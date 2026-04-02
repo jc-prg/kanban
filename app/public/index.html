@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kanban</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1 id="appTitle">jc://<span>application</span>/</h1>
+  <div class="header-actions">
+    <span class="save-indicator" id="saveIndicator">saved</span>
+  </div>
+</header>
+
+<div class="board-wrapper">
+  <div class="board" id="board"></div>
+</div>
+
+<div id="colContextMenu" class="context-menu" style="display:none">
+  <button class="ctx-item ctx-danger" id="colCtxClear">✕  Clear column</button>
+  <div class="ctx-item ctx-submenu-trigger">
+    <span>↪  Move all to</span>
+    <span class="ctx-arrow">›</span>
+    <div class="ctx-submenu" id="colCtxMoveSubmenu"></div>
+  </div>
+</div>
+
+<div id="contextMenu" class="context-menu" style="display:none">
+  <button class="ctx-item" id="ctxEdit">✎  Edit</button>
+  <div class="ctx-item ctx-submenu-trigger">
+    <span>↪  Move to</span>
+    <span class="ctx-arrow">›</span>
+    <div class="ctx-submenu" id="ctxMoveSubmenu"></div>
+  </div>
+  <button class="ctx-item ctx-danger" id="ctxDelete">✕  Delete</button>
+</div>
+
+<div id="modal" class="modal-backdrop" style="display:none">
+  <div class="modal">
+    <h2 id="modalTitle">Add Card</h2>
+    <div class="modal-field">
+      <label>Text</label>
+      <textarea id="cardText" rows="2" placeholder="What needs to be done?"></textarea>
+    </div>
+    <div class="modal-field">
+      <label>Description</label>
+      <textarea id="cardDesc" rows="3" placeholder="Optional details…"></textarea>
+    </div>
+    <div class="modal-field">
+      <label>Link</label>
+      <input id="cardLink" type="url" placeholder="https://…">
+    </div>
+    <div class="date-row">
+      <div class="modal-field">
+        <label>Start</label>
+        <input id="cardStart" type="date">
+      </div>
+      <div class="modal-field">
+        <label>End</label>
+        <input id="cardEnd" type="date">
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>Priority</label>
+      <div class="priority-row" id="priorityRow"></div>
+    </div>
+    <div class="modal-field">
+      <label>Color</label>
+      <div class="color-row" id="colorRow"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()">Add Card</button>
+    </div>
+  </div>
+</div>
+
+<div id="loginBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal login-modal">
+    <h2>Access required</h2>
+    <div class="modal-field">
+      <label>Password</label>
+      <input id="loginPassword" type="password" placeholder="Enter password…" autocomplete="current-password">
+    </div>
+    <p id="loginError" class="login-error" style="display:none">Incorrect password</p>
+    <div class="modal-actions">
+      <button class="btn btn-accent" id="loginSubmitBtn">Enter</button>
+    </div>
+  </div>
+</div>
+
+<div id="dialogBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal dialog">
+    <p id="dialogMsg" class="dialog-msg"></p>
+    <div class="modal-actions">
+      <button class="btn" id="dialogCancelBtn">Cancel</button>
+      <button class="btn" id="dialogOkBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
