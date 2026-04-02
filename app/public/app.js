@@ -1001,8 +1001,8 @@ async function tryLogin(password) {
   const { ok, token } = await r.json();
   if (ok && token) {
     sessionStorage.setItem('kanban-auth', token);
+    await load();
     document.getElementById('loginBackdrop').style.display = 'none';
-    load();
   }
   return ok;
 }
