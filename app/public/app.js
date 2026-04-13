@@ -55,18 +55,54 @@ let saveTimer = null;
 // ---- Data ----
 async function load() {
   const r = await fetch(API);
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
   state = await r.json();
   baseState = JSON.parse(JSON.stringify(state));
   pendingRemote = null;
   render();
 }
 
+function buildPatch(base, current) {
+  const baseIds = base.columns.map(c => c.id);
+  const currIds = current.columns.map(c => c.id);
+  const patch = {};
+
+  if (JSON.stringify(baseIds) !== JSON.stringify(currIds)) {
+    patch.columnOrder = currIds;
+  }
+
+  const updated = current.columns.filter(col => {
+    const baseCol = base.columns.find(c => c.id === col.id);
+    return !baseCol || JSON.stringify(baseCol) !== JSON.stringify(col);
+  });
+  if (updated.length) patch.updatedColumns = updated;
+
+  const removed = baseIds.filter(id => !currIds.includes(id));
+  if (removed.length) patch.removedColumnIds = removed;
+
+  return patch;
+}
+
 function schedulesSave() {
   clearTimeout(saveTimer);
   showSaving();
   saveTimer = setTimeout(async () => {
-    await fetch(API, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(state) });
-    showSaved();
+    saveTimer = null;
+    try {
+      let r;
+      if (baseState) {
+        const patch = buildPatch(baseState, state);
+        if (!Object.keys(patch).length) { showSaved(); return; }
+        r = await fetch(API, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(patch) });
+      } else {
+        r = await fetch(API, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(state) });
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      baseState = JSON.parse(JSON.stringify(state));
+      showSaved();
+    } catch (e) {
+      showSaveError();
+    }
   }, 600);
 }
 
@@ -81,6 +117,12 @@ function showSaved() {
   el.textContent = '✓ saved';
   el.className = 'save-indicator show saved';
   setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+function showSaveError() {
+  const el = document.getElementById('saveIndicator');
+  el.textContent = '✗ error';
+  el.className = 'save-indicator show save-error';
 }
 
 // ---- IDs ----
@@ -112,7 +154,12 @@ function updateColumnTitle(colId, title) {
 
 function addCard(colId, data) {
   const col = state.columns.find(c => c.id === colId);
-  if (col) { col.cards.push({ id: uid(), ...data }); render(); schedulesSave(); }
+  if (col) { col.cards.push({ id: uid(), created: new Date().toISOString().slice(0, 10), ...data }); render(); schedulesSave(); }
+}
+
+function recordMove(card, fromColTitle, toColTitle) {
+  if (!card.moves) card.moves = [];
+  card.moves.push({ at: new Date().toISOString(), from: fromColTitle, to: toColTitle });
 }
 
 function updateCardFull(colId, cardId, data) {
@@ -133,6 +180,7 @@ function moveCardToColumn(fromColId, cardId, toColId) {
   if (!fromCol || !toCol) return;
   const card = fromCol.cards.find(c => c.id === cardId);
   if (!card) return;
+  recordMove(card, fromCol.title, toCol.title);
   fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
   toCol.cards.unshift(card);
   render();
@@ -313,6 +361,8 @@ function onDragOver(e, colId) {
   if (!dragState) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
+  const cardsEl = document.querySelector(`[data-col-id="${colId}"] .cards`);
+  if (cardsEl) showDropIndicator(cardsEl, e.clientY);
 }
 
 function getDropIndex(cardsEl, clientY) {
@@ -322,6 +372,21 @@ function getDropIndex(cardsEl, clientY) {
     if (clientY < rect.top + rect.height / 2) return i;
   }
   return cards.length;
+}
+
+function showDropIndicator(cardsEl, clientY) {
+  document.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
+  // Use all cards (including the dragging one, which still occupies space in the
+  // layout). The midpoint comparison against the full list maps directly to the
+  // correct indicator slot without any offset arithmetic.
+  const allCards = [...cardsEl.querySelectorAll('.card')];
+  let insertIdx = allCards.length;
+  for (let i = 0; i < allCards.length; i++) {
+    const rect = allCards[i].getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) { insertIdx = i; break; }
+  }
+  const indicators = cardsEl.querySelectorAll('.drop-indicator');
+  if (indicators[insertIdx]) indicators[insertIdx].classList.add('active');
 }
 
 function onDrop(e, toColId) {
@@ -341,6 +406,8 @@ function onDrop(e, toColId) {
   const cardsEl = document.querySelector(`[data-col-id="${toColId}"] .cards`);
   const dropIdx = getDropIndex(cardsEl, e.clientY);
   toCol.cards.splice(dropIdx, 0, card);
+
+  if (fromColId !== toColId) recordMove(card, fromCol.title, toCol.title);
 
   render();
   schedulesSave();
@@ -377,6 +444,7 @@ function endTouchDrag() {
   touchDrag.sourceEl.classList.remove('dragging', 'dragging-col');
   document.querySelectorAll('.drag-over, .col-drop-left, .col-drop-right')
     .forEach(e => e.classList.remove('drag-over', 'col-drop-left', 'col-drop-right'));
+  document.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
   touchDrag = null;
 }
 
@@ -411,6 +479,9 @@ document.addEventListener('touchmove', e => {
       const cr = cardsEl.getBoundingClientRect();
       if (y < cr.top + 50)    cardsEl.scrollTop -= 8;
       if (y > cr.bottom - 50) cardsEl.scrollTop += 8;
+      showDropIndicator(cardsEl, y);
+    } else {
+      document.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
     }
   } else {
     document.querySelectorAll('.col-drop-left, .col-drop-right')
@@ -452,6 +523,7 @@ document.addEventListener('touchend', e => {
       if (fromCol && toCol && card) {
         fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
         toCol.cards.splice(getDropIndex(colEl.querySelector('.cards'), t.clientY), 0, card);
+        if (fromColId !== toColId) recordMove(card, fromCol.title, toCol.title);
         render();
         schedulesSave();
       }
@@ -478,6 +550,15 @@ document.addEventListener('touchcancel', () => {
   touchPending = null;
   endTouchDrag();
 }, { passive: true });
+
+// Prevent the browser from navigating/reloading when a drag is released
+// outside of any registered drop target (e.g. board gaps, header, window edge).
+document.addEventListener('dragover', e => {
+  if (dragState || colDragState) e.preventDefault();
+});
+document.addEventListener('drop', e => {
+  if (dragState || colDragState) e.preventDefault();
+});
 
 // ---- Helpers ----
 function findCardInState(s, cardId) {
@@ -650,6 +731,7 @@ function render() {
     colEl.addEventListener('dragleave', e => {
       if (!colEl.contains(e.relatedTarget)) {
         colEl.classList.remove('drag-over', 'col-drop-left', 'col-drop-right');
+        colEl.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
       }
     });
     colEl.addEventListener('drop', e => {
@@ -751,11 +833,20 @@ function render() {
           <textarea class="card-text" rows="1" spellcheck="false">${escHtml(card.text)}</textarea>
           ${metaHtml}
         </div>
+        <button class="card-more-btn" tabindex="-1" title="Options">⋮</button>
       `;
 
       if (safeLinkHref) {
         cardEl.querySelector('.card-link-badge').addEventListener('mousedown', e => e.stopPropagation());
       }
+
+      const moreBtn = cardEl.querySelector('.card-more-btn');
+      moreBtn.addEventListener('mousedown', e => e.stopPropagation());
+      moreBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const rect = moreBtn.getBoundingClientRect();
+        showContextMenu(rect.left, rect.bottom + 4, col.id, card);
+      });
 
       cardEl.addEventListener('contextmenu', e => {
         e.preventDefault();
@@ -767,7 +858,7 @@ function render() {
       cardEl.addEventListener('dragstart', e => { e.stopPropagation(); onDragStart(e, col.id, card.id); });
       cardEl.addEventListener('dragend', onDragEnd);
       cardEl.addEventListener('touchstart', e => {
-        if (e.target.tagName === 'TEXTAREA' || e.target.closest('a')) return;
+        if (e.target.tagName === 'TEXTAREA' || e.target.closest('a') || e.target.closest('.card-more-btn')) return;
         const t = e.touches[0];
         touchPending = { colId: col.id, cardId: card.id, el: cardEl, sx: t.clientX, sy: t.clientY };
         clearTimeout(touchLongPressTimer);
@@ -806,8 +897,16 @@ function render() {
       ta.addEventListener('focus', () => { cardEl.draggable = false; });
       ta.addEventListener('blur', () => { cardEl.draggable = true; });
 
+      const ind = document.createElement('div');
+      ind.className = 'drop-indicator';
+      cardsEl.appendChild(ind);
       cardsEl.appendChild(cardEl);
     });
+
+    // Final drop indicator after all cards
+    const lastInd = document.createElement('div');
+    lastInd.className = 'drop-indicator';
+    cardsEl.appendChild(lastInd);
 
     if (remaining > 0) {
       const loadMoreBtn = document.createElement('button');
@@ -836,6 +935,48 @@ function render() {
     ta.style.height = ta.scrollHeight + 'px';
   });
 }
+
+// ---- Card Info dialog ----
+function openCardInfo(card) {
+  const backdrop = document.getElementById('cardInfoBackdrop');
+  const content  = document.getElementById('cardInfoContent');
+  content.innerHTML = '<span class="card-info-loading">Loading…</span>';
+  backdrop.style.display = 'flex';
+
+  fetch(`/api/card/${encodeURIComponent(card.id)}`)
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(({ created, moves, column }) => {
+      let html = '';
+      html += `<div class="card-info-title">${escHtml(card.text)}</div>`;
+      html += '<table class="card-info-table">';
+      if (created) html += `<tr><th>Created</th><td>${escHtml(created)}</td></tr>`;
+      html += `<tr><th>Current column</th><td>${escHtml(column)}</td></tr>`;
+      html += '</table>';
+      if (moves && moves.length) {
+        html += '<h3 class="card-info-section">Move history</h3>';
+        html += '<ol class="card-info-moves">';
+        for (const m of moves) {
+          const when = m.at ? new Date(m.at).toLocaleString() : '?';
+          html += `<li><span class="card-info-move-time">${escHtml(when)}</span> ` +
+                  `<span class="card-info-move-from">${escHtml(m.from)}</span>` +
+                  ` → <span class="card-info-move-to">${escHtml(m.to)}</span></li>`;
+        }
+        html += '</ol>';
+      } else {
+        html += '<p class="card-info-empty">No move history.</p>';
+      }
+      content.innerHTML = html;
+    })
+    .catch(() => { content.innerHTML = '<span class="card-info-error">Failed to load card info.</span>'; });
+}
+
+function closeCardInfo() {
+  document.getElementById('cardInfoBackdrop').style.display = 'none';
+}
+
+document.getElementById('cardInfoBackdrop').addEventListener('click', e => {
+  if (e.target === document.getElementById('cardInfoBackdrop')) closeCardInfo();
+});
 
 // ---- Context menu (cards) ----
 let ctxColId = null;
@@ -869,6 +1010,10 @@ function showColContextMenu(x, y, colId) {
   const mh = menu.offsetHeight || 80;
   menu.style.left = (x + mw > window.innerWidth  ? x - mw : x) + 'px';
   menu.style.top  = (y + mh > window.innerHeight ? y - mh : y) + 'px';
+
+  // Flip submenu up if it would overflow the bottom of the viewport
+  const triggerRect = trigger.getBoundingClientRect();
+  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight);
 }
 
 function hideColContextMenu() {
@@ -914,8 +1059,7 @@ function showContextMenu(x, y, colId, card) {
     });
   });
 
-  // Flip submenu left if context menu is in the right half of the viewport
-  const trigger = document.querySelector('.ctx-submenu-trigger');
+  const trigger = document.querySelector('#contextMenu .ctx-submenu-trigger');
   trigger.classList.toggle('ctx-submenu-left', x > window.innerWidth / 2);
 
   const menu = document.getElementById('contextMenu');
@@ -924,6 +1068,10 @@ function showContextMenu(x, y, colId, card) {
   const mh = menu.offsetHeight || 100;
   menu.style.left = (x + mw > window.innerWidth  ? x - mw : x) + 'px';
   menu.style.top  = (y + mh > window.innerHeight ? y - mh : y) + 'px';
+
+  // Flip submenu up if it would overflow the bottom of the viewport
+  const triggerRect = trigger.getBoundingClientRect();
+  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight);
 }
 
 function hideContextMenu() {
@@ -931,6 +1079,13 @@ function hideContextMenu() {
   ctxColId = null;
   ctxCard = null;
 }
+
+document.getElementById('ctxInfo').addEventListener('click', async () => {
+  const card = ctxCard;
+  hideContextMenu();
+  if (!card) return;
+  openCardInfo(card);
+});
 
 document.getElementById('ctxEdit').addEventListener('click', () => {
   if (ctxColId && ctxCard) openEditModal(ctxColId, ctxCard);
@@ -946,7 +1101,7 @@ document.getElementById('ctxDelete').addEventListener('click', async () => {
 });
 
 document.addEventListener('click', () => { hideContextMenu(); hideColContextMenu(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { hideContextMenu(); hideColContextMenu(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { hideContextMenu(); hideColContextMenu(); closeCardInfo(); } });
 
 // ---- Title char init ----
 function initTitleChars() {
@@ -1039,6 +1194,111 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('loginSubmitBtn').click();
   document.getElementById('loginError').style.display = 'none';
 });
+
+// ---- Prompts dialog ----
+(function () {
+  const backdrop = document.getElementById('promptsBackdrop');
+  const saveMsg  = document.getElementById('promptsSaveMsg');
+
+  // Tab switching
+  backdrop.querySelectorAll('.prompts-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      backdrop.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
+      backdrop.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      backdrop.querySelector(`.prompts-panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
+    });
+  });
+
+  function setMsg(text, isError) {
+    saveMsg.textContent = text;
+    saveMsg.className = 'prompts-save-msg' + (isError ? ' prompts-save-msg-error' : ' prompts-save-msg-ok');
+    if (text) setTimeout(() => { saveMsg.textContent = ''; saveMsg.className = 'prompts-save-msg'; }, 3000);
+  }
+
+  window.openPromptsDialog = async function () {
+    // Reset to first tab
+    backdrop.querySelectorAll('.prompts-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+    backdrop.querySelectorAll('.prompts-panel').forEach((p, i) => p.classList.toggle('active', i === 0));
+    saveMsg.textContent = '';
+    saveMsg.className = 'prompts-save-msg';
+
+    // Show dialog immediately with empty fields, then populate on load
+    document.getElementById('promptSearchProfile').value   = '';
+    document.getElementById('promptCriteriaInclude').value = '';
+    document.getElementById('promptCriteriaExclude').value = '';
+    document.getElementById('promptSearchRadius').value    = '';
+    backdrop.style.display = 'flex';
+
+    try {
+      const r = await fetch('/api/prompts');
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      document.getElementById('promptSearchProfile').value   = data.searchProfile   || '';
+      document.getElementById('promptCriteriaInclude').value = data.criteriaInclude || '';
+      document.getElementById('promptCriteriaExclude').value = data.criteriaExclude || '';
+      document.getElementById('promptSearchRadius').value    = data.searchRadius    || '';
+    } catch {
+      setMsg('Failed to load prompts.', true);
+    }
+  };
+
+  function closePromptsDialog() {
+    backdrop.style.display = 'none';
+  }
+
+  document.getElementById('promptsCancelBtn').addEventListener('click', closePromptsDialog);
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closePromptsDialog(); });
+
+  document.getElementById('promptsSaveBtn').addEventListener('click', async () => {
+    const body = {
+      searchProfile:   document.getElementById('promptSearchProfile').value,
+      criteriaInclude: document.getElementById('promptCriteriaInclude').value,
+      criteriaExclude: document.getElementById('promptCriteriaExclude').value,
+      searchRadius:    document.getElementById('promptSearchRadius').value,
+    };
+    try {
+      const r = await fetch('/api/prompts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error();
+      setMsg('Saved.', false);
+    } catch {
+      setMsg('Failed to save.', true);
+    }
+  });
+
+  // Escape closes only if no other modal is open
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && backdrop.style.display !== 'none') closePromptsDialog();
+  });
+})();
+
+// ---- Header menu ----
+(function () {
+  const btn      = document.getElementById('headerMenuBtn');
+  const dropdown = document.getElementById('headerDropdown');
+
+  function openMenu()  { dropdown.classList.add('open'); btn.classList.add('open'); }
+  function closeMenu() { dropdown.classList.remove('open'); btn.classList.remove('open'); }
+  function toggleMenu(e) { e.stopPropagation(); dropdown.classList.contains('open') ? closeMenu() : openMenu(); }
+
+  btn.addEventListener('click', toggleMenu);
+  document.addEventListener('click', closeMenu);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+
+  document.getElementById('menuPrompts').addEventListener('click', () => {
+    closeMenu();
+    openPromptsDialog();
+  });
+
+  document.getElementById('menuStatistics').addEventListener('click', () => {
+    closeMenu();
+    alert('Statistics — coming soon');
+  });
+})();
 
 initTitleChars();
 checkAuth();

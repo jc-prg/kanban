@@ -8,7 +8,7 @@ const nano = require('nano');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'localhost';
-const DATA_FILE = path.join(__dirname, process.env.DATA_FILE || 'data.json');
+const DATA_FILE = path.join(__dirname, process.env.INITIAL_DATA || 'data.json');
 
 const APP_PASSWORD     = process.env.APP_PASSWORD     || 'kanban-pwd';
 const crypto = require('crypto');
@@ -19,11 +19,12 @@ const COUCHDB_HOST     = process.env.COUCHDB_HOST     || 'localhost';
 const COUCHDB_PORT     = process.env.COUCHDB_PORT     || 5984;
 const COUCHDB_USER     = process.env.COUCHDB_USER     || 'kanban';
 const COUCHDB_PASSWORD = process.env.COUCHDB_PASSWORD || 'kanban-pwd';
-const DB_NAME = 'jc-kanban-cards';
-const DOC_ID  = 'board';
+const DB_NAME       = 'jc-kanban-cards';
+const DOC_ID        = 'board';
+const PROMPTS_DB_NAME = 'jc-kanban-prompts';
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const DEFAULT_DATA = {
@@ -42,6 +43,7 @@ const DEFAULT_DATA = {
 };
 
 let db;
+let promptsDb;
 
 async function initDb() {
   const couch = nano(
@@ -61,16 +63,19 @@ async function initDb() {
     }
   }
 
-  // Create database if it doesn't exist (412 = already exists)
-  try {
-    await couch.db.create(DB_NAME);
-    console.log(`Database "${DB_NAME}" created`);
-  } catch (err) {
-    if (err.statusCode !== 412) throw err;
-    console.log(`Database "${DB_NAME}" already exists`);
+  // Create databases if they don't exist (412 = already exists)
+  for (const name of [DB_NAME, PROMPTS_DB_NAME]) {
+    try {
+      await couch.db.create(name);
+      console.log(`Database "${name}" created`);
+    } catch (err) {
+      if (err.statusCode !== 412) throw err;
+      console.log(`Database "${name}" already exists`);
+    }
   }
 
   db = couch.use(DB_NAME);
+  promptsDb = couch.use(PROMPTS_DB_NAME);
 
   // Seed board document if absent
   try {
@@ -102,6 +107,37 @@ async function saveData(data) {
   await db.insert({ _id: DOC_ID, _rev, ...data });
 }
 
+const BACKUP_FILE         = path.join(__dirname, process.env.BACKUP_FILE         || 'data/kanban-cards.json');
+const PROMPTS_BACKUP_FILE = path.join(__dirname, process.env.PROMPTS_BACKUP_FILE || 'data/kanban-prompts.json');
+const BACKUP_INTERVAL_MS  = parseInt(process.env.BACKUP_INTERVAL_MS, 10) || 600000;
+
+async function runBackup() {
+  try {
+    const data = await loadData();
+    const dir = path.dirname(BACKUP_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(BACKUP_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    console.log(`Backup saved to ${BACKUP_FILE}`);
+  } catch (err) {
+    console.error('Backup failed:', err.message);
+  }
+}
+
+async function runPromptsBackup() {
+  try {
+    const result = await promptsDb.list({ include_docs: true });
+    const docs = result.rows
+      .filter(r => !r.id.startsWith('_'))
+      .map(r => { const { _id, _rev, ...doc } = r.doc; return { _id, ...doc }; });
+    const dir = path.dirname(PROMPTS_BACKUP_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(PROMPTS_BACKUP_FILE, JSON.stringify(docs, null, 2), 'utf-8');
+    console.log(`Prompts backup saved to ${PROMPTS_BACKUP_FILE}`);
+  } catch (err) {
+    console.error('Prompts backup failed:', err.message);
+  }
+}
+
 app.post('/api/auth', (req, res) => {
   const { password } = req.body;
   if (password === APP_PASSWORD) {
@@ -117,7 +153,12 @@ app.get('/api/auth/verify', (req, res) => {
 });
 
 app.get('/api/board', async (req, res) => {
-  res.json(await loadData());
+  try {
+    res.json(await loadData());
+  } catch (err) {
+    console.error('Failed to load board:', err.message);
+    res.status(500).json({ error: 'Failed to load board', details: err.message });
+  }
 });
 
 app.get('/api/all-columns', async (req, res) => {
@@ -143,16 +184,33 @@ app.post('/api/move-to/:name', async (req, res) => {
   if (!targetCol)               return reply(null, req.params.name, false);
 
   let card = null;
+  let sourceColTitle = null;
   for (const col of data.columns) {
     const idx = col.cards.findIndex(c => c.text === text);
-    if (idx !== -1) { [card] = col.cards.splice(idx, 1); break; }
+    if (idx !== -1) { sourceColTitle = col.title; [card] = col.cards.splice(idx, 1); break; }
   }
 
   if (!card)                    return reply(null, targetCol.title, false);
 
+  if (!card.moves) card.moves = [];
+  card.moves.push({ at: new Date().toISOString(), from: sourceColTitle, to: targetCol.title });
+
   targetCol.cards.unshift(card);
   await saveData(data);
   reply(card, targetCol.title, true);
+});
+
+app.get('/api/card/:id', async (req, res) => {
+  try {
+    const data = await loadData();
+    for (const col of data.columns) {
+      const card = col.cards.find(c => c.id === req.params.id);
+      if (card) return res.json({ created: card.created || null, moves: card.moves || [], column: col.title });
+    }
+    res.status(404).json({ error: 'Card not found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/column/:name', async (req, res) => {
@@ -163,21 +221,59 @@ app.get('/api/column/:name', async (req, res) => {
   res.json(col.cards);
 });
 
+app.patch('/api/board', async (req, res) => {
+  try {
+    const { _rev, ...data } = await db.get(DOC_ID);
+    const { columnOrder, updatedColumns, removedColumnIds } = req.body;
+    let columns = data.columns;
+
+    if (removedColumnIds?.length) {
+      const removed = new Set(removedColumnIds);
+      columns = columns.filter(c => !removed.has(c.id));
+    }
+
+    if (updatedColumns?.length) {
+      for (const col of updatedColumns) {
+        const idx = columns.findIndex(c => c.id === col.id);
+        if (idx !== -1) columns[idx] = col;
+        else columns.push(col);
+      }
+    }
+
+    if (columnOrder?.length) {
+      const map = new Map(columns.map(c => [c.id, c]));
+      columns = columnOrder.map(id => map.get(id)).filter(Boolean);
+    }
+
+    await db.insert({ _id: DOC_ID, _rev, columns });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to patch board:', err.message);
+    res.status(500).json({ error: 'Failed to patch board', details: err.message });
+  }
+});
+
 app.put('/api/board', async (req, res) => {
-  await saveData(req.body);
-  res.json({ success: true });
+  try {
+    await saveData(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Failed to save board:', err.message);
+    res.status(500).json({ error: 'Failed to save board', details: err.message });
+  }
 });
 
 app.post('/api/import', async (req, res) => {
   let items;
   const body = req.body;
 
+  let rawItems;
   if (Array.isArray(body)) {
-    items = body;
+    rawItems = body.map(i => ({ item: i, color: i.color, bucket: 'relevant' }));
   } else if (body && (Array.isArray(body.relevant) || Array.isArray(body.excluded))) {
-    items = [
-      ...(body.relevant || []).map(i => ({ ...i, color: '#10b981' })),
-      ...(body.excluded || []).map(i => ({ ...i, color: '#ef4444' })),
+    rawItems = [
+      ...(body.relevant || []).map(i => ({ item: i, color: '#10b981', bucket: 'relevant' })),
+      ...(body.excluded || []).map(i => ({ item: i, color: '#ef4444', bucket: 'excluded' })),
     ];
   } else {
     return res.status(400).json({ error: 'Expected a JSON array or an object with "relevant"/"excluded" arrays' });
@@ -197,32 +293,82 @@ app.post('/api/import', async (req, res) => {
   // Collect all existing card texts for deduplication
   const existingTexts = new Set(data.columns.flatMap(c => c.cards.map(card => card.text)));
 
-  let added = 0;
-  let skipped = 0;
+  const relevant_items = [];
+  const excluded_items = [];
+  const skipped_items  = [];
 
-  for (const item of items) {
+  for (const { item, color, bucket } of rawItems) {
+    const normalized = { ...item };
     // Normalise: job-title / company / location format → text + description
-    if (item['job-title'] || item.company || item.location) {
-      item.text = [item['job-title'], item.company, item.location].filter(Boolean).join(' | ');
-      if (item.reason) item.description = item.reason;
+    if (normalized['job-title'] || normalized.company || normalized.location) {
+      normalized.text = [normalized['job-title'], normalized.company, normalized.location].filter(Boolean).join(' | ');
+      if (normalized.reason) normalized.description = normalized.reason;
     }
 
-    if (!item.text || existingTexts.has(item.text)) { skipped++; continue; }
+    if (!normalized.text || existingTexts.has(normalized.text)) {
+      skipped_items.push(item);
+      continue;
+    }
 
-    const card = { id: 'id-' + Math.random().toString(36).slice(2, 9), text: item.text, color: item.color || '#06b6d4' };
-    if (item.priority)    card.priority    = item.priority;
-    if (item.description) card.description = item.description;
-    if (item.link)        card.link        = item.link;
-    if (item.startDate)   card.startDate   = item.startDate;
-    if (item.endDate)     card.endDate     = item.endDate;
+    const card = { id: 'id-' + Math.random().toString(36).slice(2, 9), text: normalized.text, color: color || normalized.color || '#06b6d4', created: new Date().toISOString().slice(0, 10) };
+    if (normalized.priority)    card.priority    = normalized.priority;
+    if (normalized.description) card.description = normalized.description;
+    if (normalized.link)        card.link        = normalized.link;
+    if (normalized.startDate)   card.startDate   = normalized.startDate;
+    if (normalized.endDate)     card.endDate     = normalized.endDate;
 
     inbox.cards.push(card);
-    existingTexts.add(item.text);
-    added++;
+    existingTexts.add(normalized.text);
+    if (bucket === 'excluded') excluded_items.push(item);
+    else                       relevant_items.push(item);
   }
 
   await saveData(data);
-  res.json({ added, skipped });
+  res.json({
+    relevant:       relevant_items.length,
+    relevant_items,
+    excluded:       excluded_items.length,
+    excluded_items,
+    skipped:        skipped_items.length,
+    skipped_items,
+  });
+});
+
+const PROMPTS_DOC_ID = 'prompts';
+const PROMPTS_DEFAULT = { searchProfile: '', criteriaInclude: '', criteriaExclude: '', searchRadius: '' };
+
+async function loadPrompts() {
+  try {
+    const { _id, _rev, ...data } = await promptsDb.get(PROMPTS_DOC_ID);
+    return data;
+  } catch (err) {
+    if (err.statusCode === 404) return { ...PROMPTS_DEFAULT };
+    throw err;
+  }
+}
+
+async function savePrompts(data) {
+  let rev;
+  try { ({ _rev: rev } = await promptsDb.get(PROMPTS_DOC_ID)); } catch (e) { /* new doc */ }
+  await promptsDb.insert({ _id: PROMPTS_DOC_ID, ...(rev ? { _rev: rev } : {}), ...data });
+}
+
+app.get('/api/prompts', async (req, res) => {
+  try {
+    res.json(await loadPrompts());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/prompts', async (req, res) => {
+  try {
+    const { searchProfile = '', criteriaInclude = '', criteriaExclude = '', searchRadius = '' } = req.body;
+    await savePrompts({ searchProfile, criteriaInclude, criteriaExclude, searchRadius });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 initDb()
@@ -230,6 +376,10 @@ initDb()
     app.listen(PORT, () => {
       console.log(`Kanban server running at http://${HOST}:${PORT}`);
     });
+    runBackup();
+    setInterval(runBackup, BACKUP_INTERVAL_MS);
+    runPromptsBackup();
+    setInterval(runPromptsBackup, BACKUP_INTERVAL_MS);
   })
   .catch(err => {
     console.error('Failed to initialize database:', err.message);

@@ -2,9 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Kanban</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kanban">
+<meta name="theme-color" content="#0d0d0f">
+<link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -12,9 +18,16 @@
 <body>
 
 <header>
-  <h1 id="appTitle">jc://<span>application</span>/</h1>
+  <h1 id="appTitle">jc://<span>apply</span>/</h1>
   <div class="header-actions">
     <span class="save-indicator" id="saveIndicator">saved</span>
+  </div>
+  <div class="header-menu">
+    <button class="header-menu-btn" id="headerMenuBtn" title="Menu">☰</button>
+    <div class="header-dropdown" id="headerDropdown">
+      <button class="header-dd-item" id="menuPrompts">Prompts</button>
+      <button class="header-dd-item" id="menuStatistics">Statistics</button>
+    </div>
   </div>
 </header>
 
@@ -32,6 +45,7 @@
 </div>
 
 <div id="contextMenu" class="context-menu" style="display:none">
+  <button class="ctx-item" id="ctxInfo">ℹ  Info</button>
   <button class="ctx-item" id="ctxEdit">✎  Edit</button>
   <div class="ctx-item ctx-submenu-trigger">
     <span>↪  Move to</span>
@@ -91,6 +105,47 @@
     <p id="loginError" class="login-error" style="display:none">Incorrect password</p>
     <div class="modal-actions">
       <button class="btn btn-accent" id="loginSubmitBtn">Enter</button>
+    </div>
+  </div>
+</div>
+
+<div id="promptsBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal prompts-modal">
+    <h2>Prompts</h2>
+    <div class="prompts-tabs">
+      <button class="prompts-tab active" data-tab="searchProfile">Search Profile</button>
+      <button class="prompts-tab" data-tab="criteriaInclude">Include</button>
+      <button class="prompts-tab" data-tab="criteriaExclude">Exclude</button>
+      <button class="prompts-tab" data-tab="searchRadius">Radius</button>
+    </div>
+    <div class="prompts-panels">
+      <div class="prompts-panel active" data-panel="searchProfile">
+        <textarea id="promptSearchProfile" class="prompt-textarea" placeholder="Describe the ideal candidate profile to search for…"></textarea>
+      </div>
+      <div class="prompts-panel" data-panel="criteriaInclude">
+        <textarea id="promptCriteriaInclude" class="prompt-textarea" placeholder="List criteria a job must meet to be included…"></textarea>
+      </div>
+      <div class="prompts-panel" data-panel="criteriaExclude">
+        <textarea id="promptCriteriaExclude" class="prompt-textarea" placeholder="List criteria that disqualify a job…"></textarea>
+      </div>
+      <div class="prompts-panel" data-panel="searchRadius">
+        <textarea id="promptSearchRadius" class="prompt-textarea" placeholder="Describe the geographic search radius…"></textarea>
+      </div>
+    </div>
+    <p id="promptsSaveMsg" class="prompts-save-msg"></p>
+    <div class="modal-actions">
+      <button class="btn" id="promptsCancelBtn">Cancel</button>
+      <button class="btn btn-accent" id="promptsSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="cardInfoBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal card-info-modal">
+    <h2>Card Info</h2>
+    <div id="cardInfoContent" class="card-info-content"></div>
+    <div class="modal-actions">
+      <button class="btn btn-accent" onclick="closeCardInfo()">Close</button>
     </div>
   </div>
 </div>
