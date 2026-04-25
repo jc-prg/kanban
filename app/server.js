@@ -12,7 +12,9 @@ const HOST = process.env.HOST || 'localhost';
 
 const APP_PASSWORD  = process.env.APP_PASSWORD || 'kanban-pwd';
 const SESSION_TOKEN = crypto.createHash('sha256').update(APP_PASSWORD).digest('hex').slice(0, 32);
+const API_KEY       = process.env.API_KEY || '';
 console.log(`App password source: ${process.env.APP_PASSWORD ? '.env / environment' : 'built-in default'}`);
+console.log(`API key: ${API_KEY ? 'set' : 'not set (external API access disabled)'}`);
 
 const COUCHDB_HOST     = process.env.COUCHDB_HOST     || 'localhost';
 const COUCHDB_PORT     = process.env.COUCHDB_PORT     || 5984;
@@ -33,7 +35,7 @@ let couch;
 let promptsDb;
 
 function validBoardName(name) {
-  return typeof name === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(name) && name.length <= 64;
+  return typeof name === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(name) && name.length <= 64 && name !== 'inbox';
 }
 
 async function getBoardDb(name) {
@@ -95,6 +97,22 @@ function withExistingBoard(handler) {
   };
 }
 
+// ---- Auth middleware ----
+function authenticate(req, res, next) {
+  if (req.path === '/auth' || req.path === '/auth/verify') return next();
+
+  const sessionToken = req.headers['x-auth-token'];
+  if (sessionToken === SESSION_TOKEN) return next();
+
+  const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  const apiKey = req.headers['x-api-key'] || '';
+  if (API_KEY && (bearer === API_KEY || apiKey === API_KEY)) return next();
+
+  res.status(401).json({ error: 'Unauthorized' });
+}
+
+app.use('/api', authenticate);
+
 // ---- Auth ----
 app.post('/api/auth', (req, res) => {
   const { password } = req.body;
@@ -106,6 +124,11 @@ app.get('/api/auth/verify', (req, res) => {
   res.json({ ok: req.headers['x-auth-token'] === SESSION_TOKEN });
 });
 
+// ---- Global settings ----
+app.get('/api/settings', (req, res) => {
+  res.json({ apiKey: API_KEY || null });
+});
+
 // ---- Board list / management ----
 app.get('/api/boards', async (req, res) => {
   try {
@@ -114,11 +137,12 @@ app.get('/api/boards', async (req, res) => {
     const boards = await Promise.all(names.map(async name => {
       try {
         const data = await loadBoardData(couch.use(DB_PREFIX + name));
-        const inboxCount = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
-        const todoCount  = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
-        return { name, description: data.description || '', inboxCount, todoCount };
+        const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
+        const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
+        const inProgressCount = data.columns.filter(c => /^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
+        return { name, description: data.settings?.description || '', inboxCount, todoCount, inProgressCount };
       } catch (e) {
-        return { name, description: '', inboxCount: 0, todoCount: 0 };
+        return { name, description: '', inboxCount: 0, todoCount: 0, inProgressCount: 0 };
       }
     }));
     res.json(boards);
@@ -220,7 +244,7 @@ app.put('/api/:board/board', withBoard(async (req, res, db) => {
 
 app.patch('/api/:board/board', withBoard(async (req, res, db) => {
   const { _rev, ...data } = await db.get(DOC_ID);
-  const { columnOrder, updatedColumns, removedColumnIds, description, inboxWithDate } = req.body;
+  const { columnOrder, updatedColumns, removedColumnIds, settings } = req.body;
   let columns = data.columns;
 
   if (removedColumnIds?.length) {
@@ -238,8 +262,13 @@ app.patch('/api/:board/board', withBoard(async (req, res, db) => {
     columns = columnOrder.map(id => map.get(id)).filter(Boolean);
   }
   const update = { ...data, columns };
-  if (description !== undefined) update.description = description;
-  if (inboxWithDate !== undefined) update.inboxWithDate = inboxWithDate;
+  if (settings !== undefined) {
+    update.settings = settings;
+    delete update.description;
+    delete update.inboxWithDate;
+    delete update.persistCollapse;
+    delete update.collapsedColumnIds;
+  }
   await db.insert({ _id: DOC_ID, _rev, ...update });
   res.json({ success: true });
 }));
@@ -312,7 +341,7 @@ app.post('/api/:board/import', withBoard(async (req, res, db) => {
 
   const data = await loadBoardData(db);
   const now = new Date();
-  const inboxTitle = (data.inboxWithDate ?? false)
+  const inboxTitle = (data.settings?.inboxWithDate ?? false)
     ? `Inbox ${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.`
     : 'Inbox';
   let inbox = data.columns.find(c => c.title === inboxTitle);

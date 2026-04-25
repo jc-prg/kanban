@@ -167,6 +167,9 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
 (function () {
   const backdrop = document.getElementById('settingsBackdrop');
 
+  document.getElementById('fauxton-link').href =
+    `${window.location.protocol}//${window.location.hostname}:5984/_utils`;
+
   if (BOARD_NAME) {
     document.getElementById('settingsTitle').textContent = `Board settings: ${BOARD_NAME}`;
     document.getElementById('menuSettings').textContent  = 'Board settings';
@@ -175,16 +178,42 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
     document.getElementById('boardRenameSection').style.display = '';
     document.getElementById('importSection').style.display = '';
     document.getElementById('boardDeleteSection').style.display = '';
+    document.getElementById('boardExportSection').style.display = '';
     document.getElementById('dbSection').style.display = 'none';
+    document.getElementById('apiKeySection').style.display = 'none';
   }
+
+  async function loadApiKey() {
+    const input = document.getElementById('apiKeyDisplay');
+    try {
+      const r = await fetch('/api/settings');
+      const { apiKey } = await r.json();
+      input.value = apiKey || '';
+      input.placeholder = apiKey ? '' : 'not configured — set API_KEY in .env';
+    } catch {
+      input.placeholder = 'failed to load';
+    }
+  }
+
+  document.getElementById('apiKeyCopyBtn').addEventListener('click', () => {
+    const val = document.getElementById('apiKeyDisplay').value;
+    if (!val) return;
+    navigator.clipboard.writeText(val).then(() => {
+      const btn = document.getElementById('apiKeyCopyBtn');
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    });
+  });
 
   function openSettings() {
     if (BOARD_NAME) {
-      document.getElementById('boardDescription').value = state.description || '';
+      document.getElementById('boardDescription').value = state.settings?.description || '';
       document.getElementById('boardRenameInput').value = BOARD_NAME;
       document.getElementById('boardRenameError').style.display = 'none';
-      document.getElementById('inboxDateToggle').checked = state.inboxWithDate ?? false;
+      document.getElementById('inboxDateToggle').checked = state.settings?.inboxWithDate ?? false;
+      document.getElementById('persistCollapseToggle').checked = state.settings?.persistCollapse ?? false;
     }
+    loadApiKey();
     backdrop.style.display = 'flex';
   }
 
@@ -209,6 +238,11 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
       if (!newName || newName === BOARD_NAME) return;
       if (!/^[a-z0-9][a-z0-9-]*$/.test(newName)) {
         errEl.textContent = 'Only lowercase letters, digits and hyphens.';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (newName === 'inbox') {
+        errEl.textContent = '"inbox" is a reserved name.';
         errEl.style.display = 'block';
         return;
       }
@@ -243,7 +277,7 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
 
     const saveMsg = document.getElementById('boardDescSaveMsg');
     document.getElementById('boardDescSaveBtn').addEventListener('click', () => {
-      state.description = document.getElementById('boardDescription').value.trim() || undefined;
+      (state.settings ??= {}).description = document.getElementById('boardDescription').value.trim() || undefined;
       schedulesSave();
       saveMsg.textContent = 'Saved.';
       saveMsg.className = 'prompts-save-msg prompts-save-msg-ok';
@@ -251,14 +285,55 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
     });
 
     document.getElementById('inboxDateToggle').addEventListener('change', e => {
-      state.inboxWithDate = e.target.checked || undefined;
+      (state.settings ??= {}).inboxWithDate = e.target.checked || undefined;
       schedulesSave();
+    });
+
+    document.getElementById('persistCollapseToggle').addEventListener('change', e => {
+      (state.settings ??= {}).persistCollapse = e.target.checked || undefined;
+      if (!e.target.checked) state.settings.collapsedColumnIds = undefined;
+      persistCollapseState();
+      schedulesSave();
+    });
+
+    document.getElementById('boardExportBtn').addEventListener('click', async () => {
+      const r = await fetch(API);
+      const data = await r.json();
+      const dt = new Date().toISOString().replace(/:/g, '-').replace('T', '_').slice(0, 19);
+      const filename = `jc-kanban-${BOARD_NAME}-${dt}.json`;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    document.getElementById('boardImportBtn').addEventListener('click', async () => {
+      backdrop.style.display = 'none';
+      if (!await showConfirm(`Import will overwrite all data in "${BOARD_NAME}". This cannot be undone.`, { okLabel: 'Import', danger: true })) {
+        backdrop.style.display = 'flex';
+        return;
+      }
+      document.getElementById('boardImportFile').click();
+    });
+
+    document.getElementById('boardImportFile').addEventListener('change', async e => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      let data;
+      try { data = JSON.parse(await file.text()); }
+      catch { alert('Invalid JSON file.'); return; }
+      await fetch(API, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      closeSettings();
+      await load();
     });
   }
 })();
 
 // ---- After-auth routing ----
 async function afterAuth() {
+  if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) await load();
   else initOverview();
 }
@@ -269,6 +344,7 @@ async function initOverview() {
   document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
   document.getElementById('menuAllBoards').style.display = 'none';
+  document.getElementById('menuInbox').style.display = '';
   document.getElementById('overview').style.display = 'flex';
 
   try {
@@ -285,10 +361,11 @@ function renderBoardGrid(boards) {
   const newBoardItem = grid.querySelector('.new-board-item');
   grid.querySelectorAll('.board-card, .board-grid-empty').forEach(el => el.remove());
   if (boards.length) {
-    boards.forEach(({ name, description, inboxCount, todoCount }) => {
+    boards.forEach(({ name, description, inboxCount, todoCount, inProgressCount }) => {
       const badges = [
-        inboxCount ? `<span class="board-card-count board-card-count-inbox">inbox ${inboxCount}</span>` : '',
-        todoCount  ? `<span class="board-card-count board-card-count-todo">todo ${todoCount}</span>`   : '',
+        inboxCount      ? `<span class="board-card-count board-card-count-inbox">inbox ${inboxCount}</span>`           : '',
+        todoCount       ? `<span class="board-card-count board-card-count-todo">todo ${todoCount}</span>`              : '',
+        inProgressCount ? `<span class="board-card-count board-card-count-inprogress">doing ${inProgressCount}</span>` : '',
       ].filter(Boolean).join('');
       const a = document.createElement('a');
       a.className = 'board-card';
@@ -318,6 +395,11 @@ document.getElementById('newBoardBtn').addEventListener('click', async () => {
   if (!name) return;
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
     errEl.textContent = 'Use only lowercase letters, digits and hyphens.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (name === 'inbox') {
+    errEl.textContent = '"inbox" is a reserved name.';
     errEl.style.display = 'block';
     return;
   }

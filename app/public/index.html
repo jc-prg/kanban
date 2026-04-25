@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Kanban</title>
+<title>jc://kanban/</title>
 <link rel="icon" type="image/png" href="/icon-2.png">
 <link rel="apple-touch-icon" href="/icon-2.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -23,7 +23,7 @@
 <body>
 
 <header>
-  <h1 id="appTitle">jc://<span>apply</span>/</h1>
+  <h1 id="appTitle">jc://<span>kanban</span>/</h1>
   <div class="header-actions">
     <span class="save-indicator" id="saveIndicator">saved</span>
   </div>
@@ -31,6 +31,7 @@
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu">☰</button>
     <div class="header-dropdown" id="headerDropdown">
       <a class="header-dd-item" id="menuAllBoards" href="/">All boards</a>
+      <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
       <button class="header-dd-item" id="menuPrompts">Prompts</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
@@ -50,6 +51,56 @@
           <button id="newBoardBtn" class="btn btn-accent">+ new board</button>
         </div>
         <p id="newBoardError" class="new-board-error" style="display:none"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="inboxView" style="display:none">
+  <div class="overview-inner">
+    <p class="overview-label">Add to Inbox</p>
+    <div class="inbox-form">
+      <div class="modal-field">
+        <label>Board</label>
+        <select id="inboxBoardSelect" class="inbox-select"></select>
+      </div>
+      <div class="modal-field">
+        <label>Text</label>
+        <textarea id="inboxText" rows="2" placeholder="What needs to be done?"></textarea>
+      </div>
+      <div class="modal-field">
+        <label>Description</label>
+        <textarea id="inboxDesc" placeholder="Optional details…"></textarea>
+      </div>
+      <div class="modal-field">
+        <label>Link</label>
+        <div class="modal-link-row">
+          <input id="inboxLink" type="url" placeholder="https://…">
+          <button class="btn modal-link-open" id="inboxLinkOpen" title="Open link" tabindex="-1">↗</button>
+        </div>
+      </div>
+      <div class="date-row">
+        <div class="modal-field">
+          <label>Start</label>
+          <input id="inboxStart" type="date">
+        </div>
+        <div class="modal-field">
+          <label>End</label>
+          <input id="inboxEnd" type="date">
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Priority</label>
+        <div id="inboxPriorityRow" class="priority-row"></div>
+      </div>
+      <div class="modal-field">
+        <label>Color</label>
+        <div id="inboxColorRow" class="color-row"></div>
+      </div>
+      <p id="inboxMsg" class="inbox-msg"></p>
+      <div class="modal-actions">
+        <a class="btn" id="inboxGoBoardBtn" style="display:none">Go to board</a>
+        <button class="btn btn-accent" id="inboxSubmitBtn">Add to Inbox</button>
       </div>
     </div>
   </div>
@@ -88,13 +139,16 @@
       <label>Text</label>
       <textarea id="cardText" rows="2" placeholder="What needs to be done?"></textarea>
     </div>
-    <div class="modal-field">
+    <div class="modal-field modal-field-desc">
       <label>Description</label>
-      <textarea id="cardDesc" rows="3" placeholder="Optional details…"></textarea>
+      <textarea id="cardDesc" placeholder="Optional details…"></textarea>
     </div>
     <div class="modal-field">
       <label>Link</label>
-      <input id="cardLink" type="url" placeholder="https://…">
+      <div class="modal-link-row">
+        <input id="cardLink" type="url" placeholder="https://…">
+        <button class="btn modal-link-open" id="cardLinkOpen" title="Open link" tabindex="-1">↗</button>
+      </div>
     </div>
     <div class="date-row">
       <div class="modal-field">
@@ -204,7 +258,7 @@
     </div>
     <div class="settings-section" id="dbSection">
       <div class="settings-section-title">Database</div>
-      <a class="settings-item" href="http://localhost:5984/_utils" target="_blank" rel="noopener">
+      <a class="settings-item" id="fauxton-link" target="_blank" rel="noopener">
         <div class="settings-item-info">
           <div class="settings-item-label">Database admin (Fauxton)</div>
           <div class="settings-item-desc">CouchDB management UI — browse documents, run queries, manage the database</div>
@@ -213,7 +267,7 @@
       </a>
     </div>
     <div class="settings-section" id="importSection" style="display:none">
-      <div class="settings-section-title">Import</div>
+      <div class="settings-section-title">Settings</div>
       <label class="settings-item">
         <div class="settings-item-info">
           <div class="settings-item-label">Inbox column with date</div>
@@ -224,10 +278,37 @@
           <span class="settings-toggle-track"></span>
         </div>
       </label>
+      <label class="settings-item">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Remember collapsed columns</div>
+          <div class="settings-item-desc">Saves which columns are collapsed; inbox auto-collapse is unaffected</div>
+        </div>
+        <div class="settings-toggle">
+          <input type="checkbox" id="persistCollapseToggle">
+          <span class="settings-toggle-track"></span>
+        </div>
+      </label>
+    </div>
+    <div class="settings-section" id="apiKeySection">
+      <div class="settings-section-title">API Access</div>
+      <div class="settings-apikey-row">
+        <input id="apiKeyDisplay" class="new-board-input settings-apikey-input" type="text" readonly placeholder="not configured">
+        <button class="btn" id="apiKeyCopyBtn">Copy</button>
+      </div>
+      <p class="settings-item-desc" style="margin-top:8px">
+        Send the key in HTTP requests via <code>x-api-key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.
+        Set <code>API_KEY</code> in <code>.env</code> to enable external access.
+      </p>
+    </div>
+    <div class="settings-section" id="boardExportSection" style="display:none">
+      <div class="settings-section-title">Export / Import</div>
+      <button class="btn" id="boardExportBtn">Export JSON</button>
+      <input type="file" id="boardImportFile" accept=".json" style="display:none">
+      <button class="btn" id="boardImportBtn">Import JSON…</button>
     </div>
     <div class="settings-section" id="boardDeleteSection" style="display:none">
       <div class="settings-section-title">Danger zone</div>
-      <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete this board…</button>
+      <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete board…</button>
     </div>
     <div class="modal-actions">
       <button class="btn btn-accent" id="boardDescSaveBtn" style="display:none">Save</button>
@@ -242,6 +323,7 @@
 <script src="/render.js"></script>
 <script src="/menus.js"></script>
 <script src="/settings.js"></script>
+<script src="/inbox.js"></script>
 <script src="/init.js"></script>
 </body>
 </html>

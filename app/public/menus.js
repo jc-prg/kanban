@@ -118,6 +118,7 @@ document.getElementById('colCtxToggleContent').addEventListener('click', () => {
   hideColContextMenu();
   if (colCollapsed.has(colId)) colCollapsed.delete(colId);
   else colCollapsed.add(colId);
+  persistCollapseState();
   render();
 });
 
@@ -161,6 +162,8 @@ document.addEventListener('keydown', e => {
   btn.addEventListener('click', toggleMenu);
   document.addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+
+  if (BOARD_NAME) document.getElementById('menuInbox').href = `/inbox?board=${encodeURIComponent(BOARD_NAME)}`;
 
   document.getElementById('menuPrompts').addEventListener('click', () => { closeMenu(); openPromptsDialog(); });
   document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); alert('Statistics — coming soon'); });

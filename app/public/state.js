@@ -2,6 +2,18 @@ const BOARD_NAME = window.location.pathname.split('/').filter(Boolean)[0] || nul
 const API_BASE   = BOARD_NAME ? `/api/${BOARD_NAME}` : null;
 const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
 
+// Automatically attach the session token to every /api/ request.
+(function () {
+  const _fetch = window.fetch;
+  window.fetch = (url, opts = {}) => {
+    if (typeof url === 'string' && url.startsWith('/api/')) {
+      const token = sessionStorage.getItem('kanban-auth');
+      if (token) opts = { ...opts, headers: { 'x-auth-token': token, ...opts.headers } };
+    }
+    return _fetch(url, opts);
+  };
+})();
+
 // ---- Custom confirm dialog ----
 function showConfirm(msg, { okLabel = 'Confirm', danger = false } = {}) {
   return new Promise(resolve => {
@@ -56,8 +68,21 @@ async function load() {
   }
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
   state = await r.json();
-  baseState = JSON.parse(JSON.stringify(state));
+  baseState = JSON.parse(JSON.stringify(state)); // snapshot before migration
   pendingRemote = null;
+
+  // Migrate legacy root-level fields into settings node
+  ['description', 'inboxWithDate', 'persistCollapse', 'collapsedColumnIds'].forEach(key => {
+    if (state[key] !== undefined) {
+      if (!state.settings) state.settings = {};
+      if (state.settings[key] === undefined) state.settings[key] = state[key];
+      delete state[key];
+    }
+  });
+
+  colCollapsed.clear();
+  if (state.settings?.persistCollapse && state.settings?.collapsedColumnIds?.length)
+    state.settings.collapsedColumnIds.forEach(id => colCollapsed.add(id));
   autoCollapseLeadingInboxes();
   render();
 }
@@ -81,11 +106,8 @@ function buildPatch(base, current) {
 
   if (JSON.stringify(baseIds) !== JSON.stringify(currIds)) patch.columnOrder = currIds;
 
-  if ((current.description ?? '') !== (base.description ?? ''))
-    patch.description = current.description ?? '';
-
-  if ((current.inboxWithDate ?? false) !== (base.inboxWithDate ?? false))
-    patch.inboxWithDate = current.inboxWithDate ?? false;
+  if (JSON.stringify(current.settings ?? {}) !== JSON.stringify(base.settings ?? {}))
+    patch.settings = current.settings ?? {};
 
   const updated = current.columns.filter(col => {
     const baseCol = base.columns.find(c => c.id === col.id);
@@ -97,6 +119,13 @@ function buildPatch(base, current) {
   if (removed.length) patch.removedColumnIds = removed;
 
   return patch;
+}
+
+function persistCollapseState() {
+  if (!state.settings?.persistCollapse) return;
+  const inboxIds = new Set(state.columns.filter(c => /^inbox\b/i.test(c.title)).map(c => c.id));
+  (state.settings ??= {}).collapsedColumnIds = [...colCollapsed].filter(id => !inboxIds.has(id));
+  schedulesSave();
 }
 
 function schedulesSave() {

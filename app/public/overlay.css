@@ -94,6 +94,27 @@
   animation: scaleIn 0.2s ease;
 }
 
+#modal .modal {
+  width: min(960px, 92vw);
+  height: 95dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-field-desc {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-field-desc #cardDesc {
+  flex: 1;
+  min-height: 80px;
+  overflow-y: auto;
+}
+
 .modal h2 {
   font-family: 'Syne', sans-serif;
   font-size: 1.1rem;
@@ -111,6 +132,23 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+
+.modal-link-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.modal-link-row input { flex: 1; }
+
+.modal-link-open {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.modal-link-open.has-url { opacity: 1; }
 
 .modal-field input, .modal-field textarea {
   width: 100%;
@@ -134,20 +172,24 @@
 }
 
 .date-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 10px;
   margin-bottom: 14px;
+  width: fit-content;
 }
 
 .date-row .modal-field { margin-bottom: 0; }
 
+.date-row input { width: auto; }
+
 /* Priority selector */
 .priority-row { display: flex; gap: 6px; }
 
+.modal-field:has(.priority-row) { width: fit-content; }
+
 .priority-btn {
-  flex: 1;
-  padding: 7px 4px;
+  min-width: 46px;
+  padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface2);
@@ -452,7 +494,24 @@
   align-items: center;
 }
 
+.settings-apikey-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-apikey-input {
+  flex: 1;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: default;
+}
+
 .settings-danger-section { padding-top: 4px; }
+
+#boardExportSection { display: flex; flex-direction: row; gap: 8px; align-items: center; flex-wrap: wrap; }
+#boardExportSection .settings-section-title { width: 100%; }
 
 .btn-danger-outline {
   font-family: 'DM Mono', monospace;

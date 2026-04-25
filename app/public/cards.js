@@ -1,3 +1,19 @@
+// ---- Link open button ----
+(function () {
+  function updateLinkBtn() {
+    const url = document.getElementById('cardLink').value.trim();
+    document.getElementById('cardLinkOpen').classList.toggle('has-url', !!url);
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('cardLink').addEventListener('input', updateLinkBtn);
+    document.getElementById('cardLinkOpen').addEventListener('click', () => {
+      const url = document.getElementById('cardLink').value.trim();
+      if (url) window.open(url, '_blank', 'noopener');
+    });
+  });
+  window._updateLinkBtn = updateLinkBtn;
+})();
+
 // ---- Modal state ----
 let modalColId      = null;
 let modalMode       = 'add'; // 'add' | 'edit'
@@ -17,6 +33,7 @@ function openModal(colId) {
   document.getElementById('cardLink').value  = '';
   document.getElementById('cardStart').value = '';
   document.getElementById('cardEnd').value   = '';
+  _updateLinkBtn();
   document.getElementById('modalTitle').textContent      = 'Add Card';
   document.getElementById('modalSubmitBtn').textContent  = 'Add Card';
   renderColorRow();
@@ -36,6 +53,7 @@ function openEditModal(colId, card) {
   document.getElementById('cardLink').value  = card.link        || '';
   document.getElementById('cardStart').value = card.startDate   || '';
   document.getElementById('cardEnd').value   = card.endDate     || '';
+  _updateLinkBtn();
   document.getElementById('modalTitle').textContent     = 'Edit Card';
   document.getElementById('modalSubmitBtn').textContent = 'Save';
   renderColorRow();

@@ -132,6 +132,28 @@ function render() {
       showColContextMenu(e.clientX, e.clientY, col.id);
     });
 
+    colEl.querySelector('.column-header').addEventListener('dblclick', e => {
+      if (e.target.closest('.column-title, .col-btn, .col-drag-handle')) return;
+      if (colCollapsed.has(col.id)) colCollapsed.delete(col.id);
+      else colCollapsed.add(col.id);
+      persistCollapseState();
+      render();
+    });
+
+    let lastTap = 0;
+    colEl.querySelector('.column-header').addEventListener('touchend', e => {
+      if (e.target.closest('.column-title, .col-btn, .col-drag-handle')) return;
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        e.preventDefault();
+        if (colCollapsed.has(col.id)) colCollapsed.delete(col.id);
+        else colCollapsed.add(col.id);
+        persistCollapseState();
+        render();
+      }
+      lastTap = now;
+    });
+
     const titleInput = colEl.querySelector('.column-title');
     titleInput.addEventListener('change', () => updateColumnTitle(col.id, titleInput.value));
     titleInput.addEventListener('blur',   () => updateColumnTitle(col.id, titleInput.value));
