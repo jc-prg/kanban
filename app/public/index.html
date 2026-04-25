@@ -4,16 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Kanban</title>
-<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Kanban">
 <meta name="theme-color" content="#0d0d0f">
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="/manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
@@ -25,11 +25,25 @@
   <div class="header-menu">
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu">☰</button>
     <div class="header-dropdown" id="headerDropdown">
+      <a class="header-dd-item" id="menuAllBoards" href="/">All boards</a>
       <button class="header-dd-item" id="menuPrompts">Prompts</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
+      <button class="header-dd-item" id="menuSettings">Settings</button>
     </div>
   </div>
 </header>
+
+<div id="overview" style="display:none">
+  <div class="overview-inner">
+    <p class="overview-label">Boards</p>
+    <div id="boardGrid" class="board-grid"></div>
+    <div class="new-board-row">
+      <input id="newBoardInput" class="new-board-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off">
+      <button id="newBoardBtn" class="btn btn-accent">+ new board</button>
+    </div>
+    <p id="newBoardError" class="new-board-error" style="display:none"></p>
+  </div>
+</div>
 
 <div class="board-wrapper">
   <div class="board" id="board"></div>
@@ -160,6 +174,25 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<div id="settingsBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal settings-modal">
+    <h2>Settings</h2>
+    <div class="settings-section">
+      <div class="settings-section-title">Database</div>
+      <a class="settings-item" href="http://localhost:5984/_utils" target="_blank" rel="noopener">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Database admin (Fauxton)</div>
+          <div class="settings-item-desc">CouchDB management UI — browse documents, run queries, manage the database</div>
+        </div>
+        <span class="settings-item-arrow">↗</span>
+      </a>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-accent" id="settingsCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
 </body>
 </html>

@@ -1,4 +1,6 @@
-const API = '/api/board';
+const BOARD_NAME = window.location.pathname.split('/').filter(Boolean)[0] || null;
+const API_BASE   = BOARD_NAME ? `/${BOARD_NAME}/api` : null;
+const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
 
 // ---- Custom dialog ----
 function showConfirm(msg, { okLabel = 'Confirm', danger = false } = {}) {
@@ -54,6 +56,7 @@ let saveTimer = null;
 
 // ---- Data ----
 async function load() {
+  if (!API) return;
   const r = await fetch(API);
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
   state = await r.json();
@@ -84,6 +87,7 @@ function buildPatch(base, current) {
 }
 
 function schedulesSave() {
+  if (!API) return;
   clearTimeout(saveTimer);
   showSaving();
   saveTimer = setTimeout(async () => {
@@ -943,7 +947,7 @@ function openCardInfo(card) {
   content.innerHTML = '<span class="card-info-loading">Loading…</span>';
   backdrop.style.display = 'flex';
 
-  fetch(`/api/card/${encodeURIComponent(card.id)}`)
+  fetch(`${API_BASE}/card/${encodeURIComponent(card.id)}`)
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(({ created, moves, column }) => {
       let html = '';
@@ -1118,7 +1122,7 @@ function initTitleChars() {
 
 // ---- Remote change polling ----
 async function checkForUpdates() {
-  if (saveTimer) return; // skip while a local save is pending
+  if (!API || saveTimer) return;
   try {
     const r = await fetch(API);
     const remote = await r.json();
@@ -1156,8 +1160,8 @@ async function tryLogin(password) {
   const { ok, token } = await r.json();
   if (ok && token) {
     sessionStorage.setItem('kanban-auth', token);
-    await load();
     document.getElementById('loginBackdrop').style.display = 'none';
+    await afterAuth();
   }
   return ok;
 }
@@ -1173,7 +1177,7 @@ async function checkAuth() {
   if (token) {
     const r = await fetch('/api/auth/verify', { headers: { 'x-auth-token': token } });
     const { ok } = await r.json();
-    if (ok) { load(); return; }
+    if (ok) { afterAuth(); return; }
     sessionStorage.removeItem('kanban-auth');
   }
   document.getElementById('loginBackdrop').style.display = 'flex';
@@ -1298,7 +1302,85 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
     closeMenu();
     alert('Statistics — coming soon');
   });
+
+  document.getElementById('menuSettings').addEventListener('click', () => {
+    closeMenu();
+    document.getElementById('settingsBackdrop').style.display = 'flex';
+  });
 })();
+
+// ---- Settings dialog ----
+(function () {
+  const backdrop = document.getElementById('settingsBackdrop');
+  function closeSettings() { backdrop.style.display = 'none'; }
+  document.getElementById('settingsCloseBtn').addEventListener('click', closeSettings);
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closeSettings(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && backdrop.style.display !== 'none') closeSettings();
+  });
+})();
+
+// ---- After-auth routing ----
+async function afterAuth() {
+  if (BOARD_NAME) {
+    await load();
+  } else {
+    initOverview();
+  }
+}
+
+// ---- Overview ----
+async function initOverview() {
+  document.querySelector('.board-wrapper').style.display = 'none';
+  document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
+  document.querySelector('.header-menu').style.marginLeft = 'auto';
+  document.getElementById('menuAllBoards').style.display = 'none';
+  document.getElementById('overview').style.display = 'flex';
+
+  try {
+    const r = await fetch('/api/boards');
+    const boards = await r.json();
+    renderBoardGrid(boards);
+  } catch (e) {
+    document.getElementById('boardGrid').innerHTML = '<p class="new-board-error">Failed to load boards.</p>';
+  }
+}
+
+function renderBoardGrid(boards) {
+  const grid = document.getElementById('boardGrid');
+  grid.innerHTML = boards.length
+    ? boards.map(name =>
+        `<a class="board-card" href="/${escHtml(name)}">
+          <span class="board-card-name">${escHtml(name)}</span>
+          <span class="board-card-arrow">→</span>
+        </a>`).join('')
+    : '<p class="board-grid-empty">No boards yet — create one below.</p>';
+}
+
+document.getElementById('newBoardBtn').addEventListener('click', async () => {
+  const input = document.getElementById('newBoardInput');
+  const errEl = document.getElementById('newBoardError');
+  const name  = input.value.trim().toLowerCase();
+  errEl.style.display = 'none';
+  if (!name) return;
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+    errEl.textContent = 'Use only lowercase letters, digits and hyphens.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try {
+    const r = await fetch(`/api/boards/${encodeURIComponent(name)}`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { errEl.textContent = data.error || 'Failed to create board.'; errEl.style.display = 'block'; return; }
+    window.location.href = `/${name}`;
+  } catch (e) {
+    errEl.textContent = 'Failed to create board.'; errEl.style.display = 'block';
+  }
+});
+
+document.getElementById('newBoardInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('newBoardBtn').click();
+});
 
 initTitleChars();
 checkAuth();
