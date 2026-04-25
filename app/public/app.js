@@ -1,5 +1,5 @@
 const BOARD_NAME = window.location.pathname.split('/').filter(Boolean)[0] || null;
-const API_BASE   = BOARD_NAME ? `/${BOARD_NAME}/api` : null;
+const API_BASE   = BOARD_NAME ? `/api/${BOARD_NAME}` : null;
 const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
 
 // ---- Custom dialog ----
@@ -34,6 +34,7 @@ const PRIORITY_LABELS = ['—', 'P1', 'P2', 'P3', 'P4', 'P5'];
 
 const CARDS_PER_PAGE = 30;
 const colVisible = {}; // colId → number of cards currently shown
+const colCollapsed = new Set(); // colIds whose content is hidden
 
 let state = { columns: [] };
 let baseState = null;    // snapshot from last server load — the merge ancestor
@@ -62,7 +63,19 @@ async function load() {
   state = await r.json();
   baseState = JSON.parse(JSON.stringify(state));
   pendingRemote = null;
+  autoCollapseLeadingInboxes();
   render();
+}
+
+function autoCollapseLeadingInboxes() {
+  let count = 0;
+  for (const col of state.columns) {
+    if (/^inbox\b/i.test(col.title)) count++;
+    else break;
+  }
+  if (count > 1) {
+    for (let i = 0; i < count; i++) colCollapsed.add(state.columns[i].id);
+  }
 }
 
 function buildPatch(base, current) {
@@ -704,6 +717,7 @@ function getLinkBadgeHtml(url, href) {
 function render() {
   const board = document.getElementById('board');
   board.innerHTML = '';
+  const builtCols = [];
 
   state.columns.forEach((col, ci) => {
     const color = col.color || COL_COLORS[ci % COL_COLORS.length];
@@ -750,7 +764,7 @@ function render() {
         <div class="column-dot" style="background:${color}"></div>
         <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
         <span class="column-count">${col.cards.length}</span>
-        <button class="col-btn" title="Delete column" style="margin-left:auto">✕</button>
+        <button class="col-btn" title="Column options" style="margin-left:auto">⋮</button>
       </div>
       <div class="cards"></div>
       <button class="add-card-btn">+ add card</button>
@@ -781,11 +795,12 @@ function render() {
     titleInput.addEventListener('change', () => updateColumnTitle(col.id, titleInput.value));
     titleInput.addEventListener('blur', () => updateColumnTitle(col.id, titleInput.value));
 
-    colEl.querySelector('.col-btn').addEventListener('click', async () => {
-      const msg = col.cards.length
-        ? `Delete column "${col.title}" and its ${col.cards.length} card(s)?`
-        : `Delete column "${col.title}"?`;
-      if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) deleteColumn(col.id);
+    const colMenuBtn = colEl.querySelector('.col-btn');
+    colMenuBtn.addEventListener('mousedown', e => e.stopPropagation());
+    colMenuBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const rect = colMenuBtn.getBoundingClientRect();
+      showColContextMenu(rect.left, rect.bottom + 4, col.id);
     });
 
     colEl.querySelector('.add-card-btn').addEventListener('click', () => openModal(col.id));
@@ -923,8 +938,27 @@ function render() {
       cardsEl.appendChild(loadMoreBtn);
     }
 
-    board.appendChild(colEl);
+    if (colCollapsed.has(col.id)) colEl.classList.add('column--collapsed');
+
+    builtCols.push(colEl);
   });
+
+  // Append columns, wrapping consecutive collapsed ones in a vertical group
+  let bci = 0;
+  while (bci < builtCols.length) {
+    const el = builtCols[bci];
+    if (el.classList.contains('column--collapsed')) {
+      const group = document.createElement('div');
+      group.className = 'collapsed-group';
+      while (bci < builtCols.length && builtCols[bci].classList.contains('column--collapsed')) {
+        group.appendChild(builtCols[bci++]);
+      }
+      board.appendChild(group);
+    } else {
+      board.appendChild(el);
+      bci++;
+    }
+  }
 
   // Add column button
   const addColBtn = document.createElement('button');
@@ -992,6 +1026,9 @@ let ctxHeaderColId = null;
 function showColContextMenu(x, y, colId) {
   ctxHeaderColId = colId;
 
+  document.getElementById('colCtxToggleContent').textContent =
+    colCollapsed.has(colId) ? '▸  Show content' : '▾  Hide content';
+
   const submenu = document.getElementById('colCtxMoveSubmenu');
   submenu.innerHTML = state.columns
     .filter(c => c.id !== colId)
@@ -1025,6 +1062,14 @@ function hideColContextMenu() {
   ctxHeaderColId = null;
 }
 
+document.getElementById('colCtxToggleContent').addEventListener('click', () => {
+  const colId = ctxHeaderColId;
+  hideColContextMenu();
+  if (colCollapsed.has(colId)) colCollapsed.delete(colId);
+  else colCollapsed.add(colId);
+  render();
+});
+
 document.getElementById('colCtxClear').addEventListener('click', async () => {
   const col = state.columns.find(c => c.id === ctxHeaderColId);
   hideColContextMenu();
@@ -1033,6 +1078,17 @@ document.getElementById('colCtxClear').addEventListener('click', async () => {
     render();
     schedulesSave();
   }
+});
+
+document.getElementById('colCtxDelete').addEventListener('click', async () => {
+  const colId = ctxHeaderColId;
+  const col = state.columns.find(c => c.id === colId);
+  hideColContextMenu();
+  if (!col) return;
+  const msg = col.cards.length
+    ? `Delete column "${col.title}" and its ${col.cards.length} card(s)?`
+    : `Delete column "${col.title}"?`;
+  if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) deleteColumn(colId);
 });
 
 function moveAllCards(fromColId, toColId) {

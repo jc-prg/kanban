@@ -23,10 +23,30 @@ No build step, no linter, no test framework configured.
 Single-page kanban board with a minimal three-layer design:
 
 - **`app/server.js`** — Express 5 backend. Serves `public/` as static files and exposes six REST endpoints. Persists all data in CouchDB (`jc-kanban-cards` database, single `board` document). Uses `nano` as the CouchDB client.
-- **`app/public/index.html`** — Markup and modal HTML only. References `style.css` and `app.js`.
-- **`app/public/style.css`** — All styles. Uses CSS custom properties defined on `:root` for the design system (colors, spacing, radius).
-- **`app/public/app.js`** — All frontend logic. No framework, no bundler.
+- **`app/public/index.html`** — Markup and modal HTML only. References the CSS and JS files below.
 - **`data/data.json`** — Optional seed file. Used once on first startup to populate the CouchDB board document if it doesn't exist yet.
+
+### CSS (`app/public/`)
+
+| File | Contents |
+|---|---|
+| `base.css` | Reset, `:root` design tokens, `body`, grain overlay, scrollbar |
+| `layout.css` | Header, title animation, header menu/dropdown, `.btn` variants, save indicator, board wrapper, overview & board grid |
+| `column.css` | Column, column header, drag handle, collapsed group, col-btn, cards area, add-card/add-column buttons |
+| `card.css` | Card, card-body, more-btn, card-text, meta badges, link badge, drop indicator, load-more button |
+| `overlay.css` | Context menus, all modals & dialogs (add/edit card, login, confirm, prompts, card-info, settings), priority/color rows |
+
+### JS (`app/public/`) — load order matters, no bundler
+
+| File | Contents |
+|---|---|
+| `state.js` | API constants, `showConfirm`, color/priority constants, state vars, `load`, `buildPatch`, `schedulesSave`, save indicators, `uid`, all state mutations, `mergeStates` |
+| `drag.js` | Drag state vars, mouse D&D for columns and cards, touch D&D (`spawnGhost`, `endTouchDrag`, all touch/drag event listeners) |
+| `cards.js` | Modal state vars, card add/edit modal (`openModal`, `openEditModal`, `submitCard`, color/priority rows), card-info dialog |
+| `render.js` | `escHtml`, `fmtDate`, `safeLink`, `getLinkBadgeHtml`, `render()` |
+| `menus.js` | Card context menu, column context menu, `moveAllCards`, header dropdown menu |
+| `settings.js` | Title char animation, remote polling, auth (`tryLogin`, `checkAuth`), prompts dialog, settings dialog, `afterAuth`, overview (`initOverview`, `renderBoardGrid`) |
+| `init.js` | Entry point — calls `initTitleChars()` and `checkAuth()` |
 
 ## CouchDB
 

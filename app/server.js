@@ -79,6 +79,22 @@ function withBoard(handler) {
   };
 }
 
+function withExistingBoard(handler) {
+  return async (req, res) => {
+    const { board } = req.params;
+    if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
+    try {
+      const all = await couch.db.list();
+      if (!all.includes(DB_PREFIX + board)) return res.status(404).json({ error: 'Board not found' });
+      const db = couch.use(DB_PREFIX + board);
+      await handler(req, res, db);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).json({ error: err.message });
+    }
+  };
+}
+
 // ---- Auth ----
 app.post('/api/auth', (req, res) => {
   const { password } = req.body;
@@ -94,7 +110,18 @@ app.get('/api/auth/verify', (req, res) => {
 app.get('/api/boards', async (req, res) => {
   try {
     const all = await couch.db.list();
-    res.json(all.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length)).sort());
+    const names = all.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length)).sort();
+    const boards = await Promise.all(names.map(async name => {
+      try {
+        const data = await loadBoardData(couch.use(DB_PREFIX + name));
+        const inboxCount = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
+        const todoCount  = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
+        return { name, description: data.description || '', inboxCount, todoCount };
+      } catch (e) {
+        return { name, description: '', inboxCount: 0, todoCount: 0 };
+      }
+    }));
+    res.json(boards);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -105,6 +132,32 @@ app.post('/api/boards/:name', async (req, res) => {
   if (!validBoardName(name)) return res.status(400).json({ error: 'Invalid board name. Use lowercase letters, digits and hyphens only.' });
   try {
     await getBoardDb(name);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/boards/:name/rename', async (req, res) => {
+  const { name } = req.params;
+  const { newName } = req.body;
+  if (!validBoardName(name)) return res.status(400).json({ error: 'Invalid board name' });
+  if (!validBoardName(newName) || newName.length > 12)
+    return res.status(400).json({ error: 'Invalid new name. Use up to 12 lowercase letters, digits and hyphens.' });
+  if (name === newName) return res.status(400).json({ error: 'New name is identical to current name' });
+  try {
+    // Fail fast if target already exists
+    try {
+      await couch.db.create(DB_PREFIX + newName);
+    } catch (err) {
+      if (err.statusCode === 412) return res.status(409).json({ error: 'A board with that name already exists' });
+      throw err;
+    }
+    // Copy data to new DB (fresh DB has no doc yet, so insert directly)
+    const data = await loadBoardData(couch.use(DB_PREFIX + name));
+    await couch.use(DB_PREFIX + newName).insert({ _id: DOC_ID, ...data });
+    // Remove old DB
+    await couch.db.destroy(DB_PREFIX + name);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -156,18 +209,18 @@ app.put('/api/prompts', async (req, res) => {
 });
 
 // ---- Board API ----
-app.get('/:board/api/board', withBoard(async (req, res, db) => {
+app.get('/api/:board/board', withExistingBoard(async (req, res, db) => {
   res.json(await loadBoardData(db));
 }));
 
-app.put('/:board/api/board', withBoard(async (req, res, db) => {
+app.put('/api/:board/board', withBoard(async (req, res, db) => {
   await saveBoardData(db, req.body);
   res.json({ success: true });
 }));
 
-app.patch('/:board/api/board', withBoard(async (req, res, db) => {
+app.patch('/api/:board/board', withBoard(async (req, res, db) => {
   const { _rev, ...data } = await db.get(DOC_ID);
-  const { columnOrder, updatedColumns, removedColumnIds } = req.body;
+  const { columnOrder, updatedColumns, removedColumnIds, description, inboxWithDate } = req.body;
   let columns = data.columns;
 
   if (removedColumnIds?.length) {
@@ -184,18 +237,21 @@ app.patch('/:board/api/board', withBoard(async (req, res, db) => {
     const map = new Map(columns.map(c => [c.id, c]));
     columns = columnOrder.map(id => map.get(id)).filter(Boolean);
   }
-  await db.insert({ _id: DOC_ID, _rev, columns });
+  const update = { ...data, columns };
+  if (description !== undefined) update.description = description;
+  if (inboxWithDate !== undefined) update.inboxWithDate = inboxWithDate;
+  await db.insert({ _id: DOC_ID, _rev, ...update });
   res.json({ success: true });
 }));
 
-app.get('/:board/api/all-columns', withBoard(async (req, res, db) => {
+app.get('/api/:board/all-columns', withBoard(async (req, res, db) => {
   const data = await loadBoardData(db);
   const result = {};
   data.columns.forEach(col => { result[col.title] = col.cards; });
   res.json(result);
 }));
 
-app.get('/:board/api/column/:name', withBoard(async (req, res, db) => {
+app.get('/api/:board/column/:name', withBoard(async (req, res, db) => {
   const name = req.params.name.toLowerCase();
   const data = await loadBoardData(db);
   const col = data.columns.find(c => c.title.toLowerCase() === name);
@@ -203,7 +259,7 @@ app.get('/:board/api/column/:name', withBoard(async (req, res, db) => {
   res.json(col.cards);
 }));
 
-app.get('/:board/api/card/:id', withBoard(async (req, res, db) => {
+app.get('/api/:board/card/:id', withBoard(async (req, res, db) => {
   const data = await loadBoardData(db);
   for (const col of data.columns) {
     const card = col.cards.find(c => c.id === req.params.id);
@@ -212,7 +268,7 @@ app.get('/:board/api/card/:id', withBoard(async (req, res, db) => {
   res.status(404).json({ error: 'Card not found' });
 }));
 
-app.post('/:board/api/move-to/:name', withBoard(async (req, res, db) => {
+app.post('/api/:board/move-to/:name', withBoard(async (req, res, db) => {
   const targetName = req.params.name.toLowerCase();
   const { 'job-title': jobTitle, company, location } = req.body;
   const input = { 'job-title': jobTitle, company, location };
@@ -240,7 +296,7 @@ app.post('/:board/api/move-to/:name', withBoard(async (req, res, db) => {
   reply(card, targetCol.title, true);
 }));
 
-app.post('/:board/api/import', withBoard(async (req, res, db) => {
+app.post('/api/:board/import', withBoard(async (req, res, db) => {
   const body = req.body;
   let rawItems;
   if (Array.isArray(body)) {
@@ -256,7 +312,9 @@ app.post('/:board/api/import', withBoard(async (req, res, db) => {
 
   const data = await loadBoardData(db);
   const now = new Date();
-  const inboxTitle = `Inbox ${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.`;
+  const inboxTitle = (data.inboxWithDate ?? false)
+    ? `Inbox ${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.`
+    : 'Inbox';
   let inbox = data.columns.find(c => c.title === inboxTitle);
   if (!inbox) {
     inbox = { id: 'id-' + Math.random().toString(36).slice(2, 9), title: inboxTitle, cards: [], color: '#06b6d4' };

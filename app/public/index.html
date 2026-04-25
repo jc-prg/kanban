@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Kanban</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" href="/icon-2.png">
+<link rel="apple-touch-icon" href="/icon-2.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -13,7 +14,11 @@
 <link rel="manifest" href="/manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/base.css">
+<link rel="stylesheet" href="/layout.css">
+<link rel="stylesheet" href="/column.css">
+<link rel="stylesheet" href="/card.css">
+<link rel="stylesheet" href="/overlay.css">
 </head>
 <body>
 
@@ -35,13 +40,18 @@
 
 <div id="overview" style="display:none">
   <div class="overview-inner">
+    <p id="overviewHint" class="overview-hint" style="display:none"></p>
     <p class="overview-label">Boards</p>
-    <div id="boardGrid" class="board-grid"></div>
-    <div class="new-board-row">
-      <input id="newBoardInput" class="new-board-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off">
-      <button id="newBoardBtn" class="btn btn-accent">+ new board</button>
+    <div id="boardGrid" class="board-grid">
+      <div class="new-board-item">
+        <p class="overview-label">Create Board</p>
+        <div class="new-board-row">
+          <input id="newBoardInput" class="new-board-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off">
+          <button id="newBoardBtn" class="btn btn-accent">+ new board</button>
+        </div>
+        <p id="newBoardError" class="new-board-error" style="display:none"></p>
+      </div>
     </div>
-    <p id="newBoardError" class="new-board-error" style="display:none"></p>
   </div>
 </div>
 
@@ -50,12 +60,14 @@
 </div>
 
 <div id="colContextMenu" class="context-menu" style="display:none">
-  <button class="ctx-item ctx-danger" id="colCtxClear">✕  Clear column</button>
+  <button class="ctx-item" id="colCtxToggleContent">▾  Hide content</button>
   <div class="ctx-item ctx-submenu-trigger">
     <span>↪  Move all to</span>
     <span class="ctx-arrow">›</span>
     <div class="ctx-submenu" id="colCtxMoveSubmenu"></div>
   </div>
+  <button class="ctx-item ctx-danger" id="colCtxClear">✕  Clear column</button>
+  <button class="ctx-item ctx-danger" id="colCtxDelete">⌫  Delete column</button>
 </div>
 
 <div id="contextMenu" class="context-menu" style="display:none">
@@ -176,8 +188,21 @@
 
 <div id="settingsBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal settings-modal">
-    <h2>Settings</h2>
-    <div class="settings-section">
+    <h2 id="settingsTitle">Settings</h2>
+    <div class="settings-section" id="boardRenameSection" style="display:none">
+      <div class="settings-section-title">Rename</div>
+      <div class="settings-rename-row">
+        <input id="boardRenameInput" class="new-board-input" type="text" maxlength="12" spellcheck="false" autocomplete="off">
+        <button class="btn btn-accent" id="boardRenameBtn">Rename</button>
+      </div>
+      <p id="boardRenameError" class="new-board-error" style="display:none"></p>
+    </div>
+    <div class="settings-section" id="boardDescSection" style="display:none">
+      <div class="settings-section-title">Description</div>
+      <textarea id="boardDescription" class="prompt-textarea" style="min-height:80px" placeholder="Short description shown in the board overview…"></textarea>
+      <span id="boardDescSaveMsg" class="prompts-save-msg"></span>
+    </div>
+    <div class="settings-section" id="dbSection">
       <div class="settings-section-title">Database</div>
       <a class="settings-item" href="http://localhost:5984/_utils" target="_blank" rel="noopener">
         <div class="settings-item-info">
@@ -187,12 +212,36 @@
         <span class="settings-item-arrow">↗</span>
       </a>
     </div>
+    <div class="settings-section" id="importSection" style="display:none">
+      <div class="settings-section-title">Import</div>
+      <label class="settings-item">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Inbox column with date</div>
+          <div class="settings-item-desc">Creates "Inbox 25.04." instead of "Inbox" on each import</div>
+        </div>
+        <div class="settings-toggle">
+          <input type="checkbox" id="inboxDateToggle">
+          <span class="settings-toggle-track"></span>
+        </div>
+      </label>
+    </div>
+    <div class="settings-section" id="boardDeleteSection" style="display:none">
+      <div class="settings-section-title">Danger zone</div>
+      <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete this board…</button>
+    </div>
     <div class="modal-actions">
+      <button class="btn btn-accent" id="boardDescSaveBtn" style="display:none">Save</button>
       <button class="btn btn-accent" id="settingsCloseBtn">Close</button>
     </div>
   </div>
 </div>
 
-<script src="/app.js"></script>
+<script src="/state.js"></script>
+<script src="/drag.js"></script>
+<script src="/cards.js"></script>
+<script src="/render.js"></script>
+<script src="/menus.js"></script>
+<script src="/settings.js"></script>
+<script src="/init.js"></script>
 </body>
 </html>
