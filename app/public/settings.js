@@ -321,7 +321,7 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
     function renderTrackedCols() {
       const list    = document.getElementById('trackedColsList');
       const tracked = new Set(state.settings?.trackedColumns || []);
-      const defaultCol = t => /inbox/i.test(t) || /^todo$/i.test(t) || /^done$/i.test(t) || /^in.?progress$/i.test(t) || /^doing$/i.test(t);
+      const defaultCol = t => /inbox/i.test(t) || /^todo$/i.test(t) || /^in.?progress$/i.test(t) || /^doing$/i.test(t);
       list.innerHTML = state.columns.filter(col => !defaultCol(col.title)).map(col => `
         <label class="tracked-col-item">
           <input type="checkbox" class="tracked-col-cb" value="${escHtml(col.title)}"${tracked.has(col.title) ? ' checked' : ''}>

@@ -175,27 +175,32 @@ function render() {
 
     visible.forEach(card => {
       const cardEl = document.createElement('div');
-      cardEl.className = 'card';
+      cardEl.className = card.done ? 'card card--done' : 'card';
       cardEl.dataset.cardId = card.id;
       cardEl.draggable = true;
       cardEl.style.setProperty('--card-color', card.color || color);
 
       const metaParts = [];
+      if (card.description) {
+        metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">☰</span>`);
+      }
       if (card.priority) {
         const pc = PRIORITY_COLORS[card.priority];
         metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);
       }
       if (card.startDate || card.endDate) {
+        const today = new Date().toISOString().slice(0, 10);
+        const overdue = !card.done && card.endDate && card.endDate < today;
+        const cls = overdue ? 'card-date card-date--overdue' : 'card-date';
         if (card.startDate && card.endDate)
-          metaParts.push(`<span class="card-date">${fmtDate(card.startDate)} → ${fmtDate(card.endDate)}</span>`);
+          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} → ${fmtDate(card.endDate)}</span>`);
         else if (card.startDate)
-          metaParts.push(`<span class="card-date">from ${fmtDate(card.startDate)}</span>`);
+          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} →</span>`);
         else
-          metaParts.push(`<span class="card-date">until ${fmtDate(card.endDate)}</span>`);
+          metaParts.push(`<span class="${cls}">→ ${fmtDate(card.endDate)}</span>`);
       }
-      if (card.description) {
-        const snippet = card.description.length > 50 ? card.description.slice(0, 50) + '…' : card.description;
-        metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">${escHtml(snippet)}</span>`);
+      if (card.done) {
+        metaParts.push(`<span class="card-done-mark">✓ done</span>`);
       }
 
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
@@ -221,6 +226,11 @@ function render() {
         e.stopPropagation();
         const rect = moreBtn.getBoundingClientRect();
         showContextMenu(rect.left, rect.bottom + 4, col.id, card);
+      });
+
+      cardEl.addEventListener('dblclick', e => {
+        if (e.target.closest('.card-more-btn, .card-link-badge, .card-text')) return;
+        openEditModal(col.id, card);
       });
 
       cardEl.addEventListener('contextmenu', e => {

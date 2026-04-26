@@ -6,6 +6,8 @@ function showContextMenu(x, y, colId, card) {
   ctxColId = colId;
   ctxCard  = card;
 
+  document.getElementById('ctxDone').textContent = card.done ? '✓  Mark as undone' : '✓  Mark as done';
+
   const submenu = document.getElementById('ctxMoveSubmenu');
   submenu.innerHTML = state.columns
     .filter(c => c.id !== colId)
@@ -48,6 +50,13 @@ document.getElementById('ctxInfo').addEventListener('click', async () => {
 document.getElementById('ctxEdit').addEventListener('click', () => {
   if (ctxColId && ctxCard) openEditModal(ctxColId, ctxCard);
   hideContextMenu();
+});
+
+document.getElementById('ctxDone').addEventListener('click', () => {
+  const colId = ctxColId, card = ctxCard;
+  hideContextMenu();
+  if (!colId || !card) return;
+  updateCardFull(colId, card.id, { ...card, done: !card.done });
 });
 
 document.getElementById('ctxDelete').addEventListener('click', async () => {
@@ -185,7 +194,14 @@ document.addEventListener('keydown', e => {
   document.addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
 
-  if (BOARD_NAME) document.getElementById('menuInbox').href = `/inbox?board=${encodeURIComponent(BOARD_NAME)}`;
+  if (BOARD_NAME) {
+    const menuInbox = document.getElementById('menuInbox');
+    menuInbox.addEventListener('click', e => {
+      e.preventDefault();
+      closeMenu();
+      openInboxModal(BOARD_NAME);
+    });
+  }
 
   document.getElementById('menuPrompts').addEventListener('click', () => { closeMenu(); openPromptsDialog(); });
   document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); alert('Statistics — coming soon'); });

@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>jc://kanban/</title>
-<link rel="icon" type="image/png" href="/icon-2.png">
-<link rel="apple-touch-icon" href="/icon-2.png">
+<link rel="icon" type="image/png" href="/images/icon-2.png">
+<link rel="apple-touch-icon" href="/images/icon-2.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,11 +14,11 @@
 <link rel="manifest" href="/manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/base.css">
-<link rel="stylesheet" href="/layout.css">
-<link rel="stylesheet" href="/column.css">
-<link rel="stylesheet" href="/card.css">
-<link rel="stylesheet" href="/overlay.css">
+<link rel="stylesheet" href="/styles/base.css">
+<link rel="stylesheet" href="/styles/layout.css">
+<link rel="stylesheet" href="/styles/column.css">
+<link rel="stylesheet" href="/styles/card.css">
+<link rel="stylesheet" href="/styles/overlay.css">
 </head>
 <body>
 
@@ -56,55 +56,6 @@
   </div>
 </div>
 
-<div id="inboxView" style="display:none">
-  <div class="overview-inner">
-    <p class="overview-label">Add to Inbox</p>
-    <div class="inbox-form">
-      <div class="modal-field">
-        <label>Board</label>
-        <select id="inboxBoardSelect" class="inbox-select"></select>
-      </div>
-      <div class="modal-field">
-        <label>Text</label>
-        <textarea id="inboxText" rows="2" placeholder="What needs to be done?"></textarea>
-      </div>
-      <div class="modal-field">
-        <label>Description</label>
-        <textarea id="inboxDesc" placeholder="Optional details…"></textarea>
-      </div>
-      <div class="modal-field">
-        <label>Link</label>
-        <div class="modal-link-row">
-          <input id="inboxLink" type="url" placeholder="https://…">
-          <button class="btn modal-link-open" id="inboxLinkOpen" title="Open link" tabindex="-1">↗</button>
-        </div>
-      </div>
-      <div class="date-row">
-        <div class="modal-field">
-          <label>Start</label>
-          <input id="inboxStart" type="date">
-        </div>
-        <div class="modal-field">
-          <label>End</label>
-          <input id="inboxEnd" type="date">
-        </div>
-      </div>
-      <div class="modal-field">
-        <label>Priority</label>
-        <div id="inboxPriorityRow" class="priority-row"></div>
-      </div>
-      <div class="modal-field">
-        <label>Color</label>
-        <div id="inboxColorRow" class="color-row"></div>
-      </div>
-      <p id="inboxMsg" class="inbox-msg"></p>
-      <div class="modal-actions">
-        <a class="btn" id="inboxGoBoardBtn" style="display:none">Go to board</a>
-        <button class="btn btn-accent" id="inboxSubmitBtn">Add to Inbox</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <div class="board-wrapper">
   <div class="board" id="board"></div>
@@ -126,6 +77,7 @@
 <div id="contextMenu" class="context-menu" style="display:none">
   <button class="ctx-item" id="ctxInfo">ℹ  Info</button>
   <button class="ctx-item" id="ctxEdit">✎  Edit</button>
+  <button class="ctx-item" id="ctxDone">✓  Mark as done</button>
   <div class="ctx-item ctx-submenu-trigger">
     <span>↪  Move to</span>
     <span class="ctx-arrow">›</span>
@@ -137,12 +89,17 @@
 <div id="modal" class="modal-backdrop" style="display:none">
   <div class="modal">
     <h2 id="modalTitle">Add Card</h2>
+    <div class="modal-field" id="modalBoardField" style="display:none">
+      <label>Board</label>
+      <select id="modalBoardSelect" class="inbox-select"></select>
+    </div>
     <div class="modal-field">
       <label>Text</label>
       <textarea id="cardText" rows="2" placeholder="What needs to be done?"></textarea>
     </div>
     <div class="modal-field modal-field-desc">
       <label>Description</label>
+      <div id="cardDescPreview" class="card-desc-preview" style="display:none"></div>
       <textarea id="cardDesc" placeholder="Optional details…"></textarea>
     </div>
     <div class="modal-field">
@@ -170,7 +127,9 @@
       <label>Color</label>
       <div class="color-row" id="colorRow"></div>
     </div>
+    <p id="modalStatusMsg" class="inbox-msg" style="display:none"></p>
     <div class="modal-actions">
+      <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
       <button class="btn" onclick="closeModal()">Cancel</button>
       <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()">Add Card</button>
     </div>
@@ -324,6 +283,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="/state.js"></script>
 <script src="/drag.js"></script>
 <script src="/cards.js"></script>
