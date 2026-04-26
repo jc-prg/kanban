@@ -32,6 +32,7 @@
     <div class="header-dropdown" id="headerDropdown">
       <a class="header-dd-item" id="menuAllBoards" href="/">All boards</a>
       <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
+      <button class="header-dd-item" id="menuFindCard">Find card</button>
       <button class="header-dd-item" id="menuPrompts">Prompts</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
@@ -129,6 +130,7 @@
     </div>
     <p id="modalStatusMsg" class="inbox-msg" style="display:none"></p>
     <div class="modal-actions">
+      <span id="modalSavedMsg" class="modal-saved-msg"></span>
       <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
       <button class="btn" onclick="closeModal()">Cancel</button>
       <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()">Add Card</button>
@@ -177,6 +179,39 @@
     <div class="modal-actions">
       <button class="btn" id="promptsCancelBtn">Cancel</button>
       <button class="btn btn-accent" id="promptsSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="searchBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal search-modal">
+    <h2>Find Card</h2>
+    <div class="modal-field">
+      <label>Text</label>
+      <input id="searchText" type="text" placeholder="Contains all words…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="search-filter-strip">
+      <div class="search-filter-group">
+        <span class="search-filter-label">Priority</span>
+        <div id="searchPriorityRow" class="priority-row"></div>
+      </div>
+      <div class="search-filter-group">
+        <span class="search-filter-label">Start date ≥</span>
+        <input id="searchDateStart" type="date">
+      </div>
+      <div class="search-filter-group">
+        <span class="search-filter-label">End date ≤</span>
+        <input id="searchDateEnd" type="date">
+      </div>
+    </div>
+    <div class="search-filter-group search-col-group">
+      <span class="search-filter-label">Columns</span>
+      <div id="searchColumnList" class="search-column-list"></div>
+    </div>
+    <div id="searchResults" class="search-results"></div>
+    <div class="modal-actions">
+      <span id="searchCount" class="search-count"></span>
+      <button class="btn btn-accent" onclick="closeSearch()">Close</button>
     </div>
   </div>
 </div>
@@ -249,11 +284,13 @@
           <span class="settings-toggle-track"></span>
         </div>
       </label>
-      <div class="settings-tracked-header">
-        <div class="settings-item-label">Show in overview</div>
-        <div class="settings-item-desc">Card counts for these columns appear on the board button. Inbox, todo and doing/in progress are shown by default.</div>
+      <div class="settings-item settings-tracked-box">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Show in overview</div>
+          <div class="settings-item-desc">Card counts for these columns appear on the board button. Inbox, todo and doing/in progress are shown by default.</div>
+          <div id="trackedColsList" class="tracked-cols-list"></div>
+        </div>
       </div>
-      <div id="trackedColsList" class="tracked-cols-list"></div>
     </div>
     <div class="settings-section" id="apiKeySection">
       <div class="settings-section-title">API Access</div>
@@ -291,6 +328,7 @@
 <script src="/menus.js"></script>
 <script src="/settings.js"></script>
 <script src="/inbox.js"></script>
+<script src="/search.js"></script>
 <script src="/init.js"></script>
 </body>
 </html>

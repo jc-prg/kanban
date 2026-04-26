@@ -299,12 +299,38 @@ document.getElementById('modal').addEventListener('click', e => {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.getElementById('modal').style.display !== 'none') tryCloseModal();
+  if ((e.ctrlKey || e.metaKey) && e.key === 's' && document.getElementById('modal').style.display !== 'none') {
+    e.preventDefault();
+    saveCardInPlace();
+    return;
+  }
   if (e.key === 'Enter' && document.getElementById('modal').style.display !== 'none' && !e.shiftKey) {
     if (document.activeElement.id === 'cardDesc') return;
     e.preventDefault();
     submitCard();
   }
 });
+
+function saveCardInPlace() {
+  const text = document.getElementById('cardText').value.trim();
+  if (!text || modalMode === 'inbox') return;
+  const data = {
+    text,
+    color:       selectedColor,
+    priority:    selectedPriority || null,
+    description: document.getElementById('cardDesc').value.trim()  || null,
+    link:        document.getElementById('cardLink').value.trim()   || null,
+    startDate:   document.getElementById('cardStart').value         || null,
+    endDate:     document.getElementById('cardEnd').value           || null,
+  };
+  if (modalMode === 'edit') updateCardFull(modalColId, editCardId, data);
+  else if (modalMode === 'add') addCard(modalColId, data);
+  captureModalOriginal();
+  const msg = document.getElementById('modalSavedMsg');
+  msg.textContent = 'saved';
+  msg.classList.add('modal-saved-msg--visible');
+  setTimeout(() => { msg.textContent = ''; msg.classList.remove('modal-saved-msg--visible'); }, 2000);
+}
 
 // ---- Card info dialog ----
 function openCardInfo(card) {

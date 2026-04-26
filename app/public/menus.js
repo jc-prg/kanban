@@ -203,6 +203,7 @@ document.addEventListener('keydown', e => {
     });
   }
 
+  document.getElementById('menuFindCard').addEventListener('click', () => { closeMenu(); openSearch(); });
   document.getElementById('menuPrompts').addEventListener('click', () => { closeMenu(); openPromptsDialog(); });
   document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); alert('Statistics — coming soon'); });
 })();
