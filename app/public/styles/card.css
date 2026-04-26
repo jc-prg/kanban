@@ -1,0 +1,182 @@
+/* Card */
+.card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 10px 10px 14px;
+  cursor: grab;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 4px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.card--done { opacity: 0.5; }
+.card-done-mark { color: #10b981; font-size: 0.75rem; margin-right: 4px; }
+
+.card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 8px 0 0 8px;
+  background: var(--card-color, var(--accent));
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  border-color: var(--card-color, var(--accent));
+}
+
+.card.dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+
+.card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Card ⋮ button */
+.card-more-btn {
+  flex-shrink: 0;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  touch-action: manipulation;
+}
+.card:hover .card-more-btn  { opacity: 0.55; }
+.card-more-btn:hover         { opacity: 1 !important; background: var(--surface); }
+@media (hover: none) {
+  .card-more-btn             { opacity: 0.45; }
+}
+
+.card-text {
+  width: 100%;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text);
+  outline: none;
+  background: none;
+  border: none;
+  resize: none;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
+  cursor: text;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.priority-badge {
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.card-date {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.card-date--overdue { color: var(--danger); }
+
+.card-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.card-link-icon {
+  font-size: 0.7rem;
+  color: var(--accent);
+  text-decoration: none;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+.card-link-icon:hover { opacity: 1; }
+
+.card-link-badge {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 0 8px 0 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: background 0.15s;
+  z-index: 1;
+}
+.card-link-badge:hover { filter: brightness(1.2); }
+
+/* Drop indicator (drag target line between cards) */
+.drop-indicator {
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin: -2px 0;
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.drop-indicator.active { opacity: 1; }
+
+/* Load more button */
+.load-more-btn {
+  margin: 0 12px 4px;
+  padding: 7px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+  letter-spacing: 0.02em;
+  width: calc(100% - 24px);
+}
+
+.load-more-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
