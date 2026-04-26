@@ -22,11 +22,10 @@ No build step, no linter, no test framework configured.
 
 Single-page kanban board with a minimal three-layer design:
 
-- **`app/server.js`** — Express 5 backend. Serves `public/` as static files and exposes six REST endpoints. Persists all data in CouchDB (`jc-kanban-cards` database, single `board` document). Uses `nano` as the CouchDB client.
+- **`app/server.js`** — Express 5 backend. Serves `public/` as static files and exposes REST endpoints for auth, board management, and card operations. Persists all data in CouchDB (one `jc-kanban-<name>` database per board, single `board` document each). Uses `nano` as the CouchDB client.
 - **`app/public/index.html`** — Markup and modal HTML only. References the CSS and JS files below.
-- **`data/data.json`** — Optional seed file. Used once on first startup to populate the CouchDB board document if it doesn't exist yet.
 
-### CSS (`app/public/`)
+### CSS (`app/public/styles/`)
 
 | File | Contents |
 |---|---|
@@ -46,6 +45,8 @@ Single-page kanban board with a minimal three-layer design:
 | `render.js` | `escHtml`, `fmtDate`, `safeLink`, `getLinkBadgeHtml`, `render()` |
 | `menus.js` | Card context menu, column context menu, `moveAllCards`, header dropdown menu |
 | `settings.js` | Title char animation, remote polling, auth (`tryLogin`, `checkAuth`), prompts dialog, settings dialog, `afterAuth`, overview (`initOverview`, `renderBoardGrid`) |
+| `inbox.js` | Add-to-inbox modal (`openInboxModal`, `submitInboxCard`) used from the overview and board menu |
+| `search.js` | Find-card dialog (`openSearch`, `closeSearch`) — text (all-words, accent-folding), priority, date range, and column filters; results open the edit modal |
 | `init.js` | Entry point — calls `initTitleChars()` and `checkAuth()` |
 
 ## CouchDB
@@ -55,14 +56,20 @@ The board state is stored as a single document (`_id: "board"`) in the `jc-kanba
 2. Creates the `jc-kanban-cards` database if absent
 3. Seeds the `board` document from `data/data.json` (or built-in defaults) if absent
 
-CouchDB credentials are set in `.env` and forwarded to both containers via `docker-compose.yml`:
+All configuration is via `.env` (forwarded to both containers by `docker-compose.yml`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `COUCHDB_USER` | `kanban` | Admin username |
-| `COUCHDB_PASSWORD` | `kanban-pwd` | Admin password |
-| `COUCHDB_HOST` | `localhost` | Hostname (set to `couchdb` by compose) |
-| `COUCHDB_PORT` | `5984` | Port |
+| `APP_PASSWORD` | `kanban-pwd` | Password for the web UI login |
+| `API_KEY` | _(empty)_ | Static key for external API access; if unset, only session tokens are accepted |
+| `PORT` | `3000` | HTTP port the server listens on |
+| `HOST` | `localhost` | Bind address logged on startup |
+| `COUCHDB_USER` | `kanban` | CouchDB admin username |
+| `COUCHDB_PASSWORD` | `kanban-pwd` | CouchDB admin password |
+| `COUCHDB_HOST` | `localhost` | CouchDB hostname (set to `couchdb` by compose) |
+| `COUCHDB_PORT` | `5984` | CouchDB port |
+| `BACKUP_DIR` | `data/` | Directory for JSON board backups |
+| `BACKUP_INTERVAL_MS` | `600000` | How often backups run (ms); default 10 min |
 
 The Fauxton admin UI is available at `http://localhost:5984/_utils`.
 
@@ -70,7 +77,7 @@ The Fauxton admin UI is available at `http://localhost:5984/_utils`.
 
 The frontend maintains a single `state` object (`{ columns: [...] }`). After every mutation, `render()` wipes and rebuilds the board DOM from scratch (React-style, but vanilla JS).
 
-**Auto-save:** mutations call `scheduleSave()` which debounces 600 ms then `PUT /api/board` with the full state. A header indicator shows "saving…" / "saved".
+**Auto-save:** mutations call `scheduleSave()` which debounces 600 ms then sends a `PATCH /api/:board/board` with only the changed columns/settings (falls back to `PUT` before the first successful load). A header indicator shows "saving…" / "✓ saved".
 
 **Drag and drop:** uses the HTML5 Drag and Drop API. `dragState` tracks source column/card. `getDropIndex()` computes target insertion point from the pointer Y coordinate.
 
@@ -78,23 +85,69 @@ The frontend maintains a single `state` object (`{ columns: [...] }`). After eve
 
 ## API endpoints
 
+All `/api/*` routes require authentication via one of:
+- **Session token** (browser): `x-auth-token: <token>` — obtained via `POST /api/auth`
+- **API key** (external tools): `x-api-key: <key>` or `Authorization: Bearer <key>` — requires `API_KEY` set in `.env`
+
+### Auth & global
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/board` | Load full board state |
-| `PUT` | `/api/board` | Save board state (full replace) |
-| `GET` | `/api/all-columns` | All columns as `{ "Title": [cards], … }` |
-| `GET` | `/api/column/:name` | Cards in a single column (case-insensitive) |
-| `POST` | `/api/move-to/:name` | Move a card to the named column; body: `{ "job-title", "company", "location" }`; returns `{ toBeMoved, moved, toColumn, success }` |
-| `POST` | `/api/import` | Bulk-import cards (see below) |
+| `POST` | `/api/auth` | Login; body: `{ "password" }`; returns `{ ok, token }` |
+| `GET` | `/api/auth/verify` | Check if the current session token is valid |
+| `GET` | `/api/settings` | Returns `{ apiKey }` (null if not configured) |
+| `GET` | `/api/prompts` | Load global search prompts |
+| `PUT` | `/api/prompts` | Save global search prompts; body: `{ searchProfile, criteriaInclude, criteriaExclude, searchRadius }` |
+
+### Board management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/boards` | List all boards with card counts and metadata |
+| `POST` | `/api/boards/:name` | Create a board (name: lowercase alphanumeric + hyphens, ≤ 64 chars, not `inbox`) |
+| `POST` | `/api/boards/:name/rename` | Rename a board; body: `{ "newName" }` (≤ 12 chars) |
+| `DELETE` | `/api/boards/:name` | Delete a board and all its data |
+
+### Board data (`:board` = board name)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/:board/board` | Load full board state |
+| `PUT` | `/api/:board/board` | Full replace of board state |
+| `PATCH` | `/api/:board/board` | Partial update; body: `{ columnOrder?, updatedColumns?, removedColumnIds?, settings? }` |
+| `GET` | `/api/:board/all-columns` | All columns as `{ "Title": [cards], … }` |
+| `GET` | `/api/:board/column/:name` | Cards in a named column (case-insensitive) |
+| `GET` | `/api/:board/card/:id` | Card history: `{ created, moves, column }` |
+| `POST` | `/api/:board/move-to/:name` | Move a card to the named column (see below) |
+| `POST` | `/api/:board/import` | Bulk-import cards (see below) |
+
+## Move-to endpoint
+
+`POST /api/:board/move-to/:name` — finds a card by composite text and moves it to the named column.
+
+Body: `{ "job-title": "…", "company": "…", "location": "…" }` — card is looked up as `job-title | company | location`.
+
+Returns `{ toBeMoved, moved, toColumn, success }`.
 
 ## Import endpoint
 
-`POST /api/import` — accepts a JSON array of card objects from external tools (e.g. n8n). For each item:
-- Skips if `text` is missing or already exists in any column (deduplication by `text`)
-- Appends new cards to the "Inbox" column, creating it at position 0 if absent
-- Returns `{ added: N, skipped: N }`
+`POST /api/:board/import` — bulk-imports cards from external tools (e.g. n8n). Two accepted body formats:
 
-All card fields are accepted (`text` required, all others optional — same schema as below).
+**Plain array** — all items land in the inbox with their own color:
+```json
+[{ "text": "Card title", "priority": 1, "link": "https://…" }]
+```
+
+**Classified object** — `relevant` items get green (`#10b981`), `excluded` items get red (`#ef4444`):
+```json
+{ "relevant": [{ "text": "…" }], "excluded": [{ "text": "…" }] }
+```
+
+Job-application objects with `job-title`, `company`, `location`, and `reason` fields are auto-converted: `text` becomes `job-title | company | location` and `description` becomes `reason`.
+
+Cards are deduplicated by `text` across all columns. New cards are prepended to the "Inbox" column (created at position 0 if absent; the column name includes today's date when `inboxWithDate` is enabled in settings).
+
+Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_items }`.
 
 ## Data Model
 
@@ -104,20 +157,32 @@ All card fields are accepted (`text` required, all others optional — same sche
     {
       "id": "string",
       "title": "string",
-      "color": "string",       // optional, drives the column dot color
+      "color": "string",        // optional, drives the column dot color
       "cards": [
         {
           "id": "string",
           "text": "string",
-          "color": "string",
-          "priority": 1,       // optional, 1 (highest) – 5 (lowest)
-          "description": "string", // optional
-          "link": "string",    // optional, http/https only
+          "color": "string",    // optional
+          "priority": 1,        // optional, 1 (highest) – 5 (lowest)
+          "description": "string", // optional, rendered as Markdown
+          "link": "string",     // optional, http/https only
           "startDate": "YYYY-MM-DD", // optional
-          "endDate": "YYYY-MM-DD"    // optional
+          "endDate": "YYYY-MM-DD",   // optional
+          "done": false,        // optional boolean, set via "Mark as done"
+          "created": "YYYY-MM-DD",   // set automatically on card creation
+          "moves": [            // optional, appended on every column move
+            { "at": "ISO-8601", "from": "column title", "to": "column title" }
+          ]
         }
       ]
     }
-  ]
+  ],
+  "settings": {                 // optional, board-level configuration
+    "description": "string",   // shown in the board overview grid
+    "inboxWithDate": false,     // prefix imported inbox columns with today's date
+    "persistCollapse": false,   // save collapsed column state across sessions
+    "collapsedColumnIds": [],   // persisted when persistCollapse is true
+    "trackedColumns": []        // column titles shown as card counts in the overview
+  }
 }
 ```
