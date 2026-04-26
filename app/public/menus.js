@@ -100,6 +100,7 @@ function showColContextMenu(x, y, colId) {
 
 function hideColContextMenu() {
   document.getElementById('colContextMenu').style.display = 'none';
+  document.getElementById('colCtxColorRow').style.display = 'none';
   ctxHeaderColId = null;
 }
 
@@ -112,6 +113,27 @@ function moveAllCards(fromColId, toColId) {
   render();
   schedulesSave();
 }
+
+document.getElementById('colCtxColor').addEventListener('click', e => {
+  e.stopPropagation();
+  const row = document.getElementById('colCtxColorRow');
+  const visible = row.style.display !== 'none';
+  if (visible) { row.style.display = 'none'; return; }
+  const col = state.columns.find(c => c.id === ctxHeaderColId);
+  row.innerHTML = COL_COLORS.map(c =>
+    `<div class="color-swatch ctx-color-swatch${col?.color === c ? ' selected' : ''}"
+          style="background:${c}" data-color="${c}"></div>`
+  ).join('');
+  row.querySelectorAll('.ctx-color-swatch').forEach(s => {
+    s.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const target = state.columns.find(c => c.id === ctxHeaderColId);
+      if (target) { target.color = s.dataset.color; render(); schedulesSave(); }
+      hideColContextMenu();
+    });
+  });
+  row.style.display = 'flex';
+});
 
 document.getElementById('colCtxToggleContent').addEventListener('click', () => {
   const colId = ctxHeaderColId;

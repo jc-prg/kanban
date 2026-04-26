@@ -212,6 +212,7 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
       document.getElementById('boardRenameError').style.display = 'none';
       document.getElementById('inboxDateToggle').checked = state.settings?.inboxWithDate ?? false;
       document.getElementById('persistCollapseToggle').checked = state.settings?.persistCollapse ?? false;
+      renderTrackedCols();
     }
     loadApiKey();
     backdrop.style.display = 'flex';
@@ -317,6 +318,25 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
       document.getElementById('boardImportFile').click();
     });
 
+    function renderTrackedCols() {
+      const list    = document.getElementById('trackedColsList');
+      const tracked = new Set(state.settings?.trackedColumns || []);
+      const defaultCol = t => /inbox/i.test(t) || /^todo$/i.test(t) || /^done$/i.test(t) || /^in.?progress$/i.test(t) || /^doing$/i.test(t);
+      list.innerHTML = state.columns.filter(col => !defaultCol(col.title)).map(col => `
+        <label class="tracked-col-item">
+          <input type="checkbox" class="tracked-col-cb" value="${escHtml(col.title)}"${tracked.has(col.title) ? ' checked' : ''}>
+          <span class="tracked-col-dot" style="background:${escHtml(col.color || 'var(--text-muted)')}"></span>
+          <span class="tracked-col-name">${escHtml(col.title)}</span>
+        </label>`).join('');
+      list.querySelectorAll('.tracked-col-cb').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const selected = [...list.querySelectorAll('.tracked-col-cb:checked')].map(c => c.value);
+          (state.settings ??= {}).trackedColumns = selected.length ? selected : undefined;
+          schedulesSave();
+        });
+      });
+    }
+
     document.getElementById('boardImportFile').addEventListener('change', async e => {
       const file = e.target.files[0];
       e.target.value = '';
@@ -361,11 +381,18 @@ function renderBoardGrid(boards) {
   const newBoardItem = grid.querySelector('.new-board-item');
   grid.querySelectorAll('.board-card, .board-grid-empty').forEach(el => el.remove());
   if (boards.length) {
-    boards.forEach(({ name, description, inboxCount, todoCount, inProgressCount }) => {
+    boards.forEach(({ name, description, inboxCount, todoCount, inProgressCount, trackedCounts = [] }) => {
+      const trackedBadges = trackedCounts
+        .filter(t => t.count > 0)
+        .map(t => {
+          const style = t.color ? `background:${t.color}22;color:${t.color}` : '';
+          return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(t.title)} ${t.count}</span>`;
+        });
       const badges = [
         inboxCount      ? `<span class="board-card-count board-card-count-inbox">inbox ${inboxCount}</span>`           : '',
         todoCount       ? `<span class="board-card-count board-card-count-todo">todo ${todoCount}</span>`              : '',
         inProgressCount ? `<span class="board-card-count board-card-count-inprogress">doing ${inProgressCount}</span>` : '',
+        ...trackedBadges,
       ].filter(Boolean).join('');
       const a = document.createElement('a');
       a.className = 'board-card';

@@ -320,11 +320,13 @@ header h1 span { color: var(--accent); }
   padding: 2px 8px;
   border-radius: 20px;
   white-space: nowrap;
+  text-transform: lowercase;
 }
 
 .board-card-count-inbox      { background: rgba(124,106,247,0.15); color: #7c6af7; }
 .board-card-count-inprogress { background: rgba(249,115,22,0.15); color: #f97316; }
 .board-card-count-todo       { background: rgba(180,30,30,0.18);  color: #c94040; }
+.board-card-count-tracked    { background: rgba(144,144,176,0.15); color: var(--text-muted); }
 
 .board-card-arrow {
   color: var(--accent);

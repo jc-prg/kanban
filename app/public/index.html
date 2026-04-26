@@ -112,6 +112,8 @@
 
 <div id="colContextMenu" class="context-menu" style="display:none">
   <button class="ctx-item" id="colCtxToggleContent">▾  Hide content</button>
+  <button class="ctx-item" id="colCtxColor">◉  Change color</button>
+  <div class="ctx-color-row" id="colCtxColorRow" style="display:none"></div>
   <div class="ctx-item ctx-submenu-trigger">
     <span>↪  Move all to</span>
     <span class="ctx-arrow">›</span>
@@ -288,6 +290,11 @@
           <span class="settings-toggle-track"></span>
         </div>
       </label>
+      <div class="settings-tracked-header">
+        <div class="settings-item-label">Show in overview</div>
+        <div class="settings-item-desc">Card counts for these columns appear on the board button. Inbox, todo and doing/in progress are shown by default.</div>
+      </div>
+      <div id="trackedColsList" class="tracked-cols-list"></div>
     </div>
     <div class="settings-section" id="apiKeySection">
       <div class="settings-section-title">API Access</div>

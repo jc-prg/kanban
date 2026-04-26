@@ -140,7 +140,11 @@ app.get('/api/boards', async (req, res) => {
         const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
         const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
         const inProgressCount = data.columns.filter(c => /^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
-        return { name, description: data.settings?.description || '', inboxCount, todoCount, inProgressCount };
+        const trackedCounts   = (data.settings?.trackedColumns || []).map(title => {
+          const col = data.columns.find(c => c.title === title);
+          return col ? { title, count: col.cards.length, color: col.color || null } : null;
+        }).filter(Boolean);
+        return { name, description: data.settings?.description || '', inboxCount, todoCount, inProgressCount, trackedCounts };
       } catch (e) {
         return { name, description: '', inboxCount: 0, todoCount: 0, inProgressCount: 0 };
       }
