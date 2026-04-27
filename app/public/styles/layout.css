@@ -1,10 +1,9 @@
 header {
   position: relative;
   z-index: 10;
-  padding: 28px 36px 20px;
+  padding: 28px 25px 20px;
   display: flex;
   align-items: center;
-  gap: 20px;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(124,106,247,0.06) 0%, transparent 100%);
 }
@@ -17,6 +16,8 @@ header h1 {
   color: var(--text);
   cursor: pointer;
   transition: opacity 0.15s;
+  flex: 0 0 60%;
+  min-width: 0;
 }
 
 header h1:hover { opacity: 0.8; }
@@ -49,7 +50,7 @@ header h1 span { color: var(--accent); }
 }
 
 /* Header menu */
-.header-menu { position: relative; }
+.header-menu { position: relative; display: flex; gap: 6px; align-items: center; }
 
 .header-menu-btn {
   font-family: 'DM Mono', monospace;
@@ -106,12 +107,34 @@ header h1 span { color: var(--accent); }
   color: var(--accent);
 }
 
+.header-dd-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.header-dd-logout:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.header-right {
+  flex: 0 0 40%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
 .header-actions {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
+
+.header-menu { flex-shrink: 0; }
 
 /* Buttons */
 .btn {
@@ -173,12 +196,13 @@ header h1 span { color: var(--accent); }
 /* Board */
 .board-wrapper {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   position: relative;
   z-index: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 28px 36px;
+  padding: 28px 25px;
 }
 
 .board {
@@ -340,6 +364,30 @@ header h1 span { color: var(--accent); }
 .board-grid-empty {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+.archived-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 16px 0 12px;
+  color: var(--text-muted);
+  transition: color 0.15s;
+}
+
+.archived-section-header:hover { color: var(--text); }
+
+.board-card--archived {
+  opacity: 0.5;
+  filter: saturate(0.4);
+}
+
+.board-card--archived:hover {
+  opacity: 0.85;
+  filter: saturate(0.7);
 }
 
 .new-board-item {

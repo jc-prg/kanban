@@ -16,6 +16,12 @@ function showDescEditor() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('cardText').addEventListener('input', e => autoResizeTitle(e.target));
+
+  document.getElementById('cardToggleDate')    ?.addEventListener('click', () => toggleCardSection('cardDateSection',     'cardToggleDate'));
+  document.getElementById('cardTogglePriority')?.addEventListener('click', () => toggleCardSection('cardPrioritySection', 'cardTogglePriority'));
+  document.getElementById('cardToggleColor')   ?.addEventListener('click', () => toggleCardSection('cardColorSection',    'cardToggleColor'));
+
   document.getElementById('cardDescPreview').addEventListener('click', () => {
     showDescEditor();
     document.getElementById('cardDesc').focus();
@@ -89,15 +95,65 @@ function hasModalChanges() {
 
 async function tryCloseModal() {
   if (modalMode !== 'inbox' && hasModalChanges()) {
-    const isAdd   = modalMode === 'add';
-    const save = await showConfirm(
-      isAdd ? 'Add card before closing?' : 'Save changes before closing?',
-      { okLabel: isAdd ? 'Add' : 'Save' }
-    );
-    if (save) submitCard(); else closeModal();
+    if (await showConfirm('Close without saving changes?', { okLabel: 'Close', danger: true }))
+      closeModal();
   } else {
     closeModal();
   }
+}
+
+// ---- Collapsible card sections ----
+function setCardSection(sectionId, btnId, open) {
+  const section = document.getElementById(sectionId);
+  const btn     = document.getElementById(btnId);
+  if (section) section.style.display = open ? '' : 'none';
+  if (btn)     btn.classList.toggle('card-section-toggle--active', open);
+}
+
+function toggleCardSection(sectionId, btnId) {
+  const section = document.getElementById(sectionId);
+  setCardSection(sectionId, btnId, section?.style.display === 'none');
+}
+
+function resetCardSections() {
+  setCardSection('cardDateSection',     'cardToggleDate',     false);
+  setCardSection('cardPrioritySection', 'cardTogglePriority', false);
+  setCardSection('cardColorSection',    'cardToggleColor',    false);
+}
+
+// ---- Linked note pages on a card ----
+function renderCardLinkedPages(cardId) {
+  const field = document.getElementById('cardLinkedPagesField');
+  const list  = document.getElementById('cardLinkedPagesList');
+  if (!field || !list) return;
+
+  const linked = [];
+  (function search(pages) {
+    for (const p of pages) {
+      if ((p.linkedCards || []).includes(cardId)) linked.push(p);
+      if (p.children?.length) search(p.children);
+    }
+  })(typeof notesState !== 'undefined' ? notesState.pages : []);
+
+  field.style.display = linked.length ? '' : 'none';
+  list.innerHTML = '';
+  linked.forEach(page => {
+    const chip = document.createElement('button');
+    chip.className = 'card-linked-page-chip';
+    chip.textContent = page.title;
+    const path = typeof getNotePath === 'function'
+      ? getNotePath(page.id, notesState.pages)
+      : null;
+    chip.title = path ? path.map(p => p.title).join(' › ') : page.title;
+    chip.addEventListener('click', () => { closeModal(); openNoteModal(page.id); });
+    list.appendChild(chip);
+  });
+}
+
+// ---- Auto-resize for title textareas ----
+function autoResizeTitle(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 'px';
 }
 
 // ---- Card add/edit modal ----
@@ -116,11 +172,14 @@ function openModal(colId) {
   showDescEditor();
   document.getElementById('modalTitle').textContent      = 'Add Card';
   document.getElementById('modalSubmitBtn').textContent  = 'Add Card';
+  resetCardSections();
   renderColorRow();
   renderPriorityRow();
   captureModalOriginal();
   document.getElementById('modal').style.display = 'flex';
-  document.getElementById('cardText').focus();
+  const ct = document.getElementById('cardText');
+  ct.focus();
+  autoResizeTitle(ct);
 }
 
 function openEditModal(colId, card) {
@@ -138,18 +197,26 @@ function openEditModal(colId, card) {
   if (card.description) showDescPreview(); else showDescEditor();
   document.getElementById('modalTitle').textContent     = 'Edit Card';
   document.getElementById('modalSubmitBtn').textContent = 'Save';
+  document.getElementById('modalDeleteBtn').style.display = '';
+  resetCardSections();
   renderColorRow();
   renderPriorityRow();
+  renderCardLinkedPages(card.id);
   captureModalOriginal();
   document.getElementById('modal').style.display = 'flex';
-  document.getElementById('cardText').focus();
+  const ct = document.getElementById('cardText');
+  ct.focus();
+  autoResizeTitle(ct);
 }
 
 function closeModal() {
   document.getElementById('modal').style.display = 'none';
-  document.getElementById('modalBoardField').style.display = 'none';
-  document.getElementById('modalStatusMsg').style.display  = 'none';
-  document.getElementById('modalGoBoardBtn').style.display = 'none';
+  document.getElementById('modalBoardField').style.display    = 'none';
+  document.getElementById('modalStatusMsg').style.display     = 'none';
+  document.getElementById('modalGoBoardBtn').style.display    = 'none';
+  document.getElementById('modalDeleteBtn').style.display     = 'none';
+  document.getElementById('cardLinkedPagesField').style.display = 'none';
+  resetCardSections();
   showDescEditor();
 }
 
@@ -310,6 +377,13 @@ document.addEventListener('keydown', e => {
     submitCard();
   }
 });
+
+async function deleteCardFromModal() {
+  const ok = await showConfirm('Delete this card?', { okLabel: 'Delete' });
+  if (!ok) return;
+  deleteCard(modalColId, editCardId);
+  closeModal();
+}
 
 function saveCardInPlace() {
   const text = document.getElementById('cardText').value.trim();

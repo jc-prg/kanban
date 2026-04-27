@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>jc://kanban/</title>
-<link rel="icon" type="image/png" href="/images/icon-2.png">
-<link rel="apple-touch-icon" href="/images/icon-2.png">
+<link rel="icon" type="image/png" href="/images/icon-4.png">
+<link rel="apple-touch-icon" href="/images/icon-4.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,24 +19,30 @@
 <link rel="stylesheet" href="/styles/column.css">
 <link rel="stylesheet" href="/styles/card.css">
 <link rel="stylesheet" href="/styles/overlay.css">
+<link rel="stylesheet" href="/styles/notes.css">
 </head>
 <body>
 
 <header>
   <h1 id="appTitle">jc://<span>kanban</span>/</h1>
+  <div class="header-right">
   <div class="header-actions">
     <span class="save-indicator" id="saveIndicator">saved</span>
   </div>
   <div class="header-menu">
+    <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="1" width="4" height="4" rx="0.8"/><rect x="7" y="1" width="4" height="4" rx="0.8"/><rect x="1" y="7" width="4" height="4" rx="0.8"/><rect x="7" y="7" width="4" height="4" rx="0.8"/></svg></a>
+    <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><svg viewBox="0 0 11 14" width="11" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.5h6l3 3.5v8H1z"/><path d="M7 1.5V5h3"/></svg></button>
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu">☰</button>
     <div class="header-dropdown" id="headerDropdown">
-      <a class="header-dd-item" id="menuAllBoards" href="/">All boards</a>
       <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
-      <button class="header-dd-item" id="menuFindCard">Find card</button>
+      <button class="header-dd-item" id="menuFindCard">Find</button>
       <button class="header-dd-item" id="menuPrompts">Prompts</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
+      <div class="header-dd-separator"></div>
+      <button class="header-dd-item header-dd-logout" id="menuLogout">Log out</button>
     </div>
+  </div>
   </div>
 </header>
 
@@ -54,12 +60,28 @@
         <p id="newBoardError" class="new-board-error" style="display:none"></p>
       </div>
     </div>
+    <div id="archivedSection" style="display:none">
+      <button class="archived-section-header" id="archivedSectionBtn">
+        <span class="overview-label" style="margin-bottom:0">Archived</span>
+        <span id="archivedSectionIcon">▸</span>
+      </button>
+      <div id="archivedGrid" class="board-grid" style="display:none"></div>
+    </div>
   </div>
 </div>
 
 
-<div class="board-wrapper">
-  <div class="board" id="board"></div>
+<div class="board-area">
+  <div id="notesSidebar" class="notes-sidebar">
+    <div class="notes-sidebar-header">
+      <span class="notes-sidebar-label">Notes</span>
+      <button class="notes-sidebar-add-btn" id="notesAddRootBtn" title="Add page">+</button>
+    </div>
+    <div class="notes-tree-body" id="notesTreeBody"></div>
+  </div>
+  <div class="board-wrapper">
+    <div class="board" id="board"></div>
+  </div>
 </div>
 
 <div id="colContextMenu" class="context-menu" style="display:none">
@@ -79,6 +101,8 @@
   <button class="ctx-item" id="ctxInfo">ℹ  Info</button>
   <button class="ctx-item" id="ctxEdit">✎  Edit</button>
   <button class="ctx-item" id="ctxDone">✓  Mark as done</button>
+  <button class="ctx-item" id="ctxColor">◉  Change color</button>
+  <div class="ctx-color-row" id="ctxColorRow" style="display:none"></div>
   <div class="ctx-item ctx-submenu-trigger">
     <span>↪  Move to</span>
     <span class="ctx-arrow">›</span>
@@ -89,14 +113,14 @@
 
 <div id="modal" class="modal-backdrop" style="display:none">
   <div class="modal">
-    <h2 id="modalTitle">Add Card</h2>
+    <h2 id="modalTitle" style="display:none">Add Card</h2>
     <div class="modal-field" id="modalBoardField" style="display:none">
       <label>Board</label>
       <select id="modalBoardSelect" class="inbox-select"></select>
     </div>
     <div class="modal-field">
-      <label>Text</label>
-      <textarea id="cardText" rows="2" placeholder="What needs to be done?"></textarea>
+      <label>Card</label>
+      <textarea id="cardText" rows="1" placeholder="What needs to be done?"></textarea>
     </div>
     <div class="modal-field modal-field-desc">
       <label>Description</label>
@@ -110,29 +134,46 @@
         <button class="btn modal-link-open" id="cardLinkOpen" title="Open link" tabindex="-1">↗</button>
       </div>
     </div>
-    <div class="date-row">
-      <div class="modal-field">
-        <label>Start</label>
-        <input id="cardStart" type="date">
-      </div>
-      <div class="modal-field">
-        <label>End</label>
-        <input id="cardEnd" type="date">
+    <div class="card-section-header">Properties</div>
+    <div class="card-section-toggles">
+      <button class="card-section-toggle" id="cardToggleDate" title="Date"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="9.6" rx="1.3"/><line x1="0.7" y1="5" x2="11.3" y2="5"/><line x1="3.5" y1="0.7" x2="3.5" y2="3.3"/><line x1="8.5" y1="0.7" x2="8.5" y2="3.3"/></svg></button>
+      <button class="card-section-toggle" id="cardTogglePriority" title="Priority"><svg viewBox="0 0 11 13" width="11" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" y1="0.7" x2="2" y2="12.3"/><path d="M2 1.5h7.5l-2.2 2.8 2.2 2.7H2"/></svg></button>
+      <button class="card-section-toggle" id="cardToggleColor" title="Color"><svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="2.2"/><circle cx="9" cy="3" r="2.2"/><circle cx="3" cy="9" r="2.2"/><circle cx="9" cy="9" r="2.2"/></svg></button>
+    </div>
+    <div id="cardDateSection" style="display:none">
+      <div class="date-row">
+        <div class="modal-field">
+          <label>Start</label>
+          <input id="cardStart" type="date">
+        </div>
+        <div class="modal-field">
+          <label>End</label>
+          <input id="cardEnd" type="date">
+        </div>
       </div>
     </div>
-    <div class="modal-field">
-      <label>Priority</label>
-      <div class="priority-row" id="priorityRow"></div>
+    <div id="cardPrioritySection" style="display:none">
+      <div class="modal-field">
+        <label>Priority</label>
+        <div class="priority-row" id="priorityRow"></div>
+      </div>
     </div>
-    <div class="modal-field">
-      <label>Color</label>
-      <div class="color-row" id="colorRow"></div>
+    <div id="cardColorSection" style="display:none">
+      <div class="modal-field">
+        <label>Color</label>
+        <div class="color-row" id="colorRow"></div>
+      </div>
+    </div>
+    <div class="modal-field" id="cardLinkedPagesField" style="display:none">
+      <label>Note Pages</label>
+      <div id="cardLinkedPagesList" class="card-linked-pages-list"></div>
     </div>
     <p id="modalStatusMsg" class="inbox-msg" style="display:none"></p>
     <div class="modal-actions">
       <span id="modalSavedMsg" class="modal-saved-msg"></span>
       <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
-      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="tryCloseModal()">Close</button>
+      <button class="btn btn-danger" id="modalDeleteBtn" style="display:none" onclick="deleteCardFromModal()">Delete</button>
       <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()">Add Card</button>
     </div>
   </div>
@@ -141,14 +182,16 @@
 <div id="loginBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal login-modal">
     <h2>Access required</h2>
-    <div class="modal-field">
-      <label>Password</label>
-      <input id="loginPassword" type="password" placeholder="Enter password…" autocomplete="current-password">
-    </div>
-    <p id="loginError" class="login-error" style="display:none">Incorrect password</p>
-    <div class="modal-actions">
-      <button class="btn btn-accent" id="loginSubmitBtn">Enter</button>
-    </div>
+    <form id="loginForm" action="#" onsubmit="return false">
+      <div class="modal-field">
+        <label>Password</label>
+        <input id="loginPassword" type="password" placeholder="Enter password…" autocomplete="current-password">
+      </div>
+      <p id="loginError" class="login-error" style="display:none">Incorrect password</p>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-accent" id="loginSubmitBtn">Enter</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -185,28 +228,36 @@
 
 <div id="searchBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal search-modal">
-    <h2>Find Card</h2>
+    <div class="search-modal-header">
+      <h2>Find</h2>
+      <div class="search-type-toggle">
+        <button class="search-type-btn search-type-btn--active" id="searchToggleCards">Cards</button>
+        <button class="search-type-btn" id="searchTogglePages">Pages</button>
+      </div>
+    </div>
     <div class="modal-field">
       <label>Text</label>
       <input id="searchText" type="text" placeholder="Contains all words…" autocomplete="off" spellcheck="false">
     </div>
-    <div class="search-filter-strip">
-      <div class="search-filter-group">
-        <span class="search-filter-label">Priority</span>
-        <div id="searchPriorityRow" class="priority-row"></div>
+    <div id="searchCardFilters">
+      <div class="search-filter-strip">
+        <div class="search-filter-group">
+          <span class="search-filter-label">Priority</span>
+          <div id="searchPriorityRow" class="priority-row"></div>
+        </div>
+        <div class="search-filter-group">
+          <span class="search-filter-label">Start date ≥</span>
+          <input id="searchDateStart" type="date">
+        </div>
+        <div class="search-filter-group">
+          <span class="search-filter-label">End date ≤</span>
+          <input id="searchDateEnd" type="date">
+        </div>
       </div>
-      <div class="search-filter-group">
-        <span class="search-filter-label">Start date ≥</span>
-        <input id="searchDateStart" type="date">
+      <div class="search-filter-group search-col-group">
+        <span class="search-filter-label">Columns</span>
+        <div id="searchColumnList" class="search-column-list"></div>
       </div>
-      <div class="search-filter-group">
-        <span class="search-filter-label">End date ≤</span>
-        <input id="searchDateEnd" type="date">
-      </div>
-    </div>
-    <div class="search-filter-group search-col-group">
-      <span class="search-filter-label">Columns</span>
-      <div id="searchColumnList" class="search-column-list"></div>
     </div>
     <div id="searchResults" class="search-results"></div>
     <div class="modal-actions">
@@ -248,9 +299,8 @@
       <p id="boardRenameError" class="new-board-error" style="display:none"></p>
     </div>
     <div class="settings-section" id="boardDescSection" style="display:none">
-      <div class="settings-section-title">Description</div>
+      <div class="settings-section-title">Description<span class="settings-save-indicator" id="descSaveIndicator"></span></div>
       <textarea id="boardDescription" class="prompt-textarea" style="min-height:80px" placeholder="Short description shown in the board overview…"></textarea>
-      <span id="boardDescSaveMsg" class="prompts-save-msg"></span>
     </div>
     <div class="settings-section" id="dbSection">
       <div class="settings-section-title">Database</div>
@@ -263,7 +313,7 @@
       </a>
     </div>
     <div class="settings-section" id="importSection" style="display:none">
-      <div class="settings-section-title">Settings</div>
+      <div class="settings-section-title">Settings<span class="settings-save-indicator" id="importSaveIndicator"></span></div>
       <label class="settings-item">
         <div class="settings-item-info">
           <div class="settings-item-label">Inbox column with date</div>
@@ -306,16 +356,73 @@
     <div class="settings-section" id="boardExportSection" style="display:none">
       <div class="settings-section-title">Export / Import</div>
       <button class="btn" id="boardExportBtn">Export JSON</button>
-      <input type="file" id="boardImportFile" accept=".json" style="display:none">
       <button class="btn" id="boardImportBtn">Import JSON…</button>
+    </div>
+    <div class="settings-section" id="archiveSection" style="display:none">
+      <div class="settings-section-title">Visibility<span class="settings-save-indicator" id="archiveSaveIndicator"></span></div>
+      <label class="settings-item">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Archived</div>
+          <div class="settings-item-desc">Moves this board to the archive section in the overview</div>
+        </div>
+        <div class="settings-toggle">
+          <input type="checkbox" id="boardArchivedToggle">
+          <span class="settings-toggle-track"></span>
+        </div>
+      </label>
     </div>
     <div class="settings-section" id="boardDeleteSection" style="display:none">
       <div class="settings-section-title">Danger zone</div>
       <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete board…</button>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-accent" id="boardDescSaveBtn" style="display:none">Save</button>
       <button class="btn btn-accent" id="settingsCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="noteModal" class="modal-backdrop" style="display:none">
+  <div class="modal note-modal">
+    <div class="modal-field">
+      <label>Note</label>
+      <textarea id="notePageTitle" rows="1" placeholder="Page title…" spellcheck="false" autocomplete="off"></textarea>
+      <div class="note-modal-crumb" id="noteModalBreadcrumb"></div>
+    </div>
+    <div class="modal-field modal-field-desc">
+      <label>Description</label>
+      <div id="notePageDescPreview" class="card-desc-preview" style="display:none"></div>
+      <textarea id="notePageDesc" placeholder="Write notes in markdown…"></textarea>
+    </div>
+    <div class="modal-field">
+      <label>Link</label>
+      <div class="modal-link-row">
+        <input id="notePageLink" type="url" placeholder="https://…">
+        <button class="btn modal-link-open" id="notePageLinkOpen" title="Open link" tabindex="-1">↗</button>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>Linked Cards</label>
+      <div id="noteLinkedCardsList" class="note-linked-cards-list"></div>
+      <div class="note-card-search-wrapper">
+        <div class="note-card-search-row">
+          <input id="noteCardSearchInput" type="text" placeholder="Search cards to link…" autocomplete="off" spellcheck="false">
+          <button class="btn" id="noteCreateCardBtn" title="Create a new card and link it">+ card</button>
+        </div>
+        <div id="noteCardSearchResults" class="note-card-search-results" style="display:none"></div>
+      </div>
+      <div id="noteCreateCardForm" class="note-create-card-form" style="display:none">
+        <input id="noteNewCardText" type="text" placeholder="Card text…" autocomplete="off" spellcheck="false">
+        <div class="note-create-card-actions">
+          <button class="btn" id="noteCreateCardCancel">Cancel</button>
+          <button class="btn btn-accent" id="noteCreateCardSubmit">Create &amp; link</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <span id="noteModalSavedMsg" class="modal-saved-msg"></span>
+      <button class="btn" id="noteModalCancelBtn">Close</button>
+      <button class="btn btn-danger" id="noteModalDeleteBtn">Delete</button>
+      <button class="btn btn-accent" id="noteModalSaveBtn">Save</button>
     </div>
   </div>
 </div>
@@ -327,6 +434,7 @@
 <script src="/render.js"></script>
 <script src="/menus.js"></script>
 <script src="/settings.js"></script>
+<script src="/notes.js"></script>
 <script src="/inbox.js"></script>
 <script src="/search.js"></script>
 <script src="/init.js"></script>

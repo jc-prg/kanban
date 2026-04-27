@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const nano = require('nano');
@@ -11,10 +10,12 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'localhost';
 
 const APP_PASSWORD  = process.env.APP_PASSWORD || 'kanban-pwd';
-const SESSION_TOKEN = crypto.createHash('sha256').update(APP_PASSWORD).digest('hex').slice(0, 32);
+const SESSION_TOKEN = crypto.randomBytes(32).toString('hex');
 const API_KEY       = process.env.API_KEY || '';
 console.log(`App password source: ${process.env.APP_PASSWORD ? '.env / environment' : 'built-in default'}`);
 console.log(`API key: ${API_KEY ? 'set' : 'not set (external API access disabled)'}`);
+if (API_KEY && API_KEY.length < 32)
+  console.warn('WARNING: API_KEY is shorter than 32 characters — use a strong random key in production');
 
 const COUCHDB_HOST     = process.env.COUCHDB_HOST     || 'localhost';
 const COUCHDB_PORT     = process.env.COUCHDB_PORT     || 5984;
@@ -22,11 +23,11 @@ const COUCHDB_USER     = process.env.COUCHDB_USER     || 'kanban';
 const COUCHDB_PASSWORD = process.env.COUCHDB_PASSWORD || 'kanban-pwd';
 const DB_PREFIX        = 'jc-kanban-';
 const DOC_ID           = 'board';
+const NOTES_DOC_ID     = 'notes';
 const PROMPTS_DB_NAME  = 'jc-extension-prompts';
 const BACKUP_DIR       = path.join(__dirname, process.env.BACKUP_DIR || 'data');
 const BACKUP_INTERVAL_MS = parseInt(process.env.BACKUP_INTERVAL_MS, 10) || 600000;
 
-app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -67,6 +68,22 @@ async function saveBoardData(db, data) {
   await db.insert({ _id: DOC_ID, _rev, ...data });
 }
 
+async function loadNotesData(db) {
+  try {
+    const { _id, _rev, ...data } = await db.get(NOTES_DOC_ID);
+    return data;
+  } catch (err) {
+    if (err.statusCode === 404) return { pages: [] };
+    throw err;
+  }
+}
+
+async function saveNotesData(db, data) {
+  let rev;
+  try { ({ _rev: rev } = await db.get(NOTES_DOC_ID)); } catch (e) { /* new doc */ }
+  await db.insert({ _id: NOTES_DOC_ID, ...(rev ? { _rev: rev } : {}), ...data });
+}
+
 function withBoard(handler) {
   return async (req, res) => {
     const { board } = req.params;
@@ -97,17 +114,70 @@ function withExistingBoard(handler) {
   };
 }
 
+// ---- Auth protection ----
+// Timing-safe comparison using fixed-length 128-byte buffers to avoid length leaks
+function safeEqual(a, b) {
+  const bufA = Buffer.alloc(128);
+  const bufB = Buffer.alloc(128);
+  Buffer.from(String(a || '')).copy(bufA, 0, 0, 128);
+  Buffer.from(String(b || '')).copy(bufB, 0, 0, 128);
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+const RATE_WINDOW_MS = 15 * 60 * 1000; // 15-minute sliding window
+const RATE_MAX       = 10;             // max login attempts per window
+const LOCKOUT_AFTER  = 5;             // consecutive failures before lockout
+const LOCKOUT_MS     = 15 * 60 * 1000;
+const loginMap       = new Map();      // ip -> { count, windowStart, consecutive, lockedUntil }
+
+const AUTH_FAIL_WINDOW_MS = 15 * 60 * 1000; // window for API auth-failure tracking
+const AUTH_FAIL_MAX       = 20;             // max failed auth attempts per window before 429
+const authFailMap         = new Map();      // ip -> { count, windowStart }
+
+// Purge expired entries every window cycle
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, s] of loginMap)
+    if (now > s.windowStart + RATE_WINDOW_MS && now > s.lockedUntil) loginMap.delete(ip);
+  for (const [ip, s] of authFailMap)
+    if (now > s.windowStart + AUTH_FAIL_WINDOW_MS) authFailMap.delete(ip);
+}, RATE_WINDOW_MS);
+
+function loginState(ip) {
+  const now = Date.now();
+  let s = loginMap.get(ip);
+  if (!s) { s = { count: 0, windowStart: now, consecutive: 0, lockedUntil: 0 }; loginMap.set(ip, s); }
+  if (now > s.windowStart + RATE_WINDOW_MS) { s.count = 0; s.windowStart = now; } // reset window
+  return s;
+}
+
+function recordAuthFailure(ip) {
+  const now = Date.now();
+  let s = authFailMap.get(ip);
+  if (!s || now > s.windowStart + AUTH_FAIL_WINDOW_MS) {
+    s = { count: 0, windowStart: now };
+    authFailMap.set(ip, s);
+  }
+  s.count++;
+  if (s.count === AUTH_FAIL_MAX)
+    console.warn(`Auth rate limit reached for IP ${ip} — blocking further unauthenticated requests`);
+  return s.count;
+}
+
 // ---- Auth middleware ----
 function authenticate(req, res, next) {
   if (req.path === '/auth' || req.path === '/auth/verify') return next();
 
-  const sessionToken = req.headers['x-auth-token'];
-  if (sessionToken === SESSION_TOKEN) return next();
+  const sessionToken = req.headers['x-auth-token'] || '';
+  if (safeEqual(sessionToken, SESSION_TOKEN)) return next();
 
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
   const apiKey = req.headers['x-api-key'] || '';
-  if (API_KEY && (bearer === API_KEY || apiKey === API_KEY)) return next();
+  if (API_KEY && (safeEqual(bearer, API_KEY) || safeEqual(apiKey, API_KEY))) return next();
 
+  const failCount = recordAuthFailure(req.ip);
+  if (failCount > AUTH_FAIL_MAX)
+    return res.status(429).json({ error: 'Too many unauthorized requests. Try again later.' });
   res.status(401).json({ error: 'Unauthorized' });
 }
 
@@ -115,13 +185,33 @@ app.use('/api', authenticate);
 
 // ---- Auth ----
 app.post('/api/auth', (req, res) => {
+  const ip = req.ip;
+  const s  = loginState(ip);
+
+  if (Date.now() < s.lockedUntil)
+    return res.status(429).json({ ok: false, error: 'Too many failed attempts. Try again later.' });
+  if (s.count >= RATE_MAX)
+    return res.status(429).json({ ok: false, error: 'Too many requests. Try again later.' });
+
+  s.count++;
   const { password } = req.body;
-  if (password === APP_PASSWORD) res.json({ ok: true, token: SESSION_TOKEN });
-  else res.status(401).json({ ok: false });
+  if (safeEqual(password, APP_PASSWORD)) {
+    s.consecutive = 0;
+    res.json({ ok: true, token: SESSION_TOKEN });
+  } else {
+    s.consecutive++;
+    if (s.consecutive >= LOCKOUT_AFTER) {
+      s.lockedUntil = Date.now() + LOCKOUT_MS;
+      console.warn(`Login locked for IP ${ip} after ${s.consecutive} consecutive failures`);
+    } else {
+      console.warn(`Failed login from IP ${ip} (${s.consecutive} consecutive)`);
+    }
+    res.status(401).json({ ok: false });
+  }
 });
 
 app.get('/api/auth/verify', (req, res) => {
-  res.json({ ok: req.headers['x-auth-token'] === SESSION_TOKEN });
+  res.json({ ok: safeEqual(req.headers['x-auth-token'] || '', SESSION_TOKEN) });
 });
 
 // ---- Global settings ----
@@ -144,7 +234,7 @@ app.get('/api/boards', async (req, res) => {
           const col = data.columns.find(c => c.title === title);
           return col ? { title, count: col.cards.length, color: col.color || null } : null;
         }).filter(Boolean);
-        return { name, description: data.settings?.description || '', inboxCount, todoCount, inProgressCount, trackedCounts };
+        return { name, description: data.settings?.description || '', archived: data.settings?.archived || false, inboxCount, todoCount, inProgressCount, trackedCounts };
       } catch (e) {
         return { name, description: '', inboxCount: 0, todoCount: 0, inProgressCount: 0 };
       }
@@ -290,6 +380,15 @@ app.get('/api/:board/column/:name', withBoard(async (req, res, db) => {
   const col = data.columns.find(c => c.title.toLowerCase() === name);
   if (!col) return res.status(404).json({ error: `Column "${req.params.name}" not found` });
   res.json(col.cards);
+}));
+
+app.get('/api/:board/notes', withExistingBoard(async (req, res, db) => {
+  res.json(await loadNotesData(db));
+}));
+
+app.put('/api/:board/notes', withBoard(async (req, res, db) => {
+  await saveNotesData(db, req.body);
+  res.json({ ok: true });
 }));
 
 app.get('/api/:board/card/:id', withBoard(async (req, res, db) => {

@@ -7,6 +7,7 @@ function showContextMenu(x, y, colId, card) {
   ctxCard  = card;
 
   document.getElementById('ctxDone').textContent = card.done ? '✓  Mark as undone' : '✓  Mark as done';
+  document.getElementById('ctxColorRow').style.display = 'none';
 
   const submenu = document.getElementById('ctxMoveSubmenu');
   submenu.innerHTML = state.columns
@@ -37,6 +38,7 @@ function showContextMenu(x, y, colId, card) {
 
 function hideContextMenu() {
   document.getElementById('contextMenu').style.display = 'none';
+  document.getElementById('ctxColorRow').style.display = 'none';
   ctxColId = null;
   ctxCard  = null;
 }
@@ -59,6 +61,27 @@ document.getElementById('ctxDone').addEventListener('click', () => {
   updateCardFull(colId, card.id, { ...card, done: !card.done });
 });
 
+document.getElementById('ctxColor').addEventListener('click', e => {
+  e.stopPropagation();
+  const row = document.getElementById('ctxColorRow');
+  if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+  const card = ctxCard;
+  row.innerHTML = COLORS.map(c =>
+    `<div class="color-swatch ctx-color-swatch${card?.color === c ? ' selected' : ''}"
+          style="background:${c}" data-color="${c}"></div>`
+  ).join('');
+  row.querySelectorAll('.ctx-color-swatch').forEach(s => {
+    s.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const col = state.columns.find(c => c.id === ctxColId);
+      const target = col?.cards.find(c => c.id === ctxCard?.id);
+      if (target) { target.color = s.dataset.color; render(); schedulesSave(); }
+      hideContextMenu();
+    });
+  });
+  row.style.display = 'flex';
+});
+
 document.getElementById('ctxDelete').addEventListener('click', async () => {
   const colId = ctxColId, card = ctxCard;
   hideContextMenu();
@@ -75,7 +98,7 @@ function showColContextMenu(x, y, colId) {
   const collapsed = colCollapsed.has(colId);
   document.getElementById('colCtxToggleContent').textContent = collapsed ? '▸  Show content' : '▾  Hide content';
 
-  const hideWhenCollapsed = display => ['colCtxClear','colCtxDelete'].forEach(id =>
+  const hideWhenCollapsed = display => ['colCtxColor','colCtxClear','colCtxDelete'].forEach(id =>
     document.getElementById(id).style.display = display);
   document.querySelector('#colContextMenu .ctx-submenu-trigger').style.display = collapsed ? 'none' : '';
   hideWhenCollapsed(collapsed ? 'none' : '');
@@ -129,7 +152,7 @@ document.getElementById('colCtxColor').addEventListener('click', e => {
   const visible = row.style.display !== 'none';
   if (visible) { row.style.display = 'none'; return; }
   const col = state.columns.find(c => c.id === ctxHeaderColId);
-  row.innerHTML = COL_COLORS.map(c =>
+  row.innerHTML = COLORS.map(c =>
     `<div class="color-swatch ctx-color-swatch${col?.color === c ? ' selected' : ''}"
           style="background:${c}" data-color="${c}"></div>`
   ).join('');
@@ -206,4 +229,13 @@ document.addEventListener('keydown', e => {
   document.getElementById('menuFindCard').addEventListener('click', () => { closeMenu(); openSearch(); });
   document.getElementById('menuPrompts').addEventListener('click', () => { closeMenu(); openPromptsDialog(); });
   document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); alert('Statistics — coming soon'); });
+  document.getElementById('menuLogout').addEventListener('click', () => {
+    closeMenu();
+    sessionStorage.removeItem('kanban-auth');
+    const pwd = document.getElementById('loginPassword');
+    pwd.value = '';
+    document.getElementById('loginError').style.display = 'none';
+    document.getElementById('loginBackdrop').style.display = 'flex';
+    setTimeout(() => pwd.focus(), 50);
+  });
 })();

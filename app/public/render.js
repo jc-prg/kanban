@@ -53,7 +53,17 @@ function getLinkBadgeHtml(url, href) {
     ));
   }
 
-  return `<a class="card-link-badge" href="${escHtml(href)}" target="_blank" rel="noopener" title="${escHtml(url)}">↗</a>`;
+  if (host.includes('miro.com')) {
+    return a('#FFD02F', svg('127 55 203 203',
+      `<path fill="#050038" d="M267.88,80.5h-22.26l18.54,32.58l-40.8-32.58H201.1l20.4,39.84L178.84,80.5h-22.26l22.26,50.7l-22.26,101.4h22.26l42.66-108.66L201.1,232.6h22.26l40.8-115.86L245.62,232.6h22.26l40.8-126.78L267.88,80.5z"/>`
+    ));
+  }
+
+  if (!host) return `<a class="card-link-badge card-link-badge--fallback" href="${escHtml(href)}" target="_blank" rel="noopener" title="${escHtml(url)}">></a>`;
+  return `<a class="card-link-badge card-link-badge--favicon" href="${escHtml(href)}" target="_blank" rel="noopener" title="${escHtml(url)}">` +
+    `<img src="https://${host}/favicon.ico" alt="" ` +
+    `onerror="this.parentElement.classList.replace('card-link-badge--favicon','card-link-badge--fallback');this.parentElement.textContent='>'">` +
+    `</a>`;
 }
 
 // ---- Render ----
@@ -105,7 +115,7 @@ function render() {
         <div class="column-dot" style="background:${color}"></div>
         <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
         <button class="col-btn" title="Column options" style="margin-left:auto">⋮</button>
-        <span class="column-count">${col.cards.length}</span>
+        <span class="column-count">${col.cards.filter(c => !c.text.startsWith('#')).length}</span>
       </div>
       <div class="cards"></div>
       <button class="add-card-btn">+ add card</button>
@@ -174,8 +184,11 @@ function render() {
     const remaining = col.cards.length - limit;
 
     visible.forEach(card => {
+      const isLabel = card.text.startsWith('#');
+      const displayText = isLabel ? card.text.slice(1).trimStart() : card.text;
+
       const cardEl = document.createElement('div');
-      cardEl.className = card.done ? 'card card--done' : 'card';
+      cardEl.className = 'card' + (card.done ? ' card--done' : '') + (isLabel ? ' card--label' : '');
       cardEl.dataset.cardId = card.id;
       cardEl.draggable = true;
       cardEl.style.setProperty('--card-color', card.color || color);
@@ -207,7 +220,12 @@ function render() {
       const safeLinkHref = card.link ? safeLink(card.link) : '';
       const linkBadgeHtml = safeLinkHref ? getLinkBadgeHtml(card.link, safeLinkHref) : '';
 
-      cardEl.innerHTML = `
+      cardEl.innerHTML = isLabel ? `
+        <div class="card-body">
+          <div class="card-label-text">${escHtml(displayText)}</div>
+          ${metaHtml}
+        </div>
+      ` : `
         ${linkBadgeHtml}
         <div class="card-body">
           <textarea class="card-text" rows="1" spellcheck="false">${escHtml(card.text)}</textarea>
@@ -216,24 +234,26 @@ function render() {
         <button class="card-more-btn" tabindex="-1" title="Options">⋮</button>
       `;
 
-      if (safeLinkHref) {
+      if (safeLinkHref && !isLabel) {
         cardEl.querySelector('.card-link-badge').addEventListener('mousedown', e => e.stopPropagation());
       }
 
       const moreBtn = cardEl.querySelector('.card-more-btn');
-      moreBtn.addEventListener('mousedown', e => e.stopPropagation());
-      moreBtn.addEventListener('click', e => {
-        e.stopPropagation();
-        const rect = moreBtn.getBoundingClientRect();
-        showContextMenu(rect.left, rect.bottom + 4, col.id, card);
-      });
+      if (moreBtn) {
+        moreBtn.addEventListener('mousedown', e => e.stopPropagation());
+        moreBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          const rect = moreBtn.getBoundingClientRect();
+          showContextMenu(rect.left, rect.bottom + 4, col.id, card);
+        });
+      }
 
       cardEl.addEventListener('dblclick', e => {
         if (e.target.closest('.card-more-btn, .card-link-badge, .card-text')) return;
         openEditModal(col.id, card);
       });
 
-      cardEl.addEventListener('contextmenu', e => {
+      if (!isLabel) cardEl.addEventListener('contextmenu', e => {
         e.preventDefault();
         e.stopPropagation();
         if (lastInputWasTouch) return;
@@ -273,14 +293,16 @@ function render() {
       }, { passive: false });
 
       const ta = cardEl.querySelector('.card-text');
-      ta.addEventListener('mousedown', e => e.stopPropagation());
-      ta.addEventListener('input', () => {
-        ta.style.height = 'auto';
-        ta.style.height = ta.scrollHeight + 'px';
-        updateCardText(col.id, card.id, ta.value);
-      });
-      ta.addEventListener('focus', () => { cardEl.draggable = false; });
-      ta.addEventListener('blur',  () => { cardEl.draggable = true; });
+      if (ta) {
+        ta.addEventListener('mousedown', e => e.stopPropagation());
+        ta.addEventListener('input', () => {
+          ta.style.height = 'auto';
+          ta.style.height = ta.scrollHeight + 'px';
+          updateCardText(col.id, card.id, ta.value);
+        });
+        ta.addEventListener('focus', () => { cardEl.draggable = false; });
+        ta.addEventListener('blur',  () => { cardEl.draggable = true; });
+      }
 
       const ind = document.createElement('div');
       ind.className = 'drop-indicator';

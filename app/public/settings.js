@@ -48,10 +48,17 @@ async function tryLogin(password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
   });
-  const { ok, token } = await r.json();
+  const data = await r.json();
+  if (r.status === 429) {
+    document.getElementById('loginError').textContent = data.error || 'Too many attempts. Try again later.';
+    document.getElementById('loginError').style.display = 'block';
+    return false;
+  }
+  const { ok, token } = data;
   if (ok && token) {
     sessionStorage.setItem('kanban-auth', token);
     document.getElementById('loginBackdrop').style.display = 'none';
+    document.getElementById('loginError').textContent = 'Wrong password.';
     await afterAuth();
   }
   return ok;
@@ -75,8 +82,9 @@ async function checkAuth() {
   setTimeout(() => document.getElementById('loginPassword').focus(), 50);
 }
 
-document.getElementById('loginSubmitBtn').addEventListener('click', async () => {
+document.getElementById('loginForm').addEventListener('submit', async () => {
   const pwd = document.getElementById('loginPassword').value;
+  document.getElementById('loginError').textContent = 'Wrong password.';
   const ok = await tryLogin(pwd);
   if (!ok) {
     document.getElementById('loginError').style.display = 'block';
@@ -85,8 +93,7 @@ document.getElementById('loginSubmitBtn').addEventListener('click', async () => 
   }
 });
 
-document.getElementById('loginPassword').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('loginSubmitBtn').click();
+document.getElementById('loginPassword').addEventListener('keydown', () => {
   document.getElementById('loginError').style.display = 'none';
 });
 
@@ -174,9 +181,9 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
     document.getElementById('settingsTitle').textContent = `Board settings: ${BOARD_NAME}`;
     document.getElementById('menuSettings').textContent  = 'Board settings';
     document.getElementById('boardDescSection').style.display = '';
-    document.getElementById('boardDescSaveBtn').style.display = '';
     document.getElementById('boardRenameSection').style.display = '';
     document.getElementById('importSection').style.display = '';
+    document.getElementById('archiveSection').style.display = '';
     document.getElementById('boardDeleteSection').style.display = '';
     document.getElementById('boardExportSection').style.display = '';
     document.getElementById('dbSection').style.display = 'none';
@@ -210,8 +217,9 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
       document.getElementById('boardDescription').value = state.settings?.description || '';
       document.getElementById('boardRenameInput').value = BOARD_NAME;
       document.getElementById('boardRenameError').style.display = 'none';
-      document.getElementById('inboxDateToggle').checked = state.settings?.inboxWithDate ?? false;
+      document.getElementById('inboxDateToggle').checked     = state.settings?.inboxWithDate   ?? false;
       document.getElementById('persistCollapseToggle').checked = state.settings?.persistCollapse ?? false;
+      document.getElementById('boardArchivedToggle').checked   = state.settings?.archived        ?? false;
       renderTrackedCols();
     }
     loadApiKey();
@@ -276,18 +284,35 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
       }
     });
 
-    const saveMsg = document.getElementById('boardDescSaveMsg');
-    document.getElementById('boardDescSaveBtn').addEventListener('click', () => {
-      (state.settings ??= {}).description = document.getElementById('boardDescription').value.trim() || undefined;
-      schedulesSave();
-      saveMsg.textContent = 'Saved.';
-      saveMsg.className = 'prompts-save-msg prompts-save-msg-ok';
-      setTimeout(() => { saveMsg.textContent = ''; saveMsg.className = 'prompts-save-msg'; }, 2000);
+    function flashSaved(indicatorId) {
+      const el = document.getElementById(indicatorId);
+      if (!el) return;
+      el.textContent = '✓ saved';
+      el.classList.add('settings-save-indicator--visible');
+      clearTimeout(el._t);
+      el._t = setTimeout(() => el.classList.remove('settings-save-indicator--visible'), 1500);
+    }
+
+    let descTimer = null;
+    document.getElementById('boardDescription').addEventListener('input', () => {
+      clearTimeout(descTimer);
+      descTimer = setTimeout(() => {
+        (state.settings ??= {}).description = document.getElementById('boardDescription').value.trim() || undefined;
+        schedulesSave();
+        flashSaved('descSaveIndicator');
+      }, 600);
     });
 
     document.getElementById('inboxDateToggle').addEventListener('change', e => {
       (state.settings ??= {}).inboxWithDate = e.target.checked || undefined;
       schedulesSave();
+      flashSaved('importSaveIndicator');
+    });
+
+    document.getElementById('boardArchivedToggle').addEventListener('change', e => {
+      (state.settings ??= {}).archived = e.target.checked || undefined;
+      schedulesSave();
+      flashSaved('archiveSaveIndicator');
     });
 
     document.getElementById('persistCollapseToggle').addEventListener('change', e => {
@@ -295,6 +320,7 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
       if (!e.target.checked) state.settings.collapsedColumnIds = undefined;
       persistCollapseState();
       schedulesSave();
+      flashSaved('importSaveIndicator');
     });
 
     document.getElementById('boardExportBtn').addEventListener('click', async () => {
@@ -309,13 +335,58 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
       URL.revokeObjectURL(a.href);
     });
 
-    document.getElementById('boardImportBtn').addEventListener('click', async () => {
-      backdrop.style.display = 'none';
-      if (!await showConfirm(`Import will overwrite all data in "${BOARD_NAME}". This cannot be undone.`, { okLabel: 'Import', danger: true })) {
-        backdrop.style.display = 'flex';
-        return;
-      }
-      document.getElementById('boardImportFile').click();
+    document.getElementById('boardImportBtn').addEventListener('click', () => {
+      // Open file picker synchronously inside the user-gesture handler — any await
+      // before input.click() causes Firefox to revoke the file reference.
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+
+        let rawText;
+        try {
+          rawText = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload  = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsText(file, 'utf-8');
+          });
+        } catch (err) {
+          alert(
+            'The file could not be read.\n\n' +
+            'This is usually a browser permission issue — your browser may not have access to files in this location.\n\n' +
+            'Try copying the file to your home directory or Downloads folder and importing from there.'
+          );
+          return;
+        }
+
+        let data;
+        try { data = JSON.parse(rawText); }
+        catch (err) { alert('Invalid JSON file: ' + err.message); return; }
+
+        if (isTrelloExport(data)) {
+          const listCount = (data.lists || []).filter(l => !l.closed).length;
+          const cardCount = (data.cards || []).filter(c => !c.closed).length;
+          if (!await showConfirm(
+            `Trello export detected: ${listCount} lists, ${cardCount} cards. Convert and import?`,
+            { okLabel: 'Import' }
+          )) return;
+          data = convertTrelloExport(data);
+        } else {
+          if (!await showConfirm(
+            `Import will overwrite all data in "${BOARD_NAME}". This cannot be undone.`,
+            { okLabel: 'Import', danger: true }
+          )) return;
+        }
+
+        const r = await fetch(API, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        if (!r.ok) { alert('Server error: ' + await r.text()); return; }
+        closeSettings();
+        await load();
+      });
+      input.click();
     });
 
     function renderTrackedCols() {
@@ -333,37 +404,75 @@ document.getElementById('loginPassword').addEventListener('keydown', e => {
           const selected = [...list.querySelectorAll('.tracked-col-cb:checked')].map(c => c.value);
           (state.settings ??= {}).trackedColumns = selected.length ? selected : undefined;
           schedulesSave();
+          flashSaved('importSaveIndicator');
         });
       });
     }
 
-    document.getElementById('boardImportFile').addEventListener('change', async e => {
-      const file = e.target.files[0];
-      e.target.value = '';
-      if (!file) return;
-      let data;
-      try { data = JSON.parse(await file.text()); }
-      catch { alert('Invalid JSON file.'); return; }
-      await fetch(API, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-      closeSettings();
-      await load();
-    });
   }
 })();
+
+// ---- Trello import ----
+function isTrelloExport(data) {
+  return Array.isArray(data.lists) && Array.isArray(data.cards) && !Array.isArray(data.columns);
+}
+
+function convertTrelloExport(trello) {
+  const COLOR_MAP = {
+    yellow: '#f59e0b', blue: '#3b82f6', green: '#10b981', orange: '#f97316',
+    purple: '#7c6af7', red: '#ef4444', pink: '#ec4899', sky: '#06b6d4',
+    lime: '#84cc16', black: '#374151',
+  };
+
+  const cardsByList = {};
+  for (const card of (trello.cards || [])) {
+    if (card.closed) continue;
+    (cardsByList[card.idList] ??= []).push(card);
+  }
+
+  const columns = [...(trello.lists || [])]
+    .filter(l => !l.closed)
+    .sort((a, b) => a.pos - b.pos)
+    .map(list => ({
+      id:    'id-' + Math.random().toString(36).slice(2, 9),
+      title: list.name,
+      cards: [...(cardsByList[list.id] || [])]
+        .sort((a, b) => a.pos - b.pos)
+        .map(card => {
+          const created = new Date(parseInt(card.id.slice(0, 8), 16) * 1000)
+            .toISOString().slice(0, 10);
+          const color = card.labels?.[0]?.color
+            ? COLOR_MAP[card.labels[0].color] || null : null;
+          const c = { id: 'id-' + Math.random().toString(36).slice(2, 9), text: card.name, created };
+          if (card.desc)                c.description = card.desc;
+          if (card.due)                 c.endDate     = card.due.slice(0, 10);
+          if (card.dueComplete)         c.done        = true;
+          if (color)                    c.color       = color;
+          if (card.url && !c.text.startsWith('#')) c.link = card.url;
+          return c;
+        }),
+    }));
+
+  return { columns };
+}
 
 // ---- After-auth routing ----
 async function afterAuth() {
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
-  if (BOARD_NAME) await load();
-  else initOverview();
+  if (BOARD_NAME) {
+    document.title = `jc://${BOARD_NAME}/`;
+    document.getElementById('headerHomeBtn').style.display = '';
+    document.getElementById('notesToggleBtn').style.display = '';
+    await load();
+    loadNotes();
+  } else initOverview();
 }
 
 // ---- Overview ----
 async function initOverview() {
-  document.querySelector('.board-wrapper').style.display = 'none';
+  document.querySelector('.board-area').style.display = 'none';
   document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
-  document.getElementById('menuAllBoards').style.display = 'none';
   document.getElementById('menuInbox').style.display = '';
   document.getElementById('overview').style.display = 'flex';
 
@@ -376,43 +485,67 @@ async function initOverview() {
   }
 }
 
+function makeBoardCard({ name, description, inboxCount, todoCount, inProgressCount, trackedCounts = [], archived = false }) {
+  const trackedBadges = trackedCounts
+    .filter(t => t.count > 0)
+    .map(t => {
+      const style = t.color ? `background:${t.color}22;color:${t.color}` : '';
+      return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(t.title)} ${t.count}</span>`;
+    });
+  const badges = [
+    inboxCount      ? `<span class="board-card-count board-card-count-inbox">inbox ${inboxCount}</span>`           : '',
+    todoCount       ? `<span class="board-card-count board-card-count-todo">todo ${todoCount}</span>`              : '',
+    inProgressCount ? `<span class="board-card-count board-card-count-inprogress">doing ${inProgressCount}</span>` : '',
+    ...trackedBadges,
+  ].filter(Boolean).join('');
+  const a = document.createElement('a');
+  a.className = 'board-card' + (archived ? ' board-card--archived' : '');
+  a.href = `/${escHtml(name)}`;
+  a.innerHTML = `
+    <div class="board-card-info">
+      <span class="board-card-name">${escHtml(name)}</span>
+      ${description ? `<span class="board-card-desc">${escHtml(description)}</span>` : ''}
+      ${badges ? `<div class="board-card-counts">${badges}</div>` : ''}
+    </div>
+    <span class="board-card-arrow">→</span>`;
+  return a;
+}
+
 function renderBoardGrid(boards) {
-  const grid = document.getElementById('boardGrid');
+  const grid         = document.getElementById('boardGrid');
   const newBoardItem = grid.querySelector('.new-board-item');
   grid.querySelectorAll('.board-card, .board-grid-empty').forEach(el => el.remove());
-  if (boards.length) {
-    boards.forEach(({ name, description, inboxCount, todoCount, inProgressCount, trackedCounts = [] }) => {
-      const trackedBadges = trackedCounts
-        .filter(t => t.count > 0)
-        .map(t => {
-          const style = t.color ? `background:${t.color}22;color:${t.color}` : '';
-          return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(t.title)} ${t.count}</span>`;
-        });
-      const badges = [
-        inboxCount      ? `<span class="board-card-count board-card-count-inbox">inbox ${inboxCount}</span>`           : '',
-        todoCount       ? `<span class="board-card-count board-card-count-todo">todo ${todoCount}</span>`              : '',
-        inProgressCount ? `<span class="board-card-count board-card-count-inprogress">doing ${inProgressCount}</span>` : '',
-        ...trackedBadges,
-      ].filter(Boolean).join('');
-      const a = document.createElement('a');
-      a.className = 'board-card';
-      a.href = `/${escHtml(name)}`;
-      a.innerHTML = `
-        <div class="board-card-info">
-          <span class="board-card-name">${escHtml(name)}</span>
-          ${description ? `<span class="board-card-desc">${escHtml(description)}</span>` : ''}
-          ${badges ? `<div class="board-card-counts">${badges}</div>` : ''}
-        </div>
-        <span class="board-card-arrow">→</span>`;
-      grid.insertBefore(a, newBoardItem);
-    });
+
+  const active   = boards.filter(b => !b.archived);
+  const archived = boards.filter(b =>  b.archived);
+
+  if (active.length) {
+    active.forEach(b => grid.insertBefore(makeBoardCard(b), newBoardItem));
   } else {
     const p = document.createElement('p');
     p.className = 'board-grid-empty';
     p.textContent = 'No boards yet — create one below.';
     grid.insertBefore(p, newBoardItem);
   }
+
+  const section      = document.getElementById('archivedSection');
+  const archivedGrid = document.getElementById('archivedGrid');
+  if (archived.length) {
+    section.style.display = '';
+    archivedGrid.innerHTML = '';
+    archived.forEach(b => archivedGrid.appendChild(makeBoardCard({ ...b, archived: true })));
+  } else {
+    section.style.display = 'none';
+  }
 }
+
+document.getElementById('archivedSectionBtn')?.addEventListener('click', () => {
+  const grid = document.getElementById('archivedGrid');
+  const icon = document.getElementById('archivedSectionIcon');
+  const open = grid.style.display === '';
+  grid.style.display = open ? 'none' : '';
+  icon.textContent   = open ? '▸' : '▾';
+});
 
 document.getElementById('newBoardBtn').addEventListener('click', async () => {
   const input = document.getElementById('newBoardInput');

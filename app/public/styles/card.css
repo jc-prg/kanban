@@ -5,7 +5,7 @@
   border-radius: 8px;
   padding: 10px 10px 10px 14px;
   cursor: grab;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s, background 0.15s;
   position: relative;
   display: flex;
   flex-direction: row;
@@ -17,6 +17,26 @@
 
 .card--done { opacity: 0.5; }
 .card-done-mark { color: #10b981; font-size: 0.75rem; margin-right: 4px; }
+
+.card--label {
+  background: var(--card-color);
+  border-color: transparent;
+  justify-content: center;
+  padding: 10px 36px;
+  opacity: 0.60;
+  padding: 4px 20px;
+  }
+.card--label::before { display: none; }
+.card--label:hover { border-color: transparent; }
+.card--label .card-body { text-align: center; }
+.card-label-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: Syne, sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  line-height: 1.4;
+}
 
 .card::before {
   content: '';
@@ -32,6 +52,11 @@
 .card:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  border-color: var(--card-color, var(--accent));
+  background: color-mix(in srgb, var(--card-color, var(--accent)) 10%, var(--surface2));
+}
+
+.card:hover .card-link-badge {
   border-color: var(--card-color, var(--accent));
 }
 
@@ -134,16 +159,36 @@
   height: 20px;
   border-radius: 0 8px 0 6px;
   background: var(--accent);
-  color: #fff;
+  color: #bbb;
   font-size: 0.6rem;
   display: flex;
   align-items: center;
   justify-content: center;
   text-decoration: none;
-  transition: background 0.15s;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
   z-index: 1;
 }
 .card-link-badge:hover { filter: brightness(1.2); }
+
+.card-link-badge--fallback {
+  background: var(--card-color, var(--accent));
+  color: #fff;
+  font-weight: bold;
+}
+
+.card-link-badge--favicon {
+  background: #fff;
+  border-color: var(--border);
+  overflow: hidden;
+  padding: 0;
+}
+.card-link-badge--favicon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 
 /* Drop indicator (drag target line between cards) */
 .drop-indicator {

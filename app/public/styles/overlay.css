@@ -137,6 +137,7 @@
 .card-desc-preview p { margin: 6px 0 14px; }
 .card-desc-preview p:last-child { margin-bottom: 6px; }
 .card-desc-preview h1,.card-desc-preview h2,.card-desc-preview h3 { font-family: 'Syne', sans-serif; margin: 12px 0 4px; }
+.card-desc-preview h1 { font-size: 1.35rem; font-weight: 700; }
 .card-desc-preview h1:first-child,.card-desc-preview h2:first-child,.card-desc-preview h3:first-child { margin-top: 0; }
 .card-desc-preview ul,.card-desc-preview ol { margin: 4px 0; padding-left: 20px; }
 .card-desc-preview li { margin: 2px 0; }
@@ -248,8 +249,101 @@
   transition: transform 0.15s, border-color 0.15s;
 }
 
-.color-swatch:hover   { transform: scale(1.2); }
-.color-swatch.selected { border-color: white; transform: scale(1.15); }
+.color-swatch:hover    { transform: scale(1.2); }
+.color-swatch.selected { border-color: transparent; transform: scale(1.1); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px #fff; }
+
+/* Collapsible section toggles */
+.card-section-header {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.card-section-toggles {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 15px;
+}
+
+.card-section-toggle {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.card-section-toggle:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--text);
+}
+
+.card-section-toggle--active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+/* Linked note-page chips on card modal */
+.card-linked-pages-list {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.card-linked-page-chip {
+  font-family: 'Syne', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.card-linked-page-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+/* Card text + note page title — match description h1, look like plain text until active */
+#cardText,
+#notePageTitle {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  background: transparent;
+  border-color: var(--border);
+  transition: background 0.15s, border-color 0.15s;
+  cursor: text;
+  overflow: hidden;
+  resize: none;
+}
+
+#cardText:hover,
+#notePageTitle:hover {
+  border-color: var(--text-muted);
+  background: var(--accent-glow);
+}
+
+#cardText:focus,
+#notePageTitle:focus {
+  background: var(--surface2);
+}
 
 .modal-actions {
   display: flex;
@@ -281,7 +375,9 @@
   margin-bottom: 8px;
 }
 
-/* Confirm dialog */
+/* Confirm dialog — must sit above all other modals */
+#dialogBackdrop { z-index: 300; }
+
 .dialog {
   width: 360px;
   max-width: calc(100vw - 24px);
@@ -462,6 +558,9 @@
 .settings-section { margin-bottom: 24px; }
 
 .settings-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.1em;
@@ -471,6 +570,18 @@
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
 }
+
+.settings-save-indicator {
+  font-size: 0.7rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #10b981;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.settings-save-indicator--visible { opacity: 1; }
 
 .settings-item {
   display: flex;
@@ -604,6 +715,36 @@
 }
 
 /* Search dialog */
+.search-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.search-modal-header h2 { margin-bottom: 0; }
+
+.search-type-toggle {
+  display: flex;
+  gap: 3px;
+}
+
+.search-type-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.search-type-btn:hover { border-color: var(--accent); color: var(--text); }
+.search-type-btn--active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.search-type-btn--active:hover { background: #6b58e8; border-color: #6b58e8; color: #fff; }
+
 .search-modal {
   width: min(720px, 95vw);
   height: min(680px, 90dvh);
@@ -723,6 +864,29 @@
   color: var(--text);
   line-height: 1.4;
   word-break: break-word;
+}
+
+.search-section-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 2px 4px;
+  flex-shrink: 0;
+}
+
+.search-result-page {
+  --card-color: var(--accent);
+}
+
+.search-result-preview {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .search-empty {

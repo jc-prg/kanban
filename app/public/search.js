@@ -1,10 +1,20 @@
 (function () {
-  let selPriorities = new Set(); // empty = show all
-  let selColumns    = new Set(); // empty = show all
+  let selPriorities = new Set();
+  let selColumns    = new Set();
+  let searchMode    = 'cards'; // 'cards' | 'pages'
+
+  function setSearchMode(mode) {
+    searchMode = mode;
+    document.getElementById('searchCardFilters').style.display = mode === 'cards' ? '' : 'none';
+    document.getElementById('searchToggleCards').classList.toggle('search-type-btn--active', mode === 'cards');
+    document.getElementById('searchTogglePages').classList.toggle('search-type-btn--active', mode === 'pages');
+    runSearch();
+  }
 
   window.openSearch = function () {
     if (!API) return;
     document.getElementById('searchBackdrop').style.display = 'flex';
+    setSearchMode(searchMode); // apply current mode visibility
     renderPriorityFilter();
     renderColumnFilter();
     runSearch();
@@ -88,42 +98,56 @@
     return str.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   }
 
+  function collectPages(pages, words, acc, breadcrumb) {
+    for (const page of pages) {
+      const path = [...breadcrumb, page];
+      const hay  = normalize(page.title + ' ' + (page.description || ''));
+      if (words.length === 0 || words.every(w => hay.includes(w)))
+        acc.push({ page, path });
+      if (page.children?.length) collectPages(page.children, words, acc, path);
+    }
+  }
+
   function runSearch() {
-    const query     = normalize(document.getElementById('searchText').value.trim());
-    const words     = query ? query.split(/\s+/) : [];
-    const dateStart = document.getElementById('searchDateStart').value;
-    const dateEnd   = document.getElementById('searchDateEnd').value;
+    const query = normalize(document.getElementById('searchText').value.trim());
+    const words = query ? query.split(/\s+/) : [];
 
-    const results = [];
-    state.columns.forEach(col => {
-      if (selColumns.size > 0 && !selColumns.has(col.id)) return;
-      col.cards.forEach(card => {
-        if (words.length > 0) {
-          const hay = normalize(card.text + ' ' + (card.description || ''));
-          if (!words.every(w => hay.includes(w))) return;
-        }
-        if (selPriorities.size > 0 && !selPriorities.has(card.priority || 0)) return;
-        if (dateStart && (!card.startDate || card.startDate < dateStart)) return;
-        if (dateEnd   && (!card.endDate   || card.endDate   > dateEnd))   return;
-        results.push({ card, col });
+    if (searchMode === 'cards') {
+      const dateStart = document.getElementById('searchDateStart').value;
+      const dateEnd   = document.getElementById('searchDateEnd').value;
+      const results   = [];
+      state.columns.forEach(col => {
+        if (selColumns.size > 0 && !selColumns.has(col.id)) return;
+        col.cards.forEach(card => {
+          if (words.length > 0) {
+            const hay = normalize(card.text + ' ' + (card.description || ''));
+            if (!words.every(w => hay.includes(w))) return;
+          }
+          if (selPriorities.size > 0 && !selPriorities.has(card.priority || 0)) return;
+          if (dateStart && (!card.startDate || card.startDate < dateStart)) return;
+          if (dateEnd   && (!card.endDate   || card.endDate   > dateEnd))   return;
+          results.push({ card, col });
+        });
       });
-    });
-
-    renderResults(results);
+      renderCardResults(results);
+    } else {
+      const results = [];
+      if (typeof notesState !== 'undefined')
+        collectPages(notesState.pages, words, results, []);
+      renderPageResults(results);
+    }
   }
 
   // ---- Result rendering ----
-  function renderResults(results) {
-    const box   = document.getElementById('searchResults');
-    const count = document.getElementById('searchCount');
-    count.textContent = results.length + (results.length === 1 ? ' result' : ' results');
+  function renderCardResults(results) {
+    const box = document.getElementById('searchResults');
+    document.getElementById('searchCount').textContent =
+      results.length + (results.length === 1 ? ' result' : ' results');
 
-    if (!results.length) {
-      box.innerHTML = '<p class="search-empty">No cards match.</p>';
-      return;
-    }
+    if (!results.length) { box.innerHTML = '<p class="search-empty">No cards match.</p>'; return; }
+    box.innerHTML = '';
 
-    box.innerHTML = results.map(({ card, col }, i) => {
+    results.forEach(({ card, col }) => {
       const today   = new Date().toISOString().slice(0, 10);
       const overdue = !card.done && card.endDate && card.endDate < today;
       const meta    = [];
@@ -142,26 +166,39 @@
       }
       if (card.description) meta.push(`<span class="card-desc" title="${escHtml(card.description)}">☰</span>`);
       if (card.done)        meta.push(`<span class="card-done-mark">✓ done</span>`);
-
       const metaHtml = meta.length ? `<div class="card-meta">${meta.join('')}</div>` : '';
       const colIdx   = state.columns.indexOf(col);
       const color    = card.color || col.color || COL_COLORS[colIdx % COL_COLORS.length];
 
-      return `<div class="search-result-item" data-idx="${i}" style="--card-color:${color}">
-        <div class="search-result-col-label">${escHtml(col.title)}</div>
-        <div class="card-body">
-          <div class="search-result-text">${escHtml(card.text)}</div>
-          ${metaHtml}
-        </div>
-      </div>`;
-    }).join('');
+      const el = document.createElement('div');
+      el.className = 'search-result-item';
+      el.style.setProperty('--card-color', color);
+      el.innerHTML = `<div class="search-result-col-label">${escHtml(col.title)}</div>
+        <div class="search-result-text">${escHtml(card.text)}</div>${metaHtml}`;
+      el.addEventListener('click', () => { closeSearch(); openEditModal(col.id, card); });
+      box.appendChild(el);
+    });
+  }
 
-    box.querySelectorAll('.search-result-item').forEach((el, i) => {
-      el.addEventListener('click', () => {
-        const { card, col } = results[i];
-        closeSearch();
-        openEditModal(col.id, card);
-      });
+  function renderPageResults(results) {
+    const box = document.getElementById('searchResults');
+    document.getElementById('searchCount').textContent =
+      results.length + (results.length === 1 ? ' result' : ' results');
+
+    if (!results.length) { box.innerHTML = '<p class="search-empty">No pages match.</p>'; return; }
+    box.innerHTML = '';
+
+    results.forEach(({ page, path }) => {
+      const breadcrumb = path.map(p => p.title).join(' › ');
+      const preview    = (page.description || '').replace(/[#*`_[\]]/g, '').trim().slice(0, 80);
+      const el = document.createElement('div');
+      el.className = 'search-result-item search-result-page';
+      el.innerHTML =
+        `<div class="search-result-col-label">${escHtml(breadcrumb)}</div>` +
+        `<div class="search-result-text">${escHtml(page.title)}</div>` +
+        (preview ? `<div class="search-result-preview">${escHtml(preview)}${(page.description?.length ?? 0) > 80 ? '…' : ''}</div>` : '');
+      el.addEventListener('click', () => { closeSearch(); openNoteModal(page.id); });
+      box.appendChild(el);
     });
   }
 
@@ -171,6 +208,9 @@
     document.getElementById('searchText').addEventListener('input', rerun);
     document.getElementById('searchDateStart').addEventListener('change', rerun);
     document.getElementById('searchDateEnd').addEventListener('change', rerun);
+
+    document.getElementById('searchToggleCards').addEventListener('click', () => setSearchMode('cards'));
+    document.getElementById('searchTogglePages').addEventListener('click', () => setSearchMode('pages'));
 
     document.getElementById('searchBackdrop').addEventListener('click', e => {
       if (e.target === document.getElementById('searchBackdrop')) closeSearch();
