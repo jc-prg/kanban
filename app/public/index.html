@@ -12,14 +12,13 @@
 <meta name="apple-mobile-web-app-title" content="Kanban">
 <meta name="theme-color" content="#0d0d0f">
 <link rel="manifest" href="/manifest.json">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles/base.css">
 <link rel="stylesheet" href="/styles/layout.css">
 <link rel="stylesheet" href="/styles/column.css">
 <link rel="stylesheet" href="/styles/card.css">
 <link rel="stylesheet" href="/styles/overlay.css">
 <link rel="stylesheet" href="/styles/notes.css">
+<link rel="stylesheet" href="/styles/markdown.css">
 </head>
 <body>
 
@@ -75,6 +74,7 @@
   <div id="notesSidebar" class="notes-sidebar">
     <div class="notes-sidebar-header">
       <span class="notes-sidebar-label">Notes</span>
+      <button class="notes-sidebar-add-btn" id="notesExportBtn" title="Export notes as ZIP">↓</button>
       <button class="notes-sidebar-add-btn" id="notesAddRootBtn" title="Add page">+</button>
     </div>
     <div class="notes-tree-body" id="notesTreeBody"></div>
@@ -118,55 +118,75 @@
       <label>Board</label>
       <select id="modalBoardSelect" class="inbox-select"></select>
     </div>
-    <div class="modal-field">
-      <label>Card</label>
-      <textarea id="cardText" rows="1" placeholder="What needs to be done?"></textarea>
-    </div>
-    <div class="modal-field modal-field-desc">
-      <label>Description</label>
-      <div id="cardDescPreview" class="card-desc-preview" style="display:none"></div>
-      <textarea id="cardDesc" placeholder="Optional details…"></textarea>
-    </div>
-    <div class="modal-field">
-      <label>Link</label>
-      <div class="modal-link-row">
-        <input id="cardLink" type="url" placeholder="https://…">
-        <button class="btn modal-link-open" id="cardLinkOpen" title="Open link" tabindex="-1">↗</button>
-      </div>
-    </div>
-    <div class="card-section-header">Properties</div>
-    <div class="card-section-toggles">
-      <button class="card-section-toggle" id="cardToggleDate" title="Date"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="9.6" rx="1.3"/><line x1="0.7" y1="5" x2="11.3" y2="5"/><line x1="3.5" y1="0.7" x2="3.5" y2="3.3"/><line x1="8.5" y1="0.7" x2="8.5" y2="3.3"/></svg></button>
-      <button class="card-section-toggle" id="cardTogglePriority" title="Priority"><svg viewBox="0 0 11 13" width="11" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" y1="0.7" x2="2" y2="12.3"/><path d="M2 1.5h7.5l-2.2 2.8 2.2 2.7H2"/></svg></button>
-      <button class="card-section-toggle" id="cardToggleColor" title="Color"><svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="2.2"/><circle cx="9" cy="3" r="2.2"/><circle cx="3" cy="9" r="2.2"/><circle cx="9" cy="9" r="2.2"/></svg></button>
-    </div>
-    <div id="cardDateSection" style="display:none">
-      <div class="date-row">
+    <div class="modal-columns">
+      <div class="modal-col-main">
         <div class="modal-field">
-          <label>Start</label>
-          <input id="cardStart" type="date">
+          <label>Card</label>
+          <textarea id="cardText" rows="1" placeholder="What needs to be done?"></textarea>
         </div>
-        <div class="modal-field">
-          <label>End</label>
-          <input id="cardEnd" type="date">
+        <div class="modal-field modal-field-desc">
+          <label>Description</label>
+          <div id="cardDescPreview" class="card-desc-preview" style="display:none"></div>
+          <textarea id="cardDesc" placeholder="Optional details…"></textarea>
         </div>
       </div>
-    </div>
-    <div id="cardPrioritySection" style="display:none">
-      <div class="modal-field">
-        <label>Priority</label>
-        <div class="priority-row" id="priorityRow"></div>
+      <div class="modal-col-side">
+        <div class="modal-field">
+          <label>Link</label>
+          <div class="modal-link-row">
+            <input id="cardLink" type="url" placeholder="https://…">
+            <button class="btn modal-link-open" id="cardLinkOpen" title="Open link" tabindex="-1">↗</button>
+          </div>
+        </div>
+        <div class="card-section-header">Properties</div>
+        <div class="card-section-toggles">
+          <button class="card-section-toggle" id="cardToggleDate" title="Date"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="9.6" rx="1.3"/><line x1="0.7" y1="5" x2="11.3" y2="5"/><line x1="3.5" y1="0.7" x2="3.5" y2="3.3"/><line x1="8.5" y1="0.7" x2="8.5" y2="3.3"/></svg></button>
+          <button class="card-section-toggle" id="cardTogglePriority" title="Priority"><svg viewBox="0 0 11 13" width="11" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" y1="0.7" x2="2" y2="12.3"/><path d="M2 1.5h7.5l-2.2 2.8 2.2 2.7H2"/></svg></button>
+          <button class="card-section-toggle" id="cardToggleColor" title="Color"><svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="2.2"/><circle cx="9" cy="3" r="2.2"/><circle cx="3" cy="9" r="2.2"/><circle cx="9" cy="9" r="2.2"/></svg></button>
+          <button class="card-section-toggle" id="cardToggleNotePages" title="Note Pages" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg></button>
+          <button class="card-section-toggle" id="cardToggleAttachments" title="Attachments" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"/></svg></button>
+        </div>
+        <div id="cardDateSection" style="display:none">
+          <div class="date-row">
+            <div class="modal-field">
+              <label>Start</label>
+              <input id="cardStart" type="date">
+            </div>
+            <div class="modal-field">
+              <label>End</label>
+              <input id="cardEnd" type="date">
+            </div>
+          </div>
+        </div>
+        <div id="cardPrioritySection" style="display:none">
+          <div class="modal-field">
+            <label>Priority</label>
+            <div class="priority-row" id="priorityRow"></div>
+          </div>
+        </div>
+        <div id="cardColorSection" style="display:none">
+          <div class="modal-field">
+            <label>Color</label>
+            <div class="color-row" id="colorRow"></div>
+          </div>
+        </div>
+        <div id="cardNotePagesSection" style="display:none">
+          <div class="modal-field">
+            <label>Note Pages</label>
+            <div id="cardLinkedPagesList" class="card-linked-pages-list"></div>
+          </div>
+        </div>
+        <div id="cardAttachmentsSection" style="display:none">
+          <div class="modal-field">
+            <label>Attachments</label>
+            <div id="cardAttachList" class="note-attach-list"></div>
+            <div class="note-attach-upload-row">
+              <label class="btn note-upload-label" for="cardAttachInput">+ Upload</label>
+              <input id="cardAttachInput" type="file" multiple style="display:none">
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-    <div id="cardColorSection" style="display:none">
-      <div class="modal-field">
-        <label>Color</label>
-        <div class="color-row" id="colorRow"></div>
-      </div>
-    </div>
-    <div class="modal-field" id="cardLinkedPagesField" style="display:none">
-      <label>Note Pages</label>
-      <div id="cardLinkedPagesList" class="card-linked-pages-list"></div>
     </div>
     <p id="modalStatusMsg" class="inbox-msg" style="display:none"></p>
     <div class="modal-actions">
@@ -383,38 +403,64 @@
 
 <div id="noteModal" class="modal-backdrop" style="display:none">
   <div class="modal note-modal">
-    <div class="modal-field">
-      <label>Note</label>
-      <textarea id="notePageTitle" rows="1" placeholder="Page title…" spellcheck="false" autocomplete="off"></textarea>
-      <div class="note-modal-crumb" id="noteModalBreadcrumb"></div>
-    </div>
-    <div class="modal-field modal-field-desc">
-      <label>Description</label>
-      <div id="notePageDescPreview" class="card-desc-preview" style="display:none"></div>
-      <textarea id="notePageDesc" placeholder="Write notes in markdown…"></textarea>
-    </div>
-    <div class="modal-field">
-      <label>Link</label>
-      <div class="modal-link-row">
-        <input id="notePageLink" type="url" placeholder="https://…">
-        <button class="btn modal-link-open" id="notePageLinkOpen" title="Open link" tabindex="-1">↗</button>
-      </div>
-    </div>
-    <div class="modal-field">
-      <label>Linked Cards</label>
-      <div id="noteLinkedCardsList" class="note-linked-cards-list"></div>
-      <div class="note-card-search-wrapper">
-        <div class="note-card-search-row">
-          <input id="noteCardSearchInput" type="text" placeholder="Search cards to link…" autocomplete="off" spellcheck="false">
-          <button class="btn" id="noteCreateCardBtn" title="Create a new card and link it">+ card</button>
+    <div class="modal-columns">
+      <div class="modal-col-main">
+        <div class="modal-field">
+          <label>Note</label>
+          <textarea id="notePageTitle" rows="1" placeholder="Page title…" spellcheck="false" autocomplete="off"></textarea>
+          <div class="note-modal-crumb" id="noteModalBreadcrumb"></div>
         </div>
-        <div id="noteCardSearchResults" class="note-card-search-results" style="display:none"></div>
+        <div class="modal-field modal-field-desc">
+          <label>Description</label>
+          <div id="notePageDescPreview" class="card-desc-preview" style="display:none"></div>
+          <textarea id="notePageDesc" placeholder="Write notes in markdown…"></textarea>
+        </div>
       </div>
-      <div id="noteCreateCardForm" class="note-create-card-form" style="display:none">
-        <input id="noteNewCardText" type="text" placeholder="Card text…" autocomplete="off" spellcheck="false">
-        <div class="note-create-card-actions">
-          <button class="btn" id="noteCreateCardCancel">Cancel</button>
-          <button class="btn btn-accent" id="noteCreateCardSubmit">Create &amp; link</button>
+      <div class="modal-col-side">
+        <div class="card-section-header">Properties</div>
+        <div class="card-section-toggles">
+          <button class="card-section-toggle" id="noteToggleLink" title="Link"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M5 7a2.8 2.8 0 0 0 4 .4l1.4-1.4a2.8 2.8 0 0 0-4-4L5.1 3.3"/><path d="M7 5a2.8 2.8 0 0 0-4-.4L1.6 6a2.8 2.8 0 0 4 4L6.9 8.7"/></svg></button>
+          <button class="card-section-toggle" id="noteToggleLinkedCards" title="Linked Cards"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="3.7" width="7" height="5" rx="1"/><path d="M3.7 3V2.3A1 1 0 0 1 4.7 1.3h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H9.7"/></svg></button>
+          <button class="card-section-toggle" id="noteToggleAttachments" title="Attachments"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"/></svg></button>
+        </div>
+        <div id="noteLinkSection" style="display:none">
+          <div class="modal-field">
+            <label>Link</label>
+            <div class="modal-link-row">
+              <input id="notePageLink" type="url" placeholder="https://…">
+              <button class="btn modal-link-open" id="notePageLinkOpen" title="Open link" tabindex="-1">↗</button>
+            </div>
+          </div>
+        </div>
+        <div id="noteLinkedCardsSection" style="display:none">
+          <div class="modal-field">
+            <label>Linked Cards</label>
+            <div id="noteLinkedCardsList" class="note-linked-cards-list"></div>
+            <div class="note-card-search-wrapper">
+              <div class="note-card-search-row">
+                <input id="noteCardSearchInput" type="text" placeholder="Search cards to link…" autocomplete="off" spellcheck="false">
+                <button class="btn" id="noteCreateCardBtn" title="Create a new card and link it">+ card</button>
+              </div>
+              <div id="noteCardSearchResults" class="note-card-search-results" style="display:none"></div>
+            </div>
+            <div id="noteCreateCardForm" class="note-create-card-form" style="display:none">
+              <input id="noteNewCardText" type="text" placeholder="Card text…" autocomplete="off" spellcheck="false">
+              <div class="note-create-card-actions">
+                <button class="btn" id="noteCreateCardCancel">Cancel</button>
+                <button class="btn btn-accent" id="noteCreateCardSubmit">Create &amp; link</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="noteAttachmentsSection" style="display:none">
+          <div id="noteAttachmentsField" class="modal-field">
+            <label>Attachments</label>
+            <div id="noteAttachList" class="note-attach-list"></div>
+            <div class="note-attach-upload-row">
+              <label class="btn note-upload-label" for="noteAttachInput">+ Upload</label>
+              <input id="noteAttachInput" type="file" multiple style="display:none">
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -427,7 +473,18 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<div id="attachViewer" class="modal-backdrop attach-viewer-backdrop" style="display:none">
+  <div class="attach-viewer-box">
+    <div class="attach-viewer-bar">
+      <span id="attachViewerName" class="attach-viewer-name"></span>
+      <button class="btn" id="attachViewerDl">↓ Download</button>
+      <button class="btn" id="attachViewerClose">✕</button>
+    </div>
+    <div id="attachViewerContent" class="attach-viewer-content"></div>
+  </div>
+</div>
+
+<script src="/marked.min.js"></script>
 <script src="/state.js"></script>
 <script src="/drag.js"></script>
 <script src="/cards.js"></script>

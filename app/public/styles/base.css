@@ -1,3 +1,40 @@
+/* ---- Local Fonts ---- */
+@font-face {
+  font-family: 'Syne';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/syne-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/syne-latin-700-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Syne';
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/syne-latin-800-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'DM Mono';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/dm-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'DM Mono';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/dm-mono-latin-500-normal.woff2') format('woff2');
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {

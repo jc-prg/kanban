@@ -1,9 +1,11 @@
 require('dotenv').config();
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const nano = require('nano');
-const crypto = require('crypto');
+const express  = require('express');
+const fs       = require('fs');
+const path     = require('path');
+const nano     = require('nano');
+const crypto   = require('crypto');
+const multer   = require('multer');
+const archiver = require('archiver');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +29,7 @@ const NOTES_DOC_ID     = 'notes';
 const PROMPTS_DB_NAME  = 'jc-extension-prompts';
 const BACKUP_DIR       = path.join(__dirname, process.env.BACKUP_DIR || 'data');
 const BACKUP_INTERVAL_MS = parseInt(process.env.BACKUP_INTERVAL_MS, 10) || 600000;
+const ATTACHMENTS_DIR  = path.join(BACKUP_DIR, 'attachments');
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -487,6 +490,170 @@ app.post('/api/:board/import', withBoard(async (req, res, db) => {
     excluded: excluded_items.length, excluded_items,
     skipped:  skipped_items.length,  skipped_items,
   });
+}));
+
+// ---- Notes Attachments ----
+// Files live at ATTACHMENTS_DIR/<board>/<pageId>/<filename>
+
+function safePageId(id) {
+  return typeof id === 'string' && /^n-[a-z0-9]{1,20}$/.test(id);
+}
+function safeFilename(name) {
+  return typeof name === 'string' && name.length > 0 && name.length <= 255
+    && !/[/\\]/.test(name) && !name.includes('..');
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination(req, file, cb) {
+      const dir = path.join(ATTACHMENTS_DIR, req.params.board, req.params.pageId);
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename(req, file, cb) {
+      const safe = file.originalname
+        .replace(/[^a-zA-Z0-9._\- ]/g, '_').replace(/\s+/g, '_')
+        .replace(/^\./, '_').slice(0, 200) || 'file';
+      cb(null, safe);
+    },
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+app.get('/api/:board/notes/attachments/:pageId', (req, res) => {
+  const { board, pageId } = req.params;
+  if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
+  if (!safePageId(pageId))   return res.status(400).json({ error: 'Invalid page id' });
+  const dir = path.join(ATTACHMENTS_DIR, board, pageId);
+  if (!fs.existsSync(dir)) return res.json([]);
+  try {
+    const files = fs.readdirSync(dir).filter(n => !n.startsWith('.')).map(name => ({
+      name, size: fs.statSync(path.join(dir, name)).size,
+    }));
+    res.json(files);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/:board/notes/attachments/:pageId', (req, res) => {
+  const { board, pageId } = req.params;
+  if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
+  if (!safePageId(pageId))   return res.status(400).json({ error: 'Invalid page id' });
+  upload.single('file')(req, res, err => {
+    if (err)       return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    res.json({ name: req.file.filename, size: req.file.size });
+  });
+});
+
+app.get('/api/:board/notes/attachments/:pageId/:filename', (req, res) => {
+  const { board, pageId, filename } = req.params;
+  if (!validBoardName(board) || !safePageId(pageId) || !safeFilename(filename))
+    return res.status(400).json({ error: 'Invalid request' });
+  const fp = path.join(ATTACHMENTS_DIR, board, pageId, filename);
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' });
+  res.sendFile(fp);
+});
+
+app.delete('/api/:board/notes/attachments/:pageId/:filename', (req, res) => {
+  const { board, pageId, filename } = req.params;
+  if (!validBoardName(board) || !safePageId(pageId) || !safeFilename(filename))
+    return res.status(400).json({ error: 'Invalid request' });
+  try { fs.unlinkSync(path.join(ATTACHMENTS_DIR, board, pageId, filename)); } catch {}
+  res.json({ ok: true });
+});
+
+// ---- Card Attachments ----
+// Files live at ATTACHMENTS_DIR/<board>/<cardId>/<filename>
+
+function safeCardId(id) {
+  return typeof id === 'string' && /^id-[a-z0-9]{1,10}$/.test(id);
+}
+
+const uploadCard = multer({
+  storage: multer.diskStorage({
+    destination(req, file, cb) {
+      const dir = path.join(ATTACHMENTS_DIR, req.params.board, req.params.cardId);
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename(req, file, cb) {
+      const safe = file.originalname
+        .replace(/[^a-zA-Z0-9._\- ]/g, '_').replace(/\s+/g, '_')
+        .replace(/^\./, '_').slice(0, 200) || 'file';
+      cb(null, safe);
+    },
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+app.get('/api/:board/cards/attachments/:cardId', (req, res) => {
+  const { board, cardId } = req.params;
+  if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
+  if (!safeCardId(cardId))   return res.status(400).json({ error: 'Invalid card id' });
+  const dir = path.join(ATTACHMENTS_DIR, board, cardId);
+  if (!fs.existsSync(dir)) return res.json([]);
+  try {
+    const files = fs.readdirSync(dir).filter(n => !n.startsWith('.')).map(name => ({
+      name, size: fs.statSync(path.join(dir, name)).size,
+    }));
+    res.json(files);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/:board/cards/attachments/:cardId', (req, res) => {
+  const { board, cardId } = req.params;
+  if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
+  if (!safeCardId(cardId))   return res.status(400).json({ error: 'Invalid card id' });
+  uploadCard.single('file')(req, res, err => {
+    if (err)       return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    res.json({ name: req.file.filename, size: req.file.size });
+  });
+});
+
+app.get('/api/:board/cards/attachments/:cardId/:filename', (req, res) => {
+  const { board, cardId, filename } = req.params;
+  if (!validBoardName(board) || !safeCardId(cardId) || !safeFilename(filename))
+    return res.status(400).json({ error: 'Invalid request' });
+  const fp = path.join(ATTACHMENTS_DIR, board, cardId, filename);
+  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' });
+  res.sendFile(fp);
+});
+
+app.delete('/api/:board/cards/attachments/:cardId/:filename', (req, res) => {
+  const { board, cardId, filename } = req.params;
+  if (!validBoardName(board) || !safeCardId(cardId) || !safeFilename(filename))
+    return res.status(400).json({ error: 'Invalid request' });
+  try { fs.unlinkSync(path.join(ATTACHMENTS_DIR, board, cardId, filename)); } catch {}
+  res.json({ ok: true });
+});
+
+app.get('/api/:board/notes/export', withExistingBoard(async (req, res, db) => {
+  const { board } = req.params;
+  const notes    = await loadNotesData(db);
+  const boardDir = path.join(ATTACHMENTS_DIR, board);
+
+  const archive = archiver('zip', { zlib: { level: 6 } });
+  archive.on('error', err => console.error('ZIP error:', err.message));
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="notes-${board}.zip"`);
+  archive.pipe(res);
+
+  function addPages(pages, prefix) {
+    for (const p of pages) {
+      const dir = prefix + (p.title || 'Untitled').replace(/[/\\<>:|*?"]/g, '_').trim() + '/';
+      const md  = (p.description || '').replace(/\(attachment:([^)\s]+)\)/g, '(./attachments/$1)');
+      archive.append(md, { name: dir + 'page.md' });
+      const aDir = path.join(boardDir, p.id);
+      if (fs.existsSync(aDir))
+        fs.readdirSync(aDir).filter(n => !n.startsWith('.')).forEach(f =>
+          archive.file(path.join(aDir, f), { name: dir + 'attachments/' + f }));
+      if (p.children?.length) addPages(p.children, dir);
+    }
+  }
+
+  addPages(notes.pages || [], '');
+  await archive.finalize();
 }));
 
 // ---- SPA catch-all (must be after all API routes) ----

@@ -1,7 +1,8 @@
 // ---- Notes State ----
 let notesState = { pages: [] };
 let notesSaveTimer = null;
-const NOTES_API = API_BASE ? `${API_BASE}/notes` : null;
+const NOTES_API        = API_BASE ? `${API_BASE}/notes`             : null;
+const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
 
 // ---- Notes Load / Save ----
 async function loadNotes() {
@@ -156,6 +157,26 @@ function renderNotesList(pages, container, depth) {
   }
 }
 
+// ---- Collapsible note sections ----
+function setNoteSection(sectionId, btnId, open) {
+  const section = document.getElementById(sectionId);
+  const btn     = document.getElementById(btnId);
+  if (section) section.style.display = open ? '' : 'none';
+  if (btn)     btn.classList.toggle('card-section-toggle--active', open);
+}
+
+function toggleNoteSection(sectionId, btnId) {
+  const section = document.getElementById(sectionId);
+  setNoteSection(sectionId, btnId, section?.style.display === 'none');
+}
+
+function resetNoteSections() {
+  const wide = window.innerWidth >= 1200;
+  setNoteSection('noteLinkSection',        'noteToggleLink',         wide);
+  setNoteSection('noteLinkedCardsSection', 'noteToggleLinkedCards',  wide);
+  setNoteSection('noteAttachmentsSection', 'noteToggleAttachments',  wide);
+}
+
 // ---- Note Modal ----
 let noteModalPageId = null;
 let noteModalOrig = { title: '', desc: '', link: '' };
@@ -184,13 +205,12 @@ function openNoteModal(pageId) {
   if ((page.description || '').trim()) showNoteDescPreview();
   else showNoteDescEditor();
 
-  // reset link button state
   _updateNoteLinkBtn();
+  resetNoteSections();
+  if (NOTES_ATTACH_API) loadAttachments(pageId);
 
   document.getElementById('noteModal').style.display = 'flex';
   const nt = document.getElementById('notePageTitle');
-  nt.focus();
-  nt.select();
   autoResizeTitle(nt);
 }
 
@@ -247,8 +267,12 @@ async function tryCloseNoteModal() {
 function showNoteDescPreview() {
   const text = document.getElementById('notePageDesc').value.trim();
   if (!text) { showNoteDescEditor(); return; }
-  document.getElementById('notePageDescPreview').innerHTML = marked.parse(text, { breaks: true });
-  document.getElementById('notePageDescPreview').style.display = '';
+  const el = document.getElementById('notePageDescPreview');
+  el.dataset.rawText = text;
+  el.innerHTML = marked.parse(text, { breaks: true });
+  enhanceMarkdownPreview(el);
+  resolveAttachments(el);
+  el.style.display = '';
   document.getElementById('notePageDesc').style.display = 'none';
 }
 
@@ -368,10 +392,13 @@ function initNoteCardSearch() {
     results.innerHTML = '';
     if (!q) { results.style.display = 'none'; return; }
 
+    const page = findNotePage(noteModalPageId, notesState.pages);
+    const linked = new Set(page?.linkedCards || []);
     const matches = [];
     for (const col of (state.columns || [])) {
       for (const card of col.cards) {
-        if (card.text.toLowerCase().includes(q)) matches.push({ id: card.id, text: card.text, col: col.title });
+        if (!linked.has(card.id) && card.text.toLowerCase().includes(q))
+          matches.push({ id: card.id, text: card.text, col: col.title });
       }
     }
 
@@ -472,11 +499,176 @@ document.addEventListener('drop', async e => {
 
 function initNotesDropZone() { /* wired above via document capture listeners */ }
 
+// ---- Attachments ----
+
+
+async function loadAttachments(pageId) {
+  const list = document.getElementById('noteAttachList');
+  if (!list || !NOTES_ATTACH_API) return;
+  try {
+    const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`);
+    renderAttachments(pageId, r.ok ? await r.json() : []);
+  } catch { renderAttachments(pageId, []); }
+}
+
+function renderAttachments(pageId, files) {
+  const list = document.getElementById('noteAttachList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!files.length) {
+    const p = document.createElement('p');
+    p.className = 'note-attach-empty';
+    p.textContent = 'No attachments yet';
+    list.appendChild(p);
+    return;
+  }
+  for (const f of files) {
+    const ft  = _attachType(f.name);
+    const url = `${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`;
+    const item = document.createElement('div');
+    item.className = 'note-attach-item';
+    const icon = ft === 'image' ? '🖼' : ft === 'pdf' ? '📄' : '📎';
+    item.innerHTML =
+      `<span class="note-attach-icon">${icon}</span>` +
+      `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
+      `<span class="note-attach-size">${_fmtSize(f.size)}</span>` +
+      `<div class="note-attach-btns">` +
+        (ft !== 'other' ? `<button class="note-attach-btn" data-act="view"  title="View fullscreen">⛶</button>` : '') +
+        `<button class="note-attach-btn" data-act="insert"   title="Insert in description">⌅</button>` +
+        `<button class="note-attach-btn" data-act="download" title="Download">↓</button>` +
+        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">✕</button>` +
+      `</div>`;
+
+    if (ft !== 'other')
+      item.querySelector('[data-act="view"]').addEventListener('click', () => openAttachmentViewer(url, f.name, ft));
+    item.querySelector('[data-act="insert"]').addEventListener('click',   () => _insertAttachmentMd(f.name, ft));
+    item.querySelector('[data-act="download"]').addEventListener('click', () => _downloadAttachment(url, f.name));
+    item.querySelector('[data-act="delete"]').addEventListener('click', async () => {
+      if (!await showConfirm(`Delete "${f.name}"?`, { okLabel: 'Delete', danger: true })) return;
+      await fetch(`${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
+      loadAttachments(pageId);
+    });
+    list.appendChild(item);
+  }
+}
+
+async function _handleAttachUpload(pageId, fileList) {
+  if (!NOTES_ATTACH_API || !fileList.length) return;
+  for (const file of Array.from(fileList)) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
+    if (r.ok) _appendAttachMd('notePageDesc', (await r.json()).name);
+  }
+  loadAttachments(pageId);
+}
+
+function _insertAttachmentMd(name, type) {
+  const ta = document.getElementById('notePageDesc');
+  if (!ta) return;
+  showNoteDescEditor();
+  ta.focus();
+  const md = type === 'image' ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
+  const s = ta.selectionStart ?? ta.value.length;
+  ta.setRangeText(md, s, ta.selectionEnd ?? s, 'end');
+}
+
+async function _downloadAttachment(url, name) {
+  const r = await fetch(url);
+  if (!r.ok) return;
+  _triggerBlobDownload(await r.blob(), name);
+}
+
+function _triggerBlobDownload(blob, name) {
+  const obj = URL.createObjectURL(blob);
+  const a   = document.createElement('a');
+  a.href = obj; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(obj), 1000);
+}
+
+// Resolve attachment: links/images in rendered markdown using blob URLs (auth-safe)
+async function resolveAttachments(container) {
+  if (!noteModalPageId || !NOTES_ATTACH_API) return;
+  const base = `${NOTES_ATTACH_API}/${noteModalPageId}`;
+
+  for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
+    const fn = img.getAttribute('src').slice('attachment:'.length);
+    try {
+      const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
+      if (r.ok) img.src = URL.createObjectURL(await r.blob());
+    } catch {}
+  }
+
+  for (const a of container.querySelectorAll('a[href^="attachment:"]')) {
+    const fn = a.getAttribute('href').slice('attachment:'.length);
+    const url = `${base}/${encodeURIComponent(fn)}`;
+    a.removeAttribute('href');
+    a.style.cursor = 'pointer';
+    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _downloadAttachment(url, fn); });
+  }
+}
+
+// ---- Attachment fullscreen viewer ----
+let _viewerBlob = null;
+
+async function openAttachmentViewer(url, name, type) {
+  const viewer  = document.getElementById('attachViewer');
+  const content = document.getElementById('attachViewerContent');
+  document.getElementById('attachViewerName').textContent = name;
+  content.innerHTML = '<span class="note-attach-empty">Loading…</span>';
+  viewer.style.display = 'flex';
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Failed');
+    _viewerBlob = await r.blob();
+    const obj = URL.createObjectURL(_viewerBlob);
+    content.innerHTML = '';
+    if (type === 'image') {
+      const img = document.createElement('img');
+      img.src = obj; img.className = 'attach-viewer-img';
+      content.appendChild(img);
+    } else {
+      const iframe = document.createElement('iframe');
+      iframe.src = obj; iframe.className = 'attach-viewer-iframe';
+      content.appendChild(iframe);
+    }
+    document.getElementById('attachViewerDl').onclick = () => _triggerBlobDownload(_viewerBlob, name);
+  } catch {
+    content.innerHTML = '<span class="note-attach-empty">Failed to load file</span>';
+  }
+}
+
+function closeAttachmentViewer() {
+  document.getElementById('attachViewer').style.display = 'none';
+  document.getElementById('attachViewerContent').innerHTML = '';
+  _viewerBlob = null;
+}
+
 // ---- DOMContentLoaded wiring ----
 document.addEventListener('DOMContentLoaded', () => {
   initNotesDropZone();
   document.getElementById('notesToggleBtn')?.addEventListener('click', toggleNotesSidebar);
   document.getElementById('notesAddRootBtn')?.addEventListener('click', () => addNotePage(null));
+
+  document.getElementById('noteToggleLink')        ?.addEventListener('click', () => toggleNoteSection('noteLinkSection',        'noteToggleLink'));
+  document.getElementById('noteToggleLinkedCards') ?.addEventListener('click', () => toggleNoteSection('noteLinkedCardsSection', 'noteToggleLinkedCards'));
+  document.getElementById('noteToggleAttachments') ?.addEventListener('click', () => toggleNoteSection('noteAttachmentsSection', 'noteToggleAttachments'));
+  document.getElementById('notesExportBtn')?.addEventListener('click', () => {
+    if (API_BASE) window.open(`${API_BASE}/notes/export`, '_blank');
+  });
+
+  // Attachment upload
+  document.getElementById('noteAttachInput')?.addEventListener('change', e => {
+    if (noteModalPageId) _handleAttachUpload(noteModalPageId, e.target.files);
+    e.target.value = '';
+  });
+
+  // Attachment viewer
+  document.getElementById('attachViewerClose')?.addEventListener('click', closeAttachmentViewer);
+  document.getElementById('attachViewer')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('attachViewer')) closeAttachmentViewer();
+  });
 
   // Note modal backdrop click
   document.getElementById('noteModal')?.addEventListener('click', e => {
@@ -500,9 +692,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Description preview / editor
-  document.getElementById('notePageDescPreview')?.addEventListener('click', () => {
+  document.getElementById('notePageDescPreview')?.addEventListener('click', e => {
+    const preview = document.getElementById('notePageDescPreview');
+    const frac = previewScrollFrac(preview, e);
     showNoteDescEditor();
-    document.getElementById('notePageDesc').focus();
+    const ta = document.getElementById('notePageDesc');
+    requestAnimationFrame(() => applyEditorFrac(ta, frac));
+    ta.focus();
   });
   document.getElementById('notePageDesc')?.addEventListener('blur', () => {
     if (document.getElementById('notePageDesc').value.trim()) showNoteDescPreview();
@@ -511,7 +707,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Markdown shortcuts in description
   document.getElementById('notePageDesc')?.addEventListener('keydown', e => {
     if (!e.ctrlKey && !e.metaKey) return;
-    const markers = e.key === 'b' ? ['**','**'] : e.key === 'i' ? ['*','*'] : e.key === 'u' ? ['<u>','</u>'] : null;
+    const markers = e.key === 'b' ? ['**','**'] : e.key === 'i' ? ['*','*'] : e.key === 'u' ? ['<u>','</u>'] : e.key === 'm' ? ['<mark>','</mark>'] : null;
     if (!markers) return;
     e.preventDefault();
     const ta = e.target, s = ta.selectionStart, en = ta.selectionEnd;
@@ -529,13 +725,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') tryCloseNoteModal();
   });
 
-  // Global Escape closes note modal
+  // Global Escape closes note modal (or viewer if open)
   document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('attachViewer')?.style.display !== 'none') {
+      closeAttachmentViewer(); return;
+    }
     if (e.key === 'Escape' && document.getElementById('noteModal')?.style.display !== 'none') {
       // Only close if no other modal is on top
       const otherOpen = ['modal','settingsBackdrop','promptsBackdrop','searchBackdrop','cardInfoBackdrop','dialogBackdrop']
         .some(id => document.getElementById(id)?.style.display !== 'none');
       if (!otherOpen) tryCloseNoteModal();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 's' && document.getElementById('noteModal')?.style.display !== 'none') {
+      e.preventDefault();
+      submitNote();
     }
   });
 

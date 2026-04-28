@@ -123,7 +123,6 @@
 }
 
 .card-desc-preview {
-  background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
@@ -132,21 +131,8 @@
   padding: 10px 12px;
   cursor: text;
   line-height: 1.6;
+  /* markdown element styles live in markdown.css */
 }
-
-.card-desc-preview p { margin: 6px 0 14px; }
-.card-desc-preview p:last-child { margin-bottom: 6px; }
-.card-desc-preview h1,.card-desc-preview h2,.card-desc-preview h3 { font-family: 'Syne', sans-serif; margin: 12px 0 4px; }
-.card-desc-preview h1 { font-size: 1.35rem; font-weight: 700; }
-.card-desc-preview h1:first-child,.card-desc-preview h2:first-child,.card-desc-preview h3:first-child { margin-top: 0; }
-.card-desc-preview ul,.card-desc-preview ol { margin: 4px 0; padding-left: 20px; }
-.card-desc-preview li { margin: 2px 0; }
-.card-desc-preview code { background: var(--surface); border-radius: 4px; padding: 1px 4px; font-size: 0.8rem; }
-.card-desc-preview pre { background: var(--surface); border-radius: 6px; padding: 8px 10px; overflow-x: auto; margin: 6px 0; }
-.card-desc-preview pre code { background: none; padding: 0; }
-.card-desc-preview a { color: var(--accent); }
-.card-desc-preview strong { color: var(--text); }
-.card-desc-preview blockquote { border-left: 3px solid var(--border); margin: 6px 0; padding-left: 10px; color: var(--text-muted); }
 
 .modal h2 {
   font-family: 'Syne', sans-serif;
@@ -901,6 +887,50 @@
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-right: auto;
+}
+
+/* Two-column card edit layout — transparent on narrow screens */
+.modal-columns,
+.modal-col-main,
+.modal-col-side {
+  display: contents;
+}
+
+@media (min-width: 1200px) {
+  #modal .modal {
+    width: min(1140px, 92vw);
+  }
+
+  .modal-col-side .card-linked-pages-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .modal-columns {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 0;
+  }
+
+  .modal-col-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    padding-right: 24px;
+  }
+
+  .modal-col-side {
+    display: flex;
+    flex-direction: column;
+    width: 350px;
+    flex-shrink: 0;
+    overflow-y: auto;
+    border-left: 1px solid var(--border);
+    padding-left: 24px;
+  }
 }
 
 @media (max-width: 500px) {
