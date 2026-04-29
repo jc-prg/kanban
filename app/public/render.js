@@ -67,10 +67,23 @@ function getLinkBadgeHtml(url, href) {
 }
 
 // ---- Render ----
+function _buildNoteLinkedSet() {
+  const s = new Set();
+  if (typeof notesState === 'undefined') return s;
+  (function collect(pages) {
+    for (const p of pages) {
+      for (const id of (p.linkedCards || [])) s.add(id);
+      collect(p.children || []);
+    }
+  })(notesState.pages);
+  return s;
+}
+
 function render() {
   const board = document.getElementById('board');
   board.innerHTML = '';
   const builtCols = [];
+  const noteLinkedCards = _buildNoteLinkedSet();
 
   state.columns.forEach((col, ci) => {
     const color = col.color || COL_COLORS[ci % COL_COLORS.length];
@@ -197,6 +210,12 @@ function render() {
       if (card.description) {
         metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">☰</span>`);
       }
+      if (cardAttachSet.has(card.id)) {
+        metaParts.push(`<span class="card-attach-badge" title="Has attachments"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"></path></svg></span>`);
+      }
+      if (noteLinkedCards.has(card.id)) {
+        metaParts.push(`<span class="card-note-badge" title="Linked in notes"><svg viewBox="0 0 11 14" width="9" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.5h6l3 3.5v8H1z"/><path d="M7 1.5V5h3"/></svg></span>`);
+      }
       if (card.priority) {
         const pc = PRIORITY_COLORS[card.priority];
         metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);
@@ -228,32 +247,23 @@ function render() {
       ` : `
         ${linkBadgeHtml}
         <div class="card-body">
-          <textarea class="card-text" rows="1" spellcheck="false">${escHtml(card.text)}</textarea>
+          <div class="card-text">${escHtml(card.text)}</div>
           ${metaHtml}
         </div>
-        <button class="card-more-btn" tabindex="-1" title="Options">⋮</button>
       `;
 
       if (safeLinkHref && !isLabel) {
-        cardEl.querySelector('.card-link-badge').addEventListener('mousedown', e => e.stopPropagation());
+        const badge = cardEl.querySelector('.card-link-badge');
+        badge.addEventListener('mousedown', e => e.stopPropagation());
+        badge.addEventListener('click', e => e.stopPropagation());
       }
 
-      const moreBtn = cardEl.querySelector('.card-more-btn');
-      if (moreBtn) {
-        moreBtn.addEventListener('mousedown', e => e.stopPropagation());
-        moreBtn.addEventListener('click', e => {
-          e.stopPropagation();
-          const rect = moreBtn.getBoundingClientRect();
-          showContextMenu(rect.left, rect.bottom + 4, col.id, card);
-        });
-      }
-
-      cardEl.addEventListener('dblclick', e => {
-        if (e.target.closest('.card-more-btn, .card-link-badge, .card-text')) return;
+      cardEl.addEventListener('click', e => {
+        if (e.target.closest('.card-link-badge')) return;
         openEditModal(col.id, card);
       });
 
-      if (!isLabel) cardEl.addEventListener('contextmenu', e => {
+      cardEl.addEventListener('contextmenu', e => {
         e.preventDefault();
         e.stopPropagation();
         if (lastInputWasTouch) return;
@@ -263,7 +273,7 @@ function render() {
       cardEl.addEventListener('dragstart', e => { e.stopPropagation(); onDragStart(e, col.id, card.id); });
       cardEl.addEventListener('dragend', onDragEnd);
       cardEl.addEventListener('touchstart', e => {
-        if (e.target.tagName === 'TEXTAREA' || e.target.closest('a') || e.target.closest('.card-more-btn')) return;
+        if (e.target.closest('a')) return;
         const t = e.touches[0];
         touchPending = { colId: col.id, cardId: card.id, el: cardEl, sx: t.clientX, sy: t.clientY };
         clearTimeout(touchLongPressTimer);
@@ -277,32 +287,16 @@ function render() {
         }, 500);
       }, { passive: true });
 
-      let lastTapTime = 0;
       cardEl.addEventListener('touchend', e => {
         if (touchDrag) return;
-        if (e.target.tagName === 'TEXTAREA' || e.target.closest('a')) return;
-        const now = Date.now();
-        if (now - lastTapTime < 300) {
-          e.preventDefault();
-          touchPending = null;
-          openEditModal(col.id, card);
-          lastTapTime = 0;
-        } else {
-          lastTapTime = now;
-        }
+        if (e.target.closest('a')) return;
+        if (!touchPending) return;
+        clearTimeout(touchLongPressTimer);
+        touchLongPressTimer = null;
+        touchPending = null;
+        e.preventDefault();
+        openEditModal(col.id, card);
       }, { passive: false });
-
-      const ta = cardEl.querySelector('.card-text');
-      if (ta) {
-        ta.addEventListener('mousedown', e => e.stopPropagation());
-        ta.addEventListener('input', () => {
-          ta.style.height = 'auto';
-          ta.style.height = ta.scrollHeight + 'px';
-          updateCardText(col.id, card.id, ta.value);
-        });
-        ta.addEventListener('focus', () => { cardEl.draggable = false; });
-        ta.addEventListener('blur',  () => { cardEl.draggable = true; });
-      }
 
       const ind = document.createElement('div');
       ind.className = 'drop-indicator';
@@ -353,8 +347,4 @@ function render() {
   addColBtn.addEventListener('click', addColumn);
   board.appendChild(addColBtn);
 
-  board.querySelectorAll('.card-text').forEach(ta => {
-    ta.style.height = 'auto';
-    ta.style.height = ta.scrollHeight + 'px';
-  });
 }

@@ -13,6 +13,7 @@ async function loadNotes() {
     else { notesState = await r.json(); if (!notesState.pages) notesState.pages = []; }
   } catch (e) { notesState = { pages: [] }; }
   renderNotesTree();
+  render();
 }
 
 function scheduleSaveNotes() {
@@ -79,11 +80,63 @@ function deleteNotePage(id) {
 // ---- Notes Sidebar ----
 const notesExpanded = new Set();
 let notesSidebarOpen = false;
+const SIDEBAR_MIN = 230;
+const SIDEBAR_MAX = 460;
+let sidebarWidth = SIDEBAR_MIN;
+
+function _applySidebarWidth(sidebar, w) {
+  sidebar.style.width    = w + 'px';
+  sidebar.style.minWidth = w + 'px';
+}
 
 function toggleNotesSidebar() {
   notesSidebarOpen = !notesSidebarOpen;
-  document.getElementById('notesSidebar')?.classList.toggle('notes-sidebar--open', notesSidebarOpen);
+  const sidebar = document.getElementById('notesSidebar');
+  if (sidebar) {
+    if (notesSidebarOpen) _applySidebarWidth(sidebar, sidebarWidth);
+    else { sidebar.style.width = ''; sidebar.style.minWidth = ''; }
+  }
+  sidebar?.classList.toggle('notes-sidebar--open', notesSidebarOpen);
   document.getElementById('notesToggleBtn')?.classList.toggle('open', notesSidebarOpen);
+}
+
+function initSidebarResize() {
+  const sidebar = document.getElementById('notesSidebar');
+  const resizer = document.getElementById('notesSidebarResizer');
+  if (!sidebar || !resizer) return;
+
+  resizer.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const startX     = e.clientX;
+    const startWidth = sidebar.offsetWidth;
+    sidebar.classList.add('notes-sidebar--resizing');
+
+    function onMove(e) {
+      const raw = startWidth + (e.clientX - startX);
+      _applySidebarWidth(sidebar, Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, raw)));
+    }
+
+    function onUp(e) {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup',   onUp);
+      sidebar.classList.remove('notes-sidebar--resizing');
+
+      const raw = startWidth + (e.clientX - startX);
+      if (raw < SIDEBAR_MIN && startWidth === SIDEBAR_MIN) {
+        sidebar.style.width    = '';
+        sidebar.style.minWidth = '';
+        notesSidebarOpen = false;
+        sidebar.classList.remove('notes-sidebar--open');
+        document.getElementById('notesToggleBtn')?.classList.remove('open');
+      } else {
+        sidebarWidth = Math.min(Math.max(raw, SIDEBAR_MIN), SIDEBAR_MAX);
+        _applySidebarWidth(sidebar, sidebarWidth);
+      }
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup',   onUp);
+  });
 }
 
 function renderNotesTree() {
@@ -109,6 +162,8 @@ function renderNotesList(pages, container, depth) {
     const item = document.createElement('div');
     item.className = 'notes-tree-item';
     item.dataset.pageId = page.id;
+    item.dataset.depth = depth;
+    item.draggable = true;
     item.style.paddingLeft = (depth * 14 + 6) + 'px';
 
     item.innerHTML =
@@ -319,6 +374,7 @@ function renderLinkedCards(ids) {
       page.linkedCards = (page.linkedCards || []).filter(c => c !== id);
       renderLinkedCards(page.linkedCards);
       scheduleSaveNotes();
+      render();
     });
 
     container.appendChild(mini);
@@ -420,6 +476,7 @@ function initNoteCardSearch() {
           page.linkedCards.push(card.id);
           renderLinkedCards(page.linkedCards);
           scheduleSaveNotes();
+          render();
         }
         input.value = '';
         results.style.display = 'none';
@@ -495,6 +552,7 @@ document.addEventListener('drop', async e => {
   (target.linkedCards ??= []).push(cardId);
   scheduleSaveNotes();
   if (noteModalPageId === pageId) renderLinkedCards(target.linkedCards);
+  render();
 }, true);
 
 function initNotesDropZone() { /* wired above via document capture listeners */ }
@@ -527,20 +585,23 @@ function renderAttachments(pageId, files) {
     const url = `${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = ft === 'image' ? '🖼' : ft === 'pdf' ? '📄' : '📎';
+    const icon = ft === 'image' ? '🖼' : ft === 'pdf' ? '📄' : ft === 'html' ? '🌐' : '📎';
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
       `<span class="note-attach-size">${_fmtSize(f.size)}</span>` +
       `<div class="note-attach-btns">` +
-        (ft !== 'other' ? `<button class="note-attach-btn" data-act="view"  title="View fullscreen">⛶</button>` : '') +
+        (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">⛶</button>` : '') +
+        (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">⛶</button>` : '') +
         `<button class="note-attach-btn" data-act="insert"   title="Insert in description">⌅</button>` +
         `<button class="note-attach-btn" data-act="download" title="Download">↓</button>` +
         `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">✕</button>` +
       `</div>`;
 
-    if (ft !== 'other')
+    if (ft === 'image' || ft === 'pdf')
       item.querySelector('[data-act="view"]').addEventListener('click', () => openAttachmentViewer(url, f.name, ft));
+    else if (ft === 'html')
+      item.querySelector('[data-act="view"]').addEventListener('click', () => _openInNewTab(url));
     item.querySelector('[data-act="insert"]').addEventListener('click',   () => _insertAttachmentMd(f.name, ft));
     item.querySelector('[data-act="download"]').addEventListener('click', () => _downloadAttachment(url, f.name));
     item.querySelector('[data-act="delete"]').addEventListener('click', async () => {
@@ -605,7 +666,10 @@ async function resolveAttachments(container) {
     const url = `${base}/${encodeURIComponent(fn)}`;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
-    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _downloadAttachment(url, fn); });
+    if (_attachType(fn) === 'html')
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _openInNewTab(url); });
+    else
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _downloadAttachment(url, fn); });
   }
 }
 
@@ -645,17 +709,152 @@ function closeAttachmentViewer() {
   _viewerBlob = null;
 }
 
+// ---- Notes tree drag & drop ----
+let _treeDragId = null;
+
+function _subtreeHeight(page) {
+  if (!page.children?.length) return 0;
+  return 1 + Math.max(...page.children.map(_subtreeHeight));
+}
+
+function _removeFromTree(id, pages) {
+  for (let i = 0; i < pages.length; i++) {
+    if (pages[i].id === id) return pages.splice(i, 1)[0];
+    const r = _removeFromTree(id, pages[i].children || []);
+    if (r) return r;
+  }
+  return null;
+}
+
+function _insertIntoTree(page, targetId, position, pages) {
+  for (let i = 0; i < pages.length; i++) {
+    if (pages[i].id === targetId) {
+      if (position === 'before') { pages.splice(i, 0, page); return true; }
+      if (position === 'after')  { pages.splice(i + 1, 0, page); return true; }
+      if (position === 'into')   {
+        if (!pages[i].children) pages[i].children = [];
+        pages[i].children.unshift(page);
+        return true;
+      }
+    }
+    if (_insertIntoTree(page, targetId, position, pages[i].children || [])) return true;
+  }
+  return false;
+}
+
+function _clearTreeDrop() {
+  document.querySelectorAll(
+    '.notes-tree-item--drop-before,.notes-tree-item--drop-after,.notes-tree-item--drop-into'
+  ).forEach(el => el.classList.remove(
+    'notes-tree-item--drop-before', 'notes-tree-item--drop-after', 'notes-tree-item--drop-into'
+  ));
+}
+
+function _initTreeDragDrop() {
+  const container = document.getElementById('notesTreeBody');
+  if (!container) return;
+
+  container.addEventListener('dragstart', e => {
+    const item = e.target.closest('.notes-tree-item');
+    if (!item) return;
+    _treeDragId = item.dataset.pageId;
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => item.classList.add('notes-tree-item--dragging'), 0);
+  });
+
+  container.addEventListener('dragend', () => {
+    _treeDragId = null;
+    _clearTreeDrop();
+    container.querySelectorAll('.notes-tree-item--dragging')
+      .forEach(el => el.classList.remove('notes-tree-item--dragging'));
+  });
+
+  container.addEventListener('dragover', e => {
+    if (!_treeDragId) return;
+    const item = e.target.closest('.notes-tree-item');
+    if (!item || item.dataset.pageId === _treeDragId) { _clearTreeDrop(); return; }
+
+    const draggedPage = findNotePage(_treeDragId, notesState.pages);
+    if (!draggedPage) return;
+    const dragHeight  = _subtreeHeight(draggedPage);
+    const targetDepth = +item.dataset.depth;
+
+    const rect  = item.getBoundingClientRect();
+    const ratio = (e.clientY - rect.top) / rect.height;
+
+    const canBefore = targetDepth + dragHeight <= 2;
+    const canInto   = targetDepth < 2 && targetDepth + 1 + dragHeight <= 2;
+    const canAfter  = canBefore;
+
+    _clearTreeDrop();
+    if (canBefore && ratio < 0.3) {
+      item.classList.add('notes-tree-item--drop-before');
+    } else if (canAfter && ratio > 0.7) {
+      item.classList.add('notes-tree-item--drop-after');
+    } else if (canInto) {
+      item.classList.add('notes-tree-item--drop-into');
+    } else if (canBefore && ratio <= 0.5) {
+      item.classList.add('notes-tree-item--drop-before');
+    } else if (canAfter) {
+      item.classList.add('notes-tree-item--drop-after');
+    }
+
+    if (item.classList.contains('notes-tree-item--drop-before') ||
+        item.classList.contains('notes-tree-item--drop-after')  ||
+        item.classList.contains('notes-tree-item--drop-into')) {
+      e.preventDefault();
+    }
+  });
+
+  container.addEventListener('dragleave', e => {
+    if (!container.contains(e.relatedTarget)) _clearTreeDrop();
+  });
+
+  container.addEventListener('drop', e => {
+    e.preventDefault();
+    if (!_treeDragId) return;
+    const item = e.target.closest('.notes-tree-item');
+    if (!item || item.dataset.pageId === _treeDragId) { _clearTreeDrop(); return; }
+
+    const position = item.classList.contains('notes-tree-item--drop-before') ? 'before'
+                   : item.classList.contains('notes-tree-item--drop-after')  ? 'after'
+                   : item.classList.contains('notes-tree-item--drop-into')   ? 'into'
+                   : null;
+    _clearTreeDrop();
+    if (!position) return;
+
+    const targetId = item.dataset.pageId;
+    const page = _removeFromTree(_treeDragId, notesState.pages);
+    if (!page) return;
+
+    if (position === 'into') notesExpanded.add(targetId);
+    _insertIntoTree(page, targetId, position, notesState.pages);
+    scheduleSaveNotes();
+    renderNotesTree();
+  });
+}
+
 // ---- DOMContentLoaded wiring ----
 document.addEventListener('DOMContentLoaded', () => {
   initNotesDropZone();
+  _initTreeDragDrop();
+  initSidebarResize();
   document.getElementById('notesToggleBtn')?.addEventListener('click', toggleNotesSidebar);
   document.getElementById('notesAddRootBtn')?.addEventListener('click', () => addNotePage(null));
 
   document.getElementById('noteToggleLink')        ?.addEventListener('click', () => toggleNoteSection('noteLinkSection',        'noteToggleLink'));
   document.getElementById('noteToggleLinkedCards') ?.addEventListener('click', () => toggleNoteSection('noteLinkedCardsSection', 'noteToggleLinkedCards'));
   document.getElementById('noteToggleAttachments') ?.addEventListener('click', () => toggleNoteSection('noteAttachmentsSection', 'noteToggleAttachments'));
-  document.getElementById('notesExportBtn')?.addEventListener('click', () => {
-    if (API_BASE) window.open(`${API_BASE}/notes/export`, '_blank');
+  document.getElementById('notesExportBtn')?.addEventListener('click', async () => {
+    if (!API_BASE) return;
+    const r = await fetch(`${API_BASE}/notes/export`);
+    if (!r.ok) { console.error('Export failed', r.status); return; }
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `notes-${BOARD_NAME}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
   });
 
   // Attachment upload

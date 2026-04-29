@@ -1,0 +1,174 @@
+/* ---- Markdown Preview Styles ---- */
+/* Applied to .card-desc-preview (card modal + note modal) */
+
+.card-desc-preview {
+  position: relative;
+  background: transparent;
+}
+
+.card-desc-preview:hover {
+  background: var(--accent-glow);
+  border-color: var(--text-muted);
+}
+
+/* Paragraphs */
+.card-desc-preview p { margin: 6px 0 14px; }
+.card-desc-preview p:last-child { margin-bottom: 6px; }
+
+/* Headings — 5px top margin, none for the very first element */
+.card-desc-preview h1,
+.card-desc-preview h2,
+.card-desc-preview h3 {
+  font-family: 'Syne', sans-serif;
+  margin: 5px 0 4px;
+}
+.card-desc-preview h1:first-child,
+.card-desc-preview h2:first-child,
+.card-desc-preview h3:first-child { margin-top: 0; }
+.card-desc-preview h1 { font-size: 1.35rem; font-weight: 700; }
+
+/* Lists */
+.card-desc-preview ul,
+.card-desc-preview ol { margin: 4px 0; padding-left: 20px; }
+.card-desc-preview li { margin: 2px 0; }
+
+/* Task list — remove bullets on the ul so markers are never generated */
+.card-desc-preview ul:has(> li > input[type="checkbox"]) {
+  list-style: none;
+  padding-left: 20px;
+}
+
+/* Belt-and-suspenders: also suppress at li and ::marker level */
+.card-desc-preview .task-list-item,
+.card-desc-preview li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 5px;
+}
+.card-desc-preview li:has(> input[type="checkbox"])::marker,
+.card-desc-preview .task-list-item::marker { content: none; }
+
+/* Nested lists inside a task item drop to the next line */
+.card-desc-preview .task-list-item > ul,
+.card-desc-preview .task-list-item > ol,
+.card-desc-preview li:has(> input[type="checkbox"]) > ul,
+.card-desc-preview li:has(> input[type="checkbox"]) > ol {
+  flex: 0 0 100%;
+  margin: 2px 0 0;
+}
+
+.card-desc-preview input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* Inline code */
+.card-desc-preview code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.8rem;
+}
+
+/* Code blocks — auto line break, position:relative for copy button */
+.card-desc-preview pre {
+  position: relative;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.card-desc-preview pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  white-space: inherit;
+}
+
+/* Images */
+.card-desc-preview img { max-width: 100%; height: auto; }
+
+/* Links */
+.card-desc-preview a { color: var(--accent); }
+
+/* Bold */
+.card-desc-preview strong { color: var(--text); }
+
+/* Blockquote — purple */
+.card-desc-preview blockquote {
+  border-left: 3px solid #a78bfa;
+  margin: 6px 0;
+  padding-left: 10px;
+  color: #a78bfa;
+}
+
+/* Horizontal rule — 6px extra margin */
+.card-desc-preview hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+
+/* Tables */
+.card-desc-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 6px 0;
+  font-size: 0.85rem;
+}
+.card-desc-preview th,
+.card-desc-preview td {
+  border: 1px solid #888;
+  padding: 3px 5px;
+  text-align: left;
+}
+
+/* Highlight mark (Ctrl+M) */
+.card-desc-preview mark {
+  background: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Copy code / copy description buttons */
+.md-copy-btn,
+.md-copy-all-btn {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  line-height: 1.4;
+  z-index: 2;
+}
+
+.card-desc-preview pre:hover .md-copy-btn { opacity: 1; }
+.card-desc-preview:hover .md-copy-all-btn { opacity: 1; }
+
+.md-copy-btn:hover,
+.md-copy-all-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

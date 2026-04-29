@@ -4,7 +4,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 10px 10px 14px;
-  cursor: grab;
+  cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s, background 0.15s;
   position: relative;
   display: flex;
@@ -70,45 +70,13 @@
   min-width: 0;
 }
 
-/* Card ⋮ button */
-.card-more-btn {
-  flex-shrink: 0;
-  align-self: center;
-  width: 28px;
-  height: 28px;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-  border-radius: 5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
-  touch-action: manipulation;
-}
-.card:hover .card-more-btn  { opacity: 0.55; }
-.card-more-btn:hover         { opacity: 1 !important; background: var(--surface); }
-@media (hover: none) {
-  .card-more-btn             { opacity: 0.45; }
-}
-
 .card-text {
   width: 100%;
   font-size: 0.8rem;
   line-height: 1.5;
   color: var(--text);
-  outline: none;
-  background: none;
-  border: none;
-  resize: none;
-  overflow: hidden;
   font-family: system-ui, sans-serif;
-  cursor: text;
+  word-break: break-word;
 }
 
 .card-meta {
@@ -140,6 +108,15 @@
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-right: 4px;
+}
+
+.card-attach-badge,
+.card-note-badge {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .card-link-icon {

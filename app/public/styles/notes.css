@@ -16,13 +16,32 @@
   border-right: 1px solid transparent;
   background: var(--surface);
   flex-shrink: 0;
+  position: relative;
   transition: width 0.22s ease, border-color 0.22s ease, min-width 0.22s ease;
 }
 
 .notes-sidebar--open {
-  width: 230px;
-  min-width: 230px;
   border-right-color: var(--border);
+}
+
+.notes-sidebar--resizing {
+  transition: none !important;
+  user-select: none;
+}
+
+.notes-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+.notes-sidebar-resizer:hover,
+.notes-sidebar--resizing .notes-sidebar-resizer {
+  background: var(--accent);
+  opacity: 0.25;
 }
 
 .notes-sidebar-header {
@@ -87,10 +106,20 @@
 
 .notes-tree-item:hover { background: var(--surface2); }
 .notes-tree-item:hover .notes-item-btns { opacity: 1; }
-.notes-tree-item--drag-over {
+.notes-tree-item--drag-over,
+.notes-tree-item--drop-into {
   background: var(--accent-glow);
   outline: 1px solid var(--accent);
   outline-offset: -1px;
+}
+.notes-tree-item--drop-before {
+  border-top: 2px solid var(--accent);
+}
+.notes-tree-item--drop-after {
+  border-bottom: 2px solid var(--accent);
+}
+.notes-tree-item--dragging {
+  opacity: 0.4;
 }
 
 .notes-toggle-btn {
@@ -390,10 +419,7 @@
   .note-modal {
     width: calc(100vw - 8px);
   }
-  .notes-sidebar--open {
-    width: 190px;
-    min-width: 190px;
-  }
+
   .note-linked-cards-list {
     grid-template-columns: repeat(2, 1fr);
   }

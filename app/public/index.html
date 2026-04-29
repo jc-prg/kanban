@@ -72,6 +72,7 @@
 
 <div class="board-area">
   <div id="notesSidebar" class="notes-sidebar">
+    <div class="notes-sidebar-resizer" id="notesSidebarResizer"></div>
     <div class="notes-sidebar-header">
       <span class="notes-sidebar-label">Notes</span>
       <button class="notes-sidebar-add-btn" id="notesExportBtn" title="Export notes as ZIP">↓</button>
@@ -307,6 +308,16 @@
   </div>
 </div>
 
+<div id="statsBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal card-info-modal">
+    <h2>Statistics</h2>
+    <div id="statsContent" class="card-info-content"></div>
+    <div class="modal-actions">
+      <button class="btn btn-accent" id="statsCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="settingsBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal settings-modal">
     <h2 id="settingsTitle">Settings</h2>
@@ -377,6 +388,7 @@
       <div class="settings-section-title">Export / Import</div>
       <button class="btn" id="boardExportBtn">Export JSON</button>
       <button class="btn" id="boardImportBtn">Import JSON…</button>
+      <button class="btn" id="settingsNotesExportBtn">Export Notes ZIP</button>
     </div>
     <div class="settings-section" id="archiveSection" style="display:none">
       <div class="settings-section-title">Visibility<span class="settings-save-indicator" id="archiveSaveIndicator"></span></div>

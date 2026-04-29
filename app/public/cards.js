@@ -147,6 +147,17 @@ document.addEventListener('DOMContentLoaded', () => {
 // ---- Card attachment constants & helpers ----
 const CARD_ATTACH_API = API_BASE ? `${API_BASE}/cards/attachments` : null;
 
+let cardAttachSet = new Set();
+
+async function loadCardAttachSet() {
+  if (!CARD_ATTACH_API) return;
+  try {
+    const r = await fetch(CARD_ATTACH_API);
+    cardAttachSet = new Set(r.ok ? await r.json() : []);
+  } catch { cardAttachSet = new Set(); }
+  render();
+}
+
 function _fmtSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -157,7 +168,14 @@ function _attachType(name) {
   const ext = name.split('.').pop().toLowerCase();
   if (['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext)) return 'image';
   if (ext === 'pdf') return 'pdf';
+  if (['html','htm'].includes(ext)) return 'html';
   return 'other';
+}
+
+async function _openInNewTab(url) {
+  const r = await fetch(url);
+  if (!r.ok) return;
+  window.open(URL.createObjectURL(await r.blob()), '_blank');
 }
 
 // ---- Card attachment functions ----
@@ -174,6 +192,9 @@ function renderCardAttachments(cardId, files) {
   const list = document.getElementById('cardAttachList');
   if (!list) return;
   list.innerHTML = '';
+  const hadAttach = cardAttachSet.has(cardId);
+  if (files.length) cardAttachSet.add(cardId); else cardAttachSet.delete(cardId);
+  if (hadAttach !== cardAttachSet.has(cardId)) render();
   if (!files.length) {
     const p = document.createElement('p');
     p.className = 'note-attach-empty';
@@ -186,19 +207,22 @@ function renderCardAttachments(cardId, files) {
     const url = `${CARD_ATTACH_API}/${cardId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = ft === 'image' ? '🖼' : ft === 'pdf' ? '📄' : '📎';
+    const icon = ft === 'image' ? '🖼' : ft === 'pdf' ? '📄' : ft === 'html' ? '🌐' : '📎';
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
       `<span class="note-attach-size">${_fmtSize(f.size)}</span>` +
       `<div class="note-attach-btns">` +
-        (ft !== 'other' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">⛶</button>` : '') +
+        (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">⛶</button>` : '') +
+        (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">⛶</button>` : '') +
         `<button class="note-attach-btn" data-act="insert"   title="Insert in description">⌅</button>` +
         `<button class="note-attach-btn" data-act="download" title="Download">↓</button>` +
         `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">✕</button>` +
       `</div>`;
-    if (ft !== 'other')
+    if (ft === 'image' || ft === 'pdf')
       item.querySelector('[data-act="view"]').addEventListener('click',     () => openAttachmentViewer(url, f.name, ft));
+    else if (ft === 'html')
+      item.querySelector('[data-act="view"]').addEventListener('click',     () => _openInNewTab(url));
     item.querySelector('[data-act="insert"]').addEventListener('click',     () => _insertCardAttachMd(f.name, ft));
     item.querySelector('[data-act="download"]').addEventListener('click',   () => _downloadAttachment(url, f.name));
     item.querySelector('[data-act="delete"]').addEventListener('click', async () => {
@@ -215,7 +239,18 @@ function _appendAttachMd(taId, name) {
   const md = ft === 'image' ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
   const ta = document.getElementById(taId);
   if (!ta) return;
-  ta.value += (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + md;
+  if (ta.value) {
+    const sep = ta.value.endsWith('\n\n') ? '' : ta.value.endsWith('\n') ? '\n' : '\n\n';
+    ta.value += sep + md;
+  } else {
+    ta.value = md;
+  }
+  const previewId = taId === 'cardDesc' ? 'cardDescPreview' : 'notePageDescPreview';
+  const preview = document.getElementById(previewId);
+  if (preview && preview.style.display !== 'none') {
+    if (taId === 'cardDesc') showDescPreview();
+    else if (typeof showNoteDescPreview === 'function') showNoteDescPreview();
+  }
 }
 
 async function _handleCardAttachUpload(cardId, fileList) {
@@ -254,7 +289,10 @@ async function resolveCardAttachments(container) {
     const url = `${base}/${encodeURIComponent(fn)}`;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
-    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _downloadAttachment(url, fn); });
+    if (_attachType(fn) === 'html')
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _openInNewTab(url); });
+    else
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _downloadAttachment(url, fn); });
   }
 }
 

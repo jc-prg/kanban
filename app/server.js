@@ -569,6 +569,24 @@ function safeCardId(id) {
   return typeof id === 'string' && /^id-[a-z0-9]{1,10}$/.test(id);
 }
 
+// Returns all card IDs that have at least one attachment file.
+app.get('/api/:board/cards/attachments', (req, res) => {
+  const { board } = req.params;
+  if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
+  const boardDir = path.join(ATTACHMENTS_DIR, board);
+  if (!fs.existsSync(boardDir)) return res.json([]);
+  try {
+    const ids = fs.readdirSync(boardDir).filter(name => {
+      if (!safeCardId(name)) return false;
+      const dir = path.join(boardDir, name);
+      try {
+        return fs.statSync(dir).isDirectory() && fs.readdirSync(dir).some(f => !f.startsWith('.'));
+      } catch { return false; }
+    });
+    res.json(ids);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 const uploadCard = multer({
   storage: multer.diskStorage({
     destination(req, file, cb) {
@@ -626,6 +644,27 @@ app.delete('/api/:board/cards/attachments/:cardId/:filename', (req, res) => {
     return res.status(400).json({ error: 'Invalid request' });
   try { fs.unlinkSync(path.join(ATTACHMENTS_DIR, board, cardId, filename)); } catch {}
   res.json({ ok: true });
+});
+
+app.get('/api/:board/attachment-stats', (req, res) => {
+  const { board } = req.params;
+  if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
+  const boardDir = path.join(ATTACHMENTS_DIR, board);
+  if (!fs.existsSync(boardDir)) return res.json({ count: 0, size: 0 });
+  let count = 0, size = 0;
+  try {
+    for (const sub of fs.readdirSync(boardDir)) {
+      const subDir = path.join(boardDir, sub);
+      try {
+        if (!fs.statSync(subDir).isDirectory()) continue;
+        for (const file of fs.readdirSync(subDir).filter(n => !n.startsWith('.'))) {
+          count++;
+          size += fs.statSync(path.join(subDir, file)).size;
+        }
+      } catch {}
+    }
+    res.json({ count, size });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/:board/notes/export', withExistingBoard(async (req, res, db) => {

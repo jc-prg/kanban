@@ -212,6 +212,44 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     });
   });
 
+  window.openStatsDialog = async function () {
+    const el = document.getElementById('statsContent');
+    el.innerHTML = '<span class="card-info-loading">Loading…</span>';
+    document.getElementById('statsBackdrop').style.display = 'flex';
+
+    const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.length, 0);
+
+    function countPages(pages) {
+      return (pages || []).reduce((s, p) => s + 1 + countPages(p.children), 0);
+    }
+    const totalPages = countPages(typeof notesState !== 'undefined' ? notesState.pages : []);
+
+    let attachCount = 0, attachSize = 0;
+    if (API_BASE) {
+      try {
+        const r = await fetch(`${API_BASE}/attachment-stats`);
+        if (r.ok) ({ count: attachCount, size: attachSize } = await r.json());
+      } catch {}
+    }
+
+    function fmtSize(b) {
+      if (b < 1024) return b + ' B';
+      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+      return (b / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    const rows = [
+      ['Board',       BOARD_NAME || '—'],
+      ['Cards',       totalCards],
+      ['Note pages',  totalPages],
+      ['Attachments', attachCount],
+      ['Total size',  fmtSize(attachSize)],
+    ];
+    el.innerHTML = `<table class="card-info-table"><tbody>${
+      rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
+    }</tbody></table>`;
+  };
+
   function openSettings() {
     if (BOARD_NAME) {
       document.getElementById('boardDescription').value = state.settings?.description || '';
@@ -389,6 +427,18 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       input.click();
     });
 
+    document.getElementById('settingsNotesExportBtn').addEventListener('click', async () => {
+      if (!API_BASE) return;
+      const r = await fetch(`${API_BASE}/notes/export`);
+      if (!r.ok) { console.error('Export failed', r.status); return; }
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `notes-${BOARD_NAME}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
     function renderTrackedCols() {
       const list    = document.getElementById('trackedColsList');
       const tracked = new Set(state.settings?.trackedColumns || []);
@@ -465,6 +515,7 @@ async function afterAuth() {
     document.getElementById('notesToggleBtn').style.display = '';
     await load();
     loadNotes();
+    loadCardAttachSet();
   } else initOverview();
 }
 
