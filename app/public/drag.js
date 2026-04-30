@@ -5,6 +5,7 @@ let touchDrag    = null;
 let touchPending = null;
 let touchLongPressTimer = null;
 let lastInputWasTouch   = false;
+let cardTapState        = null; // { cardId, colId, card, x, y, timer }
 
 document.addEventListener('touchstart', () => { lastInputWasTouch = true; },  { passive: true });
 document.addEventListener('mousedown',  () => { lastInputWasTouch = false; }, { passive: true });
@@ -109,7 +110,10 @@ function onDrop(e, toColId) {
   const cardsEl = document.querySelector(`[data-col-id="${toColId}"] .cards`);
   toCol.cards.splice(getDropIndex(cardsEl, e.clientY), 0, card);
 
-  if (fromColId !== toColId) recordMove(card, fromCol.title, toCol.title);
+  if (fromColId !== toColId) {
+    recordMove(card, fromCol.title, toCol.title);
+    applyColumnActions(card, toCol);
+  }
 
   render();
   schedulesSave();
@@ -225,7 +229,10 @@ document.addEventListener('touchend', e => {
       if (fromCol && toCol && card) {
         fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
         toCol.cards.splice(getDropIndex(colEl.querySelector('.cards'), t.clientY), 0, card);
-        if (fromColId !== toColId) recordMove(card, fromCol.title, toCol.title);
+        if (fromColId !== toColId) {
+          recordMove(card, fromCol.title, toCol.title);
+          applyColumnActions(card, toCol);
+        }
         render();
         schedulesSave();
       }

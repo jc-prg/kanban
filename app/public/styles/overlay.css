@@ -70,6 +70,80 @@
   padding: 6px 12px;
 }
 
+.ctx-actions-row {
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 12px 8px;
+}
+
+.ctx-action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.1s;
+}
+
+.ctx-action-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.ctx-action-item.active { color: var(--text); }
+
+/* Done toggle in edit modal */
+.cardtext-wrap {
+  position: relative;
+}
+
+.card-done-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.card-done-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.card-done-btn:hover .card-done-circle {
+  border-color: var(--text-muted);
+}
+
+.card-done-btn.done .card-done-circle {
+  border-color: #10b981;
+  background: #10b981;
+}
+
+.card-done-btn.done .card-done-circle::after {
+  content: '✓';
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* Modal backdrop */
 .modal-backdrop {
   position: fixed;
@@ -452,7 +526,9 @@
 .prompts-save-msg-ok    { color: #10b981; }
 .prompts-save-msg-error { color: var(--danger); }
 
-/* Card info dialog */
+/* Card info dialog — above the card edit modal */
+#cardInfoBackdrop { z-index: 150; }
+
 .card-info-modal {
   width: 480px;
   max-width: calc(100vw - 24px);

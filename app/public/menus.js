@@ -98,7 +98,7 @@ function showColContextMenu(x, y, colId) {
   const collapsed = colCollapsed.has(colId);
   document.getElementById('colCtxToggleContent').textContent = collapsed ? '▸  Show content' : '▾  Hide content';
 
-  const hideWhenCollapsed = display => ['colCtxColor','colCtxClear','colCtxDelete'].forEach(id =>
+  const hideWhenCollapsed = display => ['colCtxColor','colCtxActions','colCtxClear','colCtxDelete'].forEach(id =>
     document.getElementById(id).style.display = display);
   document.querySelector('#colContextMenu .ctx-submenu-trigger').style.display = collapsed ? 'none' : '';
   hideWhenCollapsed(collapsed ? 'none' : '');
@@ -133,6 +133,7 @@ function showColContextMenu(x, y, colId) {
 function hideColContextMenu() {
   document.getElementById('colContextMenu').style.display = 'none';
   document.getElementById('colCtxColorRow').style.display = 'none';
+  document.getElementById('colCtxActionsRow').style.display = 'none';
   ctxHeaderColId = null;
 }
 
@@ -164,6 +165,59 @@ document.getElementById('colCtxColor').addEventListener('click', e => {
       hideColContextMenu();
     });
   });
+  row.style.display = 'flex';
+});
+
+const COL_ACTIONS = [
+  { id: 'markDone',     label: 'Mark as done' },
+  { id: 'markUndone',   label: 'Mark as undone' },
+  { id: 'setStartDate', label: 'Set start date → today' },
+  { id: 'setEndDate',   label: 'Set end date → today' },
+];
+
+document.getElementById('colCtxActions').addEventListener('click', e => {
+  e.stopPropagation();
+  const row = document.getElementById('colCtxActionsRow');
+  if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+
+  const colId = ctxHeaderColId; // capture before any click handler can null it
+  const col = state.columns.find(c => c.id === colId);
+  const active = col?.actions || [];
+
+  row.innerHTML = COL_ACTIONS.map(a =>
+    `<label class="ctx-action-item${active.includes(a.id) ? ' active' : ''}">
+      <input type="checkbox" data-action="${escHtml(a.id)}"${active.includes(a.id) ? ' checked' : ''}>
+      <span>${escHtml(a.label)}</span>
+    </label>`
+  ).join('');
+
+  // prevent label clicks from bubbling to document and closing the menu
+  row.onclick = e => e.stopPropagation();
+
+  row.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const col = state.columns.find(c => c.id === colId);
+      if (!col) return;
+      col.actions = col.actions || [];
+      const action = cb.dataset.action;
+      if (cb.checked) {
+        const opposite = action === 'markDone' ? 'markUndone' : action === 'markUndone' ? 'markDone' : null;
+        if (opposite) {
+          col.actions = col.actions.filter(a => a !== opposite);
+          const oppCb = row.querySelector(`[data-action="${opposite}"]`);
+          if (oppCb) { oppCb.checked = false; oppCb.closest('.ctx-action-item').classList.remove('active'); }
+        }
+        if (!col.actions.includes(action)) col.actions.push(action);
+        cb.closest('.ctx-action-item').classList.add('active');
+      } else {
+        col.actions = col.actions.filter(a => a !== action);
+        cb.closest('.ctx-action-item').classList.remove('active');
+      }
+      if (!col.actions.length) delete col.actions;
+      schedulesSave();
+    });
+  });
+
   row.style.display = 'flex';
 });
 

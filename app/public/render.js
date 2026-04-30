@@ -260,6 +260,7 @@ function render() {
 
       cardEl.addEventListener('click', e => {
         if (e.target.closest('.card-link-badge')) return;
+        if (lastInputWasTouch) return;
         openEditModal(col.id, card);
       });
 
@@ -295,7 +296,24 @@ function render() {
         touchLongPressTimer = null;
         touchPending = null;
         e.preventDefault();
-        openEditModal(col.id, card);
+
+        const t = e.changedTouches[0];
+        if (cardTapState && cardTapState.cardId === card.id) {
+          // Second tap — double-tap: show context menu
+          clearTimeout(cardTapState.timer);
+          cardTapState = null;
+          showContextMenu(t.clientX, t.clientY, col.id, card);
+        } else {
+          // First tap — wait to confirm it's not a double-tap
+          clearTimeout(cardTapState?.timer);
+          cardTapState = {
+            cardId: card.id,
+            timer: setTimeout(() => {
+              cardTapState = null;
+              openEditModal(col.id, card);
+            }, 280),
+          };
+        }
       }, { passive: false });
 
       const ind = document.createElement('div');

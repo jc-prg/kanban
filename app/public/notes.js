@@ -13,6 +13,7 @@ async function loadNotes() {
     else { notesState = await r.json(); if (!notesState.pages) notesState.pages = []; }
   } catch (e) { notesState = { pages: [] }; }
   renderNotesTree();
+  restoreNotesSidebar();
   render();
 }
 
@@ -80,6 +81,7 @@ function deleteNotePage(id) {
 // ---- Notes Sidebar ----
 const notesExpanded = new Set();
 let notesSidebarOpen = false;
+let notesFontSize = 0; // 0=sm 1=md 2=lg
 const SIDEBAR_MIN = 230;
 const SIDEBAR_MAX = 460;
 let sidebarWidth = SIDEBAR_MIN;
@@ -87,6 +89,37 @@ let sidebarWidth = SIDEBAR_MIN;
 function _applySidebarWidth(sidebar, w) {
   sidebar.style.width    = w + 'px';
   sidebar.style.minWidth = w + 'px';
+}
+
+function _saveNotesSidebarSettings() {
+  if (!state) return;
+  (state.settings ??= {}).notesSidebarOpen  = notesSidebarOpen;
+  (state.settings ??= {}).notesSidebarWidth = sidebarWidth;
+  schedulesSave();
+}
+
+function _applyNotesFontSize() {
+  const sidebar = document.getElementById('notesSidebar');
+  if (!sidebar) return;
+  sidebar.classList.toggle('notes-sidebar--font-md', notesFontSize === 1);
+  sidebar.classList.toggle('notes-sidebar--font-lg', notesFontSize === 2);
+}
+
+function toggleNotesFontSize() {
+  notesFontSize = (notesFontSize + 1) % 3;
+  _applyNotesFontSize();
+  (state.settings ??= {}).notesFontSize = notesFontSize;
+  schedulesSave();
+}
+
+function restoreNotesSidebar() {
+  const w    = state.settings?.notesSidebarWidth;
+  const open = state.settings?.notesSidebarOpen;
+  if (w >= SIDEBAR_MIN && w <= SIDEBAR_MAX) sidebarWidth = w;
+  if (open && !notesSidebarOpen) toggleNotesSidebar();
+  const fs = state.settings?.notesFontSize;
+  if (typeof fs === 'number' && fs >= 0 && fs <= 2) notesFontSize = fs;
+  _applyNotesFontSize();
 }
 
 function toggleNotesSidebar() {
@@ -98,6 +131,7 @@ function toggleNotesSidebar() {
   }
   sidebar?.classList.toggle('notes-sidebar--open', notesSidebarOpen);
   document.getElementById('notesToggleBtn')?.classList.toggle('open', notesSidebarOpen);
+  _saveNotesSidebarSettings();
 }
 
 function initSidebarResize() {
@@ -132,6 +166,7 @@ function initSidebarResize() {
         sidebarWidth = Math.min(Math.max(raw, SIDEBAR_MIN), SIDEBAR_MAX);
         _applySidebarWidth(sidebar, sidebarWidth);
       }
+      _saveNotesSidebarSettings();
     }
 
     document.addEventListener('mousemove', onMove);
@@ -166,9 +201,20 @@ function renderNotesList(pages, container, depth) {
     item.draggable = true;
     item.style.paddingLeft = (depth * 14 + 6) + 'px';
 
+    const hasLink        = !!page.link?.trim();
+    const hasCards       = page.linkedCards?.length > 0;
+    const hasAttachments = !!page.hasAttachments;
+    const indicators =
+      (hasLink        ? `<span class="notes-item-indicator" title="Has link"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 7a2.8 2.8 0 0 0 4 .4l1.4-1.4a2.8 2.8 0 0 0-4-4L5.1 3.3"/><path d="M7 5a2.8 2.8 0 0 0-4-.4L1.6 6a2.8 2.8 0 0 0 4 4L6.9 8.7"/></svg></span>` : '') +
+      (hasCards       ? `<span class="notes-item-indicator" title="${page.linkedCards.length} linked card(s)"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="3.7" width="7" height="5" rx="1"/><path d="M3.7 3V2.3A1 1 0 0 1 4.7 1.3h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H9.7"/></svg></span>` : '') +
+      (hasAttachments ? `<span class="notes-item-indicator" title="Has attachments"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"/></svg></span>` : '');
+
     item.innerHTML =
       `<button class="notes-toggle-btn${hasChildren ? '' : ' notes-toggle-btn--hidden'}" title="${isExpanded ? 'Collapse' : 'Expand'}">${isExpanded ? '▾' : '▸'}</button>` +
-      `<span class="notes-item-title${depth === 0 ? ' notes-item-title--root' : ''}">${escHtml(page.title)}</span>` +
+      `<span class="notes-item-title-wrap">` +
+        `<span class="notes-item-title${depth === 0 ? ' notes-item-title--root' : ''}">${escHtml(page.title)}</span>` +
+        (indicators ? `<span class="notes-item-indicators">${indicators}</span>` : '') +
+      `</span>` +
       `<div class="notes-item-btns">` +
         (canHaveChildren ? `<button class="notes-item-btn notes-item-btn--add" title="Add subpage">+</button>` : '') +
         `<button class="notes-item-btn notes-item-btn--del" title="Delete page">✕</button>` +
@@ -360,7 +406,7 @@ function renderLinkedCards(ids) {
     mini.innerHTML =
       `<div class="note-mini-card-body">` +
         (col ? `<span class="note-mini-card-col">${escHtml(col.title)}</span>` : '') +
-        `<span class="note-mini-card-text${isGone ? ' note-mini-card-text--gone' : ''}">${escHtml(text)}</span>` +
+        `<span class="note-mini-card-text${isGone ? ' note-mini-card-text--gone' : ''}" title="${escHtml(text)}">${escHtml(text)}</span>` +
       `</div>` +
       `<button class="note-mini-card-remove" title="Unlink card">✕</button>`;
 
@@ -573,6 +619,13 @@ function renderAttachments(pageId, files) {
   const list = document.getElementById('noteAttachList');
   if (!list) return;
   list.innerHTML = '';
+
+  const page = findNotePage(pageId, notesState.pages);
+  if (page && !!page.hasAttachments !== (files.length > 0)) {
+    page.hasAttachments = files.length > 0;
+    scheduleSaveNotes();
+    renderNotesTree();
+  }
   if (!files.length) {
     const p = document.createElement('p');
     p.className = 'note-attach-empty';
@@ -841,22 +894,11 @@ document.addEventListener('DOMContentLoaded', () => {
   initSidebarResize();
   document.getElementById('notesToggleBtn')?.addEventListener('click', toggleNotesSidebar);
   document.getElementById('notesAddRootBtn')?.addEventListener('click', () => addNotePage(null));
+  document.getElementById('notesSidebarFontBtn')?.addEventListener('click', toggleNotesFontSize);
 
   document.getElementById('noteToggleLink')        ?.addEventListener('click', () => toggleNoteSection('noteLinkSection',        'noteToggleLink'));
   document.getElementById('noteToggleLinkedCards') ?.addEventListener('click', () => toggleNoteSection('noteLinkedCardsSection', 'noteToggleLinkedCards'));
   document.getElementById('noteToggleAttachments') ?.addEventListener('click', () => toggleNoteSection('noteAttachmentsSection', 'noteToggleAttachments'));
-  document.getElementById('notesExportBtn')?.addEventListener('click', async () => {
-    if (!API_BASE) return;
-    const r = await fetch(`${API_BASE}/notes/export`);
-    if (!r.ok) { console.error('Export failed', r.status); return; }
-    const url = URL.createObjectURL(await r.blob());
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `notes-${BOARD_NAME}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-
   // Attachment upload
   document.getElementById('noteAttachInput')?.addEventListener('change', e => {
     if (noteModalPageId) _handleAttachUpload(noteModalPageId, e.target.files);

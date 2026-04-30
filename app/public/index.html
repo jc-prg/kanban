@@ -75,8 +75,8 @@
     <div class="notes-sidebar-resizer" id="notesSidebarResizer"></div>
     <div class="notes-sidebar-header">
       <span class="notes-sidebar-label">Notes</span>
-      <button class="notes-sidebar-add-btn" id="notesExportBtn" title="Export notes as ZIP">↓</button>
-      <button class="notes-sidebar-add-btn" id="notesAddRootBtn" title="Add page">+</button>
+      <button class="notes-sidebar-add-btn notes-font-btn" id="notesSidebarFontBtn" title="Change font size">A</button>
+<button class="notes-sidebar-add-btn" id="notesAddRootBtn" title="Add page">+</button>
     </div>
     <div class="notes-tree-body" id="notesTreeBody"></div>
   </div>
@@ -89,6 +89,8 @@
   <button class="ctx-item" id="colCtxToggleContent">▾  Hide content</button>
   <button class="ctx-item" id="colCtxColor">◉  Change color</button>
   <div class="ctx-color-row" id="colCtxColorRow" style="display:none"></div>
+  <button class="ctx-item" id="colCtxActions">⚡  Column actions</button>
+  <div class="ctx-actions-row" id="colCtxActionsRow" style="display:none"></div>
   <div class="ctx-item ctx-submenu-trigger">
     <span>↪  Move all to</span>
     <span class="ctx-arrow">›</span>
@@ -123,7 +125,12 @@
       <div class="modal-col-main">
         <div class="modal-field">
           <label>Card</label>
-          <textarea id="cardText" rows="1" placeholder="What needs to be done?"></textarea>
+          <div class="cardtext-wrap">
+            <textarea id="cardText" rows="1" placeholder="What needs to be done?"></textarea>
+            <button type="button" id="cardDoneBtn" class="card-done-btn" onclick="toggleModalDone()" style="display:none">
+              <span class="card-done-circle"></span>
+            </button>
+          </div>
         </div>
         <div class="modal-field modal-field-desc">
           <label>Description</label>
@@ -141,11 +148,18 @@
         </div>
         <div class="card-section-header">Properties</div>
         <div class="card-section-toggles">
+          <button class="card-section-toggle" id="cardToggleNotePages" title="Note Pages" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg></button>
           <button class="card-section-toggle" id="cardToggleDate" title="Date"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="9.6" rx="1.3"/><line x1="0.7" y1="5" x2="11.3" y2="5"/><line x1="3.5" y1="0.7" x2="3.5" y2="3.3"/><line x1="8.5" y1="0.7" x2="8.5" y2="3.3"/></svg></button>
           <button class="card-section-toggle" id="cardTogglePriority" title="Priority"><svg viewBox="0 0 11 13" width="11" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" y1="0.7" x2="2" y2="12.3"/><path d="M2 1.5h7.5l-2.2 2.8 2.2 2.7H2"/></svg></button>
           <button class="card-section-toggle" id="cardToggleColor" title="Color"><svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="2.2"/><circle cx="9" cy="3" r="2.2"/><circle cx="3" cy="9" r="2.2"/><circle cx="9" cy="9" r="2.2"/></svg></button>
-          <button class="card-section-toggle" id="cardToggleNotePages" title="Note Pages" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg></button>
           <button class="card-section-toggle" id="cardToggleAttachments" title="Attachments" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"/></svg></button>
+          <button class="card-section-toggle" id="cardInfoBtn" title="Card info" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><line x1="6" y1="5.5" x2="6" y2="8.5"/><circle cx="6" cy="3.5" r="0.5" fill="currentColor" stroke="none"/></svg></button>
+        </div>
+        <div id="cardNotePagesSection" style="display:none">
+          <div class="modal-field">
+            <label>Note Pages</label>
+            <div id="cardLinkedPagesList" class="card-linked-pages-list"></div>
+          </div>
         </div>
         <div id="cardDateSection" style="display:none">
           <div class="date-row">
@@ -169,12 +183,6 @@
           <div class="modal-field">
             <label>Color</label>
             <div class="color-row" id="colorRow"></div>
-          </div>
-        </div>
-        <div id="cardNotePagesSection" style="display:none">
-          <div class="modal-field">
-            <label>Note Pages</label>
-            <div id="cardLinkedPagesList" class="card-linked-pages-list"></div>
           </div>
         </div>
         <div id="cardAttachmentsSection" style="display:none">

@@ -89,6 +89,12 @@ function showDescEditor() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cardText').addEventListener('input', e => autoResizeTitle(e.target));
 
+  document.getElementById('cardInfoBtn')?.addEventListener('click', () => {
+    const col = state.columns.find(c => c.id === modalColId);
+    const card = col?.cards.find(c => c.id === editCardId);
+    if (card) openCardInfo(card);
+  });
+
   document.getElementById('cardToggleDate')       ?.addEventListener('click', () => toggleCardSection('cardDateSection',        'cardToggleDate'));
   document.getElementById('cardTogglePriority')   ?.addEventListener('click', () => toggleCardSection('cardPrioritySection',   'cardTogglePriority'));
   document.getElementById('cardToggleColor')      ?.addEventListener('click', () => toggleCardSection('cardColorSection',      'cardToggleColor'));
@@ -302,6 +308,7 @@ let modalMode        = 'add'; // 'add' | 'edit' | 'inbox'
 let editCardId       = null;
 let selectedColor    = COLORS[0];
 let selectedPriority = 0;
+let modalDone        = false;
 let modalOriginalData = null;
 
 function captureModalOriginal() {
@@ -313,6 +320,7 @@ function captureModalOriginal() {
     end:      document.getElementById('cardEnd').value,
     priority: selectedPriority,
     color:    selectedColor,
+    done:     modalDone,
   };
 }
 
@@ -324,7 +332,17 @@ function hasModalChanges() {
          document.getElementById('cardLink').value  !== o.link  ||
          document.getElementById('cardStart').value !== o.start ||
          document.getElementById('cardEnd').value   !== o.end   ||
-         selectedPriority !== o.priority || selectedColor !== o.color;
+         selectedPriority !== o.priority || selectedColor !== o.color ||
+         modalDone !== o.done;
+}
+
+function setModalDone(val) {
+  modalDone = !!val;
+  document.getElementById('cardDoneBtn').classList.toggle('done', modalDone);
+}
+
+function toggleModalDone() {
+  setModalDone(!modalDone);
 }
 
 async function tryCloseModal() {
@@ -412,6 +430,8 @@ function openModal(colId) {
   document.getElementById('cardLink').value  = '';
   document.getElementById('cardStart').value = '';
   document.getElementById('cardEnd').value   = '';
+  document.getElementById('cardDoneBtn').style.display = 'none';
+  document.getElementById('cardInfoBtn').style.display  = 'none';
   _updateLinkBtn();
   showDescEditor();
   document.getElementById('modalTitle').textContent      = 'Add Card';
@@ -436,6 +456,9 @@ function openEditModal(colId, card) {
   document.getElementById('cardLink').value  = card.link        || '';
   document.getElementById('cardStart').value = card.startDate   || '';
   document.getElementById('cardEnd').value   = card.endDate     || '';
+  document.getElementById('cardDoneBtn').style.display  = '';
+  document.getElementById('cardInfoBtn').style.display  = '';
+  setModalDone(card.done || false);
   _updateLinkBtn();
   if (card.description) showDescPreview(); else showDescEditor();
   document.getElementById('modalTitle').textContent     = 'Edit Card';
@@ -477,6 +500,7 @@ function submitCard() {
     link:        document.getElementById('cardLink').value.trim()   || null,
     startDate:   document.getElementById('cardStart').value         || null,
     endDate:     document.getElementById('cardEnd').value           || null,
+    done:        modalMode === 'edit' ? modalDone : undefined,
   };
   if (modalMode === 'add') addCard(modalColId, data);
   else updateCardFull(modalColId, editCardId, data);
@@ -640,6 +664,7 @@ function saveCardInPlace() {
     link:        document.getElementById('cardLink').value.trim()   || null,
     startDate:   document.getElementById('cardStart').value         || null,
     endDate:     document.getElementById('cardEnd').value           || null,
+    done:        modalMode === 'edit' ? modalDone : undefined,
   };
   if (modalMode === 'edit') updateCardFull(modalColId, editCardId, data);
   else if (modalMode === 'add') addCard(modalColId, data);

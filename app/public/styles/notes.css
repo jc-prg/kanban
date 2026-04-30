@@ -139,8 +139,16 @@
 
 .notes-toggle-btn--hidden { opacity: 0; pointer-events: none; }
 
-.notes-item-title {
+.notes-item-title-wrap {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.notes-item-title {
   font-family: 'Syne', sans-serif;
   font-size: 0.76rem;
   color: var(--text);
@@ -150,10 +158,28 @@
   min-width: 0;
   padding: 2px 0;
   transition: color 0.12s;
+  flex-shrink: 1;
+  white-space: nowrap;
 }
 
 .notes-item-title:hover { color: var(--accent); }
 .notes-item-title--root { font-weight: 700; }
+
+.notes-item-indicators {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.45;
+}
+
+.notes-item-indicator {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.notes-tree-item:hover .notes-item-indicators { opacity: 0.7; }
 
 .notes-item-btns {
   display: flex;
@@ -177,6 +203,20 @@
 
 .notes-item-btn--add:hover { color: var(--accent); background: var(--accent-glow); }
 .notes-item-btn--del:hover { color: var(--danger); background: rgba(240,79,106,0.1); }
+
+/* ---- Sidebar font-size toggle button ---- */
+.notes-font-btn {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 0.72rem;
+  transition: color 0.12s, background 0.12s, font-size 0.15s;
+}
+.notes-sidebar--font-md .notes-font-btn { font-size: 0.88rem; }
+.notes-sidebar--font-lg .notes-font-btn { font-size: 1.05rem; }
+
+/* Font size overrides for sidebar tree titles */
+.notes-sidebar--font-md .notes-item-title { font-size: 0.9rem; }
+.notes-sidebar--font-lg .notes-item-title { font-size: 1.05rem; }
 
 /* ---- Note Edit Modal ---- */
 .note-modal {

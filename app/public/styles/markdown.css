@@ -31,6 +31,8 @@
 .card-desc-preview ul,
 .card-desc-preview ol { margin: 4px 0; padding-left: 20px; }
 .card-desc-preview li { margin: 2px 0; }
+.card-desc-preview li > ul,
+.card-desc-preview li > ol { margin-top: 0; }
 
 /* Task list — remove bullets on the ul so markers are never generated */
 .card-desc-preview ul:has(> li > input[type="checkbox"]) {

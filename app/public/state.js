@@ -220,6 +220,17 @@ function deleteCard(colId, cardId) {
   if (col) { col.cards = col.cards.filter(c => c.id !== cardId); render(); schedulesSave(); }
 }
 
+function applyColumnActions(card, col) {
+  if (!col.actions?.length) return;
+  const today = new Date().toISOString().slice(0, 10);
+  for (const action of col.actions) {
+    if (action === 'markDone')     card.done = true;
+    if (action === 'markUndone')   card.done = false;
+    if (action === 'setStartDate') card.startDate = today;
+    if (action === 'setEndDate')   card.endDate   = today;
+  }
+}
+
 function moveCardToColumn(fromColId, cardId, toColId) {
   const fromCol = state.columns.find(c => c.id === fromColId);
   const toCol   = state.columns.find(c => c.id === toColId);
@@ -227,6 +238,7 @@ function moveCardToColumn(fromColId, cardId, toColId) {
   const card = fromCol.cards.find(c => c.id === cardId);
   if (!card) return;
   recordMove(card, fromCol.title, toCol.title);
+  applyColumnActions(card, toCol);
   fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
   toCol.cards.unshift(card);
   render();
