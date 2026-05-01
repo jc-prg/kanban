@@ -471,11 +471,13 @@ function openEditModal(colId, card) {
   if (CARD_ATTACH_API) loadCardAttachments(card.id);
   captureModalOriginal();
   document.getElementById('modal').style.display = 'flex';
+  history.replaceState(null, '', '#card:' + card.id);
   const ct = document.getElementById('cardText');
   autoResizeTitle(ct);
 }
 
 function closeModal() {
+  if (location.hash.startsWith('#card:')) history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('modal').style.display = 'none';
   document.getElementById('modalBoardField').style.display    = 'none';
   document.getElementById('modalStatusMsg').style.display     = 'none';

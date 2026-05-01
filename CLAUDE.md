@@ -34,6 +34,8 @@ Single-page kanban board with a minimal three-layer design:
 | `column.css` | Column, column header, drag handle, collapsed group, col-btn, cards area, add-card/add-column buttons |
 | `card.css` | Card, card-body, more-btn, card-text, meta badges, link badge, drop indicator, load-more button |
 | `overlay.css` | Context menus, all modals & dialogs (add/edit card, login, confirm, prompts, card-info, settings), priority/color rows |
+| `notes.css` | Notes sidebar, resizer, tree/list, note modal |
+| `markdown.css` | Markdown preview pane (card modal + note modal) |
 
 ### JS (`app/public/`) — load order matters, no bundler
 
@@ -45,6 +47,7 @@ Single-page kanban board with a minimal three-layer design:
 | `render.js` | `escHtml`, `fmtDate`, `safeLink`, `getLinkBadgeHtml`, `render()` |
 | `menus.js` | Card context menu, column context menu, `moveAllCards`, header dropdown menu |
 | `settings.js` | Title char animation, remote polling, auth (`tryLogin`, `checkAuth`), prompts dialog, settings dialog, `afterAuth`, overview (`initOverview`, `renderBoardGrid`) |
+| `notes.js` | Notes sidebar state, load/save (`loadNotes`, `scheduleSaveNotes`), page CRUD (`addNotePage`, `deleteNotePage`), sidebar toggle/resize, note modal (`openNoteModal`, `submitNote`), linked-card creation |
 | `inbox.js` | Add-to-inbox modal (`openInboxModal`, `submitInboxCard`) used from the overview and board menu |
 | `search.js` | Find-card dialog (`openSearch`, `closeSearch`) — text (all-words, accent-folding), priority, date range, and column filters; results open the edit modal |
 | `init.js` | Entry point — calls `initTitleChars()` and `checkAuth()` |
@@ -68,7 +71,7 @@ All configuration is via `.env` (forwarded to both containers by `docker-compose
 | `COUCHDB_PASSWORD` | `kanban-pwd` | CouchDB admin password |
 | `COUCHDB_HOST` | `localhost` | CouchDB hostname (set to `couchdb` by compose) |
 | `COUCHDB_PORT` | `5984` | CouchDB port |
-| `BACKUP_DIR` | `data/` | Directory for JSON board backups |
+| `BACKUP_DIR` | `data/` | Directory for JSON backups (`kanban-<name>-board.json`, `kanban-<name>-notes.json`, `extension-prompts.json`) |
 | `BACKUP_INTERVAL_MS` | `600000` | How often backups run (ms); default 10 min |
 
 The Fauxton admin UI is available at `http://localhost:5984/_utils`.
@@ -120,6 +123,29 @@ All `/api/*` routes require authentication via one of:
 | `GET` | `/api/:board/card/:id` | Card history: `{ created, moves, column }` |
 | `POST` | `/api/:board/move-to/:name` | Move a card to the named column (see below) |
 | `POST` | `/api/:board/import` | Bulk-import cards (see below) |
+| `GET` | `/api/:board/notes` | Load notes document |
+| `PUT` | `/api/:board/notes` | Replace notes document; body: full notes object |
+| `GET` | `/api/:board/notes/export` | Download notes as a ZIP archive (Markdown + attachments) |
+| `GET` | `/api/:board/attachment-stats` | Returns `{ count, size }` for all attachments on the board |
+
+### Notes attachments (`:pageId` format: `n-<alphanumeric>`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/:board/notes/attachments/:pageId` | List attachments; returns `[{ name, size }]` |
+| `POST` | `/api/:board/notes/attachments/:pageId` | Upload file (multipart `file` field, max 50 MB); returns `{ name, size }` |
+| `GET` | `/api/:board/notes/attachments/:pageId/:filename` | Download attachment file |
+| `DELETE` | `/api/:board/notes/attachments/:pageId/:filename` | Delete attachment; returns `{ ok: true }` |
+
+### Card attachments (`:cardId` format: `id-<alphanumeric>`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/:board/cards/attachments` | List all card IDs that have at least one attachment |
+| `GET` | `/api/:board/cards/attachments/:cardId` | List attachments for a card; returns `[{ name, size }]` |
+| `POST` | `/api/:board/cards/attachments/:cardId` | Upload file (multipart `file` field, max 50 MB); returns `{ name, size }` |
+| `GET` | `/api/:board/cards/attachments/:cardId/:filename` | Download attachment file |
+| `DELETE` | `/api/:board/cards/attachments/:cardId/:filename` | Delete attachment; returns `{ ok: true }` |
 
 ## Move-to endpoint
 
@@ -151,6 +177,8 @@ Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_
 
 ## Data Model
 
+### Board document (`_id: "board"`)
+
 ```jsonc
 {
   "columns": [
@@ -158,6 +186,8 @@ Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_
       "id": "string",
       "title": "string",
       "color": "string",        // optional, drives the column dot color
+      "actions": [],            // optional, auto-applied when a card is moved into this column
+                                // values: "markDone" | "markUndone" | "setStartDate" | "setEndDate"
       "cards": [
         {
           "id": "string",
@@ -179,10 +209,31 @@ Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_
   ],
   "settings": {                 // optional, board-level configuration
     "description": "string",   // shown in the board overview grid
+    "archived": false,          // hides the board from the active overview
     "inboxWithDate": false,     // prefix imported inbox columns with today's date
     "persistCollapse": false,   // save collapsed column state across sessions
     "collapsedColumnIds": [],   // persisted when persistCollapse is true
     "trackedColumns": []        // column titles shown as card counts in the overview
   }
+}
+```
+
+### Notes document (`_id: "notes"`)
+
+Stored as a separate CouchDB document per board.
+
+```jsonc
+{
+  "pages": [
+    {
+      "id": "string",
+      "title": "string",
+      "description": "string",  // optional, rendered as Markdown
+      "link": "string",          // optional, http/https only
+      "linkedCards": [],         // optional, card IDs linked to this page
+      "hasAttachments": false,   // optional, true when files have been uploaded
+      "children": []             // optional, nested pages (same structure, recursive)
+    }
+  ]
 }
 ```

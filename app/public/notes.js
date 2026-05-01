@@ -311,11 +311,13 @@ function openNoteModal(pageId) {
   if (NOTES_ATTACH_API) loadAttachments(pageId);
 
   document.getElementById('noteModal').style.display = 'flex';
+  history.replaceState(null, '', '#note:' + pageId);
   const nt = document.getElementById('notePageTitle');
   autoResizeTitle(nt);
 }
 
 function closeNoteModal() {
+  if (location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('noteModal').style.display = 'none';
   document.getElementById('noteCreateCardForm').style.display = 'none';
   noteModalPageId = null;

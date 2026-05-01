@@ -30,9 +30,45 @@ const PROMPTS_DB_NAME  = 'jc-extension-prompts';
 const BACKUP_DIR       = path.join(__dirname, process.env.BACKUP_DIR || 'data');
 const BACKUP_INTERVAL_MS = parseInt(process.env.BACKUP_INTERVAL_MS, 10) || 600000;
 const ATTACHMENTS_DIR  = path.join(BACKUP_DIR, 'attachments');
+const JSON_BACKUP_DIR  = path.join(BACKUP_DIR, 'json');
+const COUCHDB_DATA_DIR = path.join(BACKUP_DIR, 'couchdb');
+const LOG_API_RESPONSES = process.env.LOG_API_RESPONSES === 'true';
+
+let dbSizeBytes = 0;
+
+function computeDirSize(dir) {
+  let total = 0;
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) total += computeDirSize(full);
+      else if (entry.isFile()) try { total += fs.statSync(full).size; } catch {}
+    }
+  } catch {}
+  return total;
+}
+
+function refreshDbSize() {
+  dbSizeBytes = computeDirSize(COUCHDB_DATA_DIR);
+}
+
+const DB_SIZE_INTERVAL_MS = 15 * 60 * 1000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+if (LOG_API_RESPONSES) {
+  app.use('/api', (req, res, next) => {
+    const originalJson = res.json.bind(res);
+    res.json = (body) => {
+      console.log(`[API] ${req.method} ${req.originalUrl}`);
+      if (req.body && Object.keys(req.body).length) console.log('  req :', JSON.stringify(req.body));
+      console.log('  res :', JSON.stringify(body));
+      return originalJson(body);
+    };
+    next();
+  });
+}
 
 
 let couch;
@@ -219,10 +255,27 @@ app.get('/api/auth/verify', (req, res) => {
 
 // ---- Global settings ----
 app.get('/api/settings', (req, res) => {
-  res.json({ apiKey: API_KEY || null });
+  res.json({ apiKey: API_KEY || null, logApiResponses: LOG_API_RESPONSES });
 });
 
 // ---- Board list / management ----
+function getBoardAttachStats(name) {
+  const boardDir = path.join(ATTACHMENTS_DIR, name);
+  let count = 0, size = 0;
+  if (!fs.existsSync(boardDir)) return { count, size };
+  for (const sub of fs.readdirSync(boardDir)) {
+    const subDir = path.join(boardDir, sub);
+    try {
+      if (!fs.statSync(subDir).isDirectory()) continue;
+      for (const file of fs.readdirSync(subDir).filter(n => !n.startsWith('.'))) {
+        count++;
+        size += fs.statSync(path.join(subDir, file)).size;
+      }
+    } catch {}
+  }
+  return { count, size };
+}
+
 app.get('/api/boards', async (req, res) => {
   try {
     const all = await couch.db.list();
@@ -230,6 +283,7 @@ app.get('/api/boards', async (req, res) => {
     const boards = await Promise.all(names.map(async name => {
       try {
         const data = await loadBoardData(couch.use(DB_PREFIX + name));
+        const totalCards      = data.columns.reduce((s, c) => s + c.cards.length, 0);
         const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
         const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
         const inProgressCount = data.columns.filter(c => /^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
@@ -237,9 +291,10 @@ app.get('/api/boards', async (req, res) => {
           const col = data.columns.find(c => c.title === title);
           return col ? { title, count: col.cards.length, color: col.color || null } : null;
         }).filter(Boolean);
-        return { name, description: data.settings?.description || '', archived: data.settings?.archived || false, inboxCount, todoCount, inProgressCount, trackedCounts };
+        const { count: attachCount, size: attachSize } = getBoardAttachStats(name);
+        return { name, description: data.settings?.description || '', archived: data.settings?.archived || false, totalCards, inboxCount, todoCount, inProgressCount, trackedCounts, attachCount, attachSize };
       } catch (e) {
-        return { name, description: '', inboxCount: 0, todoCount: 0, inProgressCount: 0 };
+        return { name, description: '', totalCards: 0, inboxCount: 0, todoCount: 0, inProgressCount: 0, trackedCounts: [], attachCount: 0, attachSize: 0 };
       }
     }));
     res.json(boards);
@@ -667,6 +722,10 @@ app.get('/api/:board/attachment-stats', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/db-size', (req, res) => {
+  res.json({ size: dbSizeBytes });
+});
+
 app.get('/api/:board/notes/export', withExistingBoard(async (req, res, db) => {
   const { board } = req.params;
   const notes    = await loadNotesData(db);
@@ -703,13 +762,18 @@ app.get('/:board/*path', (req, res) => res.sendFile(SPA_HTML));
 // ---- Backup ----
 async function runBackup() {
   try {
-    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    if (!fs.existsSync(JSON_BACKUP_DIR)) fs.mkdirSync(JSON_BACKUP_DIR, { recursive: true });
     const all = await couch.db.list();
     const names = all.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
     for (const name of names) {
       try {
-        const data = await loadBoardData(couch.use(DB_PREFIX + name));
-        fs.writeFileSync(path.join(BACKUP_DIR, `kanban-${name}.json`), JSON.stringify(data, null, 2), 'utf-8');
+        const db = couch.use(DB_PREFIX + name);
+        const data = await loadBoardData(db);
+        fs.writeFileSync(path.join(JSON_BACKUP_DIR, `kanban-${name}-board.json`), JSON.stringify(data, null, 2), 'utf-8');
+        try {
+          const { _id, _rev, ...notesData } = await db.get(NOTES_DOC_ID);
+          fs.writeFileSync(path.join(JSON_BACKUP_DIR, `kanban-${name}-notes.json`), JSON.stringify(notesData, null, 2), 'utf-8');
+        } catch (e) { if (e.statusCode !== 404) console.error(`Notes backup for board "${name}" failed:`, e.message); }
       } catch (e) { console.error(`Backup for board "${name}" failed:`, e.message); }
     }
     if (names.length) console.log(`Backup completed for: ${names.join(', ')}`);
@@ -722,8 +786,8 @@ async function runPromptsBackup() {
     const docs = result.rows
       .filter(r => !r.id.startsWith('_'))
       .map(r => { const { _id, _rev, ...doc } = r.doc; return { _id, ...doc }; });
-    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-    fs.writeFileSync(path.join(BACKUP_DIR, 'extension-prompts.json'), JSON.stringify(docs, null, 2), 'utf-8');
+    if (!fs.existsSync(JSON_BACKUP_DIR)) fs.mkdirSync(JSON_BACKUP_DIR, { recursive: true });
+    fs.writeFileSync(path.join(JSON_BACKUP_DIR, 'extension-prompts.json'), JSON.stringify(docs, null, 2), 'utf-8');
     console.log('Prompts backup saved');
   } catch (err) { console.error('Prompts backup failed:', err.message); }
 }
@@ -754,5 +818,7 @@ initDb()
     setInterval(runBackup, BACKUP_INTERVAL_MS);
     runPromptsBackup();
     setInterval(runPromptsBackup, BACKUP_INTERVAL_MS);
+    refreshDbSize();
+    setInterval(refreshDbSize, DB_SIZE_INTERVAL_MS);
   })
   .catch(err => { console.error('Failed to initialize:', err.message); process.exit(1); });

@@ -6,7 +6,7 @@ services:
       COUCHDB_USER: ${COUCHDB_USER:-kanban}
       COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:-kanban-pwd}
     volumes:
-      - couchdb-data:/opt/couchdb/data
+      - ./data/couchdb:/opt/couchdb/data
     ports:
       - "5984:5984"
     healthcheck:
@@ -32,5 +32,3 @@ services:
       - ./app/public:/app/public
       - ./app/server.js:/app/server.js
 
-volumes:
-  couchdb-data:

@@ -569,6 +569,9 @@
 
 .card-info-table td { color: var(--text); }
 
+.card-info-table tr.stats-sep td { border-top: 1px solid var(--border); padding-top: 10px; }
+.card-info-table tr.stats-sep th { border-top: 1px solid var(--border); padding-top: 10px; }
+
 .card-info-section {
   font-size: 0.72rem;
   font-weight: 500;

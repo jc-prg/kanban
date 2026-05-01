@@ -217,36 +217,77 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     el.innerHTML = '<span class="card-info-loading">Loading…</span>';
     document.getElementById('statsBackdrop').style.display = 'flex';
 
-    const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.length, 0);
-
-    function countPages(pages) {
-      return (pages || []).reduce((s, p) => s + 1 + countPages(p.children), 0);
-    }
-    const totalPages = countPages(typeof notesState !== 'undefined' ? notesState.pages : []);
-
-    let attachCount = 0, attachSize = 0;
-    if (API_BASE) {
-      try {
-        const r = await fetch(`${API_BASE}/attachment-stats`);
-        if (r.ok) ({ count: attachCount, size: attachSize } = await r.json());
-      } catch {}
-    }
-
     function fmtSize(b) {
       if (b < 1024) return b + ' B';
       if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
       return (b / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
-    const rows = [
-      ['Board',       BOARD_NAME || '—'],
-      ['Cards',       totalCards],
-      ['Note pages',  totalPages],
-      ['Attachments', attachCount],
-      ['Total size',  fmtSize(attachSize)],
-    ];
+    let rows;
+
+    if (!BOARD_NAME) {
+      // Overview: aggregate across all boards
+      let boards = [];
+      try {
+        const r = await fetch('/api/boards');
+        if (r.ok) boards = await r.json();
+      } catch {}
+      const active   = boards.filter(b => !b.archived);
+      const archived = boards.filter(b =>  b.archived);
+      const totalCards      = boards.reduce((s, b) => s + (b.totalCards      || 0), 0);
+      const inboxCount      = boards.reduce((s, b) => s + (b.inboxCount      || 0), 0);
+      const todoCount       = boards.reduce((s, b) => s + (b.todoCount       || 0), 0);
+      const inProgressCount = boards.reduce((s, b) => s + (b.inProgressCount || 0), 0);
+
+      const totalAttachSize = boards.reduce((s, b) => s + (b.attachSize || 0), 0);
+
+      let dbSize = 0;
+      try {
+        const r = await fetch('/api/db-size');
+        if (r.ok) ({ size: dbSize } = await r.json());
+      } catch {}
+
+      rows = [
+        ['Boards',         active.length],
+        ['Archived',       archived.length],
+        ['Total cards',    totalCards],
+        ['Attachments',    fmtSize(totalAttachSize)],
+        ['Database size',  fmtSize(dbSize)],
+        null, // separator
+        ['Inbox',          inboxCount],
+        ['Todo',           todoCount],
+        ['In progress',    inProgressCount],
+      ];
+    } else {
+      // Board view: show stats for this board only
+      const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.length, 0);
+
+      function countPages(pages) {
+        return (pages || []).reduce((s, p) => s + 1 + countPages(p.children), 0);
+      }
+      const totalPages = countPages(typeof notesState !== 'undefined' ? notesState.pages : []);
+
+      let attachCount = 0, attachSize = 0;
+      try {
+        const r = await fetch(`${API_BASE}/attachment-stats`);
+        if (r.ok) ({ count: attachCount, size: attachSize } = await r.json());
+      } catch {}
+
+      rows = [
+        ['Board',       BOARD_NAME],
+        ['Cards',       totalCards],
+        ['Note pages',  totalPages],
+        ['Attachments', attachCount],
+        ['Total size',  fmtSize(attachSize)],
+      ];
+    }
+
     el.innerHTML = `<table class="card-info-table"><tbody>${
-      rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
+      rows.map((row, i) => {
+        if (row === null) return '';
+        const sep = (i > 0 && rows[i - 1] === null) ? ' class="stats-sep"' : '';
+        return `<tr${sep}><th>${row[0]}</th><td>${row[1]}</td></tr>`;
+      }).join('')
     }</tbody></table>`;
   };
 
@@ -506,16 +547,53 @@ function convertTrelloExport(trello) {
   return { columns };
 }
 
+// ---- URL hash routing ----
+function handleUrlHash() {
+  const hash = location.hash.slice(1);
+  if (!hash) return;
+  if (hash.startsWith('card:')) {
+    const cardId = hash.slice(5);
+    for (const col of state.columns) {
+      const card = col.cards.find(c => c.id === cardId);
+      if (card) { openEditModal(col.id, card); return; }
+    }
+  } else if (hash.startsWith('note:')) {
+    const noteId = hash.slice(5);
+    if (findNotePage(noteId, notesState.pages)) openNoteModal(noteId);
+  }
+}
+
 // ---- After-auth routing ----
 async function afterAuth() {
+  try {
+    const r = await fetch('/api/settings');
+    const { logApiResponses } = await r.json();
+    if (logApiResponses) {
+      const _fetch = window.fetch.bind(window);
+      window.fetch = async (url, opts = {}) => {
+        const res = await _fetch(url, opts);
+        const clone = res.clone();
+        const method = (opts.method || 'GET').toUpperCase();
+        console.group(`[API] ${method} ${url}`);
+        if (opts.body) {
+          try { console.log('req:', JSON.parse(opts.body)); } catch { console.log('req:', opts.body); }
+        }
+        try { console.log('res:', await clone.json()); } catch {}
+        console.groupEnd();
+        return res;
+      };
+    }
+  } catch {}
+
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;
     document.getElementById('headerHomeBtn').style.display = '';
     document.getElementById('notesToggleBtn').style.display = '';
     await load();
-    loadNotes();
+    await loadNotes();
     loadCardAttachSet();
+    handleUrlHash();
   } else initOverview();
 }
 

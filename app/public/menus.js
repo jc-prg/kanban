@@ -61,6 +61,19 @@ document.getElementById('ctxDone').addEventListener('click', () => {
   updateCardFull(colId, card.id, { ...card, done: !card.done });
 });
 
+document.getElementById('ctxDuplicate').addEventListener('click', () => {
+  const colId = ctxColId, card = ctxCard;
+  hideContextMenu();
+  if (!colId || !card) return;
+  const col = state.columns.find(c => c.id === colId);
+  if (!col) return;
+  const idx = col.cards.findIndex(c => c.id === card.id);
+  const copy = { ...JSON.parse(JSON.stringify(card)), id: uid(), text: '(copy) ' + card.text };
+  col.cards.splice(idx + 1, 0, copy);
+  render();
+  schedulesSave();
+});
+
 document.getElementById('ctxColor').addEventListener('click', e => {
   e.stopPropagation();
   const row = document.getElementById('ctxColorRow');
