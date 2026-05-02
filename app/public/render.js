@@ -124,10 +124,10 @@ function render() {
 
     colEl.innerHTML = `
       <div class="column-header">
-        <div class="col-drag-handle" draggable="true" title="Drag to reorder">⠿</div>
+        <div class="col-drag-handle" draggable="true" title="Drag to reorder">${ICONS.dragHandle}</div>
         <div class="column-dot" style="background:${color}"></div>
         <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
-        <button class="col-btn" title="Column options" style="margin-left:auto">⋮</button>
+        <button class="col-btn" title="Column options" style="margin-left:auto">${ICONS.moreOptions}</button>
         <span class="column-count">${col.cards.filter(c => !c.text.startsWith('#')).length}</span>
       </div>
       <div class="cards"></div>
@@ -208,13 +208,13 @@ function render() {
 
       const metaParts = [];
       if (card.description) {
-        metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">☰</span>`);
+        metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">${ICONS.description}</span>`);
       }
       if (cardAttachSet.has(card.id)) {
-        metaParts.push(`<span class="card-attach-badge" title="Has attachments"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"></path></svg></span>`);
+        metaParts.push(`<span class="card-attach-badge" title="Has attachments">${SVGICONS.attachment(10, 10)}</span>`);
       }
       if (noteLinkedCards.has(card.id)) {
-        metaParts.push(`<span class="card-note-badge" title="Linked in notes"><svg viewBox="0 0 11 14" width="9" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.5h6l3 3.5v8H1z"/><path d="M7 1.5V5h3"/></svg></span>`);
+        metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
       }
       if (card.priority) {
         const pc = PRIORITY_COLORS[card.priority];
@@ -232,7 +232,7 @@ function render() {
           metaParts.push(`<span class="${cls}">→ ${fmtDate(card.endDate)}</span>`);
       }
       if (card.done) {
-        metaParts.push(`<span class="card-done-mark">✓ done</span>`);
+        metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
       }
 
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';

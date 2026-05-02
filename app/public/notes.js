@@ -64,7 +64,7 @@ function addNotePage(parentId = null) {
   }
   renderNotesTree();
   scheduleSaveNotes();
-  openNoteModal(page.id);
+  openNoteModal(page.id, true);
 }
 
 function deleteNotePage(id) {
@@ -83,7 +83,7 @@ const notesExpanded = new Set();
 let notesSidebarOpen = false;
 let notesFontSize = 0; // 0=sm 1=md 2=lg
 const SIDEBAR_MIN = 230;
-const SIDEBAR_MAX = 460;
+function _sidebarMax() { return window.innerWidth <= 500 ? window.innerWidth - 80 : 460; }
 let sidebarWidth = SIDEBAR_MIN;
 
 function _applySidebarWidth(sidebar, w) {
@@ -115,7 +115,7 @@ function toggleNotesFontSize() {
 function restoreNotesSidebar() {
   const w    = state.settings?.notesSidebarWidth;
   const open = state.settings?.notesSidebarOpen;
-  if (w >= SIDEBAR_MIN && w <= SIDEBAR_MAX) sidebarWidth = w;
+  if (w >= SIDEBAR_MIN) sidebarWidth = Math.min(w, _sidebarMax());
   if (open && !notesSidebarOpen) toggleNotesSidebar();
   const fs = state.settings?.notesFontSize;
   if (typeof fs === 'number' && fs >= 0 && fs <= 2) notesFontSize = fs;
@@ -147,7 +147,7 @@ function initSidebarResize() {
 
     function onMove(e) {
       const raw = startWidth + (e.clientX - startX);
-      _applySidebarWidth(sidebar, Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, raw)));
+      _applySidebarWidth(sidebar, Math.max(SIDEBAR_MIN, Math.min(_sidebarMax(), raw)));
     }
 
     function onUp(e) {
@@ -163,7 +163,7 @@ function initSidebarResize() {
         sidebar.classList.remove('notes-sidebar--open');
         document.getElementById('notesToggleBtn')?.classList.remove('open');
       } else {
-        sidebarWidth = Math.min(Math.max(raw, SIDEBAR_MIN), SIDEBAR_MAX);
+        sidebarWidth = Math.min(Math.max(raw, SIDEBAR_MIN), _sidebarMax());
         _applySidebarWidth(sidebar, sidebarWidth);
       }
       _saveNotesSidebarSettings();
@@ -172,6 +172,43 @@ function initSidebarResize() {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup',   onUp);
   });
+
+  resizer.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    const startX     = e.touches[0].clientX;
+    const startWidth = sidebar.offsetWidth;
+    sidebar.classList.add('notes-sidebar--resizing');
+
+    function onMove(e) {
+      const raw = startWidth + (e.touches[0].clientX - startX);
+      _applySidebarWidth(sidebar, Math.max(SIDEBAR_MIN, Math.min(_sidebarMax(), raw)));
+    }
+
+    function onUp(e) {
+      resizer.removeEventListener('touchmove',  onMove);
+      resizer.removeEventListener('touchend',   onUp);
+      resizer.removeEventListener('touchcancel', onUp);
+      sidebar.classList.remove('notes-sidebar--resizing');
+
+      const raw = startWidth + (e.changedTouches[0].clientX - startX);
+      if (raw < SIDEBAR_MIN && startWidth === SIDEBAR_MIN) {
+        sidebar.style.width    = '';
+        sidebar.style.minWidth = '';
+        notesSidebarOpen = false;
+        sidebar.classList.remove('notes-sidebar--open');
+        document.getElementById('notesToggleBtn')?.classList.remove('open');
+      } else {
+        sidebarWidth = Math.min(Math.max(raw, SIDEBAR_MIN), _sidebarMax());
+        _applySidebarWidth(sidebar, sidebarWidth);
+      }
+      _saveNotesSidebarSettings();
+    }
+
+    resizer.addEventListener('touchmove',   onMove, { passive: false });
+    resizer.addEventListener('touchend',    onUp,   { passive: true });
+    resizer.addEventListener('touchcancel', onUp,   { passive: true });
+  }, { passive: false });
 }
 
 function renderNotesTree() {
@@ -205,19 +242,19 @@ function renderNotesList(pages, container, depth) {
     const hasCards       = page.linkedCards?.length > 0;
     const hasAttachments = !!page.hasAttachments;
     const indicators =
-      (hasLink        ? `<span class="notes-item-indicator" title="Has link"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 7a2.8 2.8 0 0 0 4 .4l1.4-1.4a2.8 2.8 0 0 0-4-4L5.1 3.3"/><path d="M7 5a2.8 2.8 0 0 0-4-.4L1.6 6a2.8 2.8 0 0 0 4 4L6.9 8.7"/></svg></span>` : '') +
-      (hasCards       ? `<span class="notes-item-indicator" title="${page.linkedCards.length} linked card(s)"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="3.7" width="7" height="5" rx="1"/><path d="M3.7 3V2.3A1 1 0 0 1 4.7 1.3h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H9.7"/></svg></span>` : '') +
-      (hasAttachments ? `<span class="notes-item-indicator" title="Has attachments"><svg viewBox="0 0 12 12" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"/></svg></span>` : '');
+      (hasLink        ? `<span class="notes-item-indicator" title="Has link">${SVGICONS.link(9, 9)}</span>` : '') +
+      (hasCards       ? `<span class="notes-item-indicator" title="${page.linkedCards.length} linked card(s)">${SVGICONS.linkedCards(9, 9)}</span>` : '') +
+      (hasAttachments ? `<span class="notes-item-indicator" title="Has attachments">${SVGICONS.attachment(9, 9)}</span>` : '');
 
     item.innerHTML =
-      `<button class="notes-toggle-btn${hasChildren ? '' : ' notes-toggle-btn--hidden'}" title="${isExpanded ? 'Collapse' : 'Expand'}">${isExpanded ? '▾' : '▸'}</button>` +
+      `<button class="notes-toggle-btn${hasChildren ? '' : ' notes-toggle-btn--hidden'}" title="${isExpanded ? 'Collapse' : 'Expand'}">${isExpanded ? ICONS.collapse : ICONS.expand}</button>` +
       `<span class="notes-item-title-wrap">` +
         `<span class="notes-item-title${depth === 0 ? ' notes-item-title--root' : ''}">${escHtml(page.title)}</span>` +
         (indicators ? `<span class="notes-item-indicators">${indicators}</span>` : '') +
       `</span>` +
       `<div class="notes-item-btns">` +
         (canHaveChildren ? `<button class="notes-item-btn notes-item-btn--add" title="Add subpage">+</button>` : '') +
-        `<button class="notes-item-btn notes-item-btn--del" title="Delete page">✕</button>` +
+        `<button class="notes-item-btn notes-item-btn--del" title="Delete page">${ICONS.close}</button>` +
       `</div>`;
 
     item.querySelector('.notes-item-title').addEventListener('click', () => openNoteModal(page.id));
@@ -242,11 +279,10 @@ function renderNotesList(pages, container, depth) {
 
     item.querySelector('.notes-item-btn--del').addEventListener('click', async e => {
       e.stopPropagation();
-      const hasContent = page.description?.trim() || page.children?.length;
       const msg = page.children?.length
         ? `Delete "${page.title}" and all its subpages?`
         : `Delete page "${page.title}"?`;
-      if (!hasContent || await showConfirm(msg, { okLabel: 'Delete', danger: true })) {
+      if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) {
         if (noteModalPageId === page.id) closeNoteModal();
         deleteNotePage(page.id);
       }
@@ -282,7 +318,7 @@ function resetNoteSections() {
 let noteModalPageId = null;
 let noteModalOrig = { title: '', desc: '', link: '' };
 
-function openNoteModal(pageId) {
+function openNoteModal(pageId, focusTitle = false) {
   const page = findNotePage(pageId, notesState.pages);
   if (!page) return;
   noteModalPageId = pageId;
@@ -314,6 +350,7 @@ function openNoteModal(pageId) {
   history.replaceState(null, '', '#note:' + pageId);
   const nt = document.getElementById('notePageTitle');
   autoResizeTitle(nt);
+  if (focusTitle) requestAnimationFrame(() => { nt.focus(); nt.select(); });
 }
 
 function closeNoteModal() {
@@ -346,7 +383,7 @@ function submitNote() {
   scheduleSaveNotes();
 
   const msg = document.getElementById('noteModalSavedMsg');
-  msg.textContent = '✓ saved';
+  msg.textContent = `${ICONS.done} saved`;
   msg.classList.add('modal-saved-msg--visible');
   setTimeout(() => msg.classList.remove('modal-saved-msg--visible'), 1500);
 }
@@ -367,6 +404,125 @@ async function tryCloseNoteModal() {
   }
 }
 
+function _tocSlug(text, used) {
+  let base = text.toLowerCase().replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-') || 'section';
+  let slug = base, n = 1;
+  while (used.has(slug)) slug = `${base}-${n++}`;
+  used.add(slug);
+  return slug;
+}
+
+function buildToc(el) {
+  const placeholder = [...el.querySelectorAll('p')].find(p => p.textContent.trim().toLowerCase() === '[toc]');
+  if (!placeholder) return;
+
+  const headings = [...el.querySelectorAll('h1, h2, h3')];
+  if (!headings.length) { placeholder.remove(); return; }
+
+  const used = new Set();
+  headings.forEach(h => { h.id = 'toc-' + _tocSlug(h.textContent, used); });
+
+  const nav = document.createElement('nav');
+  nav.className = 'md-toc';
+  const label = document.createElement('span');
+  label.className = 'md-toc-label';
+  label.textContent = 'Contents';
+  nav.appendChild(label);
+
+  const ul = document.createElement('ul');
+  headings.forEach((h, i) => {
+    const li = document.createElement('li');
+    li.className = `md-toc-item md-toc-${h.tagName.toLowerCase()}`;
+    const a = document.createElement('a');
+    a.textContent = h.textContent;
+    a.addEventListener('click', e => { e.preventDefault(); h.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    li.appendChild(a);
+    ul.appendChild(li);
+  });
+  nav.appendChild(ul);
+  placeholder.replaceWith(nav);
+
+  // Highlight the active section while scrolling
+  const links = [...nav.querySelectorAll('a')];
+  const scrollRoot = el.closest('.note-modal-body') || el.parentElement;
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      const idx = headings.indexOf(entry.target);
+      if (idx === -1) return;
+      links[idx]?.classList.toggle('md-toc-active', entry.isIntersecting);
+    });
+  }, { root: scrollRoot, rootMargin: '-8px 0px -80% 0px', threshold: 0 });
+  headings.forEach(h => obs.observe(h));
+}
+
+function buildSubpages(el) {
+  const placeholder = [...el.querySelectorAll('p')].find(p => p.textContent.trim().toLowerCase() === '[subpages]');
+  if (!placeholder) return;
+
+  const page = findNotePage(noteModalPageId, notesState.pages);
+  const children = page?.children?.length ? page.children : [];
+
+  const wrap = document.createElement('div');
+  wrap.className = 'md-subpages';
+  const label = document.createElement('span');
+  label.className = 'md-toc-label';
+  label.textContent = 'Subpages';
+  wrap.appendChild(label);
+
+  function _buildItem(child, depth) {
+    const hasLink        = !!child.link?.trim();
+    const hasCards       = child.linkedCards?.length > 0;
+    const hasAttachments = !!child.hasAttachments;
+    const grandchildren  = child.children?.length ? child.children : [];
+
+    const li = document.createElement('li');
+    li.className = `md-subpages-item md-subpages-depth-${depth}`;
+
+    const row = document.createElement('div');
+    row.className = 'md-subpages-row';
+
+    const a = document.createElement('a');
+    a.className = 'md-subpages-title';
+    a.textContent = child.title;
+    a.addEventListener('click', e => { e.preventDefault(); openNoteModal(child.id); });
+    row.appendChild(a);
+
+    const meta = document.createElement('span');
+    meta.className = 'md-subpages-meta';
+    if (hasCards)       meta.insertAdjacentHTML('beforeend', `<span class="notes-item-indicator" title="${child.linkedCards.length} linked card(s)">${SVGICONS.linkedCards(9, 9)}</span>`);
+    if (hasLink)        meta.insertAdjacentHTML('beforeend', `<span class="notes-item-indicator" title="Has link">${SVGICONS.link(9, 9)}</span>`);
+    if (hasAttachments) meta.insertAdjacentHTML('beforeend', `<span class="notes-item-indicator" title="Has attachments">${SVGICONS.attachment(9, 9)}</span>`);
+    if (meta.children.length) row.appendChild(meta);
+    li.appendChild(row);
+
+    if (depth < 2 && grandchildren.length) {
+      const sub = document.createElement('ul');
+      sub.className = 'md-subpages-children';
+      grandchildren.forEach(gc => sub.appendChild(_buildItem(gc, depth + 1)));
+      li.appendChild(sub);
+    }
+
+    return li;
+  }
+
+  if (!children.length) {
+    const empty = document.createElement('span');
+    empty.className = 'md-subpages-empty';
+    empty.textContent = 'No subpages yet';
+    wrap.appendChild(empty);
+  } else {
+    const ul = document.createElement('ul');
+    children.forEach(child => ul.appendChild(_buildItem(child, 1)));
+    wrap.appendChild(ul);
+  }
+
+  placeholder.replaceWith(wrap);
+}
+
+function _applyNoteFormat(action) {
+  applyDescFormat(document.getElementById('notePageDesc'), action);
+}
+
 function showNoteDescPreview() {
   const text = document.getElementById('notePageDesc').value.trim();
   if (!text) { showNoteDescEditor(); return; }
@@ -374,9 +530,12 @@ function showNoteDescPreview() {
   el.dataset.rawText = text;
   el.innerHTML = marked.parse(text, { breaks: true });
   enhanceMarkdownPreview(el);
+  buildToc(el);
+  buildSubpages(el);
   resolveAttachments(el);
   el.style.display = '';
   document.getElementById('notePageDesc').style.display = 'none';
+  document.getElementById('noteDescToolbar').style.display = 'none';
 }
 
 function showNoteDescEditor() {
@@ -410,7 +569,7 @@ function renderLinkedCards(ids) {
         (col ? `<span class="note-mini-card-col">${escHtml(col.title)}</span>` : '') +
         `<span class="note-mini-card-text${isGone ? ' note-mini-card-text--gone' : ''}" title="${escHtml(text)}">${escHtml(text)}</span>` +
       `</div>` +
-      `<button class="note-mini-card-remove" title="Unlink card">✕</button>`;
+      `<button class="note-mini-card-remove" title="Unlink card">${ICONS.close}</button>`;
 
     if (card && col) {
       mini.querySelector('.note-mini-card-body').addEventListener('click', () => { closeNoteModal(); openEditModal(col.id, card); });
@@ -640,7 +799,7 @@ function renderAttachments(pageId, files) {
     const url = `${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = ft === 'image' ? '🖼' : ft === 'pdf' ? '📄' : ft === 'html' ? '🌐' : '📎';
+    const icon = ft === 'image' ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
@@ -649,8 +808,8 @@ function renderAttachments(pageId, files) {
         (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">⛶</button>` : '') +
         (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">⛶</button>` : '') +
         `<button class="note-attach-btn" data-act="insert"   title="Insert in description">⌅</button>` +
-        `<button class="note-attach-btn" data-act="download" title="Download">↓</button>` +
-        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">✕</button>` +
+        `<button class="note-attach-btn" data-act="download" title="Download">${ICONS.download}</button>` +
+        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">${ICONS.close}</button>` +
       `</div>`;
 
     if (ft === 'image' || ft === 'pdf')
@@ -805,6 +964,139 @@ function _clearTreeDrop() {
   ));
 }
 
+function _initTreeTouchDragDrop() {
+  const container = document.getElementById('notesTreeBody');
+  if (!container) return;
+
+  let ttDragId   = null;
+  let ttDragEl   = null;
+  let ttGhost    = null;
+  let ttOverItem = null;
+  let ttStartX   = 0;
+  let ttStartY   = 0;
+  let ttActive   = false;
+
+  function _ttClearGhost() {
+    if (ttGhost) { ttGhost.remove(); ttGhost = null; }
+    if (ttDragEl) { ttDragEl.classList.remove('notes-tree-item--dragging'); }
+  }
+
+  function _ttUpdateDrop(x, y) {
+    if (ttGhost) ttGhost.style.display = 'none';
+    const el = document.elementFromPoint(x, y);
+    if (ttGhost) ttGhost.style.display = '';
+
+    const item = el?.closest('.notes-tree-item');
+    if (ttOverItem && ttOverItem !== item) { _clearTreeDrop(); ttOverItem = null; }
+    if (!item || item.dataset.pageId === ttDragId) return;
+
+    const draggedPage = findNotePage(ttDragId, notesState.pages);
+    if (!draggedPage) return;
+    const dragHeight  = _subtreeHeight(draggedPage);
+    const targetDepth = +item.dataset.depth;
+    const rect        = item.getBoundingClientRect();
+    const ratio       = (y - rect.top) / rect.height;
+    const canBefore   = targetDepth + dragHeight <= 2;
+    const canInto     = targetDepth < 2 && targetDepth + 1 + dragHeight <= 2;
+
+    _clearTreeDrop();
+    if      (canBefore && ratio < 0.3)  item.classList.add('notes-tree-item--drop-before');
+    else if (canBefore && ratio > 0.7)  item.classList.add('notes-tree-item--drop-after');
+    else if (canInto)                   item.classList.add('notes-tree-item--drop-into');
+    else if (canBefore && ratio <= 0.5) item.classList.add('notes-tree-item--drop-before');
+    else if (canBefore)                 item.classList.add('notes-tree-item--drop-after');
+    ttOverItem = item;
+  }
+
+  container.addEventListener('touchstart', e => {
+    const item = e.target.closest('.notes-tree-item');
+    if (!item || e.target.closest('button')) return;
+    ttDragId  = item.dataset.pageId;
+    ttDragEl  = item;
+    ttStartX  = e.touches[0].clientX;
+    ttStartY  = e.touches[0].clientY;
+    ttActive  = false;
+  }, { passive: true });
+
+  container.addEventListener('touchmove', e => {
+    if (!ttDragId) return;
+    const t  = e.touches[0];
+    const dx = t.clientX - ttStartX;
+    const dy = t.clientY - ttStartY;
+
+    if (!ttActive) {
+      if (Math.hypot(dx, dy) < 10) return;
+      ttActive = true;
+      const rect = ttDragEl.getBoundingClientRect();
+      ttGhost = ttDragEl.cloneNode(true);
+      Object.assign(ttGhost.style, {
+        position: 'fixed',
+        left: rect.left + 'px',
+        top: rect.top + 'px',
+        width: rect.width + 'px',
+        margin: '0',
+        zIndex: '9999',
+        opacity: '0.85',
+        pointerEvents: 'none',
+        transform: 'scale(1.02)',
+        boxShadow: '0 8px 32px rgba(0,0,0,.45)',
+        transition: 'none',
+      });
+      document.body.appendChild(ttGhost);
+      ttDragEl.classList.add('notes-tree-item--dragging');
+    }
+
+    e.preventDefault();
+    ttGhost.style.left = (t.clientX - (ttStartX - parseFloat(ttGhost.style.left))) + 'px';
+    ttGhost.style.top  = (t.clientY - (ttStartY - parseFloat(ttGhost.style.top)))  + 'px';
+    ttStartX = t.clientX;
+    ttStartY = t.clientY;
+
+    // Auto-scroll the sidebar
+    const sidebar = document.getElementById('notesSidebar');
+    const sr = sidebar?.getBoundingClientRect();
+    if (sr) {
+      if (t.clientY < sr.top + 60)    sidebar.scrollTop -= 8;
+      if (t.clientY > sr.bottom - 60) sidebar.scrollTop += 8;
+    }
+
+    _ttUpdateDrop(t.clientX, t.clientY);
+  }, { passive: false });
+
+  function _ttEnd(e) {
+    if (!ttDragId) return;
+    const savedId = ttDragId;
+    const wasActive = ttActive;
+    ttDragId  = null;
+    ttActive  = false;
+    _ttClearGhost();
+    ttDragEl  = null;
+
+    if (!wasActive) { _clearTreeDrop(); ttOverItem = null; return; }
+
+    const item = ttOverItem;
+    ttOverItem = null;
+    if (!item || item.dataset.pageId === savedId) { _clearTreeDrop(); return; }
+
+    const position = item.classList.contains('notes-tree-item--drop-before') ? 'before'
+                   : item.classList.contains('notes-tree-item--drop-after')  ? 'after'
+                   : item.classList.contains('notes-tree-item--drop-into')   ? 'into'
+                   : null;
+    _clearTreeDrop();
+    if (!position) return;
+
+    const page = _removeFromTree(savedId, notesState.pages);
+    if (!page) return;
+    if (position === 'into') notesExpanded.add(item.dataset.pageId);
+    _insertIntoTree(page, item.dataset.pageId, position, notesState.pages);
+    scheduleSaveNotes();
+    renderNotesTree();
+  }
+
+  container.addEventListener('touchend',    _ttEnd, { passive: true });
+  container.addEventListener('touchcancel', _ttEnd, { passive: true });
+}
+
 function _initTreeDragDrop() {
   const container = document.getElementById('notesTreeBody');
   if (!container) return;
@@ -893,6 +1185,7 @@ function _initTreeDragDrop() {
 document.addEventListener('DOMContentLoaded', () => {
   initNotesDropZone();
   _initTreeDragDrop();
+  _initTreeTouchDragDrop();
   initSidebarResize();
   document.getElementById('notesToggleBtn')?.addEventListener('click', toggleNotesSidebar);
   document.getElementById('notesAddRootBtn')?.addEventListener('click', () => addNotePage(null));
@@ -959,9 +1252,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Title key handling
+  document.getElementById('notePageTitle')?.addEventListener('focus', e => {
+    if (e.target.value === 'New Page') { e.target.value = ''; autoResizeTitle(e.target); }
+  });
+  document.getElementById('notePageTitle')?.addEventListener('blur', e => {
+    if (!e.target.value.trim()) { e.target.value = 'New Page'; autoResizeTitle(e.target); }
+  });
   document.getElementById('notePageTitle')?.addEventListener('input', e => {
     e.target.value = e.target.value.replace(/\n/g, ''); // no newlines in title
     autoResizeTitle(e.target);
+    const crumb = document.getElementById('noteModalBreadcrumb');
+    if (!crumb || crumb.style.display === 'none') return;
+    const path = getNotePath(noteModalPageId, notesState.pages);
+    if (path && path.length > 1) {
+      const live = e.target.value.trim() || 'New Page';
+      crumb.textContent = path.map(p => p.id === noteModalPageId ? live : p.title).join(' › ');
+    }
   });
   document.getElementById('notePageTitle')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); submitNote(); document.getElementById('notePageDesc').focus(); }
@@ -990,6 +1296,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('notePageLinkOpen')?.addEventListener('click', () => {
     const url = document.getElementById('notePageLink').value.trim();
     if (url) window.open(url, '_blank', 'noopener');
+  });
+
+  // Description toolbar
+  const _toolbar = document.getElementById('noteDescToolbar');
+  const _descTa  = document.getElementById('notePageDesc');
+  _descTa?.addEventListener('focus', () => { if (_toolbar) _toolbar.style.display = 'flex'; });
+  _descTa?.addEventListener('blur',  () => { if (_toolbar) _toolbar.style.display = 'none'; });
+  _toolbar?.querySelectorAll('.note-tb-btn').forEach(btn => {
+    btn.addEventListener('pointerdown', e => e.preventDefault()); // keep focus on textarea
+    btn.addEventListener('click', () => _applyNoteFormat(btn.dataset.fmt));
   });
 
   initNoteCardSearch();

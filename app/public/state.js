@@ -160,14 +160,14 @@ function showSaving() {
 
 function showSaved() {
   const el = document.getElementById('saveIndicator');
-  el.textContent = '✓ saved';
+  el.textContent = `${ICONS.done} saved`;
   el.className = 'save-indicator show saved';
   setTimeout(() => el.classList.remove('show'), 2000);
 }
 
 function showSaveError() {
   const el = document.getElementById('saveIndicator');
-  el.textContent = '✗ error';
+  el.textContent = `${ICONS.error} error`;
   el.className = 'save-indicator show save-error';
 }
 
@@ -200,7 +200,7 @@ function updateColumnTitle(colId, title) {
 
 function addCard(colId, data) {
   const col = state.columns.find(c => c.id === colId);
-  if (col) { col.cards.push({ id: uid(), created: new Date().toISOString().slice(0, 10), ...data }); render(); schedulesSave(); }
+  if (col) { col.cards.push({ id: uid(), created: new Date().toISOString().slice(0, 10), ...data, lastModified: new Date().toISOString() }); render(); schedulesSave(); }
 }
 
 function recordMove(card, fromColTitle, toColTitle) {
@@ -212,7 +212,7 @@ function updateCardFull(colId, cardId, data) {
   const col = state.columns.find(c => c.id === colId);
   if (!col) return;
   const card = col.cards.find(c => c.id === cardId);
-  if (card) { Object.assign(card, data); render(); schedulesSave(); }
+  if (card) { Object.assign(card, data); card.lastModified = new Date().toISOString(); render(); schedulesSave(); }
 }
 
 function deleteCard(colId, cardId) {
@@ -239,6 +239,7 @@ function moveCardToColumn(fromColId, cardId, toColId) {
   if (!card) return;
   recordMove(card, fromCol.title, toCol.title);
   applyColumnActions(card, toCol);
+  card.lastModified = new Date().toISOString();
   fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
   toCol.cards.unshift(card);
   render();
@@ -249,7 +250,7 @@ function updateCardText(colId, cardId, text) {
   const col = state.columns.find(c => c.id === colId);
   if (!col) return;
   const card = col.cards.find(c => c.id === cardId);
-  if (card) { card.text = text; schedulesSave(); }
+  if (card) { card.text = text; card.lastModified = new Date().toISOString(); schedulesSave(); }
 }
 
 // ---- Merge helpers ----

@@ -29,9 +29,9 @@
     <span class="save-indicator" id="saveIndicator">saved</span>
   </div>
   <div class="header-menu">
-    <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="1" width="4" height="4" rx="0.8"/><rect x="7" y="1" width="4" height="4" rx="0.8"/><rect x="1" y="7" width="4" height="4" rx="0.8"/><rect x="7" y="7" width="4" height="4" rx="0.8"/></svg></a>
-    <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><svg viewBox="0 0 11 14" width="11" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.5h6l3 3.5v8H1z"/><path d="M7 1.5V5h3"/></svg></button>
-    <button class="header-menu-btn" id="headerMenuBtn" title="Menu">☰</button>
+    <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards" style="display:none"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
+    <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
+    <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
     <div class="header-dropdown" id="headerDropdown">
       <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
       <button class="header-dd-item" id="menuFindCard">Find</button>
@@ -62,7 +62,7 @@
     <div id="archivedSection" style="display:none">
       <button class="archived-section-header" id="archivedSectionBtn">
         <span class="overview-label" style="margin-bottom:0">Archived</span>
-        <span id="archivedSectionIcon">▸</span>
+        <span id="archivedSectionIcon"><span data-icon="expand"></span></span>
       </button>
       <div id="archivedGrid" class="board-grid" style="display:none"></div>
     </div>
@@ -86,33 +86,33 @@
 </div>
 
 <div id="colContextMenu" class="context-menu" style="display:none">
-  <button class="ctx-item" id="colCtxToggleContent">▾  Hide content</button>
-  <button class="ctx-item" id="colCtxColor">◉  Change color</button>
+  <button class="ctx-item" id="colCtxToggleContent"><span data-icon="collapse"></span>  Hide content</button>
+  <button class="ctx-item" id="colCtxColor"><span data-icon="color"></span>  Change color</button>
   <div class="ctx-color-row" id="colCtxColorRow" style="display:none"></div>
-  <button class="ctx-item" id="colCtxActions">⚡  Column actions</button>
+  <button class="ctx-item" id="colCtxActions"><span data-icon="actions"></span>  Column actions</button>
   <div class="ctx-actions-row" id="colCtxActionsRow" style="display:none"></div>
   <div class="ctx-item ctx-submenu-trigger">
-    <span>↪  Move all to</span>
-    <span class="ctx-arrow">›</span>
+    <span><span data-icon="moveTo"></span>  Move all to</span>
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxMoveSubmenu"></div>
   </div>
-  <button class="ctx-item ctx-danger" id="colCtxClear">✕  Clear column</button>
-  <button class="ctx-item ctx-danger" id="colCtxDelete">⌫  Delete column</button>
+  <button class="ctx-item ctx-danger" id="colCtxClear"><span data-icon="close"></span>  Clear column</button>
+  <button class="ctx-item ctx-danger" id="colCtxDelete"><span data-icon="deleteCol"></span>  Delete column</button>
 </div>
 
 <div id="contextMenu" class="context-menu" style="display:none">
-  <button class="ctx-item" id="ctxInfo">ℹ  Info</button>
-  <button class="ctx-item" id="ctxEdit">✎  Edit</button>
-  <button class="ctx-item" id="ctxDone">✓  Mark as done</button>
-  <button class="ctx-item" id="ctxDuplicate">⧉  Duplicate</button>
-  <button class="ctx-item" id="ctxColor">◉  Change color</button>
+  <button class="ctx-item" id="ctxInfo"><span data-icon="info"></span>  Info</button>
+  <button class="ctx-item" id="ctxEdit"><span data-icon="edit"></span>  Edit</button>
+  <button class="ctx-item" id="ctxDone"></button>
+  <button class="ctx-item" id="ctxDuplicate"><span data-icon="duplicate"></span>  Duplicate</button>
+  <button class="ctx-item" id="ctxColor"><span data-icon="color"></span>  Change color</button>
   <div class="ctx-color-row" id="ctxColorRow" style="display:none"></div>
   <div class="ctx-item ctx-submenu-trigger">
-    <span>↪  Move to</span>
-    <span class="ctx-arrow">›</span>
+    <span><span data-icon="moveTo"></span>  Move to</span>
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="ctxMoveSubmenu"></div>
   </div>
-  <button class="ctx-item ctx-danger" id="ctxDelete">✕  Delete</button>
+  <button class="ctx-item ctx-danger" id="ctxDelete"><span data-icon="close"></span>  Delete</button>
 </div>
 
 <div id="modal" class="modal-backdrop" style="display:none">
@@ -134,7 +134,24 @@
           </div>
         </div>
         <div class="modal-field modal-field-desc">
-          <label>Description</label>
+          <div class="modal-field-label-row">
+            <label>Description</label>
+            <div id="cardDescToolbar" class="note-desc-toolbar" style="display:none">
+              <button class="note-tb-btn" data-fmt="bold"      title="Bold (Ctrl+B)"><b>B</b></button>
+              <button class="note-tb-btn" data-fmt="italic"    title="Italic (Ctrl+I)"><i>I</i></button>
+              <button class="note-tb-btn" data-fmt="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+              <button class="note-tb-btn note-tb-btn--mark" data-fmt="mark" title="Highlight (Ctrl+M)">M</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="h1" title="Heading 1">H1</button>
+              <button class="note-tb-btn" data-fmt="h2" title="Heading 2">H2</button>
+              <button class="note-tb-btn" data-fmt="h3" title="Heading 3">H3</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="checkbox" title="Checkbox"><span data-icon="checkbox"></span></button>
+              <button class="note-tb-btn" data-fmt="code"     title="Code block">&lt;/&gt;</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
+            </div>
+          </div>
           <div id="cardDescPreview" class="card-desc-preview" style="display:none"></div>
           <textarea id="cardDesc" placeholder="Optional details…"></textarea>
         </div>
@@ -144,17 +161,17 @@
           <label>Link</label>
           <div class="modal-link-row">
             <input id="cardLink" type="url" placeholder="https://…">
-            <button class="btn modal-link-open" id="cardLinkOpen" title="Open link" tabindex="-1">↗</button>
+            <button class="btn modal-link-open" id="cardLinkOpen" title="Open link" tabindex="-1"><span data-icon="openLink"></span></button>
           </div>
         </div>
         <div class="card-section-header">Properties</div>
         <div class="card-section-toggles">
-          <button class="card-section-toggle" id="cardToggleNotePages" title="Note Pages" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg></button>
-          <button class="card-section-toggle" id="cardToggleDate" title="Date"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="9.6" rx="1.3"/><line x1="0.7" y1="5" x2="11.3" y2="5"/><line x1="3.5" y1="0.7" x2="3.5" y2="3.3"/><line x1="8.5" y1="0.7" x2="8.5" y2="3.3"/></svg></button>
-          <button class="card-section-toggle" id="cardTogglePriority" title="Priority"><svg viewBox="0 0 11 13" width="11" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" y1="0.7" x2="2" y2="12.3"/><path d="M2 1.5h7.5l-2.2 2.8 2.2 2.7H2"/></svg></button>
-          <button class="card-section-toggle" id="cardToggleColor" title="Color"><svg viewBox="0 0 12 12" width="12" height="12" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="2.2"/><circle cx="9" cy="3" r="2.2"/><circle cx="3" cy="9" r="2.2"/><circle cx="9" cy="9" r="2.2"/></svg></button>
-          <button class="card-section-toggle" id="cardToggleAttachments" title="Attachments" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"/></svg></button>
-          <button class="card-section-toggle" id="cardInfoBtn" title="Card info" style="display:none"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><line x1="6" y1="5.5" x2="6" y2="8.5"/><circle cx="6" cy="3.5" r="0.5" fill="currentColor" stroke="none"/></svg></button>
+          <button class="card-section-toggle" id="cardToggleNotePages" title="Note Pages" style="display:none"><span data-icon="notePages" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="cardToggleDate" title="Date"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="cardTogglePriority" title="Priority"><span data-icon="priority" data-icon-w="11" data-icon-h="13"></span></button>
+          <button class="card-section-toggle" id="cardToggleColor" title="Color"><span data-icon="colorPalette" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="cardToggleAttachments" title="Attachments" style="display:none"><span data-icon="attachment" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="cardInfoBtn" title="Card info" style="display:none"><span data-icon="cardInfo" data-icon-w="12" data-icon-h="12"></span></button>
         </div>
         <div id="cardNotePagesSection" style="display:none">
           <div class="modal-field">
@@ -349,7 +366,7 @@
           <div class="settings-item-label">Database admin (Fauxton)</div>
           <div class="settings-item-desc">CouchDB management UI — browse documents, run queries, manage the database</div>
         </div>
-        <span class="settings-item-arrow">↗</span>
+        <span class="settings-item-arrow"><span data-icon="openLink"></span></span>
       </a>
     </div>
     <div class="settings-section" id="importSection" style="display:none">
@@ -416,6 +433,10 @@
       <div class="settings-section-title">Danger zone</div>
       <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete board…</button>
     </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Icon Library</div>
+      <div id="iconLibraryGrid" class="icon-lib-grid"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-accent" id="settingsCloseBtn">Close</button>
     </div>
@@ -432,7 +453,25 @@
           <div class="note-modal-crumb" id="noteModalBreadcrumb"></div>
         </div>
         <div class="modal-field modal-field-desc">
-          <label>Description</label>
+          <div class="modal-field-label-row">
+            <label>Description</label>
+            <div id="noteDescToolbar" class="note-desc-toolbar" style="display:none">
+              <button class="note-tb-btn" data-fmt="bold"      title="Bold (Ctrl+B)"><b>B</b></button>
+              <button class="note-tb-btn" data-fmt="italic"    title="Italic (Ctrl+I)"><i>I</i></button>
+              <button class="note-tb-btn" data-fmt="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+              <button class="note-tb-btn note-tb-btn--mark" data-fmt="mark" title="Highlight (Ctrl+M)">M</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="h1" title="Heading 1">H1</button>
+              <button class="note-tb-btn" data-fmt="h2" title="Heading 2">H2</button>
+              <button class="note-tb-btn" data-fmt="h3" title="Heading 3">H3</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="checkbox" title="Checkbox"><span data-icon="checkbox"></span></button>
+              <button class="note-tb-btn" data-fmt="code"     title="Code block">&lt;/&gt;</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
+              <button class="note-tb-btn" data-fmt="subpages" title="Subpages">[sub]</button>
+            </div>
+          </div>
           <div id="notePageDescPreview" class="card-desc-preview" style="display:none"></div>
           <textarea id="notePageDesc" placeholder="Write notes in markdown…"></textarea>
         </div>
@@ -440,16 +479,16 @@
       <div class="modal-col-side">
         <div class="card-section-header">Properties</div>
         <div class="card-section-toggles">
-          <button class="card-section-toggle" id="noteToggleLink" title="Link"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M5 7a2.8 2.8 0 0 0 4 .4l1.4-1.4a2.8 2.8 0 0 0-4-4L5.1 3.3"/><path d="M7 5a2.8 2.8 0 0 0-4-.4L1.6 6a2.8 2.8 0 0 4 4L6.9 8.7"/></svg></button>
-          <button class="card-section-toggle" id="noteToggleLinkedCards" title="Linked Cards"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="3.7" width="7" height="5" rx="1"/><path d="M3.7 3V2.3A1 1 0 0 1 4.7 1.3h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H9.7"/></svg></button>
-          <button class="card-section-toggle" id="noteToggleAttachments" title="Attachments"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M10 5.5L5.5 10a3 3 0 0 1-4.2-4.2L7 0.8a2 2 0 0 1 2.8 2.8L4.1 9.3A1 1 0 0 1 2.7 7.9L8 2.5"/></svg></button>
+          <button class="card-section-toggle" id="noteToggleLink" title="Link"><span data-icon="link" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="noteToggleLinkedCards" title="Linked Cards"><span data-icon="linkedCards" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="noteToggleAttachments" title="Attachments"><span data-icon="attachment" data-icon-w="12" data-icon-h="12"></span></button>
         </div>
         <div id="noteLinkSection" style="display:none">
           <div class="modal-field">
             <label>Link</label>
             <div class="modal-link-row">
               <input id="notePageLink" type="url" placeholder="https://…">
-              <button class="btn modal-link-open" id="notePageLinkOpen" title="Open link" tabindex="-1">↗</button>
+              <button class="btn modal-link-open" id="notePageLinkOpen" title="Open link" tabindex="-1"><span data-icon="openLink"></span></button>
             </div>
           </div>
         </div>
@@ -498,14 +537,15 @@
   <div class="attach-viewer-box">
     <div class="attach-viewer-bar">
       <span id="attachViewerName" class="attach-viewer-name"></span>
-      <button class="btn" id="attachViewerDl">↓ Download</button>
-      <button class="btn" id="attachViewerClose">✕</button>
+      <button class="btn" id="attachViewerDl"><span data-icon="download"></span> Download</button>
+      <button class="btn" id="attachViewerClose"><span data-icon="close"></span></button>
     </div>
     <div id="attachViewerContent" class="attach-viewer-content"></div>
   </div>
 </div>
 
 <script src="/marked.min.js"></script>
+<script src="/icons.js"></script>
 <script src="/state.js"></script>
 <script src="/drag.js"></script>
 <script src="/cards.js"></script>

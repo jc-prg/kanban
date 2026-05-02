@@ -113,6 +113,7 @@ function onDrop(e, toColId) {
   if (fromColId !== toColId) {
     recordMove(card, fromCol.title, toCol.title);
     applyColumnActions(card, toCol);
+    card.lastModified = new Date().toISOString();
   }
 
   render();
@@ -232,6 +233,7 @@ document.addEventListener('touchend', e => {
         if (fromColId !== toColId) {
           recordMove(card, fromCol.title, toCol.title);
           applyColumnActions(card, toCol);
+          card.lastModified = new Date().toISOString();
         }
         render();
         schedulesSave();

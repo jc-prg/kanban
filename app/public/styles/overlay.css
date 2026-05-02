@@ -1023,3 +1023,61 @@
     width: calc(100vw - 8px);
   }
 }
+
+/* ---- Icon Library (settings section) ---- */
+.icon-lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 5px;
+  margin-top: 8px;
+}
+.icon-lib-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: var(--bg-base, #111);
+  border-radius: 6px;
+}
+.icon-lib-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: var(--surface, #1a1a1a);
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.icon-lib-glyph {
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-base);
+}
+.icon-lib-svg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-base);
+}
+.icon-lib-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.icon-lib-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.icon-lib-usage {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

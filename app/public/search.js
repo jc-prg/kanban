@@ -164,8 +164,8 @@
         else
           meta.push(`<span class="${cls}">→ ${fmtDate(card.endDate)}</span>`);
       }
-      if (card.description) meta.push(`<span class="card-desc" title="${escHtml(card.description)}">☰</span>`);
-      if (card.done)        meta.push(`<span class="card-done-mark">✓ done</span>`);
+      if (card.description) meta.push(`<span class="card-desc" title="${escHtml(card.description)}">${ICONS.description}</span>`);
+      if (card.done)        meta.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
       const metaHtml = meta.length ? `<div class="card-meta">${meta.join('')}</div>` : '';
       const colIdx   = state.columns.indexOf(col);
       const color    = card.color || col.color || COL_COLORS[colIdx % COL_COLORS.length];

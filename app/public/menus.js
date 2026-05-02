@@ -6,7 +6,7 @@ function showContextMenu(x, y, colId, card) {
   ctxColId = colId;
   ctxCard  = card;
 
-  document.getElementById('ctxDone').textContent = card.done ? '✓  Mark as undone' : '✓  Mark as done';
+  document.getElementById('ctxDone').textContent = `${ICONS.done}  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
   document.getElementById('ctxColorRow').style.display = 'none';
 
   const submenu = document.getElementById('ctxMoveSubmenu');
@@ -68,7 +68,7 @@ document.getElementById('ctxDuplicate').addEventListener('click', () => {
   const col = state.columns.find(c => c.id === colId);
   if (!col) return;
   const idx = col.cards.findIndex(c => c.id === card.id);
-  const copy = { ...JSON.parse(JSON.stringify(card)), id: uid(), text: '(copy) ' + card.text };
+  const copy = { ...JSON.parse(JSON.stringify(card)), id: uid(), text: '(copy) ' + card.text, lastModified: new Date().toISOString() };
   col.cards.splice(idx + 1, 0, copy);
   render();
   schedulesSave();
@@ -88,7 +88,7 @@ document.getElementById('ctxColor').addEventListener('click', e => {
       ev.stopPropagation();
       const col = state.columns.find(c => c.id === ctxColId);
       const target = col?.cards.find(c => c.id === ctxCard?.id);
-      if (target) { target.color = s.dataset.color; render(); schedulesSave(); }
+      if (target) { target.color = s.dataset.color; target.lastModified = new Date().toISOString(); render(); schedulesSave(); }
       hideContextMenu();
     });
   });
@@ -109,7 +109,7 @@ function showColContextMenu(x, y, colId) {
   ctxHeaderColId = colId;
 
   const collapsed = colCollapsed.has(colId);
-  document.getElementById('colCtxToggleContent').textContent = collapsed ? '▸  Show content' : '▾  Hide content';
+  document.getElementById('colCtxToggleContent').textContent = `${collapsed ? ICONS.expand : ICONS.collapse}  ${collapsed ? 'Show content' : 'Hide content'}`;
 
   const hideWhenCollapsed = display => ['colCtxColor','colCtxActions','colCtxClear','colCtxDelete'].forEach(id =>
     document.getElementById(id).style.display = display);
@@ -154,6 +154,8 @@ function moveAllCards(fromColId, toColId) {
   const fromCol = state.columns.find(c => c.id === fromColId);
   const toCol   = state.columns.find(c => c.id === toColId);
   if (!fromCol || !toCol) return;
+  const _now = new Date().toISOString();
+  fromCol.cards.forEach(c => { c.lastModified = _now; });
   toCol.cards.push(...fromCol.cards);
   fromCol.cards = [];
   render();

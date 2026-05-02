@@ -1,3 +1,43 @@
+// ---- Shared description formatting helpers ----
+function _descWrap(ta, open, close) {
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  ta.setRangeText(open + ta.value.slice(s, e) + close, s, e, 'select');
+  if (s === e) { const mid = s + open.length; ta.setSelectionRange(mid, mid); }
+  ta.focus();
+}
+
+function _descLinePrefix(ta, prefix) {
+  const s = ta.selectionStart;
+  const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
+  ta.setRangeText(prefix, lineStart, lineStart, 'end');
+  ta.focus();
+}
+
+function _descInsertBlock(ta, text, cursorOffset) {
+  const s = ta.selectionStart;
+  const needsNewline = s > 0 && ta.value[s - 1] !== '\n';
+  const insert = (needsNewline ? '\n' : '') + text;
+  ta.setRangeText(insert, s, s, 'end');
+  const pos = s + (needsNewline ? 1 : 0) + cursorOffset;
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
+}
+
+function applyDescFormat(ta, action) {
+  if (!ta) return;
+  if (action === 'bold')      return _descWrap(ta, '**', '**');
+  if (action === 'italic')    return _descWrap(ta, '*', '*');
+  if (action === 'underline') return _descWrap(ta, '<u>', '</u>');
+  if (action === 'mark')      return _descWrap(ta, '<mark>', '</mark>');
+  if (action === 'h1')        return _descLinePrefix(ta, '# ');
+  if (action === 'h2')        return _descLinePrefix(ta, '## ');
+  if (action === 'h3')        return _descLinePrefix(ta, '### ');
+  if (action === 'checkbox')  return _descLinePrefix(ta, '- [ ] ');
+  if (action === 'code')      return _descInsertBlock(ta, '```\n\n```', 4);
+  if (action === 'toc')       return _descInsertBlock(ta, '[toc]', 5);
+  if (action === 'subpages')  return _descInsertBlock(ta, '[subpages]', 10);
+}
+
 // ---- Markdown preview enhancement (copy buttons + task checkboxes) ----
 function enhanceMarkdownPreview(container) {
   // Interactive task-list checkboxes
@@ -22,14 +62,14 @@ function enhanceMarkdownPreview(container) {
   container.querySelectorAll('pre').forEach(pre => {
     const btn = document.createElement('button');
     btn.className = 'md-copy-btn';
-    btn.textContent = '⎘';
+    btn.textContent = ICONS.copyCode;
     btn.title = 'Copy code';
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const text = (pre.querySelector('code') || pre).textContent;
       navigator.clipboard.writeText(text).then(() => {
-        btn.textContent = '✓';
-        setTimeout(() => { btn.textContent = '⎘'; }, 1500);
+        btn.textContent = ICONS.done;
+        setTimeout(() => { btn.textContent = ICONS.copyCode; }, 1500);
       });
     });
     pre.appendChild(btn);
@@ -37,13 +77,13 @@ function enhanceMarkdownPreview(container) {
 
   const allBtn = document.createElement('button');
   allBtn.className = 'md-copy-all-btn';
-  allBtn.textContent = '⎘';
+  allBtn.textContent = ICONS.copyCode;
   allBtn.title = 'Copy full description';
   allBtn.addEventListener('click', e => {
     e.stopPropagation();
     navigator.clipboard.writeText(container.dataset.rawText || container.innerText).then(() => {
-      allBtn.textContent = '✓';
-      setTimeout(() => { allBtn.textContent = '⎘'; }, 1500);
+      allBtn.textContent = ICONS.done;
+      setTimeout(() => { allBtn.textContent = ICONS.copyCode; }, 1500);
     });
   });
   container.appendChild(allBtn);
@@ -60,6 +100,7 @@ function showDescPreview() {
   if (editCardId && CARD_ATTACH_API) resolveCardAttachments(el);
   el.style.display = '';
   document.getElementById('cardDesc').style.display = 'none';
+  document.getElementById('cardDescToolbar').style.display = 'none';
 }
 
 function previewScrollFrac(el, e) {
@@ -114,8 +155,18 @@ document.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(() => applyEditorFrac(ta, frac));
     ta.focus();
   });
+  document.getElementById('cardDesc').addEventListener('focus', () => {
+    document.getElementById('cardDescToolbar').style.display = 'flex';
+  });
   document.getElementById('cardDesc').addEventListener('blur', () => {
+    document.getElementById('cardDescToolbar').style.display = 'none';
     if (document.getElementById('cardDesc').value.trim()) showDescPreview();
+  });
+
+  const _cardToolbar = document.getElementById('cardDescToolbar');
+  _cardToolbar?.querySelectorAll('.note-tb-btn').forEach(btn => {
+    btn.addEventListener('pointerdown', e => e.preventDefault());
+    btn.addEventListener('click', () => applyDescFormat(document.getElementById('cardDesc'), btn.dataset.fmt));
   });
   document.getElementById('cardDesc').addEventListener('keydown', e => {
     if (!e.ctrlKey && !e.metaKey) return;
@@ -213,7 +264,7 @@ function renderCardAttachments(cardId, files) {
     const url = `${CARD_ATTACH_API}/${cardId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = ft === 'image' ? '🖼' : ft === 'pdf' ? '📄' : ft === 'html' ? '🌐' : '📎';
+    const icon = ft === 'image' ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
@@ -222,8 +273,8 @@ function renderCardAttachments(cardId, files) {
         (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">⛶</button>` : '') +
         (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">⛶</button>` : '') +
         `<button class="note-attach-btn" data-act="insert"   title="Insert in description">⌅</button>` +
-        `<button class="note-attach-btn" data-act="download" title="Download">↓</button>` +
-        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">✕</button>` +
+        `<button class="note-attach-btn" data-act="download" title="Download">${ICONS.download}</button>` +
+        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">${ICONS.close}</button>` +
       `</div>`;
     if (ft === 'image' || ft === 'pdf')
       item.querySelector('[data-act="view"]').addEventListener('click',     () => openAttachmentViewer(url, f.name, ft));
@@ -691,6 +742,7 @@ function openCardInfo(card) {
       html += `<div class="card-info-title">${escHtml(card.text)}</div>`;
       html += '<table class="card-info-table">';
       if (created) html += `<tr><th>Created</th><td>${escHtml(created)}</td></tr>`;
+      if (card.lastModified) html += `<tr><th>Last modified</th><td>${escHtml(new Date(card.lastModified).toLocaleString())}</td></tr>`;
       html += `<tr><th>Current column</th><td>${escHtml(column)}</td></tr>`;
       html += '</table>';
       if (moves && moves.length) {

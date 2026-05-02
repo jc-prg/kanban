@@ -302,6 +302,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       renderTrackedCols();
     }
     loadApiKey();
+    renderIconLibrary();
     backdrop.style.display = 'flex';
   }
 
@@ -366,7 +367,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     function flashSaved(indicatorId) {
       const el = document.getElementById(indicatorId);
       if (!el) return;
-      el.textContent = '✓ saved';
+      el.textContent = `${ICONS.done} saved`;
       el.classList.add('settings-save-indicator--visible');
       clearTimeout(el._t);
       el._t = setTimeout(() => el.classList.remove('settings-save-indicator--visible'), 1500);
@@ -673,7 +674,7 @@ document.getElementById('archivedSectionBtn')?.addEventListener('click', () => {
   const icon = document.getElementById('archivedSectionIcon');
   const open = grid.style.display === '';
   grid.style.display = open ? 'none' : '';
-  icon.textContent   = open ? '▸' : '▾';
+  icon.textContent   = open ? ICONS.expand : ICONS.collapse;
 });
 
 document.getElementById('newBoardBtn').addEventListener('click', async () => {
