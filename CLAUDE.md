@@ -76,6 +76,10 @@ All configuration is via `.env` (forwarded to both containers by `docker-compose
 
 The Fauxton admin UI is available at `http://localhost:5984/_utils`.
 
+## Icons
+
+Before adding an icon, check whether a suitable one already exists in the project's icon library (inline SVGs in `index.html` or reused SVG markup in the JS/CSS). When a new icon is needed, prefer SVG over icon fonts or raster images.
+
 ## Frontend Patterns
 
 The frontend maintains a single `state` object (`{ columns: [...] }`). After every mutation, `render()` wipes and rebuilds the board DOM from scratch (React-style, but vanilla JS).

@@ -6,6 +6,7 @@ const nano     = require('nano');
 const crypto   = require('crypto');
 const multer   = require('multer');
 const archiver = require('archiver');
+const Ajv      = require('ajv');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,16 +55,109 @@ function refreshDbSize() {
 
 const DB_SIZE_INTERVAL_MS = 15 * 60 * 1000;
 
+// ---- Input validation schemas ----
+const ajv = new Ajv({ allErrors: true, strict: false });
+
+const _moveSchema = {
+  type: 'object', additionalProperties: false,
+  properties: { at: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' } }
+};
+const _cardSchema = {
+  type: 'object', required: ['id', 'text'], additionalProperties: false,
+  properties: {
+    id:          { type: 'string', minLength: 1 },
+    text:        { type: 'string' },
+    color:       { type: 'string' },
+    priority:    { type: 'integer', minimum: 1, maximum: 5 },
+    description: { type: 'string' },
+    link:        { type: 'string' },
+    startDate:   { type: 'string' },
+    endDate:     { type: 'string' },
+    done:         { type: 'boolean' },
+    created:      { type: 'string' },
+    lastModified: { type: 'string' },
+    moves:        { type: 'array', items: _moveSchema }
+  }
+};
+const _columnSchema = {
+  type: 'object', required: ['id', 'title', 'cards'], additionalProperties: false,
+  properties: {
+    id:      { type: 'string', minLength: 1 },
+    title:   { type: 'string' },
+    color:   { type: 'string' },
+    actions: { type: 'array', items: { type: 'string' } },
+    cards:   { type: 'array', items: _cardSchema }
+  }
+};
+const _settingsSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    description:        { type: 'string' },
+    archived:           { type: 'boolean' },
+    inboxWithDate:      { type: 'boolean' },
+    persistCollapse:    { type: 'boolean' },
+    collapsedColumnIds: { type: 'array', items: { type: 'string' } },
+    trackedColumns:     { type: 'array', items: { type: 'string' } },
+    notesSidebarOpen:   { type: 'boolean' },
+    notesSidebarWidth:  { type: 'number' },
+    notesFontSize:      { type: 'number' }
+  }
+};
+
+const validateBoard = ajv.compile({
+  type: 'object', required: ['columns'], additionalProperties: false,
+  properties: { columns: { type: 'array', items: _columnSchema }, settings: _settingsSchema }
+});
+const validateBoardPatch = ajv.compile({
+  type: 'object', additionalProperties: false,
+  properties: {
+    columnOrder:      { type: 'array', items: { type: 'string' } },
+    updatedColumns:   { type: 'array', items: _columnSchema },
+    removedColumnIds: { type: 'array', items: { type: 'string' } },
+    settings:         _settingsSchema
+  }
+});
+const validateNotes = ajv.compile({
+  type: 'object', required: ['pages'], additionalProperties: false,
+  properties: { pages: { type: 'array', items: { $ref: '#/definitions/page' } } },
+  definitions: {
+    page: {
+      type: 'object', required: ['id', 'title'], additionalProperties: false,
+      properties: {
+        id:             { type: 'string', minLength: 1 },
+        title:          { type: 'string' },
+        description:    { type: 'string' },
+        link:           { type: 'string' },
+        linkedCards:    { type: 'array', items: { type: 'string' } },
+        hasAttachments: { type: 'boolean' },
+        children:       { type: 'array', items: { $ref: '#/definitions/page' } }
+      }
+    }
+  }
+});
+
+function schemaError(validate) {
+  return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
+}
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+const REDACT_REQ_KEYS  = new Set(['password']);
+const REDACT_RES_KEYS  = new Set(['token', 'apiKey']);
+
+function redact(obj, keys) {
+  if (!obj || typeof obj !== 'object') return obj;
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, keys.has(k) ? '[redacted]' : v]));
+}
 
 if (LOG_API_RESPONSES) {
   app.use('/api', (req, res, next) => {
     const originalJson = res.json.bind(res);
     res.json = (body) => {
       console.log(`[API] ${req.method} ${req.originalUrl}`);
-      if (req.body && Object.keys(req.body).length) console.log('  req :', JSON.stringify(req.body));
-      console.log('  res :', JSON.stringify(body));
+      if (req.body && Object.keys(req.body).length) console.log('  req :', JSON.stringify(redact(req.body, REDACT_REQ_KEYS)));
+      console.log('  res :', JSON.stringify(redact(body, REDACT_RES_KEYS)));
       return originalJson(body);
     };
     next();
@@ -283,13 +377,14 @@ app.get('/api/boards', async (req, res) => {
     const boards = await Promise.all(names.map(async name => {
       try {
         const data = await loadBoardData(couch.use(DB_PREFIX + name));
-        const totalCards      = data.columns.reduce((s, c) => s + c.cards.length, 0);
-        const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
-        const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
-        const inProgressCount = data.columns.filter(c => /^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)).reduce((s, c) => s + c.cards.length, 0);
+        const visibleCards    = col => col.cards.filter(c => !c.text?.startsWith('#'));
+        const totalCards      = data.columns.reduce((s, c) => s + visibleCards(c).length, 0);
+        const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + visibleCards(c).length, 0);
+        const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + visibleCards(c).length, 0);
+        const inProgressCount = data.columns.filter(c => /^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)).reduce((s, c) => s + visibleCards(c).length, 0);
         const trackedCounts   = (data.settings?.trackedColumns || []).map(title => {
           const col = data.columns.find(c => c.title === title);
-          return col ? { title, count: col.cards.length, color: col.color || null } : null;
+          return col ? { title, count: visibleCards(col).length, color: col.color || null } : null;
         }).filter(Boolean);
         const { count: attachCount, size: attachSize } = getBoardAttachStats(name);
         return { name, description: data.settings?.description || '', archived: data.settings?.archived || false, totalCards, inboxCount, todoCount, inProgressCount, trackedCounts, attachCount, attachSize };
@@ -390,11 +485,18 @@ app.get('/api/:board/board', withExistingBoard(async (req, res, db) => {
 }));
 
 app.put('/api/:board/board', withBoard(async (req, res, db) => {
+  if (!validateBoard(req.body))
+    return res.status(400).json({ error: 'Invalid board data', details: schemaError(validateBoard) });
   await saveBoardData(db, req.body);
   res.json({ success: true });
 }));
 
 app.patch('/api/:board/board', withBoard(async (req, res, db) => {
+  if (!validateBoardPatch(req.body)) {
+    const details = schemaError(validateBoardPatch);
+    console.error(`[PATCH /${req.params.board}/board] schema validation failed:`, details);
+    return res.status(400).json({ error: 'Invalid patch data', details });
+  }
   const { _rev, ...data } = await db.get(DOC_ID);
   const { columnOrder, updatedColumns, removedColumnIds, settings } = req.body;
   let columns = data.columns;
@@ -445,6 +547,8 @@ app.get('/api/:board/notes', withExistingBoard(async (req, res, db) => {
 }));
 
 app.put('/api/:board/notes', withBoard(async (req, res, db) => {
+  if (!validateNotes(req.body))
+    return res.status(400).json({ error: 'Invalid notes data', details: schemaError(validateNotes) });
   await saveNotesData(db, req.body);
   res.json({ ok: true });
 }));

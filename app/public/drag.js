@@ -152,6 +152,7 @@ function endTouchDrag() {
   document.querySelectorAll('.drag-over, .col-drop-left, .col-drop-right')
     .forEach(e => e.classList.remove('drag-over', 'col-drop-left', 'col-drop-right'));
   document.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.notes-tree-item--drag-over').forEach(el => el.classList.remove('notes-tree-item--drag-over'));
   touchDrag = null;
 }
 

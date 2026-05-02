@@ -104,6 +104,21 @@
 
 .card-date--overdue { color: var(--danger); }
 
+.card--overdue {
+  border-color: var(--danger);
+  border-left-color: var(--border);
+}
+.card--overdue .card-link-badge {
+  border-color: var(--danger);
+}
+.card--overdue:hover {
+  border-color: var(--danger);
+  border-left-color: var(--border);
+}
+.card--overdue:hover .card-link-badge {
+  border-color: var(--danger);
+}
+
 .card-desc {
   font-size: 0.75rem;
   color: var(--text-muted);

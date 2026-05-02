@@ -318,6 +318,40 @@ function resetNoteSections() {
 let noteModalPageId = null;
 let noteModalOrig = { title: '', desc: '', link: '' };
 
+async function _crumbNavigate(pageId) {
+  if (noteModalHasChanges()) {
+    const result = await showConfirm('Save changes before navigating?', { okLabel: 'Save', altLabel: "Don't save", cancelLabel: 'Cancel' });
+    if (result === false) return;  // Cancel — stay on page
+    if (result === true) submitNote();
+    // null → Don't save, navigate without saving
+  }
+  openNoteModal(pageId);
+}
+
+function _renderCrumb(path, currentTitle = null) {
+  const crumb = document.getElementById('noteModalBreadcrumb');
+  if (!crumb) return;
+  const isNested = path && path.length > 1;
+  crumb.style.display = isNested ? '' : 'none';
+  crumb.innerHTML = '';
+  if (!isNested) return;
+  path.forEach((p, i) => {
+    if (i > 0) crumb.insertAdjacentHTML('beforeend', '<span class="note-crumb-sep"> › </span>');
+    if (i < path.length - 1) {
+      const a = document.createElement('a');
+      a.className = 'note-crumb-link';
+      a.textContent = p.title;
+      a.href = '#';
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _crumbNavigate(p.id); });
+      crumb.appendChild(a);
+    } else {
+      const span = document.createElement('span');
+      span.textContent = currentTitle ?? p.title;
+      crumb.appendChild(span);
+    }
+  });
+}
+
 function openNoteModal(pageId, focusTitle = false) {
   const page = findNotePage(pageId, notesState.pages);
   if (!page) return;
@@ -332,12 +366,7 @@ function openNoteModal(pageId, focusTitle = false) {
   renderLinkedCards(page.linkedCards || []);
 
   const path = getNotePath(pageId, notesState.pages);
-  const crumb = document.getElementById('noteModalBreadcrumb');
-  if (crumb) {
-    const isNested = path && path.length > 1;
-    crumb.textContent = isNested ? path.map(p => p.title).join(' › ') : '';
-    crumb.style.display = isNested ? '' : 'none';
-  }
+  _renderCrumb(path);
 
   if ((page.description || '').trim()) showNoteDescPreview();
   else showNoteDescEditor();
@@ -371,13 +400,7 @@ function submitNote() {
 
   noteModalOrig = { title: page.title, desc: page.description, link: page.link };
 
-  const crumb = document.getElementById('noteModalBreadcrumb');
-  const path = getNotePath(noteModalPageId, notesState.pages);
-  if (crumb) {
-    const isNested = path && path.length > 1;
-    crumb.textContent = isNested ? path.map(p => p.title).join(' › ') : '';
-    crumb.style.display = isNested ? '' : 'none';
-  }
+  _renderCrumb(getNotePath(noteModalPageId, notesState.pages));
 
   renderNotesTree();
   scheduleSaveNotes();
@@ -435,7 +458,7 @@ function buildToc(el) {
     li.className = `md-toc-item md-toc-${h.tagName.toLowerCase()}`;
     const a = document.createElement('a');
     a.textContent = h.textContent;
-    a.addEventListener('click', e => { e.preventDefault(); h.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); h.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
     li.appendChild(a);
     ul.appendChild(li);
   });
@@ -484,7 +507,7 @@ function buildSubpages(el) {
     const a = document.createElement('a');
     a.className = 'md-subpages-title';
     a.textContent = child.title;
-    a.addEventListener('click', e => { e.preventDefault(); openNoteModal(child.id); });
+    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _crumbNavigate(child.id); });
     row.appendChild(a);
 
     const meta = document.createElement('span');
@@ -528,7 +551,7 @@ function showNoteDescPreview() {
   if (!text) { showNoteDescEditor(); return; }
   const el = document.getElementById('notePageDescPreview');
   el.dataset.rawText = text;
-  el.innerHTML = marked.parse(text, { breaks: true });
+  el.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
   enhanceMarkdownPreview(el);
   buildToc(el);
   buildSubpages(el);
@@ -763,6 +786,46 @@ document.addEventListener('drop', async e => {
 }, true);
 
 function initNotesDropZone() { /* wired above via document capture listeners */ }
+
+// ---- Touch: card → notes page link ----
+document.addEventListener('touchmove', e => {
+  if (!touchDrag || touchDrag.type !== 'card') return;
+  const t = e.touches[0];
+  touchDrag.ghost.el.style.display = 'none';
+  const under = document.elementFromPoint(t.clientX, t.clientY);
+  touchDrag.ghost.el.style.display = '';
+  const item = under?.closest('.notes-tree-item');
+  if (_notesDragOverItem && _notesDragOverItem !== item) {
+    _notesDragOverItem.classList.remove('notes-tree-item--drag-over');
+    _notesDragOverItem = null;
+  }
+  if (item && _notesDragOverItem !== item) {
+    item.classList.add('notes-tree-item--drag-over');
+    _notesDragOverItem = item;
+  }
+}, { capture: true, passive: true });
+
+document.addEventListener('touchend', e => {
+  if (!touchDrag || touchDrag.type !== 'card') return;
+  const item = _notesDragOverItem;
+  _notesDragOverItem = null;
+  if (!item) return;
+  const { colId, cardId } = touchDrag;
+  (async () => {
+    const col  = state.columns.find(c => c.id === colId);
+    const card = col?.cards.find(c => c.id === cardId);
+    if (!card) return;
+    const pageId = item.dataset.pageId;
+    const target = findNotePage(pageId, notesState.pages);
+    if (!target || (target.linkedCards || []).includes(cardId)) return;
+    const label = card.text.length > 60 ? card.text.slice(0, 60) + '…' : card.text;
+    if (!await showConfirm(`Link "${label}" to page "${target.title}"?`, { okLabel: 'Link card' })) return;
+    (target.linkedCards ??= []).push(cardId);
+    scheduleSaveNotes();
+    if (noteModalPageId === pageId) renderLinkedCards(target.linkedCards);
+    render();
+  })();
+}, true);
 
 // ---- Attachments ----
 
@@ -1261,12 +1324,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('notePageTitle')?.addEventListener('input', e => {
     e.target.value = e.target.value.replace(/\n/g, ''); // no newlines in title
     autoResizeTitle(e.target);
-    const crumb = document.getElementById('noteModalBreadcrumb');
-    if (!crumb || crumb.style.display === 'none') return;
     const path = getNotePath(noteModalPageId, notesState.pages);
     if (path && path.length > 1) {
       const live = e.target.value.trim() || 'New Page';
-      crumb.textContent = path.map(p => p.id === noteModalPageId ? live : p.title).join(' › ');
+      _renderCrumb(path, live);
     }
   });
   document.getElementById('notePageTitle')?.addEventListener('keydown', e => {
@@ -1288,6 +1349,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's' && document.getElementById('noteModal')?.style.display !== 'none') {
       e.preventDefault();
       submitNote();
+    }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && document.getElementById('noteModal')?.style.display !== 'none') {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      const preview = document.getElementById('notePageDescPreview');
+      const target = preview?.style.display !== 'none' ? preview : null;
+      if (!target) return;
+      e.preventDefault();
+      target.scrollTop += e.key === 'ArrowDown' ? 80 : -80;
     }
   });
 

@@ -245,6 +245,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.note-crumb-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+.note-crumb-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
 
 /* Reuse modal-field-desc flex stretch for note description */
 .note-modal .modal-field-desc {

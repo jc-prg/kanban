@@ -260,7 +260,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       ];
     } else {
       // Board view: show stats for this board only
-      const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.length, 0);
+      const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.filter(card => !card.text?.startsWith('#')).length, 0);
 
       function countPages(pages) {
         return (pages || []).reduce((s, p) => s + 1 + countPages(p.children), 0);

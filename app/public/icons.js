@@ -5,7 +5,6 @@
 const ICONS = {
   // Navigation & UI chrome
   menu:         '☰',
-  description:  '☰',
   collapse:     '▾',
   expand:       '▸',
   submenuArrow: '›',
@@ -15,19 +14,13 @@ const ICONS = {
   // Actions
   done:         '✓',
   error:        '✗',
-  edit:         '✎',
-  duplicate:    '⧉',
   close:        '✕',
-  deleteCol:    '⌫',
   openLink:     '↗',
   download:     '↓',
-  copyCode:     '⎘',
-  moveTo:       '↪',
+  copyCode:     '⧉',
 
   // Properties
   color:        '◉',
-  actions:      '⚡',
-  info:         'ℹ',
   checkbox:     '☐',
 
   // File types (attachment lists)
@@ -86,6 +79,31 @@ function _svgCardInfo(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><line x1="6" y1="5.5" x2="6" y2="8.5"/><circle cx="6" cy="3.5" r="0.5" fill="currentColor" stroke="none"/></svg>`;
 }
 
+// Pencil — edit card or note
+function _svgEdit(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 1.5 L10.5 3.5 L3.5 10.5 L1 11 L1.5 8.5 Z"/><line x1="7" y1="3" x2="9" y2="5"/></svg>`;
+}
+
+// Two overlapping rectangles — duplicate / copy
+function _svgDuplicate(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="0.5" width="8.5" height="8.5" rx="1.3"/><rect x="0.5" y="3" width="8.5" height="8.5" rx="1.3" fill="var(--surface)"/></svg>`;
+}
+
+// Three lines, last shorter — card has a description
+function _svgDescription(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><line x1="1" y1="2.5" x2="11" y2="2.5"/><line x1="1" y1="6" x2="11" y2="6"/><line x1="1" y1="9.5" x2="7" y2="9.5"/></svg>`;
+}
+
+// Bent arrow — move card(s) to another column
+function _svgMoveTo(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="2,3 9,3 9,9"/><polyline points="6.5,6.5 9,9 11.5,6.5"/></svg>`;
+}
+
+// Lightning bolt — column automation actions
+function _svgActions(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="currentColor" aria-hidden="true"><path d="M7 0.5L2.5 6.5H5.5L5 11.5L9.5 5.5H6.5Z"/></svg>`;
+}
+
 // Lined rectangle — note pages list
 function _svgNotePages(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg>`;
@@ -101,6 +119,11 @@ const SVGICONS = {
   priority:     _svgPriority,
   colorPalette: _svgColorPalette,
   cardInfo:     _svgCardInfo,
+  edit:         _svgEdit,
+  duplicate:    _svgDuplicate,
+  description:  _svgDescription,
+  moveTo:       _svgMoveTo,
+  actions:      _svgActions,
   notePages:    _svgNotePages,
 };
 
@@ -110,22 +133,19 @@ const ICON_REGISTRY = [
   { type: 'char', char: ICONS.done,         name: 'Done',           usage: 'Confirms action; marks card as done' },
   { type: 'char', char: ICONS.error,        name: 'Error',          usage: 'Save error or failed operation' },
   { type: 'char', char: ICONS.close,        name: 'Close / Delete', usage: 'Remove item; close dialog or viewer' },
-  { type: 'char', char: ICONS.deleteCol,    name: 'Delete column',  usage: 'Permanently remove an entire column' },
-  { type: 'char', char: ICONS.edit,         name: 'Edit',           usage: 'Open card or note for editing' },
-  { type: 'char', char: ICONS.duplicate,    name: 'Duplicate',      usage: 'Create a copy of a card' },
-  { type: 'char', char: ICONS.info,         name: 'Info',           usage: 'Show card history and metadata' },
+  { type: 'svg', svg: _svgEdit(16, 16),        name: 'Edit',           usage: 'Open card or note for editing' },
+  { type: 'svg', svg: _svgDuplicate(16, 16),   name: 'Duplicate',      usage: 'Create a copy of a card' },
   { type: 'char', char: ICONS.openLink,     name: 'Open link',      usage: 'Open URL in a new browser tab' },
   { type: 'char', char: ICONS.download,     name: 'Download',       usage: 'Download an attachment file' },
-  { type: 'char', char: ICONS.copyCode,     name: 'Copy code',      usage: 'Copy code block to clipboard' },
-  { type: 'char', char: ICONS.moveTo,       name: 'Move to',        usage: 'Move card(s) to another column' },
+  { type: 'svg', svg: _svgMoveTo(16, 16),      name: 'Move to',        usage: 'Move card(s) to another column' },
   { type: 'char', char: ICONS.menu,         name: 'Menu',           usage: 'Open the header dropdown menu' },
-  { type: 'char', char: ICONS.description,  name: 'Description',    usage: 'Card has a text description' },
+  { type: 'svg', svg: _svgDescription(16, 16), name: 'Description',    usage: 'Card has a text description' },
   { type: 'char', char: ICONS.moreOptions,  name: 'More options',   usage: 'Open column context menu' },
   { type: 'char', char: ICONS.dragHandle,   name: 'Drag handle',    usage: 'Grab to reorder columns' },
   { type: 'char', char: ICONS.collapse,     name: 'Collapse',       usage: 'Collapse column or tree item' },
   { type: 'char', char: ICONS.expand,       name: 'Expand',         usage: 'Expand column or tree item' },
   { type: 'char', char: ICONS.color,        name: 'Color picker',   usage: 'Change card or column color' },
-  { type: 'char', char: ICONS.actions,      name: 'Actions',        usage: 'Column automation triggers' },
+  { type: 'svg', svg: _svgActions(16, 16),      name: 'Actions',        usage: 'Column automation triggers' },
   { type: 'char', char: ICONS.submenuArrow, name: 'Submenu arrow',  usage: 'Indicates a nested submenu' },
   { type: 'char', char: ICONS.checkbox,     name: 'Checkbox',       usage: 'Insert task checkbox in description' },
   { type: 'char', char: ICONS.fileImage,    name: 'Image file',     usage: 'Image attachment (jpg, png, gif, …)' },
@@ -141,7 +161,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgDate(16, 16),         name: 'Date',             usage: 'Card start / end dates' },
   { type: 'svg', svg: _svgPriority(14, 16),     name: 'Priority',         usage: 'Card priority level (1–5)' },
   { type: 'svg', svg: _svgColorPalette(16, 16), name: 'Color palette',    usage: 'Color selection in card modal' },
-  { type: 'svg', svg: _svgCardInfo(16, 16),     name: 'Card info',        usage: 'Card creation and move history' },
+  { type: 'svg', svg: _svgCardInfo(16, 16),     name: 'Card info',        usage: 'Card info / history (context menu and card modal)' },
   { type: 'svg', svg: _svgNotePages(16, 16),    name: 'Note pages',       usage: 'Note pages linked to this card' },
 ];
 
@@ -149,14 +169,15 @@ const ICON_REGISTRY = [
 function renderIconLibrary() {
   const grid = document.getElementById('iconLibraryGrid');
   if (!grid) return;
-  grid.innerHTML = ICON_REGISTRY.map(entry => {
+  grid.innerHTML = [...ICON_REGISTRY].sort((a, b) => a.name.localeCompare(b.name)).map(entry => {
     const preview = entry.type === 'char'
       ? `<span class="icon-lib-glyph">${entry.char}</span>`
       : `<span class="icon-lib-svg">${entry.svg}</span>`;
+    const badge = entry.type === 'svg' ? '<span class="icon-lib-badge">svg</span>' : '';
     return `<div class="icon-lib-item">
       <span class="icon-lib-preview">${preview}</span>
       <span class="icon-lib-meta">
-        <span class="icon-lib-name">${entry.name}</span>
+        <span class="icon-lib-name">${entry.name}${badge}</span>
         <span class="icon-lib-usage">${entry.usage}</span>
       </span>
     </div>`;

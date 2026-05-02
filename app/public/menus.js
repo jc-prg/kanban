@@ -6,7 +6,7 @@ function showContextMenu(x, y, colId, card) {
   ctxColId = colId;
   ctxCard  = card;
 
-  document.getElementById('ctxDone').textContent = `${ICONS.done}  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
+  document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
   document.getElementById('ctxColorRow').style.display = 'none';
 
   const submenu = document.getElementById('ctxMoveSubmenu');
@@ -22,18 +22,20 @@ function showContextMenu(x, y, colId, card) {
     });
   });
 
-  const trigger = document.querySelector('#contextMenu .ctx-submenu-trigger');
-  trigger.classList.toggle('ctx-submenu-left', x > window.innerWidth / 2);
-
   const menu = document.getElementById('contextMenu');
   menu.style.display = 'block';
   const mw = menu.offsetWidth || 140;
   const mh = menu.offsetHeight || 100;
-  menu.style.left = (x + mw > window.innerWidth  ? x - mw : x) + 'px';
-  menu.style.top  = (y + mh > window.innerHeight ? y - mh : y) + 'px';
+  const edge = 4;
+  const menuLeft = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge));
+  const menuTop  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge));
+  menu.style.left = menuLeft + 'px';
+  menu.style.top  = menuTop  + 'px';
 
+  const trigger = document.querySelector('#contextMenu .ctx-submenu-trigger');
+  trigger.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
   const triggerRect = trigger.getBoundingClientRect();
-  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight);
+  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight - edge);
 }
 
 function hideContextMenu() {
@@ -109,7 +111,11 @@ function showColContextMenu(x, y, colId) {
   ctxHeaderColId = colId;
 
   const collapsed = colCollapsed.has(colId);
-  document.getElementById('colCtxToggleContent').textContent = `${collapsed ? ICONS.expand : ICONS.collapse}  ${collapsed ? 'Show content' : 'Hide content'}`;
+  const toggleIcon = document.getElementById('colCtxToggleContent').querySelector('[data-icon]');
+  const toggleKey = collapsed ? 'expand' : 'collapse';
+  toggleIcon.dataset.icon = toggleKey;
+  toggleIcon.textContent = ICONS[toggleKey];
+  document.getElementById('colCtxToggleLabel').textContent = `  ${collapsed ? 'Show content' : 'Hide content'}`;
 
   const hideWhenCollapsed = display => ['colCtxColor','colCtxActions','colCtxClear','colCtxDelete'].forEach(id =>
     document.getElementById(id).style.display = display);
@@ -129,18 +135,20 @@ function showColContextMenu(x, y, colId) {
     });
   });
 
-  const trigger = document.querySelector('#colContextMenu .ctx-submenu-trigger');
-  trigger.classList.toggle('ctx-submenu-left', x > window.innerWidth / 2);
-
   const menu = document.getElementById('colContextMenu');
   menu.style.display = 'block';
   const mw = menu.offsetWidth || 160;
   const mh = menu.offsetHeight || 80;
-  menu.style.left = (x + mw > window.innerWidth  ? x - mw : x) + 'px';
-  menu.style.top  = (y + mh > window.innerHeight ? y - mh : y) + 'px';
+  const edge = 4;
+  const menuLeft = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge));
+  const menuTop  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge));
+  menu.style.left = menuLeft + 'px';
+  menu.style.top  = menuTop  + 'px';
 
+  const trigger = document.querySelector('#colContextMenu .ctx-submenu-trigger');
+  trigger.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
   const triggerRect = trigger.getBoundingClientRect();
-  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight);
+  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight - edge);
 }
 
 function hideColContextMenu() {

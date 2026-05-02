@@ -15,22 +15,30 @@ const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
 })();
 
 // ---- Custom confirm dialog ----
-function showConfirm(msg, { okLabel = 'Confirm', danger = false } = {}) {
+function showConfirm(msg, { okLabel = 'Confirm', cancelLabel = 'Cancel', altLabel = null, danger = false } = {}) {
   return new Promise(resolve => {
     document.getElementById('dialogMsg').textContent = msg;
     const okBtn = document.getElementById('dialogOkBtn');
     okBtn.textContent = okLabel;
     okBtn.className = danger ? 'btn btn-confirm-danger' : 'btn btn-accent';
+    const cancelBtn = document.getElementById('dialogCancelBtn');
+    cancelBtn.textContent = cancelLabel;
+    const altBtn = document.getElementById('dialogAltBtn');
+    altBtn.textContent = altLabel || '';
+    altBtn.style.display = altLabel ? '' : 'none';
     const backdrop = document.getElementById('dialogBackdrop');
     backdrop.style.display = 'flex';
 
     const finish = result => {
       backdrop.style.display = 'none';
+      cancelBtn.textContent = 'Cancel';
+      altBtn.style.display = 'none';
       resolve(result);
     };
 
     okBtn.onclick = () => finish(true);
-    document.getElementById('dialogCancelBtn').onclick = () => finish(false);
+    altBtn.onclick = () => finish(null);
+    cancelBtn.onclick = () => finish(false);
 
     const onKey = e => {
       if (e.key === 'Enter')  { document.removeEventListener('keydown', onKey); finish(true); }
@@ -68,6 +76,9 @@ async function load() {
   }
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
   state = await r.json();
+  for (const col of (state.columns || []))
+    for (const card of (col.cards || []))
+      for (const k of Object.keys(card)) { if (card[k] == null) delete card[k]; }
   baseState = JSON.parse(JSON.stringify(state)); // snapshot before migration
   pendingRemote = null;
 
@@ -212,7 +223,12 @@ function updateCardFull(colId, cardId, data) {
   const col = state.columns.find(c => c.id === colId);
   if (!col) return;
   const card = col.cards.find(c => c.id === cardId);
-  if (card) { Object.assign(card, data); card.lastModified = new Date().toISOString(); render(); schedulesSave(); }
+  if (card) {
+    Object.assign(card, data);
+    for (const k of Object.keys(card)) { if (card[k] == null) delete card[k]; }
+    card.lastModified = new Date().toISOString();
+    render(); schedulesSave();
+  }
 }
 
 function deleteCard(colId, cardId) {
