@@ -90,17 +90,26 @@ function enhanceMarkdownPreview(container) {
 }
 
 // ---- Description markdown preview ----
-function showDescPreview() {
-  const text = document.getElementById('cardDesc').value.trim();
-  if (!text) { showDescEditor(); return; }
-  const el = document.getElementById('cardDescPreview');
+function renderMarkdown(text) {
+  return DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+}
+
+function showMarkdownPreview(taId, previewId, toolbarId, editorFn, postFn) {
+  const text = document.getElementById(taId).value.trim();
+  if (!text) { editorFn(); return; }
+  const el = document.getElementById(previewId);
   el.dataset.rawText = text;
-  el.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+  el.innerHTML = renderMarkdown(text);
   enhanceMarkdownPreview(el);
-  if (editCardId && CARD_ATTACH_API) resolveCardAttachments(el);
+  if (postFn) postFn(el);
   el.style.display = '';
-  document.getElementById('cardDesc').style.display = 'none';
-  document.getElementById('cardDescToolbar').style.display = 'none';
+  document.getElementById(taId).style.display = 'none';
+  if (toolbarId) document.getElementById(toolbarId).style.display = 'none';
+}
+
+function showDescPreview() {
+  showMarkdownPreview('cardDesc', 'cardDescPreview', 'cardDescToolbar', showDescEditor,
+    el => { if (editCardId && CARD_ATTACH_API) resolveCardAttachments(el); });
 }
 
 function previewScrollFrac(el, e) {
@@ -109,14 +118,165 @@ function previewScrollFrac(el, e) {
   return Math.min(1, Math.max(0, relY / Math.max(1, el.scrollHeight)));
 }
 
-function applyEditorFrac(ta, frac) {
-  ta.scrollTop = frac * Math.max(0, ta.scrollHeight - ta.clientHeight);
-  const lines = ta.value.split('\n');
-  const targetLine = Math.round(frac * (lines.length - 1));
-  let pos = 0;
-  for (let i = 0; i < targetLine; i++) pos += lines[i].length + 1;
-  pos = Math.min(pos, ta.value.length);
-  ta.setSelectionRange(pos, pos);
+// ---- Click-on-preview → cursor placement in editor ----
+
+// Handles leading whitespace so nested list items (e.g. "  - sub") are stripped correctly
+function _mdBlockPrefixLen(line) {
+  const m = line.match(/^(\s*(?:#{1,6} |(?:[-*+]|\d+\.) (?:\[[ x]\] )?|> ))/);
+  return m ? m[1].length : 0;
+}
+
+function _mdLineToVisible(line) {
+  return line.slice(_mdBlockPrefixLen(line))
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/~~(.*?)~~/g, '$1')
+    .replace(/`(.*?)`/g, '$1')
+    .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, '');
+}
+
+function clickPreviewToEditor(previewEl, taId, editorFn, e) {
+  if (window.getSelection()?.toString()) return;
+  if (e.target.closest('a, button, input')) return;
+
+  const ta = document.getElementById(taId);
+  const md = ta.value;
+  if (!md.trim()) { editorFn(); ta.focus(); return; }
+
+  // DOM caret position from click coordinates
+  let caretNode = null, caretOff = 0;
+  if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(e.clientX, e.clientY);
+    if (r) { caretNode = r.startContainer; caretOff = r.startOffset; }
+  } else if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(e.clientX, e.clientY);
+    if (p) { caretNode = p.offsetNode; caretOff = p.offset; }
+  }
+
+  // Nearest block-level element inside the preview
+  const BLOCK = new Set(['P','H1','H2','H3','H4','H5','H6','LI','PRE','BLOCKQUOTE','TD','TH']);
+  let blockEl = e.target;
+  while (blockEl && blockEl !== previewEl && !BLOCK.has(blockEl.tagName))
+    blockEl = blockEl.parentElement;
+  if (blockEl === previewEl) blockEl = null;
+
+  // Character offset from start of block element to caret
+  let intraChars = 0;
+  if (caretNode && blockEl) {
+    try {
+      const r = document.createRange();
+      r.setStart(blockEl, 0);
+      r.setEnd(caretNode, caretOff);
+      intraChars = r.toString().length;
+    } catch (_) {}
+  }
+
+  const mdLines = md.split('\n');
+
+  // Convert a markdown line index + intra-visible-char offset to an absolute char offset
+  function lineOffset(li, intra) {
+    const lineStart = mdLines.slice(0, li).reduce((s, l) => s + l.length + 1, 0);
+    const cur = mdLines[li] || '';
+    const pre = _mdBlockPrefixLen(cur);
+    const col = pre + Math.round((intra / Math.max(1, _mdLineToVisible(cur).length)) * Math.max(1, cur.length - pre));
+    return lineStart + Math.min(col, cur.length);
+  }
+
+  let mdOffset = null;
+  const tag = blockEl?.tagName;
+
+  if (tag === 'LI') {
+    // Count-based: use the LI's index in its parent list to avoid false text matches
+    const parent = blockEl.parentElement;
+    const liIdx  = Array.from(parent.children).indexOf(blockEl);
+    const firstText = parent.children[0].textContent.trim().slice(0, 20);
+    const LIST_RE = /^\s*([-*+]|\d+\.) /;
+    outer: for (let i = 0; i < mdLines.length; i++) {
+      if (!LIST_RE.test(mdLines[i])) continue;
+      if (firstText && !_mdLineToVisible(mdLines[i]).trim().startsWith(firstText.slice(0, 15))) continue;
+      let count = 0;
+      for (let j = i; j < mdLines.length; j++) {
+        if (LIST_RE.test(mdLines[j])) {
+          if (count++ === liIdx) { mdOffset = lineOffset(j, intraChars); break outer; }
+        } else if (!mdLines[j].trim()) break;
+      }
+    }
+
+  } else if (tag === 'TD' || tag === 'TH') {
+    // Row+column indexing: avoids short/repeated cell text causing wrong matches
+    const tr       = blockEl.closest('tr');
+    const table    = blockEl.closest('table');
+    const allRows  = Array.from(table.querySelectorAll('tr'));
+    const rowIdx   = allRows.indexOf(tr);
+    const colIdx   = Array.from(tr.cells).indexOf(blockEl);
+    const firstCellText = (allRows[0]?.cells[0]?.textContent.trim() || '').slice(0, 15);
+
+    for (let i = 0; i < mdLines.length; i++) {
+      if (!mdLines[i].trim().startsWith('|')) continue;
+      if (firstCellText && !mdLines[i].includes(firstCellText.slice(0, 10))) continue;
+      // rowIdx 0 = header row at i; separator at i+1; body rows at i+2, i+3, …
+      const target = rowIdx === 0 ? i : i + 1 + rowIdx;
+      if (target >= mdLines.length || !mdLines[target].trim().startsWith('|')) break;
+
+      const mdRow = mdLines[target];
+      const cells = mdRow.split('|'); // ["", " cell1 ", " cell2 ", ""]
+      // Advance rawPos past all columns before colIdx
+      let rawPos = 0;
+      for (let c = 0; c <= colIdx; c++) rawPos += cells[c].length + 1;
+      const cellContent = cells[colIdx + 1] || '';
+      const leadSpace   = cellContent.length - cellContent.trimStart().length;
+      const cellOff     = Math.round((intraChars / Math.max(1, blockEl.textContent.trim().length)) * cellContent.trim().length);
+      const lineStart   = mdLines.slice(0, target).reduce((s, l) => s + l.length + 1, 0);
+      mdOffset = Math.min(lineStart + rawPos + leadSpace + cellOff, lineStart + mdRow.length);
+      break;
+    }
+
+  } else if (tag === 'PRE') {
+    // Code block: locate by first content line inside the fence
+    const codeEl = blockEl.querySelector('code') || blockEl;
+    const firstCodeLine = codeEl.textContent.split('\n')[0].trim();
+    for (let i = 0; i < mdLines.length; i++) {
+      if (!mdLines[i].startsWith('```')) continue;
+      if (firstCodeLine && (mdLines[i + 1] || '').trim() !== firstCodeLine) continue;
+      mdOffset = lineOffset(i + 1, intraChars);
+      break;
+    }
+
+  } else if (blockEl) {
+    // P, H1–H6, BLOCKQUOTE: text-matching with multi-line paragraph support
+    const anchor = blockEl.textContent.trim().slice(0, 40);
+    for (let i = 0; i < mdLines.length; i++) {
+      const lv = _mdLineToVisible(mdLines[i]).trim();
+      if (!lv || !anchor) continue;
+      const ml = Math.min(anchor.length, lv.length);
+      if (lv.slice(0, ml) !== anchor.slice(0, ml)) continue;
+      // Consume continuation lines of multi-line paragraphs
+      let li = i, rem = intraChars;
+      while (rem > 0 && li < mdLines.length) {
+        const cv = _mdLineToVisible(mdLines[li]);
+        if (rem <= cv.length) break;
+        rem -= cv.length + 1;
+        if (!mdLines[li + 1]?.trim()) break;
+        li++;
+      }
+      mdOffset = lineOffset(li, rem);
+      break;
+    }
+  }
+
+  // Fallback: Y-position fraction
+  if (mdOffset === null)
+    mdOffset = Math.round(previewScrollFrac(previewEl, e) * md.length);
+
+  editorFn();
+  requestAnimationFrame(() => {
+    mdOffset = Math.max(0, Math.min(mdOffset, md.length));
+    ta.setSelectionRange(mdOffset, mdOffset);
+    const linesAbove = md.slice(0, mdOffset).split('\n').length - 1;
+    ta.scrollTop = (linesAbove / Math.max(1, mdLines.length - 1)) * Math.max(0, ta.scrollHeight - ta.clientHeight);
+    ta.focus();
+  });
 }
 
 function showDescEditor() {
@@ -148,12 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('cardDescPreview').addEventListener('click', e => {
-    const preview = document.getElementById('cardDescPreview');
-    const frac = previewScrollFrac(preview, e);
-    showDescEditor();
-    const ta = document.getElementById('cardDesc');
-    requestAnimationFrame(() => applyEditorFrac(ta, frac));
-    ta.focus();
+    clickPreviewToEditor(document.getElementById('cardDescPreview'), 'cardDesc', showDescEditor, e);
   });
   document.getElementById('cardDesc').addEventListener('focus', () => {
     document.getElementById('cardDescToolbar').style.display = 'flex';
@@ -682,8 +837,12 @@ function selectPriority(p) {
   renderPriorityRow();
 }
 
+let _backdropMousedown = false;
+document.getElementById('modal').addEventListener('mousedown', e => {
+  _backdropMousedown = e.target === document.getElementById('modal');
+});
 document.getElementById('modal').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal')) tryCloseModal();
+  if (_backdropMousedown && e.target === document.getElementById('modal')) tryCloseModal();
 });
 
 document.addEventListener('keydown', e => {
@@ -777,6 +936,9 @@ function closeCardInfo() {
   document.getElementById('cardInfoBackdrop').style.display = 'none';
 }
 
+document.getElementById('cardInfoBackdrop').addEventListener('mousedown', e => {
+  _backdropMousedown = e.target === document.getElementById('cardInfoBackdrop');
+});
 document.getElementById('cardInfoBackdrop').addEventListener('click', e => {
-  if (e.target === document.getElementById('cardInfoBackdrop')) closeCardInfo();
+  if (_backdropMousedown && e.target === document.getElementById('cardInfoBackdrop')) closeCardInfo();
 });

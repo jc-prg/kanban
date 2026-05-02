@@ -39,9 +39,12 @@ Single-page kanban board with a minimal three-layer design:
 
 ### JS (`app/public/`) — load order matters, no bundler
 
+Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.js` (DOMPurify, XSS sanitisation).
+
 | File | Contents |
 |---|---|
-| `state.js` | API constants, `showConfirm`, color/priority constants, state vars, `load`, `buildPatch`, `schedulesSave`, save indicators, `uid`, all state mutations, `mergeStates` |
+| `icons.js` | `ICONS` object (unicode/emoji constants) and SVG icon builder functions (`_svgAttachment`, `_svgLink`, `_svgNoteDoc`, …) |
+| `state.js` | API constants, fetch interceptor (auto-attaches session token), `showConfirm`, color/priority constants, state vars, `load`, `buildPatch`, `schedulesSave`, save indicators, `uid`, all state mutations, `mergeStates` |
 | `drag.js` | Drag state vars, mouse D&D for columns and cards, touch D&D (`spawnGhost`, `endTouchDrag`, all touch/drag event listeners) |
 | `cards.js` | Modal state vars, card add/edit modal (`openModal`, `openEditModal`, `submitCard`, color/priority rows), card-info dialog |
 | `render.js` | `escHtml`, `fmtDate`, `safeLink`, `getLinkBadgeHtml`, `render()` |

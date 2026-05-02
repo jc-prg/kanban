@@ -398,6 +398,37 @@ app.get('/api/boards', async (req, res) => {
   }
 });
 
+app.get('/api/achievements/today', async (req, res) => {
+  try {
+    const today = req.query.date || new Date().toISOString().slice(0, 10);
+    const all   = await couch.db.list();
+    const names = all.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
+    let created = 0, moved = 0, done = 0, hasPast = false;
+    const createdBoards = {}, movedBoards = {}, doneBoards = {};
+    await Promise.all(names.map(async name => {
+      try {
+        const data = await loadBoardData(couch.use(DB_PREFIX + name));
+        if (data.settings?.archived) return;
+        for (const col of data.columns) {
+          for (const card of col.cards) {
+            if (card.created?.startsWith(today)) { created++; createdBoards[name] = (createdBoards[name] || 0) + 1; }
+            if (card.moves?.some(m => m.at?.startsWith(today))) { moved++; movedBoards[name] = (movedBoards[name] || 0) + 1; }
+            if (card.done && card.lastModified?.startsWith(today)) { done++; doneBoards[name] = (doneBoards[name] || 0) + 1; }
+            if (!hasPast) {
+              if (card.created && card.created < today) hasPast = true;
+              else if (card.moves?.some(m => m.at?.slice(0, 10) < today)) hasPast = true;
+              else if (card.done && card.lastModified?.slice(0, 10) < today) hasPast = true;
+            }
+          }
+        }
+      } catch (e) { /* skip broken boards */ }
+    }));
+    res.json({ created, moved, done, createdBoards, movedBoards, doneBoards, hasPast });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/boards/:name', async (req, res) => {
   const { name } = req.params;
   if (!validBoardName(name)) return res.status(400).json({ error: 'Invalid board name. Use lowercase letters, digits and hyphens only.' });

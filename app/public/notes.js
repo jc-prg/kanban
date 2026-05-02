@@ -547,18 +547,8 @@ function _applyNoteFormat(action) {
 }
 
 function showNoteDescPreview() {
-  const text = document.getElementById('notePageDesc').value.trim();
-  if (!text) { showNoteDescEditor(); return; }
-  const el = document.getElementById('notePageDescPreview');
-  el.dataset.rawText = text;
-  el.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
-  enhanceMarkdownPreview(el);
-  buildToc(el);
-  buildSubpages(el);
-  resolveAttachments(el);
-  el.style.display = '';
-  document.getElementById('notePageDesc').style.display = 'none';
-  document.getElementById('noteDescToolbar').style.display = 'none';
+  showMarkdownPreview('notePageDesc', 'notePageDescPreview', 'noteDescToolbar', showNoteDescEditor,
+    el => { buildToc(el); buildSubpages(el); resolveAttachments(el); });
 }
 
 function showNoteDescEditor() {
@@ -1270,8 +1260,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Note modal backdrop click
+  let _noteModalMousedown = false;
+  document.getElementById('noteModal')?.addEventListener('mousedown', e => {
+    _noteModalMousedown = e.target.id === 'noteModal';
+  });
   document.getElementById('noteModal')?.addEventListener('click', e => {
-    if (e.target.id === 'noteModal') tryCloseNoteModal();
+    if (_noteModalMousedown && e.target.id === 'noteModal') tryCloseNoteModal();
   });
 
   document.getElementById('noteModalCancelBtn')?.addEventListener('click', () => tryCloseNoteModal());
@@ -1292,12 +1286,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Description preview / editor
   document.getElementById('notePageDescPreview')?.addEventListener('click', e => {
-    const preview = document.getElementById('notePageDescPreview');
-    const frac = previewScrollFrac(preview, e);
-    showNoteDescEditor();
-    const ta = document.getElementById('notePageDesc');
-    requestAnimationFrame(() => applyEditorFrac(ta, frac));
-    ta.focus();
+    clickPreviewToEditor(document.getElementById('notePageDescPreview'), 'notePageDesc', showNoteDescEditor, e);
   });
   document.getElementById('notePageDesc')?.addEventListener('blur', () => {
     if (document.getElementById('notePageDesc').value.trim()) showNoteDescPreview();

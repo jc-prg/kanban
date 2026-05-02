@@ -281,6 +281,119 @@ header h1 span { color: var(--accent); }
   margin-bottom: 16px;
 }
 
+.achievements-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.achievements-nav .overview-label {
+  margin-bottom: 0;
+}
+
+.ach-nav-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ach-nav-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.ach-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.achievements-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.achievement-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 150px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 22px;
+}
+
+.achievement-value {
+  font-family: 'Syne', sans-serif;
+  font-size: calc(0.78rem * 2 * 1.4);
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.achievement-label {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+#achievementsSection [id="achCreated"] ~ .achievement-label,
+#achievementsSection [id="achMoved"]   ~ .achievement-label,
+#achievementsSection [id="achDone"]    ~ .achievement-label { color: inherit; }
+
+#achCreated { color: #f97316; }
+#achCreated + .achievement-label { color: #f97316cc; }
+.achievement-item:has(#achCreated) { background: #f9731618; border-color: #f9731640; }
+
+#achMoved { color: #eab308; }
+#achMoved + .achievement-label { color: #eab308cc; }
+.achievement-item:has(#achMoved) { background: #eab30818; border-color: #eab30840; }
+
+#achDone { color: #10b981; }
+#achDone + .achievement-label { color: #10b981cc; }
+.achievement-item:has(#achDone) { background: #10b98118; border-color: #10b98140; }
+
+.achievement-value[data-tooltip] {
+  position: relative;
+  cursor: default;
+}
+
+.achievement-value[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text);
+  white-space: pre;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 100;
+}
+
+.achievement-value[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
 .board-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));

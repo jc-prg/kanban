@@ -302,7 +302,6 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       renderTrackedCols();
     }
     loadApiKey();
-    renderIconLibrary();
     backdrop.style.display = 'flex';
   }
 
@@ -606,13 +605,62 @@ async function initOverview() {
   document.getElementById('menuInbox').style.display = '';
   document.getElementById('overview').style.display = 'flex';
 
+  document.getElementById('achPrev').onclick = () => loadAchievements(achDayOffset - 1);
+  document.getElementById('achNext').onclick = () => loadAchievements(achDayOffset + 1);
+
   try {
-    const r = await fetch('/api/boards');
-    const boards = await r.json();
+    const boardsRes = await fetch('/api/boards');
+    const boards = await boardsRes.json();
     renderBoardGrid(boards);
   } catch (e) {
     document.getElementById('boardGrid').innerHTML = '<p class="new-board-error">Failed to load boards.</p>';
   }
+  loadAchievements(0);
+}
+
+let achDayOffset = 0;
+
+function achDateLabel(offset) {
+  if (offset === 0)  return "Today's Achievements";
+  if (offset === -1) return "Yesterday's Achievements";
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+async function loadAchievements(offset) {
+  achDayOffset = offset;
+  document.getElementById('achDateLabel').textContent = achDateLabel(offset);
+  document.getElementById('achNext').disabled = offset >= 0;
+  document.getElementById('achPrev').disabled = true;
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const date = d.toISOString().slice(0, 10);
+  try {
+    const res = await fetch(`/api/achievements/today?date=${date}`);
+    const ach = res.ok ? await res.json() : { created: 0, moved: 0, done: 0, hasPast: false };
+    document.getElementById('achPrev').disabled = !ach.hasPast;
+    renderAchievements(ach, offset);
+  } catch (e) { /* ignore */ }
+}
+
+function boardsTooltip(map) {
+  return Object.entries(map).map(([b, n]) => `${b}: ${n}`).join('\n');
+}
+
+function renderAchievements({ created = 0, moved = 0, done = 0, createdBoards = {}, movedBoards = {}, doneBoards = {} }, offset = 0) {
+  const section = document.getElementById('achievementsSection');
+  if (created === 0 && moved === 0 && done === 0 && offset === 0) { section.style.display = 'none'; return; }
+  const achCreated = document.getElementById('achCreated');
+  const achMoved   = document.getElementById('achMoved');
+  const achDone    = document.getElementById('achDone');
+  achCreated.textContent = created;
+  achMoved.textContent   = moved;
+  achDone.textContent    = done;
+  if (created) achCreated.dataset.tooltip = boardsTooltip(createdBoards); else delete achCreated.dataset.tooltip;
+  if (moved)   achMoved.dataset.tooltip   = boardsTooltip(movedBoards);   else delete achMoved.dataset.tooltip;
+  if (done)    achDone.dataset.tooltip    = boardsTooltip(doneBoards);     else delete achDone.dataset.tooltip;
+  section.style.display = '';
 }
 
 function makeBoardCard({ name, description, inboxCount, todoCount, inProgressCount, trackedCounts = [], archived = false }) {

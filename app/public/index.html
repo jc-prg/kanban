@@ -48,6 +48,27 @@
 <div id="overview" style="display:none">
   <div class="overview-inner">
     <p id="overviewHint" class="overview-hint" style="display:none"></p>
+    <div id="achievementsSection" style="display:none">
+      <div class="achievements-nav">
+        <button id="achPrev" class="ach-nav-btn">&#8249;</button>
+        <p class="overview-label" id="achDateLabel">Today's Achievements</p>
+        <button id="achNext" class="ach-nav-btn" disabled>&#8250;</button>
+      </div>
+      <div class="achievements-row">
+        <div class="achievement-item">
+          <span class="achievement-value" id="achCreated">0</span>
+          <span class="achievement-label">cards<br>created</span>
+        </div>
+        <div class="achievement-item">
+          <span class="achievement-value" id="achMoved">0</span>
+          <span class="achievement-label">cards<br>moved</span>
+        </div>
+        <div class="achievement-item">
+          <span class="achievement-value" id="achDone">0</span>
+          <span class="achievement-label">cards<br>done</span>
+        </div>
+      </div>
+    </div>
     <p class="overview-label">Boards</p>
     <div id="boardGrid" class="board-grid">
       <div class="new-board-item">
@@ -433,10 +454,6 @@
     <div class="settings-section" id="boardDeleteSection" style="display:none">
       <div class="settings-section-title">Danger zone</div>
       <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete board…</button>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Icon Library</div>
-      <div id="iconLibraryGrid" class="icon-lib-grid"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-accent" id="settingsCloseBtn">Close</button>

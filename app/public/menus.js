@@ -163,7 +163,10 @@ function moveAllCards(fromColId, toColId) {
   const toCol   = state.columns.find(c => c.id === toColId);
   if (!fromCol || !toCol) return;
   const _now = new Date().toISOString();
-  fromCol.cards.forEach(c => { c.lastModified = _now; });
+  fromCol.cards.forEach(c => {
+    recordMove(c, fromCol.title, toCol.title);
+    c.lastModified = _now;
+  });
   toCol.cards.push(...fromCol.cards);
   fromCol.cards = [];
   render();

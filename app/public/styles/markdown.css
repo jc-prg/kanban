@@ -12,8 +12,8 @@
 }
 
 /* Paragraphs */
-.card-desc-preview p { margin: 6px 0 14px; }
-.card-desc-preview p:last-child { margin-bottom: 6px; }
+.card-desc-preview p { margin: 6px 0 2px; }
+.card-desc-preview p:last-child { margin-bottom: 2px; }
 
 /* Headings — 5px top margin, none for the very first element */
 .card-desc-preview h1,
@@ -40,26 +40,46 @@
   padding-left: 20px;
 }
 
-/* Belt-and-suspenders: also suppress at li and ::marker level */
+/* Suppress markers on all task-list li variants */
 .card-desc-preview .task-list-item,
-.card-desc-preview li:has(> input[type="checkbox"]) {
+.card-desc-preview li:has(> input[type="checkbox"]),
+.card-desc-preview li:has(> p > input[type="checkbox"]) {
   list-style: none;
-  margin-left: -4px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 5px;
+  margin-left: -14px;
 }
+.card-desc-preview .task-list-item::marker,
 .card-desc-preview li:has(> input[type="checkbox"])::marker,
-.card-desc-preview .task-list-item::marker { content: none; }
+.card-desc-preview li:has(> p > input[type="checkbox"])::marker { content: none; }
 
-/* Nested lists inside a task item drop to the next line */
-.card-desc-preview .task-list-item > ul,
-.card-desc-preview .task-list-item > ol,
+/* Direct checkbox in li: absolute-position the checkbox, indent remaining content */
+.card-desc-preview li:has(> input[type="checkbox"]) {
+  position: relative;
+  padding-left: 18px;
+}
+.card-desc-preview li:has(> input[type="checkbox"]) > input[type="checkbox"] {
+  position: absolute;
+  left: 0;
+  top: 2px;
+}
+
+/* Checkbox wrapped in <p> by marked: same treatment on the p */
+.card-desc-preview li:has(> p > input[type="checkbox"]) > p {
+  position: relative;
+  padding-left: 18px;
+  margin: 0;
+}
+.card-desc-preview li:has(> p > input[type="checkbox"]) > p > input[type="checkbox"] {
+  position: absolute;
+  left: 0;
+  top: 2px;
+}
+
+/* Nested lists inside task items: extra padding compensates for the negative margin-left on child li */
 .card-desc-preview li:has(> input[type="checkbox"]) > ul,
-.card-desc-preview li:has(> input[type="checkbox"]) > ol {
-  flex: 0 0 100%;
-  margin: 2px 0 0;
+.card-desc-preview li:has(> input[type="checkbox"]) > ol,
+.card-desc-preview li:has(> p > input[type="checkbox"]) > ul,
+.card-desc-preview li:has(> p > input[type="checkbox"]) > ol {
+  padding-left: 32px;
 }
 
 .card-desc-preview input[type="checkbox"] {
@@ -67,8 +87,6 @@
   cursor: pointer;
   width: 13px;
   height: 13px;
-  flex-shrink: 0;
-  margin-top: 2px;
 }
 
 /* Inline code */
