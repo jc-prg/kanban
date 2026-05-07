@@ -8,7 +8,11 @@ RUN npm ci --omit=dev
 COPY server.js ./
 COPY public/ ./public/
 
+RUN mkdir -p /app/data && chown -R node:node /app
+
 VOLUME ["/app/data"]
+
+USER node
 
 ENV NODE_ENV=production
 #ENV NODE_ENV=production \

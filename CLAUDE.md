@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Single-user application.** There is no per-board or per-user access control. One valid session token or API key grants full access to all boards. Do not add multi-user features without first implementing per-board authorization.
+
 ## Commands
 
 ```bash

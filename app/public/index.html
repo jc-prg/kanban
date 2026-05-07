@@ -29,7 +29,10 @@
     <span class="save-indicator" id="saveIndicator">saved</span>
   </div>
   <div class="header-menu">
-    <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards" style="display:none"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
+    <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
+      <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
+      <div class="board-switch-menu" id="boardSwitchMenu"></div>
+    </div>
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
     <div class="header-dropdown" id="headerDropdown">
@@ -50,8 +53,8 @@
     <p id="overviewHint" class="overview-hint" style="display:none"></p>
     <div id="achievementsSection" style="display:none">
       <div class="achievements-nav">
-        <button id="achPrev" class="ach-nav-btn">&#8249;</button>
         <p class="overview-label" id="achDateLabel">Today's Achievements</p>
+        <button id="achPrev" class="ach-nav-btn">&#8249;</button>
         <button id="achNext" class="ach-nav-btn" disabled>&#8250;</button>
       </div>
       <div class="achievements-row">
@@ -162,6 +165,7 @@
               <button class="note-tb-btn" data-fmt="italic"    title="Italic (Ctrl+I)"><i>I</i></button>
               <button class="note-tb-btn" data-fmt="underline" title="Underline (Ctrl+U)"><u>U</u></button>
               <button class="note-tb-btn note-tb-btn--mark" data-fmt="mark" title="Highlight (Ctrl+M)">M</button>
+              <button class="note-tb-btn" data-fmt="strikethrough" title="Strikethrough"><s>S</s></button>
               <span class="note-tb-sep"></span>
               <button class="note-tb-btn" data-fmt="h1" title="Heading 1">H1</button>
               <button class="note-tb-btn" data-fmt="h2" title="Heading 2">H2</button>
@@ -238,7 +242,10 @@
     </div>
     <p id="modalStatusMsg" class="inbox-msg" style="display:none"></p>
     <div class="modal-actions">
-      <span id="modalSavedMsg" class="modal-saved-msg"></span>
+      <div class="modal-autosave-wrap">
+        <label class="modal-autosave-label" id="cardAutoSaveLabel" style="display:none"><input type="checkbox" id="cardAutoSave"> Auto-save</label>
+        <span id="modalSavedMsg" class="modal-saved-msg"></span>
+      </div>
       <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
       <button class="btn" onclick="tryCloseModal()">Close</button>
       <button class="btn btn-danger" id="modalDeleteBtn" style="display:none" onclick="deleteCardFromModal()">Delete</button>
@@ -250,6 +257,7 @@
 <div id="loginBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal login-modal">
     <h2>Access required</h2>
+    <p id="loginSessionMsg" class="login-session-msg" style="display:none">You were logged out automatically. Please sign in again.</p>
     <form id="loginForm" action="#" onsubmit="return false">
       <div class="modal-field">
         <label>Password</label>
@@ -413,6 +421,23 @@
           <span class="settings-toggle-track"></span>
         </div>
       </label>
+      <label class="settings-item">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Auto-save dialogs by default</div>
+          <div class="settings-item-desc">Enables the auto-save checkbox by default when opening the card or note editor</div>
+        </div>
+        <div class="settings-toggle">
+          <input type="checkbox" id="autoSaveDialogsToggle">
+          <span class="settings-toggle-track"></span>
+        </div>
+      </label>
+      <label class="settings-item">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Auto-save interval (minutes)</div>
+          <div class="settings-item-desc">How often an open dialog is saved automatically when auto-save is enabled</div>
+        </div>
+        <input type="number" id="autoSaveIntervalInput" class="settings-number-input" min="1" max="60" value="5">
+      </label>
       <div class="settings-item settings-tracked-box">
         <div class="settings-item-info">
           <div class="settings-item-label">Show in overview</div>
@@ -478,6 +503,7 @@
               <button class="note-tb-btn" data-fmt="italic"    title="Italic (Ctrl+I)"><i>I</i></button>
               <button class="note-tb-btn" data-fmt="underline" title="Underline (Ctrl+U)"><u>U</u></button>
               <button class="note-tb-btn note-tb-btn--mark" data-fmt="mark" title="Highlight (Ctrl+M)">M</button>
+              <button class="note-tb-btn" data-fmt="strikethrough" title="Strikethrough"><s>S</s></button>
               <span class="note-tb-sep"></span>
               <button class="note-tb-btn" data-fmt="h1" title="Heading 1">H1</button>
               <button class="note-tb-btn" data-fmt="h2" title="Heading 2">H2</button>
@@ -543,7 +569,10 @@
       </div>
     </div>
     <div class="modal-actions">
-      <span id="noteModalSavedMsg" class="modal-saved-msg"></span>
+      <div class="modal-autosave-wrap">
+        <label class="modal-autosave-label" id="noteAutoSaveLabel"><input type="checkbox" id="noteAutoSave"> Auto-save</label>
+        <span id="noteModalSavedMsg" class="modal-saved-msg"></span>
+      </div>
       <button class="btn" id="noteModalCancelBtn">Close</button>
       <button class="btn btn-danger" id="noteModalDeleteBtn">Delete</button>
       <button class="btn btn-accent" id="noteModalSaveBtn">Save</button>

@@ -27,8 +27,9 @@ function applyDescFormat(ta, action) {
   if (!ta) return;
   if (action === 'bold')      return _descWrap(ta, '**', '**');
   if (action === 'italic')    return _descWrap(ta, '*', '*');
-  if (action === 'underline') return _descWrap(ta, '<u>', '</u>');
-  if (action === 'mark')      return _descWrap(ta, '<mark>', '</mark>');
+  if (action === 'underline')     return _descWrap(ta, '<u>', '</u>');
+  if (action === 'mark')          return _descWrap(ta, '<mark>', '</mark>');
+  if (action === 'strikethrough') return _descWrap(ta, '~~', '~~');
   if (action === 'h1')        return _descLinePrefix(ta, '# ');
   if (action === 'h2')        return _descLinePrefix(ta, '## ');
   if (action === 'h3')        return _descLinePrefix(ta, '### ');
@@ -89,9 +90,15 @@ function enhanceMarkdownPreview(container) {
   container.appendChild(allBtn);
 }
 
+// Disable setext headings (text followed by --- or ===) so --- is always <hr>
+marked.use({ tokenizer: { lheading() { return undefined; } } });
+
 // ---- Description markdown preview ----
 function renderMarkdown(text) {
-  return DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+  return DOMPurify.sanitize(marked.parse(text, { breaks: true }), {
+    ALLOWED_URI_REGEXP: /^(?:https?|ftp|mailto|attachment):/i,
+    ADD_URI_SAFE_ATTR: ['type']
+  });
 }
 
 function showMarkdownPreview(taId, previewId, toolbarId, editorFn, postFn) {
@@ -288,6 +295,10 @@ function showDescEditor() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('cardAutoSave')?.addEventListener('change', e => {
+    if (e.target.checked) _startCardAutoSave(); else _stopCardAutoSave();
+  });
+
   document.getElementById('cardText').addEventListener('input', e => autoResizeTitle(e.target));
 
   document.getElementById('cardInfoBtn')?.addEventListener('click', () => {
@@ -493,7 +504,17 @@ async function resolveCardAttachments(container) {
     const fn = img.getAttribute('src').slice('attachment:'.length);
     try {
       const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
-      if (r.ok) img.src = URL.createObjectURL(await r.blob());
+      if (!r.ok) continue;
+      const obj = URL.createObjectURL(await r.blob());
+      if (_attachType(fn) === 'pdf') {
+        const embed = document.createElement('embed');
+        embed.src = obj;
+        embed.type = 'application/pdf';
+        embed.className = 'md-pdf-embed';
+        img.replaceWith(embed);
+      } else {
+        img.src = obj;
+      }
     } catch {}
   }
   for (const a of container.querySelectorAll('a[href^="attachment:"]')) {
@@ -501,11 +522,30 @@ async function resolveCardAttachments(container) {
     const url = `${base}/${encodeURIComponent(fn)}`;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
-    if (_attachType(fn) === 'html')
+    const ft = _attachType(fn);
+    if (ft === 'image' || ft === 'pdf')
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openAttachmentViewer(url, fn, ft); });
+    else if (ft === 'html')
       a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _openInNewTab(url); });
     else
       a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _downloadAttachment(url, fn); });
   }
+}
+
+// ---- Card auto-save ----
+let _cardAutoSaveTimer = null;
+
+function _stopCardAutoSave() {
+  clearInterval(_cardAutoSaveTimer);
+  _cardAutoSaveTimer = null;
+}
+
+function _startCardAutoSave() {
+  _stopCardAutoSave();
+  const ms = (state.settings?.autoSaveIntervalMin ?? 5) * 60 * 1000;
+  _cardAutoSaveTimer = setInterval(() => {
+    if (modalMode === 'edit' && hasModalChanges()) saveCardInPlace();
+  }, ms);
 }
 
 // ---- Modal state ----
@@ -646,6 +686,9 @@ function openModal(colId) {
   renderColorRow();
   renderPriorityRow();
   captureModalOriginal();
+  const autoSaveLbl = document.getElementById('cardAutoSaveLabel');
+  if (autoSaveLbl) autoSaveLbl.style.display = 'none';
+  _stopCardAutoSave();
   document.getElementById('modal').style.display = 'flex';
   const ct = document.getElementById('cardText');
   autoResizeTitle(ct);
@@ -677,6 +720,13 @@ function openEditModal(colId, card) {
   renderCardLinkedPages(card.id);
   if (CARD_ATTACH_API) loadCardAttachments(card.id);
   captureModalOriginal();
+  const autoSaveEl  = document.getElementById('cardAutoSave');
+  const autoSaveLbl = document.getElementById('cardAutoSaveLabel');
+  if (autoSaveLbl) autoSaveLbl.style.display = '';
+  if (autoSaveEl) {
+    autoSaveEl.checked = state.settings?.autoSaveDialogs ?? false;
+    if (autoSaveEl.checked) _startCardAutoSave(); else _stopCardAutoSave();
+  }
   document.getElementById('modal').style.display = 'flex';
   history.replaceState(null, '', '#card:' + card.id);
   const ct = document.getElementById('cardText');
@@ -684,6 +734,7 @@ function openEditModal(colId, card) {
 }
 
 function closeModal() {
+  _stopCardAutoSave();
   if (location.hash.startsWith('#card:')) history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('modal').style.display = 'none';
   document.getElementById('modalBoardField').style.display    = 'none';
@@ -711,6 +762,10 @@ function submitCard() {
     endDate:     document.getElementById('cardEnd').value           || undefined,
     done:        modalMode === 'edit' ? modalDone : undefined,
   };
+  if (modalMode === 'edit') {
+    if (modalDone && !modalOriginalData?.done) data.doneAt = new Date().toISOString();
+    else if (!modalDone) data.doneAt = null;
+  }
   if (modalMode === 'add') addCard(modalColId, data);
   else updateCardFull(modalColId, editCardId, data);
   closeModal();
@@ -889,10 +944,23 @@ function saveCardInPlace() {
     done:        modalMode === 'edit' ? modalDone : undefined,
   };
   if (modalMode === 'edit') updateCardFull(modalColId, editCardId, data);
-  else if (modalMode === 'add') addCard(modalColId, data);
+  else if (modalMode === 'add') {
+    const card = addCard(modalColId, data);
+    if (card) {
+      modalMode  = 'edit';
+      editCardId = card.id;
+      setModalDone(card.done || false);
+      document.getElementById('cardDoneBtn').style.display = '';
+      document.getElementById('cardInfoBtn').style.display = '';
+      document.getElementById('modalTitle').textContent     = 'Edit Card';
+      document.getElementById('modalSubmitBtn').textContent = 'Save';
+      document.getElementById('modalDeleteBtn').style.display = '';
+      history.replaceState(null, '', '#card:' + card.id);
+    }
+  }
   captureModalOriginal();
   const msg = document.getElementById('modalSavedMsg');
-  msg.textContent = 'saved';
+  msg.textContent = `${ICONS.done} saved`;
   msg.classList.add('modal-saved-msg--visible');
   setTimeout(() => { msg.textContent = ''; msg.classList.remove('modal-saved-msg--visible'); }, 2000);
 }

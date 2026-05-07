@@ -13,13 +13,24 @@ function initTitleChars() {
 
 // ---- Remote change polling ----
 async function checkForUpdates() {
-  if (!API || saveTimer) return;
+  if (!API) return;
   try {
-    const r = await fetch(API);
+    const headers = boardEtag ? { 'If-None-Match': boardEtag } : {};
+    const r = await fetch(API, { headers });
+    if (r.status === 304) return;
+    if (!r.ok) return;
+    boardEtag = r.headers.get('ETag');
     const remote = await r.json();
-    if (JSON.stringify(remote) !== JSON.stringify(state)) {
-      pendingRemote = remote;
-      document.getElementById('appTitle').classList.add('has-updates');
+    if (JSON.stringify(remote) === JSON.stringify(state)) return;
+    if (saveTimer) {
+      state = mergeStates(baseState, remote, state);
+      baseState = JSON.parse(JSON.stringify(remote));
+      render();
+      schedulesSave();
+    } else {
+      state = remote;
+      baseState = JSON.parse(JSON.stringify(remote));
+      render();
     }
   } catch (e) { /* ignore network errors */ }
 }
@@ -27,19 +38,28 @@ async function checkForUpdates() {
 setInterval(checkForUpdates, 5000);
 
 document.getElementById('appTitle').addEventListener('click', async () => {
-  document.getElementById('appTitle').classList.remove('has-updates');
-  if (pendingRemote && baseState) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    state = mergeStates(baseState, pendingRemote, state);
-    baseState = JSON.parse(JSON.stringify(state));
-    pendingRemote = null;
-    render();
-    schedulesSave();
-  } else {
-    await load();
-  }
+  await load();
 });
+
+// ---- Session expiry ----
+function handleSessionExpired() {
+  // Avoid triggering multiple times while the login modal is already open
+  if (document.getElementById('loginBackdrop').style.display !== 'none') return;
+  const msg = document.getElementById('loginSessionMsg');
+  if (msg) msg.style.display = '';
+  document.getElementById('loginBackdrop').style.display = 'flex';
+  setTimeout(() => document.getElementById('loginPassword').focus(), 50);
+}
+
+// Periodically verify the session is still valid (every 60 s)
+setInterval(async () => {
+  if (document.getElementById('loginBackdrop').style.display !== 'none') return;
+  try {
+    const r = await fetch('/api/auth/verify');
+    const { ok } = await r.json();
+    if (!ok) handleSessionExpired();
+  } catch { /* ignore network errors */ }
+}, 60000);
 
 // ---- Auth ----
 async function tryLogin(password) {
@@ -54,9 +74,8 @@ async function tryLogin(password) {
     document.getElementById('loginError').style.display = 'block';
     return false;
   }
-  const { ok, token } = data;
-  if (ok && token) {
-    sessionStorage.setItem('kanban-auth', token);
+  const { ok } = data;
+  if (ok) {
     document.getElementById('loginBackdrop').style.display = 'none';
     document.getElementById('loginError').textContent = 'Wrong password.';
     await afterAuth();
@@ -65,19 +84,9 @@ async function tryLogin(password) {
 }
 
 async function checkAuth() {
-  const params = new URLSearchParams(location.search);
-  const urlPwd = params.get('login');
-  if (urlPwd) {
-    history.replaceState({}, '', location.pathname);
-    if (await tryLogin(urlPwd)) return;
-  }
-  const token = sessionStorage.getItem('kanban-auth');
-  if (token) {
-    const r = await fetch('/api/auth/verify', { headers: { 'x-auth-token': token } });
-    const { ok } = await r.json();
-    if (ok) { afterAuth(); return; }
-    sessionStorage.removeItem('kanban-auth');
-  }
+  const r = await fetch('/api/auth/verify');
+  const { ok } = await r.json();
+  if (ok) { afterAuth(); return; }
   document.getElementById('loginBackdrop').style.display = 'flex';
   setTimeout(() => document.getElementById('loginPassword').focus(), 50);
 }
@@ -91,6 +100,11 @@ document.getElementById('loginForm').addEventListener('submit', async () => {
     document.getElementById('loginPassword').value = '';
     document.getElementById('loginPassword').focus();
   }
+});
+
+document.getElementById('loginPassword').addEventListener('focus', () => {
+  const msg = document.getElementById('loginSessionMsg');
+  if (msg) msg.style.display = 'none';
 });
 
 document.getElementById('loginPassword').addEventListener('keydown', () => {
@@ -174,8 +188,14 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 (function () {
   const backdrop = document.getElementById('settingsBackdrop');
 
-  document.getElementById('fauxton-link').href =
-    `${window.location.protocol}//${window.location.hostname}:5984/_utils`;
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+  const dbSection = document.getElementById('dbSection');
+  if (isLocal) {
+    document.getElementById('fauxton-link').href =
+      `${window.location.protocol}//${window.location.hostname}:5984/_utils`;
+  } else {
+    dbSection.style.display = 'none';
+  }
 
   if (BOARD_NAME) {
     document.getElementById('settingsTitle').textContent = `Board settings: ${BOARD_NAME}`;
@@ -192,25 +212,16 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   async function loadApiKey() {
     const input = document.getElementById('apiKeyDisplay');
+    document.getElementById('apiKeyCopyBtn').style.display = 'none';
     try {
       const r = await fetch('/api/settings');
-      const { apiKey } = await r.json();
-      input.value = apiKey || '';
-      input.placeholder = apiKey ? '' : 'not configured — set API_KEY in .env';
+      const { apiKeyConfigured } = await r.json();
+      input.value = '';
+      input.placeholder = apiKeyConfigured ? 'configured — see .env' : 'not configured — set API_KEY in .env';
     } catch {
       input.placeholder = 'failed to load';
     }
   }
-
-  document.getElementById('apiKeyCopyBtn').addEventListener('click', () => {
-    const val = document.getElementById('apiKeyDisplay').value;
-    if (!val) return;
-    navigator.clipboard.writeText(val).then(() => {
-      const btn = document.getElementById('apiKeyCopyBtn');
-      btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-    });
-  });
 
   window.openStatsDialog = async function () {
     const el = document.getElementById('statsContent');
@@ -296,9 +307,11 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       document.getElementById('boardDescription').value = state.settings?.description || '';
       document.getElementById('boardRenameInput').value = BOARD_NAME;
       document.getElementById('boardRenameError').style.display = 'none';
-      document.getElementById('inboxDateToggle').checked     = state.settings?.inboxWithDate   ?? false;
-      document.getElementById('persistCollapseToggle').checked = state.settings?.persistCollapse ?? false;
-      document.getElementById('boardArchivedToggle').checked   = state.settings?.archived        ?? false;
+      document.getElementById('inboxDateToggle').checked       = state.settings?.inboxWithDate     ?? false;
+      document.getElementById('persistCollapseToggle').checked  = state.settings?.persistCollapse   ?? false;
+      document.getElementById('boardArchivedToggle').checked    = state.settings?.archived           ?? false;
+      document.getElementById('autoSaveDialogsToggle').checked  = state.settings?.autoSaveDialogs   ?? false;
+      document.getElementById('autoSaveIntervalInput').value    = state.settings?.autoSaveIntervalMin ?? 5;
       renderTrackedCols();
     }
     loadApiKey();
@@ -398,6 +411,20 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       (state.settings ??= {}).persistCollapse = e.target.checked || undefined;
       if (!e.target.checked) state.settings.collapsedColumnIds = undefined;
       persistCollapseState();
+      schedulesSave();
+      flashSaved('importSaveIndicator');
+    });
+
+    document.getElementById('autoSaveDialogsToggle').addEventListener('change', e => {
+      (state.settings ??= {}).autoSaveDialogs = e.target.checked || undefined;
+      schedulesSave();
+      flashSaved('importSaveIndicator');
+    });
+
+    document.getElementById('autoSaveIntervalInput').addEventListener('change', e => {
+      const val = Math.max(1, Math.min(60, parseInt(e.target.value) || 5));
+      e.target.value = val;
+      (state.settings ??= {}).autoSaveIntervalMin = val === 5 ? undefined : val;
       schedulesSave();
       flashSaved('importSaveIndicator');
     });
@@ -565,30 +592,10 @@ function handleUrlHash() {
 
 // ---- After-auth routing ----
 async function afterAuth() {
-  try {
-    const r = await fetch('/api/settings');
-    const { logApiResponses } = await r.json();
-    if (logApiResponses) {
-      const _fetch = window.fetch.bind(window);
-      window.fetch = async (url, opts = {}) => {
-        const res = await _fetch(url, opts);
-        const clone = res.clone();
-        const method = (opts.method || 'GET').toUpperCase();
-        console.group(`[API] ${method} ${url}`);
-        if (opts.body) {
-          try { console.log('req:', JSON.parse(opts.body)); } catch { console.log('req:', opts.body); }
-        }
-        try { console.log('res:', await clone.json()); } catch {}
-        console.groupEnd();
-        return res;
-      };
-    }
-  } catch {}
-
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;
-    document.getElementById('headerHomeBtn').style.display = '';
+    document.getElementById('boardSwitchWrap').style.display = '';
     document.getElementById('notesToggleBtn').style.display = '';
     await load();
     await loadNotes();
@@ -603,6 +610,7 @@ async function initOverview() {
   document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
   document.getElementById('menuInbox').style.display = '';
+  document.getElementById('menuFindCard').style.display = 'none';
   document.getElementById('overview').style.display = 'flex';
 
   document.getElementById('achPrev').onclick = () => loadAchievements(achDayOffset - 1);
@@ -625,7 +633,10 @@ function achDateLabel(offset) {
   if (offset === -1) return "Yesterday's Achievements";
   const d = new Date();
   d.setDate(d.getDate() + offset);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return sameYear ? `Achievements ${dd}.${mm}.` : `Achievements ${dd}.${mm}.${d.getFullYear()}`;
 }
 
 async function loadAchievements(offset) {
@@ -754,3 +765,36 @@ document.getElementById('newBoardBtn').addEventListener('click', async () => {
 document.getElementById('newBoardInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('newBoardBtn').click();
 });
+
+// ---- Board switcher hover menu ----
+(function () {
+  const wrap = document.getElementById('boardSwitchWrap');
+  const menu = document.getElementById('boardSwitchMenu');
+  let hideTimer = null;
+
+  function scheduleHide() {
+    hideTimer = setTimeout(() => menu.classList.remove('open'), 150);
+  }
+  function cancelHide() {
+    clearTimeout(hideTimer);
+  }
+
+  async function openBoardMenu() {
+    cancelHide();
+    if (menu.classList.contains('open')) return;
+    try {
+      const boards = await fetch('/api/boards').then(r => r.json());
+      const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
+      if (!others.length) return;
+      menu.innerHTML = others
+        .map(b => `<a class="board-switch-item" href="/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
+        .join('');
+    } catch { return; }
+    menu.classList.add('open');
+  }
+
+  wrap.addEventListener('mouseenter', openBoardMenu);
+  wrap.addEventListener('mouseleave', scheduleHide);
+  menu.addEventListener('mouseenter', cancelHide);
+  menu.addEventListener('mouseleave', scheduleHide);
+})();

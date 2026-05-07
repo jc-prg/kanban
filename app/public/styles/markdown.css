@@ -89,6 +89,12 @@
   height: 13px;
 }
 
+@media (pointer: coarse) {
+  .card-desc-preview li:has(> input[type="checkbox"]) { padding-left: 26px; }
+  .card-desc-preview li:has(> p > input[type="checkbox"]) > p { padding-left: 24px; }
+  .card-desc-preview input[type="checkbox"] { width: 18px; height: 18px; }
+}
+
 /* Inline code */
 .card-desc-preview code {
   background: var(--surface2);
@@ -119,6 +125,16 @@
 
 /* Images */
 .card-desc-preview img { max-width: 100%; height: auto; }
+
+/* Embedded PDF */
+.card-desc-preview .md-pdf-embed {
+  display: block;
+  width: 100%;
+  height: 600px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 6px 0;
+}
 
 /* Links */
 .card-desc-preview a { color: var(--accent); }

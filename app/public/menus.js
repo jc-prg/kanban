@@ -60,7 +60,8 @@ document.getElementById('ctxDone').addEventListener('click', () => {
   const colId = ctxColId, card = ctxCard;
   hideContextMenu();
   if (!colId || !card) return;
-  updateCardFull(colId, card.id, { ...card, done: !card.done });
+  const newDone = !card.done;
+  updateCardFull(colId, card.id, { ...card, done: newDone, doneAt: newDone ? new Date().toISOString() : null });
 });
 
 document.getElementById('ctxDuplicate').addEventListener('click', () => {
@@ -310,9 +311,9 @@ document.addEventListener('keydown', e => {
   document.getElementById('menuPrompts').addEventListener('click', () => { closeMenu(); openPromptsDialog(); });
   document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); openStatsDialog(); });
   document.getElementById('statsCloseBtn').addEventListener('click', () => { document.getElementById('statsBackdrop').style.display = 'none'; });
-  document.getElementById('menuLogout').addEventListener('click', () => {
+  document.getElementById('menuLogout').addEventListener('click', async () => {
     closeMenu();
-    sessionStorage.removeItem('kanban-auth');
+    await fetch('/api/auth/logout', { method: 'POST' });
     const pwd = document.getElementById('loginPassword');
     pwd.value = '';
     document.getElementById('loginError').style.display = 'none';

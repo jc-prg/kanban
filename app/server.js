@@ -74,6 +74,7 @@ const _cardSchema = {
     startDate:   { type: 'string' },
     endDate:     { type: 'string' },
     done:         { type: 'boolean' },
+    doneAt:       { type: 'string' },
     created:      { type: 'string' },
     lastModified: { type: 'string' },
     moves:        { type: 'array', items: _moveSchema }
@@ -98,9 +99,11 @@ const _settingsSchema = {
     persistCollapse:    { type: 'boolean' },
     collapsedColumnIds: { type: 'array', items: { type: 'string' } },
     trackedColumns:     { type: 'array', items: { type: 'string' } },
-    notesSidebarOpen:   { type: 'boolean' },
-    notesSidebarWidth:  { type: 'number' },
-    notesFontSize:      { type: 'number' }
+    notesSidebarOpen:      { type: 'boolean' },
+    notesSidebarWidth:     { type: 'number' },
+    notesFontSize:         { type: 'number' },
+    autoSaveDialogs:       { type: 'boolean' },
+    autoSaveIntervalMin:   { type: 'number' }
   }
 };
 
@@ -130,9 +133,28 @@ const validateNotes = ajv.compile({
         link:           { type: 'string' },
         linkedCards:    { type: 'array', items: { type: 'string' } },
         hasAttachments: { type: 'boolean' },
+        lastModified:   { type: 'string' },
         children:       { type: 'array', items: { $ref: '#/definitions/page' } }
       }
     }
+  }
+});
+const _notePagePatchSchema = {
+  type: 'object', required: ['id'], additionalProperties: false,
+  properties: {
+    id:             { type: 'string', minLength: 1 },
+    title:          { type: 'string' },
+    description:    { type: 'string' },
+    link:           { type: 'string' },
+    linkedCards:    { type: 'array', items: { type: 'string' } },
+    hasAttachments: { type: 'boolean' },
+    lastModified:   { type: 'string' }
+  }
+};
+const validateNotesPatch = ajv.compile({
+  type: 'object', additionalProperties: false,
+  properties: {
+    updatedPages: { type: 'array', items: _notePagePatchSchema }
   }
 });
 
@@ -198,7 +220,7 @@ async function loadBoardData(db) {
 
 async function saveBoardData(db, data) {
   const { _rev } = await db.get(DOC_ID);
-  await db.insert({ _id: DOC_ID, _rev, ...data });
+  return db.insert({ _id: DOC_ID, _rev, ...data });
 }
 
 async function loadNotesData(db) {
@@ -214,7 +236,7 @@ async function loadNotesData(db) {
 async function saveNotesData(db, data) {
   let rev;
   try { ({ _rev: rev } = await db.get(NOTES_DOC_ID)); } catch (e) { /* new doc */ }
-  await db.insert({ _id: NOTES_DOC_ID, ...(rev ? { _rev: rev } : {}), ...data });
+  return db.insert({ _id: NOTES_DOC_ID, ...(rev ? { _rev: rev } : {}), ...data });
 }
 
 function withBoard(handler) {
@@ -297,12 +319,23 @@ function recordAuthFailure(ip) {
   return s.count;
 }
 
+// ---- Cookie helpers ----
+function parseCookies(req) {
+  const cookies = {};
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    cookies[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return cookies;
+}
+
 // ---- Auth middleware ----
 function authenticate(req, res, next) {
-  if (req.path === '/auth' || req.path === '/auth/verify') return next();
+  if (req.path === '/auth' || req.path === '/auth/verify' || req.path === '/auth/logout') return next();
 
-  const sessionToken = req.headers['x-auth-token'] || '';
-  if (safeEqual(sessionToken, SESSION_TOKEN)) return next();
+  const cookies = parseCookies(req);
+  if (safeEqual(cookies['kanban-session'] || '', SESSION_TOKEN)) return next();
 
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
   const apiKey = req.headers['x-api-key'] || '';
@@ -330,7 +363,9 @@ app.post('/api/auth', (req, res) => {
   const { password } = req.body;
   if (safeEqual(password, APP_PASSWORD)) {
     s.consecutive = 0;
-    res.json({ ok: true, token: SESSION_TOKEN });
+    const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+    res.cookie('kanban-session', SESSION_TOKEN, { httpOnly: true, sameSite: 'strict', secure, path: '/' });
+    res.json({ ok: true });
   } else {
     s.consecutive++;
     if (s.consecutive >= LOCKOUT_AFTER) {
@@ -344,12 +379,18 @@ app.post('/api/auth', (req, res) => {
 });
 
 app.get('/api/auth/verify', (req, res) => {
-  res.json({ ok: safeEqual(req.headers['x-auth-token'] || '', SESSION_TOKEN) });
+  const cookies = parseCookies(req);
+  res.json({ ok: safeEqual(cookies['kanban-session'] || '', SESSION_TOKEN) });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('kanban-session', { path: '/', sameSite: 'strict' });
+  res.json({ ok: true });
 });
 
 // ---- Global settings ----
 app.get('/api/settings', (req, res) => {
-  res.json({ apiKey: API_KEY || null, logApiResponses: LOG_API_RESPONSES });
+  res.json({ apiKeyConfigured: !!API_KEY });
 });
 
 // ---- Board list / management ----
@@ -413,11 +454,14 @@ app.get('/api/achievements/today', async (req, res) => {
           for (const card of col.cards) {
             if (card.created?.startsWith(today)) { created++; createdBoards[name] = (createdBoards[name] || 0) + 1; }
             if (card.moves?.some(m => m.at?.startsWith(today))) { moved++; movedBoards[name] = (movedBoards[name] || 0) + 1; }
-            if (card.done && card.lastModified?.startsWith(today)) { done++; doneBoards[name] = (doneBoards[name] || 0) + 1; }
+            const donByFlag = card.doneAt?.startsWith(today);
+            const doneByMove = !donByFlag && card.moves?.some(m => m.at?.startsWith(today) && /^done/i.test(m.to));
+            if (donByFlag || doneByMove) { done++; doneBoards[name] = (doneBoards[name] || 0) + 1; }
             if (!hasPast) {
               if (card.created && card.created < today) hasPast = true;
               else if (card.moves?.some(m => m.at?.slice(0, 10) < today)) hasPast = true;
-              else if (card.done && card.lastModified?.slice(0, 10) < today) hasPast = true;
+              else if (card.doneAt && card.doneAt.slice(0, 10) < today) hasPast = true;
+              else if (card.moves?.some(m => /^done/i.test(m.to) && m.at?.slice(0, 10) < today)) hasPast = true;
             }
           }
         }
@@ -512,13 +556,23 @@ app.put('/api/prompts', async (req, res) => {
 
 // ---- Board API ----
 app.get('/api/:board/board', withExistingBoard(async (req, res, db) => {
-  res.json(await loadBoardData(db));
+  const { _id, _rev, ...data } = await db.get(DOC_ID);
+  const etag = `"${_rev}"`;
+  if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  res.setHeader('ETag', etag);
+  res.json(data);
 }));
 
 app.put('/api/:board/board', withBoard(async (req, res, db) => {
   if (!validateBoard(req.body))
     return res.status(400).json({ error: 'Invalid board data', details: schemaError(validateBoard) });
-  await saveBoardData(db, req.body);
+  const ifMatch = req.headers['if-match'];
+  if (ifMatch) {
+    const { _rev } = await db.get(DOC_ID);
+    if (ifMatch !== `"${_rev}"`) return res.status(409).json({ error: 'conflict' });
+  }
+  const result = await saveBoardData(db, req.body);
+  res.setHeader('ETag', `"${result.rev}"`);
   res.json({ success: true });
 }));
 
@@ -529,6 +583,8 @@ app.patch('/api/:board/board', withBoard(async (req, res, db) => {
     return res.status(400).json({ error: 'Invalid patch data', details });
   }
   const { _rev, ...data } = await db.get(DOC_ID);
+  const ifMatch = req.headers['if-match'];
+  if (ifMatch && ifMatch !== `"${_rev}"`) return res.status(409).json({ error: 'conflict' });
   const { columnOrder, updatedColumns, removedColumnIds, settings } = req.body;
   let columns = data.columns;
 
@@ -554,7 +610,8 @@ app.patch('/api/:board/board', withBoard(async (req, res, db) => {
     delete update.persistCollapse;
     delete update.collapsedColumnIds;
   }
-  await db.insert({ _id: DOC_ID, _rev, ...update });
+  const result = await db.insert({ _id: DOC_ID, _rev, ...update });
+  res.setHeader('ETag', `"${result.rev}"`);
   res.json({ success: true });
 }));
 
@@ -574,13 +631,58 @@ app.get('/api/:board/column/:name', withBoard(async (req, res, db) => {
 }));
 
 app.get('/api/:board/notes', withExistingBoard(async (req, res, db) => {
-  res.json(await loadNotesData(db));
+  try {
+    const { _id, _rev, ...data } = await db.get(NOTES_DOC_ID);
+    const etag = `"${_rev}"`;
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.setHeader('ETag', etag);
+    res.json(data);
+  } catch (err) {
+    if (err.statusCode === 404) return res.json({ pages: [] });
+    throw err;
+  }
 }));
 
 app.put('/api/:board/notes', withBoard(async (req, res, db) => {
   if (!validateNotes(req.body))
     return res.status(400).json({ error: 'Invalid notes data', details: schemaError(validateNotes) });
-  await saveNotesData(db, req.body);
+  const ifMatch = req.headers['if-match'];
+  if (ifMatch) {
+    let rev;
+    try { ({ _rev: rev } = await db.get(NOTES_DOC_ID)); } catch (e) { /* new doc — no conflict */ }
+    if (rev && ifMatch !== `"${rev}"`) return res.status(409).json({ error: 'conflict' });
+  }
+  const result = await saveNotesData(db, req.body);
+  res.setHeader('ETag', `"${result.rev}"`);
+  res.json({ ok: true });
+}));
+
+app.patch('/api/:board/notes', withBoard(async (req, res, db) => {
+  if (!validateNotesPatch(req.body))
+    return res.status(400).json({ error: 'Invalid notes patch', details: schemaError(validateNotesPatch) });
+  const { updatedPages = [] } = req.body;
+  if (!updatedPages.length) return res.json({ ok: true });
+  let notes, currentRev;
+  try {
+    const { _id, _rev, ...data } = await db.get(NOTES_DOC_ID);
+    currentRev = _rev;
+    notes = data;
+  } catch (err) {
+    if (err.statusCode === 404) { notes = { pages: [] }; }
+    else throw err;
+  }
+  const ifMatch = req.headers['if-match'];
+  if (ifMatch && currentRev && ifMatch !== `"${currentRev}"`) return res.status(409).json({ error: 'conflict' });
+  function upsertPage(pages, patch) {
+    for (const p of pages) {
+      if (p.id === patch.id) { Object.assign(p, patch); return true; }
+      if (p.children?.length && upsertPage(p.children, patch)) return true;
+    }
+    return false;
+  }
+  for (const page of updatedPages) upsertPage(notes.pages, page);
+  const result = await saveNotesData(db, notes);
+  res.setHeader('ETag', `"${result.rev}"`);
   res.json({ ok: true });
 }));
 
@@ -946,8 +1048,25 @@ async function initDb() {
   promptsDb = couch.use(PROMPTS_DB_NAME);
 }
 
+// ---- Startup directory check ----
+function checkDataDirectories() {
+  const dirs = [JSON_BACKUP_DIR, ATTACHMENTS_DIR];
+  for (const dir of dirs) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+    } catch (err) {
+      console.error(`\nSTARTUP WARNING: Cannot write to "${dir}"`);
+      console.error(`  Error: ${err.message}`);
+      console.error(`  File uploads and backups will fail until this is fixed.`);
+      console.error(`  Fix (Docker): run  chown -R 1000:1000 ./data  on the host.\n`);
+    }
+  }
+}
+
 initDb()
   .then(() => {
+    checkDataDirectories();
     app.listen(PORT, () => console.log(`Kanban server running at http://${HOST}:${PORT}`));
     runBackup();
     setInterval(runBackup, BACKUP_INTERVAL_MS);

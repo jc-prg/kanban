@@ -2,15 +2,16 @@ const BOARD_NAME = window.location.pathname.split('/').filter(Boolean)[0] || nul
 const API_BASE   = BOARD_NAME ? `/api/${BOARD_NAME}` : null;
 const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
 
-// Automatically attach the session token to every /api/ request.
+// Intercept 401 responses to trigger the session-expired flow.
 (function () {
   const _fetch = window.fetch;
-  window.fetch = (url, opts = {}) => {
-    if (typeof url === 'string' && url.startsWith('/api/')) {
-      const token = sessionStorage.getItem('kanban-auth');
-      if (token) opts = { ...opts, headers: { 'x-auth-token': token, ...opts.headers } };
+  window.fetch = async (url, opts = {}) => {
+    const r = await _fetch(url, opts);
+    if (r.status === 401 && typeof url === 'string' &&
+        url.startsWith('/api/') && !url.startsWith('/api/auth')) {
+      if (typeof handleSessionExpired === 'function') handleSessionExpired();
     }
-    return _fetch(url, opts);
+    return r;
   };
 })();
 
@@ -61,8 +62,8 @@ const colCollapsed = new Set(); // colIds whose content is hidden
 // ---- State ----
 let state        = { columns: [] };
 let baseState    = null; // snapshot from last server load — the merge ancestor
-let pendingRemote = null;
 let saveTimer    = null;
+let boardEtag    = null;
 
 // ---- Data load ----
 async function load() {
@@ -75,12 +76,12 @@ async function load() {
     return;
   }
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+  boardEtag = r.headers.get('ETag');
   state = await r.json();
   for (const col of (state.columns || []))
     for (const card of (col.cards || []))
       for (const k of Object.keys(card)) { if (card[k] == null) delete card[k]; }
   baseState = JSON.parse(JSON.stringify(state)); // snapshot before migration
-  pendingRemote = null;
 
   // Migrate legacy root-level fields into settings node
   ['description', 'inboxWithDate', 'persistCollapse', 'collapsedColumnIds'].forEach(key => {
@@ -147,14 +148,27 @@ function schedulesSave() {
     saveTimer = null;
     try {
       let r;
+      const headers = { 'Content-Type': 'application/json' };
+      if (boardEtag) headers['If-Match'] = boardEtag;
       if (baseState) {
         const patch = buildPatch(baseState, state);
         if (!Object.keys(patch).length) { showSaved(); return; }
-        r = await fetch(API, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(patch) });
+        r = await fetch(API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
       } else {
-        r = await fetch(API, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(state) });
+        r = await fetch(API, { method: 'PUT', headers, body: JSON.stringify(state) });
+      }
+      if (r.status === 409) {
+        const localSnapshot = JSON.parse(JSON.stringify(state));
+        const baseSnapshot  = JSON.parse(JSON.stringify(baseState));
+        await load();
+        state = mergeStates(baseSnapshot, state, localSnapshot);
+        render();
+        schedulesSave();
+        return;
       }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const newEtag = r.headers.get('ETag');
+      if (newEtag) boardEtag = newEtag;
       baseState = JSON.parse(JSON.stringify(state));
       showSaved();
     } catch (e) {
@@ -211,7 +225,12 @@ function updateColumnTitle(colId, title) {
 
 function addCard(colId, data) {
   const col = state.columns.find(c => c.id === colId);
-  if (col) { col.cards.push({ id: uid(), created: new Date().toISOString().slice(0, 10), ...data, lastModified: new Date().toISOString() }); render(); schedulesSave(); }
+  if (!col) return null;
+  const card = { id: uid(), created: new Date().toISOString().slice(0, 10), ...data, lastModified: new Date().toISOString() };
+  col.cards.push(card);
+  render();
+  schedulesSave();
+  return card;
 }
 
 function recordMove(card, fromColTitle, toColTitle) {
@@ -240,8 +259,8 @@ function applyColumnActions(card, col) {
   if (!col.actions?.length) return;
   const today = new Date().toISOString().slice(0, 10);
   for (const action of col.actions) {
-    if (action === 'markDone')     card.done = true;
-    if (action === 'markUndone')   card.done = false;
+    if (action === 'markDone')   { card.done = true;  card.doneAt = new Date().toISOString(); }
+    if (action === 'markUndone') { card.done = false; delete card.doneAt; }
     if (action === 'setStartDate') card.startDate = today;
     if (action === 'setEndDate')   card.endDate   = today;
   }
@@ -326,7 +345,14 @@ function mergeStates(base, remote, local) {
       if (!mCard) continue;
       for (const key of Object.keys(lCard)) {
         if (key === 'id') continue;
-        if (JSON.stringify(lCard[key]) !== JSON.stringify(bCard[key])) mCard[key] = lCard[key];
+        if (JSON.stringify(lCard[key]) !== JSON.stringify(bCard[key])) {
+          if (JSON.stringify(mCard[key]) !== JSON.stringify(bCard[key])) {
+            // Both sides changed this field — newer lastModified wins
+            if ((lCard.lastModified || '') >= (mCard.lastModified || '')) mCard[key] = lCard[key];
+          } else {
+            mCard[key] = lCard[key];
+          }
+        }
       }
     }
   }

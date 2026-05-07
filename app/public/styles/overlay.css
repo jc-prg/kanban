@@ -423,15 +423,51 @@
   margin-top: 20px;
 }
 
-.modal-saved-msg {
+.modal-autosave-wrap {
+  display: grid;
+  align-items: center;
   margin-right: auto;
+}
+
+.modal-autosave-label,
+.modal-saved-msg { grid-area: 1 / 1; }
+
+.modal-autosave-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: opacity 0.2s;
+}
+.modal-autosave-label input { cursor: pointer; margin: 0; }
+.modal-autosave-wrap:has(.modal-saved-msg--visible) .modal-autosave-label { opacity: 0; }
+
+.modal-saved-msg {
   font-size: 0.75rem;
   color: #10b981;
   opacity: 0;
   transition: opacity 0.2s;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .modal-saved-msg--visible { opacity: 1; }
+
+.settings-number-input {
+  width: 70px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: center;
+  flex-shrink: 0;
+}
 
 /* Login */
 .login-modal {
@@ -443,6 +479,16 @@
   font-size: 0.75rem;
   color: var(--danger);
   margin-bottom: 8px;
+}
+
+.login-session-msg {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
 }
 
 /* Confirm dialog — must sit above all other modals */

@@ -1,5 +1,7 @@
 # Kanban App
 
+> **Single-user application.** Authentication is a single global password with no per-board or per-user access control. One valid session token grants full read/write/delete access to all boards. Do not expose this app to untrusted users or the public internet without additional access controls in front of it.
+
 ## Setup & Start
 
 ```bash

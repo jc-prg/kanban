@@ -1,5 +1,23 @@
+// ---- Notes auto-save ----
+let _noteAutoSaveTimer = null;
+
+function _stopNoteAutoSave() {
+  clearInterval(_noteAutoSaveTimer);
+  _noteAutoSaveTimer = null;
+}
+
+function _startNoteAutoSave() {
+  _stopNoteAutoSave();
+  const ms = (state.settings?.autoSaveIntervalMin ?? 5) * 60 * 1000;
+  _noteAutoSaveTimer = setInterval(() => {
+    if (noteModalHasChanges()) submitNote();
+  }, ms);
+}
+
 // ---- Notes State ----
-let notesState = { pages: [] };
+let notesState     = { pages: [] };
+let baseNotesState = null; // snapshot from last server load/save — the merge ancestor
+let notesEtag      = null;
 let notesSaveTimer = null;
 const NOTES_API        = API_BASE ? `${API_BASE}/notes`             : null;
 const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
@@ -10,11 +28,45 @@ async function loadNotes() {
   try {
     const r = await fetch(NOTES_API);
     if (!r.ok) { notesState = { pages: [] }; }
-    else { notesState = await r.json(); if (!notesState.pages) notesState.pages = []; }
+    else {
+      notesEtag  = r.headers.get('ETag');
+      notesState = await r.json();
+      if (!notesState.pages) notesState.pages = [];
+    }
   } catch (e) { notesState = { pages: [] }; }
+  baseNotesState = JSON.parse(JSON.stringify(notesState));
   renderNotesTree();
   restoreNotesSidebar();
   render();
+}
+
+// DFS-flatten note pages, stripping `children` from each entry.
+// Returns a Map<id, pageOwnFields> in DFS traversal order.
+function _flattenNotePages(pages, out = new Map()) {
+  for (const p of pages) {
+    const { children, ...own } = p;
+    out.set(p.id, own);
+    if (children?.length) _flattenNotePages(children, out);
+  }
+  return out;
+}
+
+// Returns { updatedPages } for content-only changes, {} for no changes,
+// or null when structure changed (add/remove/reorder) — caller should fall back to PUT.
+function buildNotesPatch(base, current) {
+  const baseFlat = _flattenNotePages(base.pages);
+  const currFlat = _flattenNotePages(current.pages);
+
+  // Same set of IDs in same DFS order?
+  const baseIds = [...baseFlat.keys()];
+  const currIds = [...currFlat.keys()];
+  if (JSON.stringify(baseIds) !== JSON.stringify(currIds)) return null;
+
+  const updatedPages = [];
+  for (const [id, curr] of currFlat) {
+    if (JSON.stringify(curr) !== JSON.stringify(baseFlat.get(id))) updatedPages.push(curr);
+  }
+  return updatedPages.length ? { updatedPages } : {};
 }
 
 function scheduleSaveNotes() {
@@ -23,15 +75,112 @@ function scheduleSaveNotes() {
     notesSaveTimer = null;
     if (!NOTES_API) return;
     try {
-      const r = await fetch(NOTES_API, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(notesState),
-      });
+      let r;
+      const headers = { 'Content-Type': 'application/json' };
+      if (notesEtag) headers['If-Match'] = notesEtag;
+      if (baseNotesState) {
+        const patch = buildNotesPatch(baseNotesState, notesState);
+        if (patch !== null) {
+          if (!Object.keys(patch).length) return; // nothing changed
+          r = await fetch(NOTES_API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
+        } else {
+          r = await fetch(NOTES_API, { method: 'PUT', headers, body: JSON.stringify(notesState) });
+        }
+      } else {
+        r = await fetch(NOTES_API, { method: 'PUT', headers, body: JSON.stringify(notesState) });
+      }
+      if (r.status === 409) {
+        const localSnapshot = JSON.parse(JSON.stringify(notesState));
+        const baseSnapshot  = JSON.parse(JSON.stringify(baseNotesState));
+        await loadNotes();
+        notesState = mergeNotesStates(baseSnapshot, notesState, localSnapshot);
+        renderNotesTree();
+        render();
+        scheduleSaveNotes();
+        return;
+      }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const newEtag = r.headers.get('ETag');
+      if (newEtag) notesEtag = newEtag;
+      baseNotesState = JSON.parse(JSON.stringify(notesState));
     } catch (e) { console.error('Notes save failed:', e.message); }
   }, 600);
 }
+
+// Remove a page by id from any level of a page tree (mutates in place).
+function _removePage(id, pages) {
+  for (let i = 0; i < pages.length; i++) {
+    if (pages[i].id === id) { pages.splice(i, 1); return true; }
+    if (pages[i].children?.length && _removePage(id, pages[i].children)) return true;
+  }
+  return false;
+}
+
+// 3-way merge: remote wins for structure, local wins for own-field edits.
+// When both sides changed the same page, newer lastModified wins.
+function mergeNotesStates(base, remote, local) {
+  const merged    = JSON.parse(JSON.stringify(remote));
+  const baseFlat  = _flattenNotePages(base.pages);
+  const localFlat = _flattenNotePages(local.pages);
+  const remoteFlat = _flattenNotePages(remote.pages);
+
+  // Pages new in local but not in base and not in remote → append to root
+  for (const [id] of localFlat) {
+    if (!baseFlat.has(id) && !remoteFlat.has(id)) {
+      const p = findNotePage(id, local.pages);
+      if (p) merged.pages.push(JSON.parse(JSON.stringify(p)));
+    }
+  }
+
+  // Pages deleted in local (present in base, absent in local) → remove from merged
+  for (const [id] of baseFlat) {
+    if (!localFlat.has(id)) _removePage(id, merged.pages);
+  }
+
+  // Field-level merge for pages present in both local and base
+  for (const [id, localPage] of localFlat) {
+    const basePage = baseFlat.get(id);
+    if (!basePage) continue; // new in local, handled above
+    const mergedPageRef = findNotePage(id, merged.pages);
+    if (!mergedPageRef) continue; // removed in remote → remote wins
+    if (JSON.stringify(localPage) === JSON.stringify(basePage)) continue; // no local change
+
+    const remotePage   = remoteFlat.get(id);
+    const remoteChanged = remotePage && JSON.stringify(remotePage) !== JSON.stringify(basePage);
+
+    if (!remoteChanged) {
+      // Only local changed → apply local own fields (children preserved in mergedPageRef)
+      for (const key of Object.keys(localPage)) mergedPageRef[key] = localPage[key];
+    } else {
+      // Both changed → newer lastModified wins
+      if ((localPage.lastModified || '') > (remotePage.lastModified || '')) {
+        for (const key of Object.keys(localPage)) mergedPageRef[key] = localPage[key];
+      }
+    }
+  }
+
+  return merged;
+}
+
+async function checkForNotesUpdates() {
+  if (!NOTES_API || notesSaveTimer || !baseNotesState) return;
+  try {
+    const headers = notesEtag ? { 'If-None-Match': notesEtag } : {};
+    const r = await fetch(NOTES_API, { headers });
+    if (r.status === 304) return;
+    if (!r.ok) return;
+    notesEtag = r.headers.get('ETag');
+    const remote = await r.json();
+    if (JSON.stringify(remote) === JSON.stringify(notesState)) return;
+    notesState    = mergeNotesStates(baseNotesState, remote, notesState);
+    baseNotesState = JSON.parse(JSON.stringify(remote));
+    renderNotesTree();
+    render();
+    scheduleSaveNotes(); // persist any local changes that survived the merge
+  } catch (e) { /* ignore network errors */ }
+}
+
+setInterval(checkForNotesUpdates, 5000);
 
 // ---- Notes Tree Helpers ----
 function findNotePage(id, pages) {
@@ -55,6 +204,7 @@ function addNotePage(parentId = null) {
   const page = {
     id: 'n-' + Math.random().toString(36).slice(2, 9),
     title: 'New Page', description: '', link: '', linkedCards: [], children: [],
+    lastModified: new Date().toISOString(),
   };
   if (!parentId) {
     notesState.pages.push(page);
@@ -375,6 +525,11 @@ function openNoteModal(pageId, focusTitle = false) {
   resetNoteSections();
   if (NOTES_ATTACH_API) loadAttachments(pageId);
 
+  const noteAutoSaveEl = document.getElementById('noteAutoSave');
+  if (noteAutoSaveEl) {
+    noteAutoSaveEl.checked = state.settings?.autoSaveDialogs ?? false;
+    if (noteAutoSaveEl.checked) _startNoteAutoSave(); else _stopNoteAutoSave();
+  }
   document.getElementById('noteModal').style.display = 'flex';
   history.replaceState(null, '', '#note:' + pageId);
   const nt = document.getElementById('notePageTitle');
@@ -383,6 +538,7 @@ function openNoteModal(pageId, focusTitle = false) {
 }
 
 function closeNoteModal() {
+  _stopNoteAutoSave();
   if (location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('noteModal').style.display = 'none';
   document.getElementById('noteCreateCardForm').style.display = 'none';
@@ -394,9 +550,10 @@ function submitNote() {
   const page = findNotePage(noteModalPageId, notesState.pages);
   if (!page) return;
 
-  page.title       = document.getElementById('notePageTitle').value.trim() || 'Untitled';
-  page.description = document.getElementById('notePageDesc').value;
-  page.link        = document.getElementById('notePageLink').value.trim();
+  page.title        = document.getElementById('notePageTitle').value.trim() || 'Untitled';
+  page.description  = document.getElementById('notePageDesc').value;
+  page.link         = document.getElementById('notePageLink').value.trim();
+  page.lastModified = new Date().toISOString();
 
   noteModalOrig = { title: page.title, desc: page.description, link: page.link };
 
@@ -591,7 +748,8 @@ function renderLinkedCards(ids) {
       e.stopPropagation();
       const page = findNotePage(noteModalPageId, notesState.pages);
       if (!page) return;
-      page.linkedCards = (page.linkedCards || []).filter(c => c !== id);
+      page.linkedCards  = (page.linkedCards || []).filter(c => c !== id);
+      page.lastModified = new Date().toISOString();
       renderLinkedCards(page.linkedCards);
       scheduleSaveNotes();
       render();
@@ -652,6 +810,7 @@ function createAndLinkCard(text) {
   const target = findNotePage(noteModalPageId, notesState.pages);
   if (target && !(target.linkedCards || []).includes(cardId)) {
     (target.linkedCards ??= []).push(cardId);
+    target.lastModified = new Date().toISOString();
     renderLinkedCards(target.linkedCards);
     scheduleSaveNotes();
   }
@@ -694,6 +853,7 @@ function initNoteCardSearch() {
         if (!page.linkedCards) page.linkedCards = [];
         if (!page.linkedCards.includes(card.id)) {
           page.linkedCards.push(card.id);
+          page.lastModified = new Date().toISOString();
           renderLinkedCards(page.linkedCards);
           scheduleSaveNotes();
           render();
@@ -770,6 +930,7 @@ document.addEventListener('drop', async e => {
   if (!await showConfirm(`Link "${label}" to page "${target.title}"?`, { okLabel: 'Link card' })) return;
 
   (target.linkedCards ??= []).push(cardId);
+  target.lastModified = new Date().toISOString();
   scheduleSaveNotes();
   if (noteModalPageId === pageId) renderLinkedCards(target.linkedCards);
   render();
@@ -811,6 +972,7 @@ document.addEventListener('touchend', e => {
     const label = card.text.length > 60 ? card.text.slice(0, 60) + '…' : card.text;
     if (!await showConfirm(`Link "${label}" to page "${target.title}"?`, { okLabel: 'Link card' })) return;
     (target.linkedCards ??= []).push(cardId);
+    target.lastModified = new Date().toISOString();
     scheduleSaveNotes();
     if (noteModalPageId === pageId) renderLinkedCards(target.linkedCards);
     render();
@@ -837,6 +999,7 @@ function renderAttachments(pageId, files) {
   const page = findNotePage(pageId, notesState.pages);
   if (page && !!page.hasAttachments !== (files.length > 0)) {
     page.hasAttachments = files.length > 0;
+    page.lastModified   = new Date().toISOString();
     scheduleSaveNotes();
     renderNotesTree();
   }
@@ -924,7 +1087,17 @@ async function resolveAttachments(container) {
     const fn = img.getAttribute('src').slice('attachment:'.length);
     try {
       const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
-      if (r.ok) img.src = URL.createObjectURL(await r.blob());
+      if (!r.ok) continue;
+      const obj = URL.createObjectURL(await r.blob());
+      if (_attachType(fn) === 'pdf') {
+        const embed = document.createElement('embed');
+        embed.src = obj;
+        embed.type = 'application/pdf';
+        embed.className = 'md-pdf-embed';
+        img.replaceWith(embed);
+      } else {
+        img.src = obj;
+      }
     } catch {}
   }
 
@@ -933,7 +1106,10 @@ async function resolveAttachments(container) {
     const url = `${base}/${encodeURIComponent(fn)}`;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
-    if (_attachType(fn) === 'html')
+    const ft = _attachType(fn);
+    if (ft === 'image' || ft === 'pdf')
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openAttachmentViewer(url, fn, ft); });
+    else if (ft === 'html')
       a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _openInNewTab(url); });
     else
       a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _downloadAttachment(url, fn); });
@@ -1236,6 +1412,10 @@ function _initTreeDragDrop() {
 
 // ---- DOMContentLoaded wiring ----
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('noteAutoSave')?.addEventListener('change', e => {
+    if (e.target.checked) _startNoteAutoSave(); else _stopNoteAutoSave();
+  });
+
   initNotesDropZone();
   _initTreeDragDrop();
   _initTreeTouchDragDrop();
