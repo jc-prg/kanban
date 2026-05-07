@@ -766,35 +766,38 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('newBoardBtn').click();
 });
 
-// ---- Board switcher hover menu ----
+// ---- Board switcher click menu ----
 (function () {
   const wrap = document.getElementById('boardSwitchWrap');
+  const btn  = document.getElementById('headerHomeBtn');
   const menu = document.getElementById('boardSwitchMenu');
-  let hideTimer = null;
 
-  function scheduleHide() {
-    hideTimer = setTimeout(() => menu.classList.remove('open'), 150);
-  }
-  function cancelHide() {
-    clearTimeout(hideTimer);
-  }
-
-  async function openBoardMenu() {
-    cancelHide();
-    if (menu.classList.contains('open')) return;
+  async function toggleBoardMenu(e) {
+    e.preventDefault();
+    if (menu.classList.contains('open')) {
+      menu.classList.remove('open');
+      btn.classList.remove('open');
+      return;
+    }
     try {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
-      if (!others.length) return;
-      menu.innerHTML = others
+      const allEntry = '<a class="board-switch-item" href="/">all boards</a>';
+      const sep = others.length ? '<div class="header-dd-separator"></div>' : '';
+      menu.innerHTML = allEntry + sep + others
         .map(b => `<a class="board-switch-item" href="/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
         .join('');
     } catch { return; }
     menu.classList.add('open');
+    btn.classList.add('open');
   }
 
-  wrap.addEventListener('mouseenter', openBoardMenu);
-  wrap.addEventListener('mouseleave', scheduleHide);
-  menu.addEventListener('mouseenter', cancelHide);
-  menu.addEventListener('mouseleave', scheduleHide);
+  btn.addEventListener('click', toggleBoardMenu);
+
+  document.addEventListener('click', e => {
+    if (!wrap.contains(e.target)) {
+      menu.classList.remove('open');
+      btn.classList.remove('open');
+    }
+  });
 })();

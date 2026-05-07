@@ -53,6 +53,8 @@ header h1 span { color: var(--accent); }
 .header-menu { position: relative; display: flex; gap: 6px; align-items: center; }
 
 .header-menu-btn {
+  display: flex;
+  align-items: center;
   font-family: 'DM Mono', monospace;
   font-size: 1rem;
   background: none;
@@ -116,12 +118,14 @@ header h1 span { color: var(--accent); }
 /* Board switcher hover menu */
 .board-switch-wrap {
   position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .board-switch-menu {
   display: none;
   position: absolute;
-  top: calc(100% + 3px);
+  top: calc(100% + 9px);
   right: 0;
   background: var(--surface);
   border: 1px solid var(--border);

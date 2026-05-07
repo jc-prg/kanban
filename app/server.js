@@ -289,6 +289,31 @@ const AUTH_FAIL_WINDOW_MS = 15 * 60 * 1000; // window for API auth-failure track
 const AUTH_FAIL_MAX       = 20;             // max failed auth attempts per window before 429
 const authFailMap         = new Map();      // ip -> { count, windowStart }
 
+const WRITE_WINDOW_MS  = 15 * 60 * 1000;  // 15-minute window for write rate limiting
+const WRITE_MAX        = 200;              // max write requests per window
+const UPLOAD_MAX       = 30;              // max upload requests per window
+const writeMap         = new Map();        // ip -> { count, windowStart }
+const uploadMap        = new Map();        // ip -> { count, windowStart }
+
+function makeWriteLimiter(map, max) {
+  return function writeLimiter(req, res, next) {
+    const ip  = req.ip;
+    const now = Date.now();
+    let s = map.get(ip);
+    if (!s || now > s.windowStart + WRITE_WINDOW_MS) {
+      s = { count: 0, windowStart: now };
+      map.set(ip, s);
+    }
+    s.count++;
+    if (s.count > max)
+      return res.status(429).json({ error: 'Too many requests. Try again later.' });
+    next();
+  };
+}
+
+const writeRateLimit  = makeWriteLimiter(writeMap,  WRITE_MAX);
+const uploadRateLimit = makeWriteLimiter(uploadMap, UPLOAD_MAX);
+
 // Purge expired entries every window cycle
 setInterval(() => {
   const now = Date.now();
@@ -296,7 +321,11 @@ setInterval(() => {
     if (now > s.windowStart + RATE_WINDOW_MS && now > s.lockedUntil) loginMap.delete(ip);
   for (const [ip, s] of authFailMap)
     if (now > s.windowStart + AUTH_FAIL_WINDOW_MS) authFailMap.delete(ip);
-}, RATE_WINDOW_MS);
+  for (const [ip, s] of writeMap)
+    if (now > s.windowStart + WRITE_WINDOW_MS) writeMap.delete(ip);
+  for (const [ip, s] of uploadMap)
+    if (now > s.windowStart + WRITE_WINDOW_MS) uploadMap.delete(ip);
+}, WRITE_WINDOW_MS);
 
 function loginState(ip) {
   const now = Date.now();
@@ -473,7 +502,7 @@ app.get('/api/achievements/today', async (req, res) => {
   }
 });
 
-app.post('/api/boards/:name', async (req, res) => {
+app.post('/api/boards/:name', writeRateLimit, async (req, res) => {
   const { name } = req.params;
   if (!validBoardName(name)) return res.status(400).json({ error: 'Invalid board name. Use lowercase letters, digits and hyphens only.' });
   try {
@@ -484,7 +513,7 @@ app.post('/api/boards/:name', async (req, res) => {
   }
 });
 
-app.post('/api/boards/:name/rename', async (req, res) => {
+app.post('/api/boards/:name/rename', writeRateLimit, async (req, res) => {
   const { name } = req.params;
   const { newName } = req.body;
   if (!validBoardName(name)) return res.status(400).json({ error: 'Invalid board name' });
@@ -510,7 +539,7 @@ app.post('/api/boards/:name/rename', async (req, res) => {
   }
 });
 
-app.delete('/api/boards/:name', async (req, res) => {
+app.delete('/api/boards/:name', writeRateLimit, async (req, res) => {
   const { name } = req.params;
   if (!validBoardName(name)) return res.status(400).json({ error: 'Invalid board name' });
   try {
@@ -546,7 +575,7 @@ app.get('/api/prompts', async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/prompts', async (req, res) => {
+app.put('/api/prompts', writeRateLimit, async (req, res) => {
   try {
     const { searchProfile = '', criteriaInclude = '', criteriaExclude = '', searchRadius = '' } = req.body;
     await savePrompts({ searchProfile, criteriaInclude, criteriaExclude, searchRadius });
@@ -563,7 +592,7 @@ app.get('/api/:board/board', withExistingBoard(async (req, res, db) => {
   res.json(data);
 }));
 
-app.put('/api/:board/board', withBoard(async (req, res, db) => {
+app.put('/api/:board/board', writeRateLimit, withBoard(async (req, res, db) => {
   if (!validateBoard(req.body))
     return res.status(400).json({ error: 'Invalid board data', details: schemaError(validateBoard) });
   const ifMatch = req.headers['if-match'];
@@ -576,7 +605,7 @@ app.put('/api/:board/board', withBoard(async (req, res, db) => {
   res.json({ success: true });
 }));
 
-app.patch('/api/:board/board', withBoard(async (req, res, db) => {
+app.patch('/api/:board/board', writeRateLimit, withBoard(async (req, res, db) => {
   if (!validateBoardPatch(req.body)) {
     const details = schemaError(validateBoardPatch);
     console.error(`[PATCH /${req.params.board}/board] schema validation failed:`, details);
@@ -643,7 +672,7 @@ app.get('/api/:board/notes', withExistingBoard(async (req, res, db) => {
   }
 }));
 
-app.put('/api/:board/notes', withBoard(async (req, res, db) => {
+app.put('/api/:board/notes', writeRateLimit, withBoard(async (req, res, db) => {
   if (!validateNotes(req.body))
     return res.status(400).json({ error: 'Invalid notes data', details: schemaError(validateNotes) });
   const ifMatch = req.headers['if-match'];
@@ -657,7 +686,7 @@ app.put('/api/:board/notes', withBoard(async (req, res, db) => {
   res.json({ ok: true });
 }));
 
-app.patch('/api/:board/notes', withBoard(async (req, res, db) => {
+app.patch('/api/:board/notes', writeRateLimit, withBoard(async (req, res, db) => {
   if (!validateNotesPatch(req.body))
     return res.status(400).json({ error: 'Invalid notes patch', details: schemaError(validateNotesPatch) });
   const { updatedPages = [] } = req.body;
@@ -695,7 +724,7 @@ app.get('/api/:board/card/:id', withBoard(async (req, res, db) => {
   res.status(404).json({ error: 'Card not found' });
 }));
 
-app.post('/api/:board/move-to/:name', withBoard(async (req, res, db) => {
+app.post('/api/:board/move-to/:name', writeRateLimit, withBoard(async (req, res, db) => {
   const targetName = req.params.name.toLowerCase();
   const { 'job-title': jobTitle, company, location } = req.body;
   const input = { 'job-title': jobTitle, company, location };
@@ -723,7 +752,7 @@ app.post('/api/:board/move-to/:name', withBoard(async (req, res, db) => {
   reply(card, targetCol.title, true);
 }));
 
-app.post('/api/:board/import', withBoard(async (req, res, db) => {
+app.post('/api/:board/import', writeRateLimit, withBoard(async (req, res, db) => {
   const body = req.body;
   let rawItems;
   if (Array.isArray(body)) {
@@ -826,7 +855,7 @@ app.get('/api/:board/notes/attachments/:pageId', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/:board/notes/attachments/:pageId', (req, res) => {
+app.post('/api/:board/notes/attachments/:pageId', uploadRateLimit, (req, res) => {
   const { board, pageId } = req.params;
   if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
   if (!safePageId(pageId))   return res.status(400).json({ error: 'Invalid page id' });
@@ -846,7 +875,7 @@ app.get('/api/:board/notes/attachments/:pageId/:filename', (req, res) => {
   res.sendFile(fp);
 });
 
-app.delete('/api/:board/notes/attachments/:pageId/:filename', (req, res) => {
+app.delete('/api/:board/notes/attachments/:pageId/:filename', writeRateLimit, (req, res) => {
   const { board, pageId, filename } = req.params;
   if (!validBoardName(board) || !safePageId(pageId) || !safeFilename(filename))
     return res.status(400).json({ error: 'Invalid request' });
@@ -910,7 +939,7 @@ app.get('/api/:board/cards/attachments/:cardId', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/:board/cards/attachments/:cardId', (req, res) => {
+app.post('/api/:board/cards/attachments/:cardId', uploadRateLimit, (req, res) => {
   const { board, cardId } = req.params;
   if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
   if (!safeCardId(cardId))   return res.status(400).json({ error: 'Invalid card id' });
@@ -930,7 +959,7 @@ app.get('/api/:board/cards/attachments/:cardId/:filename', (req, res) => {
   res.sendFile(fp);
 });
 
-app.delete('/api/:board/cards/attachments/:cardId/:filename', (req, res) => {
+app.delete('/api/:board/cards/attachments/:cardId/:filename', writeRateLimit, (req, res) => {
   const { board, cardId, filename } = req.params;
   if (!validBoardName(board) || !safeCardId(cardId) || !safeFilename(filename))
     return res.status(400).json({ error: 'Invalid request' });
