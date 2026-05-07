@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cd app
 npm install        # install dependencies
 npm start          # start server at http://localhost:3000
-node server.js     # equivalent to npm start
+node backend/server.js  # equivalent to npm start
 ```
 
 Or via Docker (from project root):
@@ -24,10 +24,27 @@ No build step, no linter, no test framework configured.
 
 Single-page kanban board with a minimal three-layer design:
 
-- **`app/server.js`** — Express 5 backend. Serves `public/` as static files and exposes REST endpoints for auth, board management, and card operations. Persists all data in CouchDB (one `jc-kanban-<name>` database per board, single `board` document each). Uses `nano` as the CouchDB client.
-- **`app/public/index.html`** — Markup and modal HTML only. References the CSS and JS files below.
+- **`app/backend/`** — Express 5 backend. Serves `public/` as static files and exposes REST endpoints for auth, board management, and card operations. Persists all data in CouchDB (one `jc-kanban-<name>` database per board, single `board` document each). Uses `nano` as the CouchDB client.
+- **`app/frontend/index.html`** — Markup and modal HTML only. References the CSS and JS files below.
 
-### CSS (`app/public/styles/`)
+### Backend (`app/backend/`)
+
+| File | Contents |
+|---|---|
+| `server.js` | Entry point — middleware, mount routers, startup (`initDb`, backup intervals) |
+| `config.js` | All env vars and derived constants (`PORT`, `BACKUP_DIR`, `DB_PREFIX`, …) |
+| `db.js` | CouchDB connection (`initDb`), `getBoardDb`, board/notes CRUD helpers, `withBoard`/`withExistingBoard` wrappers |
+| `auth.js` | `safeEqual`, rate-limiting maps, `parseCookies`, `authenticate` middleware, `writeRateLimit`/`uploadRateLimit` |
+| `schemas.js` | AJV instance, all `validate*` compiled schemas, `schemaError` |
+| `backup.js` | `runBackup`, `runPromptsBackup`, `checkDataDirectories`, `refreshDbSize`/`getDbSizeBytes` |
+| `routes/auth.js` | `POST /api/auth`, `GET /api/auth/verify`, `POST /api/auth/logout` |
+| `routes/prompts.js` | `GET /api/settings`, `GET/PUT /api/prompts` |
+| `routes/boards.js` | `GET /api/boards`, achievements, board create/rename/delete |
+| `routes/board.js` | All `/:board/board`, `all-columns`, `column`, `card`, `move-to`, `import` |
+| `routes/notes.js` | All `/:board/notes*` including ZIP export |
+| `routes/attachments.js` | All notes/card attachment routes + `GET /api/db-size` |
+
+### CSS (`app/frontend/styles/`)
 
 | File | Contents |
 |---|---|
@@ -39,7 +56,7 @@ Single-page kanban board with a minimal three-layer design:
 | `notes.css` | Notes sidebar, resizer, tree/list, note modal |
 | `markdown.css` | Markdown preview pane (card modal + note modal) |
 
-### JS (`app/public/`) — load order matters, no bundler
+### JS (`app/frontend/`) — load order matters, no bundler
 
 Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.js` (DOMPurify, XSS sanitisation).
 
@@ -59,7 +76,7 @@ Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.
 
 ## CouchDB
 
-The board state is stored as a single document (`_id: "board"`) in the `jc-kanban-cards` database. On startup `server.js`:
+The board state is stored as a single document (`_id: "board"`) in the `jc-kanban-cards` database. On startup `db.js#initDb`:
 1. Retries the CouchDB connection up to 15 times (2 s apart)
 2. Creates the `jc-kanban-cards` database if absent
 3. Seeds the `board` document from `data/data.json` (or built-in defaults) if absent

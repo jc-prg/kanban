@@ -7,7 +7,7 @@
 ```bash
 cd kanban/app
 npm install
-node server.js
+node backend/server.js
 ```
 
 Then open: http://localhost:3000
@@ -25,7 +25,7 @@ docker compose up -d --build
 - Auto-save to `data.json` (debounced, 600ms)
 
 ## Files
-- `app/server.js` – Express backend (REST API + static file serving)
+- `app/backend/server.js` – Express backend (REST API + static file serving)
 - `app/public/index.html` – Single-file frontend
 - `data/data.json` – Board state (auto-created on first start)
 

@@ -1,0 +1,43 @@
+const express = require('express');
+const router  = express.Router();
+const { writeRateLimit } = require('../auth');
+const { getPromptsDb }   = require('../db');
+const { API_KEY }        = require('../config');
+
+const PROMPTS_DOC_ID  = 'prompts';
+const PROMPTS_DEFAULT = { searchProfile: '', criteriaInclude: '', criteriaExclude: '', searchRadius: '' };
+
+async function loadPrompts() {
+  try {
+    const { _id, _rev, ...data } = await getPromptsDb().get(PROMPTS_DOC_ID);
+    return data;
+  } catch (err) {
+    if (err.statusCode === 404) return { ...PROMPTS_DEFAULT };
+    throw err;
+  }
+}
+
+async function savePrompts(data) {
+  let rev;
+  try { ({ _rev: rev } = await getPromptsDb().get(PROMPTS_DOC_ID)); } catch (e) { /* new doc */ }
+  await getPromptsDb().insert({ _id: PROMPTS_DOC_ID, ...(rev ? { _rev: rev } : {}), ...data });
+}
+
+router.get('/settings', (req, res) => {
+  res.json({ apiKeyConfigured: !!API_KEY });
+});
+
+router.get('/prompts', async (req, res) => {
+  try { res.json(await loadPrompts()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/prompts', writeRateLimit, async (req, res) => {
+  try {
+    const { searchProfile = '', criteriaInclude = '', criteriaExclude = '', searchRadius = '' } = req.body;
+    await savePrompts({ searchProfile, criteriaInclude, criteriaExclude, searchRadius });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+module.exports = router;

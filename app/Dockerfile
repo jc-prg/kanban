@@ -5,10 +5,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY server.js ./
-COPY public/ ./public/
+COPY backend/ ./backend/
+COPY frontend/ ./frontend/
 
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN mkdir -p /app/data && chmod 700 /app/data && chown -R node:node /app
 
 VOLUME ["/app/data"]
 
@@ -22,4 +22,4 @@ ENV NODE_ENV=production
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["node", "backend/server.js"]

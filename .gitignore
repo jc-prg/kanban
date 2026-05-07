@@ -1,3 +1,7 @@
 ./app/node_modules/
 
 .env
+
+# Ignore data directory contents but keep the directory itself
+data/*
+!data/.gitkeep
