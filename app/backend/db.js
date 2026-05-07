@@ -10,6 +10,20 @@ let promptsDb;
 function getCouch()     { return couch; }
 function getPromptsDb() { return promptsDb; }
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function sanitize(val) {
+  if (Array.isArray(val)) return val.map(sanitize);
+  if (val !== null && typeof val === 'object') {
+    return Object.fromEntries(
+      Object.entries(val)
+        .filter(([k]) => !DANGEROUS_KEYS.has(k))
+        .map(([k, v]) => [k, sanitize(v)])
+    );
+  }
+  return val;
+}
+
 function validBoardName(name) {
   return typeof name === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(name) && name.length <= 64 && name !== 'inbox';
 }
@@ -40,7 +54,7 @@ async function loadBoardData(db) {
 
 async function saveBoardData(db, data) {
   const { _rev } = await db.get(DOC_ID);
-  return db.insert({ _id: DOC_ID, _rev, ...data });
+  return db.insert({ _id: DOC_ID, _rev, ...sanitize(data) });
 }
 
 async function loadNotesData(db) {
@@ -56,7 +70,7 @@ async function loadNotesData(db) {
 async function saveNotesData(db, data) {
   let rev;
   try { ({ _rev: rev } = await db.get(NOTES_DOC_ID)); } catch (e) { /* new doc */ }
-  return db.insert({ _id: NOTES_DOC_ID, ...(rev ? { _rev: rev } : {}), ...data });
+  return db.insert({ _id: NOTES_DOC_ID, ...(rev ? { _rev: rev } : {}), ...sanitize(data) });
 }
 
 function withBoard(handler) {

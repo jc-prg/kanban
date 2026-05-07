@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { SESSION_TOKEN, API_KEY } = require('./config');
+const { SESSION_SECRET, SESSION_MAX_AGE_MS, API_KEY } = require('./config');
 
 // Timing-safe comparison using fixed-length 128-byte buffers to avoid length leaks
 function safeEqual(a, b) {
@@ -79,6 +79,26 @@ function recordAuthFailure(ip) {
   return s.count;
 }
 
+function issueSessionToken() {
+  const payload = Buffer.from(JSON.stringify({ iat: Date.now() })).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifySessionToken(token) {
+  if (!token || typeof token !== 'string') return false;
+  const dot = token.lastIndexOf('.');
+  if (dot === -1) return false;
+  const payload = token.slice(0, dot);
+  const sig     = token.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  if (!safeEqual(sig, expected)) return false;
+  try {
+    const { iat } = JSON.parse(Buffer.from(payload, 'base64url').toString());
+    return typeof iat === 'number' && Date.now() - iat < SESSION_MAX_AGE_MS;
+  } catch { return false; }
+}
+
 function parseCookies(req) {
   const cookies = {};
   for (const part of (req.headers.cookie || '').split(';')) {
@@ -93,7 +113,7 @@ function authenticate(req, res, next) {
   if (req.path === '/auth' || req.path === '/auth/verify' || req.path === '/auth/logout') return next();
 
   const cookies = parseCookies(req);
-  if (safeEqual(cookies['kanban-session'] || '', SESSION_TOKEN)) return next();
+  if (verifySessionToken(cookies['kanban-session'])) return next();
 
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
   const apiKey = req.headers['x-api-key'] || '';
@@ -107,6 +127,7 @@ function authenticate(req, res, next) {
 
 module.exports = {
   safeEqual, parseCookies, authenticate,
+  issueSessionToken, verifySessionToken,
   loginState, recordAuthFailure,
   writeRateLimit, uploadRateLimit,
   RATE_MAX, LOCKOUT_AFTER, LOCKOUT_MS,

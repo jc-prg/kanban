@@ -82,8 +82,10 @@ router.get('/:board/notes/export', withExistingBoard(async (req, res, db) => {
       archive.append(md, { name: dir + 'page.md' });
       const aDir = path.join(boardDir, p.id);
       if (fs.existsSync(aDir))
-        fs.readdirSync(aDir).filter(n => !n.startsWith('.')).forEach(f =>
-          archive.file(path.join(aDir, f), { name: dir + 'attachments/' + f }));
+        fs.readdirSync(aDir).filter(n => !n.startsWith('.')).forEach(f => {
+          const entryName = dir + 'attachments/' + path.basename(f);
+          if (!entryName.includes('..')) archive.file(path.join(aDir, f), { name: entryName });
+        });
       if (p.children?.length) addPages(p.children, dir);
     }
   }

@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const helmet  = require('helmet');
 const path    = require('path');
 
 const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES } = require('./config');
@@ -8,6 +9,28 @@ const { authenticate }                    = require('./auth');
 const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize } = require('./backup');
 
 const app = express();
+
+// Security headers — note: scriptSrc includes 'unsafe-inline' because the frontend
+// uses inline onclick handlers; remove it once the frontend is refactored.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:     ["'self'"],
+      scriptSrc:      ["'self'", "'unsafe-inline'"],
+      scriptSrcAttr:  ["'unsafe-inline'"],
+      styleSrc:       ["'self'", "'unsafe-inline'"],
+      imgSrc:         ["'self'", "data:", "blob:", "https:"],
+      connectSrc:     ["'self'"],
+      frameSrc:       ["'self'", "blob:"],   // blob: needed for the PDF iframe viewer
+      fontSrc:        ["'self'"],
+      objectSrc:      ["'none'"],
+      baseUri:        ["'self'"],
+      formAction:     ["'self'"],
+    },
+  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+}));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 

@@ -1,7 +1,8 @@
 const express = require('express');
 const router  = express.Router();
-const { safeEqual, parseCookies, loginState, RATE_MAX, LOCKOUT_AFTER, LOCKOUT_MS } = require('../auth');
-const { APP_PASSWORD, SESSION_TOKEN } = require('../config');
+const { safeEqual, parseCookies, loginState, issueSessionToken, verifySessionToken,
+        RATE_MAX, LOCKOUT_AFTER, LOCKOUT_MS } = require('../auth');
+const { APP_PASSWORD, SESSION_MAX_AGE_MS } = require('../config');
 
 router.post('/auth', (req, res) => {
   const ip = req.ip;
@@ -17,7 +18,10 @@ router.post('/auth', (req, res) => {
   if (safeEqual(password, APP_PASSWORD)) {
     s.consecutive = 0;
     const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    res.cookie('kanban-session', SESSION_TOKEN, { httpOnly: true, sameSite: 'strict', secure, path: '/' });
+    res.cookie('kanban-session', issueSessionToken(), {
+      httpOnly: true, sameSite: 'strict', secure, path: '/',
+      maxAge: SESSION_MAX_AGE_MS,
+    });
     res.json({ ok: true });
   } else {
     s.consecutive++;
@@ -33,7 +37,7 @@ router.post('/auth', (req, res) => {
 
 router.get('/auth/verify', (req, res) => {
   const cookies = parseCookies(req);
-  res.json({ ok: safeEqual(cookies['kanban-session'] || '', SESSION_TOKEN) });
+  res.json({ ok: verifySessionToken(cookies['kanban-session']) });
 });
 
 router.post('/auth/logout', (req, res) => {

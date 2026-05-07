@@ -16,7 +16,33 @@ function safeCardId(id) {
 }
 function safeFilename(name) {
   return typeof name === 'string' && name.length > 0 && name.length <= 255
-    && !/[/\\]/.test(name) && !name.includes('..');
+    && !/[/\\]/.test(name) && !name.includes('..') && !name.includes('\x00');
+}
+
+// Extensions blocked at upload — browser-executable, OS-executable, or scripting formats.
+// Office formats (.doc/x, .xls/x, .ppt/x, .docm, …) and .html/.htm/.svg are intentionally allowed.
+const BLOCKED_EXTS = new Set([
+  // browser-renderable same-origin risk
+  'xhtml', 'xht', 'xml',
+  // Windows executables / scripting
+  'exe', 'com', 'bat', 'cmd', 'vbs', 'wsf', 'hta', 'ps1',
+  // macOS / Linux executables & installers
+  'app', 'dmg', 'pkg', 'deb', 'rpm', 'run', 'elf',
+  // JVM
+  'jar', 'war',
+  // server-side scripting
+  'php', 'asp', 'aspx', 'jsp', 'cgi', 'rb', 'pl',
+  // general scripting
+  'js', 'mjs', 'py', 'sh', 'bash',
+  // polyglot / embedded-script formats
+  'swf',
+]);
+
+function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).slice(1).toLowerCase();
+  if (BLOCKED_EXTS.has(ext))
+    return cb(Object.assign(new Error(`File type .${ext} is not allowed`), { status: 400 }));
+  cb(null, true);
 }
 
 function makeDiskStorage(subParamName) {
@@ -35,8 +61,9 @@ function makeDiskStorage(subParamName) {
   });
 }
 
-const upload     = multer({ storage: makeDiskStorage('pageId'), limits: { fileSize: 50 * 1024 * 1024 } });
-const uploadCard = multer({ storage: makeDiskStorage('cardId'), limits: { fileSize: 50 * 1024 * 1024 } });
+const MULTER_OPTS = { fileFilter, limits: { fileSize: 50 * 1024 * 1024 } };
+const upload     = multer({ ...MULTER_OPTS, storage: makeDiskStorage('pageId') });
+const uploadCard = multer({ ...MULTER_OPTS, storage: makeDiskStorage('cardId') });
 
 // ---- Notes attachments ----
 
@@ -69,9 +96,10 @@ router.get('/:board/notes/attachments/:pageId/:filename', (req, res) => {
   const { board, pageId, filename } = req.params;
   if (!validBoardName(board) || !safePageId(pageId) || !safeFilename(filename))
     return res.status(400).json({ error: 'Invalid request' });
-  const fp = path.join(ATTACHMENTS_DIR, board, pageId, filename);
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(fp);
+  const root = path.join(ATTACHMENTS_DIR, board, pageId);
+  if (!fs.existsSync(path.join(root, filename))) return res.status(404).json({ error: 'Not found' });
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.sendFile(filename, { root });
 });
 
 router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, (req, res) => {
@@ -130,9 +158,10 @@ router.get('/:board/cards/attachments/:cardId/:filename', (req, res) => {
   const { board, cardId, filename } = req.params;
   if (!validBoardName(board) || !safeCardId(cardId) || !safeFilename(filename))
     return res.status(400).json({ error: 'Invalid request' });
-  const fp = path.join(ATTACHMENTS_DIR, board, cardId, filename);
-  if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(fp);
+  const root = path.join(ATTACHMENTS_DIR, board, cardId);
+  if (!fs.existsSync(path.join(root, filename))) return res.status(404).json({ error: 'Not found' });
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.sendFile(filename, { root });
 });
 
 router.delete('/:board/cards/attachments/:cardId/:filename', writeRateLimit, (req, res) => {

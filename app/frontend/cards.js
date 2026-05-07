@@ -389,7 +389,8 @@ function _fmtSize(bytes) {
 
 function _attachType(name) {
   const ext = name.split('.').pop().toLowerCase();
-  if (['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext)) return 'image';
+  if (ext === 'svg') return 'svg';
+  if (['jpg','jpeg','png','gif','webp','bmp'].includes(ext)) return 'image';
   if (ext === 'pdf') return 'pdf';
   if (['html','htm'].includes(ext)) return 'html';
   return 'other';
@@ -430,7 +431,7 @@ function renderCardAttachments(cardId, files) {
     const url = `${CARD_ATTACH_API}/${cardId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = ft === 'image' ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
+    const icon = (ft === 'image' || ft === 'svg') ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
@@ -459,7 +460,7 @@ function renderCardAttachments(cardId, files) {
 
 function _appendAttachMd(taId, name) {
   const ft = _attachType(name);
-  const md = ft === 'image' ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
+  const md = (ft === 'image' || ft === 'svg') ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
   const ta = document.getElementById(taId);
   if (!ta) return;
   if (ta.value) {
@@ -482,7 +483,12 @@ async function _handleCardAttachUpload(cardId, fileList) {
     const fd = new FormData();
     fd.append('file', file);
     const r = await fetch(`${CARD_ATTACH_API}/${cardId}`, { method: 'POST', body: fd });
-    if (r.ok) _appendAttachMd('cardDesc', (await r.json()).name);
+    if (r.ok) {
+      _appendAttachMd('cardDesc', (await r.json()).name);
+    } else {
+      const data = await r.json().catch(() => ({}));
+      await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+    }
   }
   loadCardAttachments(cardId);
 }

@@ -1015,7 +1015,7 @@ function renderAttachments(pageId, files) {
     const url = `${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = ft === 'image' ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
+    const icon = (ft === 'image' || ft === 'svg') ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
@@ -1049,7 +1049,12 @@ async function _handleAttachUpload(pageId, fileList) {
     const fd = new FormData();
     fd.append('file', file);
     const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
-    if (r.ok) _appendAttachMd('notePageDesc', (await r.json()).name);
+    if (r.ok) {
+      _appendAttachMd('notePageDesc', (await r.json()).name);
+    } else {
+      const data = await r.json().catch(() => ({}));
+      await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+    }
   }
   loadAttachments(pageId);
 }
@@ -1059,7 +1064,7 @@ function _insertAttachmentMd(name, type) {
   if (!ta) return;
   showNoteDescEditor();
   ta.focus();
-  const md = type === 'image' ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
+  const md = (type === 'image' || type === 'svg') ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
   const s = ta.selectionStart ?? ta.value.length;
   ta.setRangeText(md, s, ta.selectionEnd ?? s, 'end');
 }

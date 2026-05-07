@@ -4,9 +4,10 @@ const path   = require('path');
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'localhost';
 
-const APP_PASSWORD  = process.env.APP_PASSWORD || 'kanban-pwd';
-const SESSION_TOKEN = crypto.randomBytes(32).toString('hex');
-const API_KEY       = process.env.API_KEY || '';
+const APP_PASSWORD      = process.env.APP_PASSWORD  || 'kanban-pwd';
+const SESSION_SECRET    = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_MAX_AGE_MS = parseInt(process.env.SESSION_MAX_AGE_MS, 10) || 7 * 24 * 60 * 60 * 1000; // 7 days
+const API_KEY           = process.env.API_KEY || '';
 
 console.log(`App password source: ${process.env.APP_PASSWORD ? '.env / environment' : 'built-in default'}`);
 console.log(`API key: ${API_KEY ? 'set' : 'not set (external API access disabled)'}`);
@@ -31,7 +32,7 @@ const DB_SIZE_INTERVAL_MS = 15 * 60 * 1000;
 
 module.exports = {
   PORT, HOST,
-  APP_PASSWORD, SESSION_TOKEN, API_KEY,
+  APP_PASSWORD, SESSION_SECRET, SESSION_MAX_AGE_MS, API_KEY,
   COUCHDB_HOST, COUCHDB_PORT, COUCHDB_USER, COUCHDB_PASSWORD,
   DB_PREFIX, DOC_ID, NOTES_DOC_ID, PROMPTS_DB_NAME,
   BACKUP_DIR, BACKUP_INTERVAL_MS, ATTACHMENTS_DIR, JSON_BACKUP_DIR, COUCHDB_DATA_DIR,
