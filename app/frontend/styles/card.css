@@ -17,6 +17,17 @@
 
 .card--done { opacity: 0.5; }
 .card-done-mark { color: #10b981; font-size: 0.75rem; margin-right: 4px; }
+.card-duplicate-badge {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: #f59e0b22;
+  color: #f59e0b;
+  border: 1px solid #f59e0b55;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
 
 .card--label {
   background: var(--card-color);

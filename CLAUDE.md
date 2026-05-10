@@ -239,7 +239,9 @@ Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_
     "inboxWithDate": false,     // prefix imported inbox columns with today's date
     "persistCollapse": false,   // save collapsed column state across sessions
     "collapsedColumnIds": [],   // persisted when persistCollapse is true
-    "trackedColumns": []        // column titles shown as card counts in the overview
+    "trackedColumns": [],       // column titles shown as card counts in the overview
+    "autoSaveDialogs": false,   // auto-save card/note dialogs on a timer
+    "autoSaveIntervalMin": 5    // interval in minutes for autoSaveDialogs (default 5, omitted when 5)
   }
 }
 ```

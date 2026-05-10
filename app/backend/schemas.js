@@ -19,6 +19,7 @@ const _cardSchema = {
     endDate:     { type: 'string' },
     done:         { type: 'boolean' },
     doneAt:       { type: 'string' },
+    duplicate:    { type: 'boolean' },
     created:      { type: 'string' },
     lastModified: { type: 'string' },
     moves:        { type: 'array', items: _moveSchema }
@@ -102,8 +103,30 @@ const validateNotesPatch = ajv.compile({
   }
 });
 
+const _inboxCardSchema = {
+  type: 'object', required: ['text'], additionalProperties: false,
+  properties: {
+    text:        { type: 'string', minLength: 1 },
+    color:       { type: 'string' },
+    priority:    { type: 'integer', minimum: 1, maximum: 5 },
+    description: { type: 'string' },
+    link:        { type: 'string' },
+    startDate:   { type: 'string' },
+    endDate:     { type: 'string' },
+    done:        { type: 'boolean' },
+    doneAt:      { type: 'string' },
+    lastModified: { type: 'string' }
+  }
+};
+const validateInboxCards = ajv.compile({
+  oneOf: [
+    _inboxCardSchema,
+    { type: 'array', items: _inboxCardSchema }
+  ]
+});
+
 function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, schemaError };

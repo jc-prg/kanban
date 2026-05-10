@@ -2,7 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const { writeRateLimit }                                      = require('../auth');
 const { withBoard, withExistingBoard, loadBoardData, saveBoardData } = require('../db');
-const { validateBoard, validateBoardPatch, schemaError }      = require('../schemas');
+const { validateBoard, validateBoardPatch, validateInboxCards, schemaError } = require('../schemas');
 const { DOC_ID }                                              = require('../config');
 
 router.get('/:board/board', withExistingBoard(async (req, res, db) => {
@@ -13,15 +13,26 @@ router.get('/:board/board', withExistingBoard(async (req, res, db) => {
   res.json(data);
 }));
 
+function stripNulls(v) {
+  if (Array.isArray(v)) return v.map(stripNulls);
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const [k, val] of Object.entries(v)) { if (val !== null) out[k] = stripNulls(val); }
+    return out;
+  }
+  return v;
+}
+
 router.put('/:board/board', writeRateLimit, withBoard(async (req, res, db) => {
-  if (!validateBoard(req.body))
+  const body = stripNulls(req.body);
+  if (!validateBoard(body))
     return res.status(400).json({ error: 'Invalid board data', details: schemaError(validateBoard) });
   const ifMatch = req.headers['if-match'];
   if (ifMatch) {
     const { _rev } = await db.get(DOC_ID);
     if (ifMatch !== `"${_rev}"`) return res.status(409).json({ error: 'conflict' });
   }
-  const result = await saveBoardData(db, req.body);
+  const result = await saveBoardData(db, body);
   res.setHeader('ETag', `"${result.rev}"`);
   res.json({ success: true });
 }));
@@ -143,7 +154,7 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
   }
 
   const existingTexts = new Set(data.columns.flatMap(c => c.cards.map(card => card.text)));
-  const relevant_items = [], excluded_items = [], skipped_items = [];
+  const relevant_items = [], excluded_items = [], duplicate_items = [];
 
   for (const { item, color, bucket } of rawItems) {
     const normalized = { ...item };
@@ -151,8 +162,9 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
       normalized.text = [normalized['job-title'], normalized.company, normalized.location].filter(Boolean).join(' | ');
       if (normalized.reason) normalized.description = normalized.reason;
     }
-    if (!normalized.text || existingTexts.has(normalized.text)) { skipped_items.push(item); continue; }
+    if (!normalized.text) continue;
 
+    const isDuplicate = existingTexts.has(normalized.text);
     const card = {
       id: 'id-' + Math.random().toString(36).slice(2, 9),
       text: normalized.text,
@@ -164,17 +176,56 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
     if (normalized.link)        card.link        = normalized.link;
     if (normalized.startDate)   card.startDate   = normalized.startDate;
     if (normalized.endDate)     card.endDate     = normalized.endDate;
+    if (isDuplicate) card.duplicate = true; else existingTexts.add(normalized.text);
 
     inbox.cards.push(card);
-    existingTexts.add(normalized.text);
-    if (bucket === 'excluded') excluded_items.push(item); else relevant_items.push(item);
+    if (isDuplicate) duplicate_items.push(card);
+    else if (bucket === 'excluded') excluded_items.push(card); else relevant_items.push(card);
   }
 
   await saveBoardData(db, data);
   res.json({
-    relevant: relevant_items.length, relevant_items,
-    excluded: excluded_items.length, excluded_items,
-    skipped:  skipped_items.length,  skipped_items,
+    relevant:   relevant_items.length,  relevant_items,
+    excluded:   excluded_items.length,  excluded_items,
+    duplicates: duplicate_items.length, duplicate_items,
+  });
+}));
+
+router.post('/:board/inbox', writeRateLimit, withBoard(async (req, res, db) => {
+  if (!validateInboxCards(req.body))
+    return res.status(400).json({ error: 'Invalid card data', details: schemaError(validateInboxCards) });
+
+  const items = Array.isArray(req.body) ? req.body : [req.body];
+  const data = await loadBoardData(db);
+  const now = new Date();
+  const inboxTitle = (data.settings?.inboxWithDate ?? false)
+    ? `Inbox ${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.`
+    : 'Inbox';
+  let inbox = data.columns.find(c => c.title === inboxTitle);
+  if (!inbox) {
+    inbox = { id: 'id-' + Math.random().toString(36).slice(2, 9), title: inboxTitle, cards: [], color: '#06b6d4' };
+    data.columns.unshift(inbox);
+  }
+
+  const existingTexts = new Set(data.columns.flatMap(c => c.cards.map(card => card.text)));
+  const added_items = [], duplicate_items = [];
+
+  for (const item of items) {
+    const isDuplicate = existingTexts.has(item.text);
+    const card = {
+      id:      'id-' + Math.random().toString(36).slice(2, 9),
+      created: now.toISOString().slice(0, 10),
+      ...item,
+    };
+    if (isDuplicate) card.duplicate = true; else existingTexts.add(item.text);
+    inbox.cards.unshift(card);
+    if (isDuplicate) duplicate_items.push(card); else added_items.push(card);
+  }
+
+  await saveBoardData(db, data);
+  res.json({
+    added: added_items.length, added_items,
+    duplicates: duplicate_items.length, duplicate_items,
   });
 }));
 

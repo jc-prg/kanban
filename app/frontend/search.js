@@ -166,6 +166,11 @@
       }
       if (card.description) meta.push(`<span class="card-desc" title="${escHtml(card.description)}">${SVGICONS.description()}</span>`);
       if (card.done)        meta.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
+      if (card.duplicate) {
+        const originalCol = state.columns.find(c => c.cards.some(c2 => c2.id !== card.id && c2.text === card.text && !c2.duplicate));
+        const tip = originalCol ? `Also in: &quot;${escHtml(originalCol.title)}&quot;` : 'Duplicate card';
+        meta.push(`<span class="card-duplicate-badge" title="${tip}">duplicate</span>`);
+      }
       const metaHtml = meta.length ? `<div class="card-meta">${meta.join('')}</div>` : '';
       const colIdx   = state.columns.indexOf(col);
       const color    = card.color || col.color || COL_COLORS[colIdx % COL_COLORS.length];

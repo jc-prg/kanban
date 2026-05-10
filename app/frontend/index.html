@@ -22,6 +22,10 @@
 </head>
 <body>
 
+<div id="connectionBanner" class="connection-banner" style="display:none">
+  No connection to server — retrying…
+</div>
+
 <header>
   <h1 id="appTitle">jc://<span>kanban</span>/</h1>
   <div class="header-right">
@@ -39,6 +43,7 @@
       <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
       <button class="header-dd-item" id="menuFindCard">Find</button>
       <button class="header-dd-item" id="menuPrompts">Prompts</button>
+      <button class="header-dd-item" id="menuAnalytics">Analyze</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
       <div class="header-dd-separator"></div>
@@ -111,17 +116,34 @@
 
 <div id="colContextMenu" class="context-menu" style="display:none">
   <button class="ctx-item" id="colCtxToggleContent"><span data-icon="collapse"></span><span id="colCtxToggleLabel">  Hide content</span></button>
-  <button class="ctx-item" id="colCtxColor"><span data-icon="color"></span>  Change color</button>
-  <div class="ctx-color-row" id="colCtxColorRow" style="display:none"></div>
-  <button class="ctx-item" id="colCtxActions"><span data-icon="actions"></span>  Column actions</button>
-  <div class="ctx-actions-row" id="colCtxActionsRow" style="display:none"></div>
   <div class="ctx-item ctx-submenu-trigger">
     <span><span data-icon="moveTo"></span>  Move all to</span>
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxMoveSubmenu"></div>
   </div>
-  <button class="ctx-item ctx-danger" id="colCtxClear"><span data-icon="close"></span>  Clear column</button>
-  <button class="ctx-item ctx-danger" id="colCtxDelete"><span data-icon="close"></span>  Delete column</button>
+  <button class="ctx-item" id="colCtxFilterByColor"><span data-icon="color"></span>  Filter by color</button>
+  <div class="ctx-color-row" id="colCtxFilterColorRow" style="display:none"></div>
+  <div class="ctx-item ctx-submenu-trigger" id="colCtxDeleteCards">
+    <span><span data-icon="close"></span>  Delete cards</span>
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
+    <div class="ctx-submenu" id="colCtxDeleteCardsSubmenu">
+      <button class="ctx-item ctx-danger" id="colCtxDeleteDuplicates">Delete duplicates</button>
+      <button class="ctx-item ctx-danger" id="colCtxDeleteAll">Delete all cards</button>
+      <button class="ctx-item ctx-danger" id="colCtxDeleteByColor">By color</button>
+      <div class="ctx-color-row" id="colCtxDeleteColorRow" style="display:none"></div>
+    </div>
+  </div>
+  <div class="ctx-item ctx-submenu-trigger" id="colCtxSettings">
+    <span><span data-icon="moreOptions"></span>  Settings</span>
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
+    <div class="ctx-submenu" id="colCtxSettingsSubmenu">
+      <button class="ctx-item" id="colCtxColor"><span data-icon="color"></span>  Change color</button>
+      <div class="ctx-color-row" id="colCtxColorRow" style="display:none"></div>
+      <button class="ctx-item" id="colCtxActions"><span data-icon="actions"></span>  Column actions</button>
+      <div class="ctx-actions-row" id="colCtxActionsRow" style="display:none"></div>
+      <button class="ctx-item ctx-danger" id="colCtxDelete"><span data-icon="close"></span>  Delete column</button>
+    </div>
+  </div>
 </div>
 
 <div id="contextMenu" class="context-menu" style="display:none">
@@ -360,6 +382,27 @@
       <button class="btn" id="dialogCancelBtn">Cancel</button>
       <button class="btn" id="dialogAltBtn" style="display:none">Alt</button>
       <button class="btn" id="dialogOkBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="analyticsBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal analytics-modal">
+    <h2>Analyze</h2>
+    <div class="modal-field">
+      <label>Analysis type</label>
+      <select id="analyticsType" class="analytics-select"></select>
+    </div>
+    <div class="search-filter-group search-col-group">
+      <span class="search-filter-label">Columns</span>
+      <div id="analyticsColumnList" class="search-column-list"></div>
+    </div>
+    <div id="analyticsParams" class="analytics-params"></div>
+    <div id="analyticsResults" class="analytics-results"></div>
+    <div class="modal-actions">
+      <span id="analyticsCardCount" class="search-count"></span>
+      <button class="btn" onclick="closeAnalytics()">Close</button>
+      <button class="btn btn-accent" id="analyticsRunBtn">Run</button>
     </div>
   </div>
 </div>
@@ -603,6 +646,7 @@
 <script src="/notes.js"></script>
 <script src="/inbox.js"></script>
 <script src="/search.js"></script>
+<script src="/analytics.js"></script>
 <script src="/init.js"></script>
 </body>
 </html>

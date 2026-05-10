@@ -118,10 +118,14 @@ function showColContextMenu(x, y, colId) {
   toggleIcon.textContent = ICONS[toggleKey];
   document.getElementById('colCtxToggleLabel').textContent = `  ${collapsed ? 'Show content' : 'Hide content'}`;
 
-  const hideWhenCollapsed = display => ['colCtxColor','colCtxActions','colCtxClear','colCtxDelete'].forEach(id =>
+  const hideWhenCollapsed = display => ['colCtxSettings','colCtxFilterByColor','colCtxDeleteCards'].forEach(id =>
     document.getElementById(id).style.display = display);
   document.querySelector('#colContextMenu .ctx-submenu-trigger').style.display = collapsed ? 'none' : '';
   hideWhenCollapsed(collapsed ? 'none' : '');
+
+  const col = state.columns.find(c => c.id === colId);
+  const hasDuplicates = col?.cards.some(c => c.duplicate);
+  document.getElementById('colCtxDeleteDuplicates').style.display = hasDuplicates ? '' : 'none';
 
   const submenu = document.getElementById('colCtxMoveSubmenu');
   submenu.innerHTML = state.columns
@@ -146,16 +150,19 @@ function showColContextMenu(x, y, colId) {
   menu.style.left = menuLeft + 'px';
   menu.style.top  = menuTop  + 'px';
 
-  const trigger = document.querySelector('#colContextMenu .ctx-submenu-trigger');
-  trigger.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
-  const triggerRect = trigger.getBoundingClientRect();
-  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight - edge);
+  document.querySelectorAll('#colContextMenu > .ctx-submenu-trigger').forEach(trigger => {
+    trigger.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
+    const triggerRect = trigger.getBoundingClientRect();
+    trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight - edge);
+  });
 }
 
 function hideColContextMenu() {
   document.getElementById('colContextMenu').style.display = 'none';
   document.getElementById('colCtxColorRow').style.display = 'none';
   document.getElementById('colCtxActionsRow').style.display = 'none';
+  document.getElementById('colCtxDeleteColorRow').style.display = 'none';
+  document.getElementById('colCtxFilterColorRow').style.display = 'none';
   ctxHeaderColId = null;
 }
 
@@ -257,15 +264,96 @@ document.getElementById('colCtxToggleContent').addEventListener('click', () => {
   render();
 });
 
-document.getElementById('colCtxClear').addEventListener('click', async () => {
+document.getElementById('colCtxFilterByColor').addEventListener('click', e => {
+  e.stopPropagation();
+  const colorRow = document.getElementById('colCtxFilterColorRow');
+  if (colorRow.style.display !== 'none') { colorRow.style.display = 'none'; return; }
+  const col = state.columns.find(c => c.id === ctxHeaderColId);
+  if (!col) return;
+  const activeFilter = colColorFilter[col.id];
+  const colColors = [...new Set(col.cards.map(c => c.color).filter(Boolean))];
+  let html = colColors.map(c =>
+    `<div class="color-swatch ctx-color-swatch${activeFilter === c ? ' selected' : ''}"
+          style="background:${escHtml(c)}" data-color="${escHtml(c)}"
+          title="${col.cards.filter(card => card.color === c).length} card(s)"></div>`
+  ).join('');
+  if (activeFilter) html += `<button class="ctx-item" id="colCtxFilterClear" style="font-size:0.72rem;padding:4px 6px;width:auto">clear</button>`;
+  colorRow.innerHTML = html;
+  colorRow.querySelectorAll('.ctx-color-swatch').forEach(s => {
+    s.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const colId = ctxHeaderColId;
+      hideColContextMenu();
+      colColorFilter[colId] = s.dataset.color;
+      render();
+    });
+  });
+  const clearBtn = colorRow.querySelector('#colCtxFilterClear');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const colId = ctxHeaderColId;
+      hideColContextMenu();
+      delete colColorFilter[colId];
+      render();
+    });
+  }
+  colorRow.style.display = 'flex';
+});
+
+document.getElementById('colCtxDeleteDuplicates').addEventListener('click', async e => {
+  e.stopPropagation();
+  const col = state.columns.find(c => c.id === ctxHeaderColId);
+  const count = col?.cards.filter(c => c.duplicate).length || 0;
+  hideColContextMenu();
+  if (!col || !count) return;
+  if (await showConfirm(`Delete ${count} duplicate card(s) from "${col.title}"?`, { okLabel: 'Delete', danger: true })) {
+    col.cards = col.cards.filter(c => !c.duplicate);
+    render();
+    schedulesSave();
+  }
+});
+
+document.getElementById('colCtxDeleteAll').addEventListener('click', async e => {
+  e.stopPropagation();
   const col = state.columns.find(c => c.id === ctxHeaderColId);
   hideColContextMenu();
   if (col && col.cards.length > 0 &&
-      await showConfirm(`Remove all ${col.cards.length} card(s) from "${col.title}"?`, { okLabel: 'Clear', danger: true })) {
+      await showConfirm(`Delete all ${col.cards.length} card(s) from "${col.title}"?`, { okLabel: 'Delete', danger: true })) {
     col.cards = [];
     render();
     schedulesSave();
   }
+});
+
+document.getElementById('colCtxDeleteByColor').addEventListener('click', e => {
+  e.stopPropagation();
+  const colorRow = document.getElementById('colCtxDeleteColorRow');
+  if (colorRow.style.display !== 'none') { colorRow.style.display = 'none'; return; }
+  const col = state.columns.find(c => c.id === ctxHeaderColId);
+  if (!col) return;
+  const colColors = [...new Set(col.cards.map(c => c.color).filter(Boolean))];
+  if (!colColors.length) return;
+  colorRow.innerHTML = colColors.map(c =>
+    `<div class="color-swatch ctx-color-swatch" style="background:${escHtml(c)}" data-color="${escHtml(c)}"
+          title="${col.cards.filter(card => card.color === c).length} card(s)"></div>`
+  ).join('');
+  colorRow.querySelectorAll('.ctx-color-swatch').forEach(s => {
+    s.addEventListener('click', async ev => {
+      ev.stopPropagation();
+      const color = s.dataset.color;
+      const colRef = state.columns.find(c => c.id === ctxHeaderColId);
+      const count = colRef?.cards.filter(c => c.color === color).length || 0;
+      hideColContextMenu();
+      if (colRef && count > 0 &&
+          await showConfirm(`Delete ${count} card(s) with this color from "${colRef.title}"?`, { okLabel: 'Delete', danger: true })) {
+        colRef.cards = colRef.cards.filter(c => c.color !== color);
+        render();
+        schedulesSave();
+      }
+    });
+  });
+  colorRow.style.display = 'flex';
 });
 
 document.getElementById('colCtxDelete').addEventListener('click', async () => {
@@ -308,6 +396,7 @@ document.addEventListener('keydown', e => {
   }
 
   document.getElementById('menuFindCard').addEventListener('click', () => { closeMenu(); openSearch(); });
+  document.getElementById('menuAnalytics').addEventListener('click', () => { closeMenu(); openAnalytics(); });
   document.getElementById('menuPrompts').addEventListener('click', () => { closeMenu(); openPromptsDialog(); });
   document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); openStatsDialog(); });
   document.getElementById('statsCloseBtn').addEventListener('click', () => { document.getElementById('statsBackdrop').style.display = 'none'; });

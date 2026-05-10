@@ -62,6 +62,17 @@
 
 .column-title:focus { color: var(--accent); }
 
+.col-filter-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px var(--surface);
+  transition: box-shadow 0.15s;
+}
+.col-filter-dot:hover { box-shadow: 0 0 0 2px var(--accent); }
+
 .column-count {
   font-size: 0.7rem;
   color: var(--text-muted);

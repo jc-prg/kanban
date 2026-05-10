@@ -1,3 +1,21 @@
+.connection-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: #7c2d12;
+  color: #fca5a5;
+  font-size: 0.78rem;
+  font-family: 'DM Mono', monospace;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid #991b1b;
+}
+
 header {
   position: relative;
   z-index: 10;

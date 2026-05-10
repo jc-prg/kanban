@@ -128,6 +128,7 @@ function render() {
         <div class="column-dot" style="background:${color}"></div>
         <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
         <button class="col-btn" title="Column options" style="margin-left:auto">${ICONS.moreOptions}</button>
+        ${colColorFilter[col.id] ? `<span class="col-filter-dot" style="background:${colColorFilter[col.id]}" title="Color filter active — click to clear" data-col-id="${escHtml(col.id)}"></span>` : ''}
         <span class="column-count">${col.cards.filter(c => !c.text.startsWith('#')).length}</span>
       </div>
       <div class="cards"></div>
@@ -192,9 +193,20 @@ function render() {
     colEl.querySelector('.add-card-btn').addEventListener('click', () => openModal(col.id));
 
     const cardsEl = colEl.querySelector('.cards');
-    const limit    = colVisible[col.id] || CARDS_PER_PAGE;
-    const visible  = col.cards.slice(0, limit);
-    const remaining = col.cards.length - limit;
+    const filterColor = colColorFilter[col.id];
+    const filteredCards = filterColor ? col.cards.filter(c => c.color === filterColor) : col.cards;
+    const isInbox  = col.title.toLowerCase().startsWith('inbox');
+    const limit    = isInbox ? filteredCards.length : (colVisible[col.id] || CARDS_PER_PAGE);
+    const visible  = filteredCards.slice(0, limit);
+    const remaining = filteredCards.length - limit;
+
+    if (filterColor) {
+      colEl.querySelector('.col-filter-dot').addEventListener('click', e => {
+        e.stopPropagation();
+        delete colColorFilter[col.id];
+        render();
+      });
+    }
 
     visible.forEach(card => {
       const isLabel = card.text.startsWith('#');
@@ -233,6 +245,11 @@ function render() {
       }
       if (card.done) {
         metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
+      }
+      if (card.duplicate) {
+        const originalCol = state.columns.find(c => c.cards.some(c2 => c2.id !== card.id && c2.text === card.text && !c2.duplicate));
+        const tip = originalCol ? `Also in: &quot;${escHtml(originalCol.title)}&quot;` : 'Duplicate card';
+        metaParts.push(`<span class="card-duplicate-badge" title="${tip}">duplicate</span>`);
       }
 
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';

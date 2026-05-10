@@ -2,16 +2,36 @@ const BOARD_NAME = window.location.pathname.split('/').filter(Boolean)[0] || nul
 const API_BASE   = BOARD_NAME ? `/api/${BOARD_NAME}` : null;
 const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
 
-// Intercept 401 responses to trigger the session-expired flow.
+// Intercept fetch: handle 401 session expiry and detect connection loss.
 (function () {
   const _fetch = window.fetch;
+  let _offline = false;
+
+  function setOffline(val) {
+    if (_offline === val) return;
+    _offline = val;
+    document.getElementById('connectionBanner').style.display = val ? 'flex' : 'none';
+  }
+
+  // Poll every 5 s while offline to detect restoration.
+  setInterval(async () => {
+    if (!_offline) return;
+    try { await _fetch('/api/auth/verify'); setOffline(false); } catch {}
+  }, 5000);
+
   window.fetch = async (url, opts = {}) => {
-    const r = await _fetch(url, opts);
-    if (r.status === 401 && typeof url === 'string' &&
-        url.startsWith('/api/') && !url.startsWith('/api/auth')) {
-      if (typeof handleSessionExpired === 'function') handleSessionExpired();
+    const isApi = typeof url === 'string' && url.startsWith('/api/');
+    try {
+      const r = await _fetch(url, opts);
+      if (isApi) setOffline(false);
+      if (r.status === 401 && isApi && !url.startsWith('/api/auth')) {
+        if (typeof handleSessionExpired === 'function') handleSessionExpired();
+      }
+      return r;
+    } catch (e) {
+      if (isApi) setOffline(true);
+      throw e;
     }
-    return r;
   };
 })();
 
@@ -56,8 +76,9 @@ const PRIORITY_COLORS = ['', '#ef4444', '#f97316', '#f59e0b', '#10b981', '#6b728
 const PRIORITY_LABELS = ['—', 'P1', 'P2', 'P3', 'P4', 'P5'];
 
 const CARDS_PER_PAGE = 30;
-const colVisible   = {}; // colId → number of cards currently shown
-const colCollapsed = new Set(); // colIds whose content is hidden
+const colVisible      = {}; // colId → number of cards currently shown
+const colCollapsed    = new Set(); // colIds whose content is hidden
+const colColorFilter  = {}; // colId → color string (active filter) or undefined
 
 // ---- State ----
 let state        = { columns: [] };
