@@ -2,6 +2,9 @@
   let selColumns = new Set();
   let _doneWeeks  = null;
   let _weekOffset = 0;
+  let _movedWeeks   = null;
+  let _movedWeekOffset = 0;
+  let _movedColumns = [];
 
   // ---- Analysis definitions ----
   const ANALYSES = [
@@ -85,6 +88,43 @@
         return { months, weeks };
       },
       renderResult: (data, el) => renderMonthChart(data, el),
+    },
+    {
+      id: 'moved-to-column',
+      label: 'Moved to column per month/week',
+      params: [],
+      run(cards) {
+        function monday(dateStr) {
+          const d = new Date(dateStr);
+          const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
+          d.setDate(d.getDate() + diff);
+          return d.toISOString().slice(0, 10);
+        }
+        const monthMap = {}, weekMap = {};
+        const colSet = new Set();
+        cards.forEach(c => {
+          (c.moves || []).forEach(m => {
+            if (!m.at || !m.to) return;
+            const month = m.at.slice(0, 7);
+            const mon = monday(m.at);
+            colSet.add(m.to);
+            if (!monthMap[month]) monthMap[month] = {};
+            monthMap[month][m.to] = (monthMap[month][m.to] || 0) + 1;
+            if (!weekMap[mon]) weekMap[mon] = {};
+            weekMap[mon][m.to] = (weekMap[mon][m.to] || 0) + 1;
+          });
+        });
+        const currentColTitles = new Set(state.columns.map(c => c.title));
+        const columns = [...colSet].filter(col => currentColTitles.has(col)).sort();
+        const months = Object.entries(monthMap)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([label, counts]) => ({ label, counts }));
+        const weeks = Object.entries(weekMap)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([mon, counts]) => ({ mon, counts }));
+        return { months, weeks, columns };
+      },
+      renderResult: (data, el) => renderMovedChart(data, el),
     },
     {
       id: 'date-duration',
@@ -399,8 +439,9 @@
     renderWeekChart();
   }
 
-  const PAGE_SIZE = 12;
-  const MONTHS    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const PAGE_SIZE    = 12;
+  const MONTHS       = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const CHART_COLORS = ['#60a5fa','#34d399','#f97316','#a78bfa','#f43f5e','#facc15','#06b6d4','#ec4899','#84cc16','#fb923c'];
 
   function cwLabel(mon) {
     const d = new Date(mon);
@@ -468,6 +509,163 @@
     if (nextBtn) nextBtn.disabled = _weekOffset + PAGE_SIZE >= _doneWeeks.length;
     if (rangeEl && visible.length) {
       const fmt = s => { const d = new Date(s); return `${cwLabel(s)} ${d.getFullYear()}`; };
+      rangeEl.textContent = `${fmt(visible[0].mon)} – ${fmt(visible[visible.length - 1].mon)}`;
+    }
+  }
+
+  function renderMovedChart({ months, weeks, columns }, el) {
+    if (!months.length) {
+      el.innerHTML = '<p class="search-empty">No move history found.</p>';
+      return;
+    }
+    _movedWeeks      = weeks;
+    _movedWeekOffset = 0;
+    _movedColumns    = columns;
+
+    const W = 500, H = 180;
+    const ml = 30, mr = 8, mt = 8, mb = 44;
+    const plotW = W - ml - mr, plotH = H - mt - mb;
+    const nc = columns.length;
+    const maxCount = Math.max(1, ...months.flatMap(r => columns.map(col => r.counts[col] || 0)));
+    const groupW = plotW / months.length;
+    const barGap = 1;
+    const barW   = Math.max(1, (groupW * 0.85) / Math.max(1, nc));
+
+    const bars = months.map((r, i) => {
+      const gx = ml + i * groupW + groupW * 0.075;
+      return columns.map((col, ci) => {
+        const count = r.counts[col] || 0;
+        if (!count) return '';
+        const bh    = (count / maxCount) * plotH;
+        const x     = (gx + ci * (barW + barGap)).toFixed(1);
+        const y     = (mt + plotH - bh).toFixed(1);
+        const color = CHART_COLORS[ci % CHART_COLORS.length];
+        return `<rect x="${x}" y="${y}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${color}" opacity="0.85" rx="1.5"><title>${escHtml(r.label)} · ${escHtml(col)}: ${count}</title></rect>`;
+      }).join('');
+    }).join('');
+
+    const nTicks = Math.min(4, maxCount);
+    const yLines = Array.from({ length: nTicks + 1 }, (_, i) => {
+      const v  = Math.round((maxCount / nTicks) * i);
+      const y  = (mt + plotH - (v / maxCount) * plotH).toFixed(1);
+      const da = i === 0 ? '' : ' stroke-dasharray="3,3"';
+      return `<line x1="${ml}" y1="${y}" x2="${W - mr}" y2="${y}" style="stroke:var(--border)" stroke-width="0.5"${da}/>
+              <text x="${ml - 4}" y="${y}" text-anchor="end" dominant-baseline="middle">${v}</text>`;
+    }).join('');
+
+    const step = Math.max(1, Math.ceil(months.length / 12));
+    const xLabels = months.map((r, i) => {
+      if (i % step !== 0 && i !== months.length - 1) return '';
+      const cx = (ml + i * groupW + groupW / 2).toFixed(1);
+      const cy = H - mb + 12;
+      const [yr, mo] = r.label.split('-');
+      return `<text x="${cx}" y="${cy}" text-anchor="end" transform="rotate(-40,${cx},${cy})">${MONTHS[parseInt(mo, 10) - 1]} ${yr.slice(2)}</text>`;
+    }).join('');
+
+    const legendHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:0.7rem;color:var(--text-muted);margin-top:8px">
+      ${columns.map((col, ci) => `<span style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:12px;height:8px;background:${CHART_COLORS[ci % CHART_COLORS.length]};border-radius:2px"></span>${escHtml(col)}</span>`).join('')}
+    </div>`;
+
+    const navHtml = weeks.length > PAGE_SIZE ? `
+      <div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+        <button id="analyticsMovedWeekPrev" class="btn">◀ 4w</button>
+        <span id="analyticsMovedWeekRange" style="font-size:0.72rem;color:var(--text-muted);flex:1;text-align:center"></span>
+        <button id="analyticsMovedWeekNext" class="btn">4w ▶</button>
+      </div>` : '';
+
+    el.innerHTML = `<p class="analytics-section-label">Moved to column per month</p>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="analytics-histogram"
+               style="font-size:9px;font-family:'DM Mono',monospace;fill:var(--text-muted);display:block;margin-top:10px;max-width:100%">
+      ${yLines}
+      <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt + plotH}" style="stroke:var(--border)" stroke-width="1"/>
+      ${bars}
+      ${xLabels}
+    </svg>
+    ${legendHtml}
+    <p class="analytics-section-label" style="margin-top:18px">Moved to column per week</p>
+    ${navHtml}
+    <div id="analyticsMovedWeekChartInner"></div>`;
+
+    if (weeks.length > PAGE_SIZE) {
+      document.getElementById('analyticsMovedWeekPrev').addEventListener('click', () => {
+        _movedWeekOffset = Math.max(0, _movedWeekOffset - 4);
+        renderMovedWeekChart();
+      });
+      document.getElementById('analyticsMovedWeekNext').addEventListener('click', () => {
+        _movedWeekOffset = Math.min(_movedWeeks.length - PAGE_SIZE, _movedWeekOffset + 4);
+        renderMovedWeekChart();
+      });
+    }
+    renderMovedWeekChart();
+  }
+
+  function renderMovedWeekChart() {
+    const el = document.getElementById('analyticsMovedWeekChartInner');
+    if (!el || !_movedWeeks) return;
+
+    if (!_movedWeeks.length) {
+      el.innerHTML = '<p class="search-empty" style="margin:6px 0">No weekly data.</p>';
+      return;
+    }
+
+    const visible = _movedWeeks.slice(_movedWeekOffset, _movedWeekOffset + PAGE_SIZE);
+    const columns = _movedColumns;
+    const nc      = columns.length;
+    const maxCount = Math.max(1, ...visible.flatMap(w => columns.map(col => w.counts[col] || 0)));
+
+    const W = 500, H = 150;
+    const ml = 28, mr = 8, mt = 8, mb = 32;
+    const plotW = W - ml - mr, plotH = H - mt - mb;
+    const groupW = plotW / visible.length;
+    const barGap = 1;
+    const barW   = Math.max(1, (groupW * 0.85) / Math.max(1, nc));
+
+    const nTicks = Math.min(maxCount, 4);
+    const yLines = Array.from({ length: nTicks + 1 }, (_, i) => {
+      const v  = Math.round((maxCount / nTicks) * i);
+      const y  = (mt + plotH - (v / maxCount) * plotH).toFixed(1);
+      const da = i === 0 ? '' : ' stroke-dasharray="3,3"';
+      return `<line x1="${ml}" y1="${y}" x2="${W - mr}" y2="${y}" style="stroke:var(--border)" stroke-width="0.5"${da}/>
+              <text x="${ml - 4}" y="${y}" text-anchor="end" dominant-baseline="middle">${v}</text>`;
+    }).join('');
+
+    const bars = visible.map((w, i) => {
+      const gx = ml + i * groupW + groupW * 0.075;
+      const cw = cwLabel(w.mon);
+      return columns.map((col, ci) => {
+        const count = w.counts[col] || 0;
+        if (!count) return '';
+        const bh    = (count / maxCount) * plotH;
+        const x     = (gx + ci * (barW + barGap)).toFixed(1);
+        const y     = (mt + plotH - bh).toFixed(1);
+        const color = CHART_COLORS[ci % CHART_COLORS.length];
+        return `<rect x="${x}" y="${y}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${color}" opacity="0.85" rx="1.5"><title>${cw} · ${escHtml(col)}: ${count}</title></rect>`;
+      }).join('');
+    }).join('');
+
+    const step = Math.max(1, Math.ceil(visible.length / 8));
+    const xLabels = visible.map((w, i) => {
+      if (i % step !== 0) return '';
+      const cx = (ml + i * groupW + groupW / 2).toFixed(1);
+      const cy = H - mb + 12;
+      return `<text x="${cx}" y="${cy}" text-anchor="end" transform="rotate(-35,${cx},${cy})">${cwLabel(w.mon)}</text>`;
+    }).join('');
+
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
+        style="font-size:9px;font-family:'DM Mono',monospace;fill:var(--text-muted);display:block;max-width:100%">
+      ${yLines}
+      <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt + plotH}" style="stroke:var(--border)" stroke-width="1"/>
+      ${bars}
+      ${xLabels}
+    </svg>`;
+
+    const prevBtn = document.getElementById('analyticsMovedWeekPrev');
+    const nextBtn = document.getElementById('analyticsMovedWeekNext');
+    const rangeEl = document.getElementById('analyticsMovedWeekRange');
+    if (prevBtn) prevBtn.disabled = _movedWeekOffset <= 0;
+    if (nextBtn) nextBtn.disabled = _movedWeekOffset + PAGE_SIZE >= _movedWeeks.length;
+    if (rangeEl && visible.length) {
+      const fmt = s => `${cwLabel(s)} ${new Date(s).getFullYear()}`;
       rangeEl.textContent = `${fmt(visible[0].mon)} – ${fmt(visible[visible.length - 1].mon)}`;
     }
   }
