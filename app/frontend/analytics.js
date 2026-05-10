@@ -93,7 +93,7 @@
       id: 'moved-to-column',
       label: 'Moved to column per month/week',
       params: [],
-      run(cards) {
+      run() {
         function monday(dateStr) {
           const d = new Date(dateStr);
           const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
@@ -102,7 +102,8 @@
         }
         const monthMap = {}, weekMap = {};
         const colSet = new Set();
-        cards.forEach(c => {
+        const allCards = state.columns.flatMap(c => c.cards);
+        allCards.forEach(c => {
           (c.moves || []).forEach(m => {
             if (!m.at || !m.to) return;
             const month = m.at.slice(0, 7);
@@ -114,8 +115,11 @@
             weekMap[mon][m.to] = (weekMap[mon][m.to] || 0) + 1;
           });
         });
+        const selectedTitles = selColumns.size > 0
+          ? new Set(state.columns.filter(c => selColumns.has(c.id)).map(c => c.title))
+          : null;
         const colOrder = state.columns.map(c => c.title);
-        const columns = colOrder.filter(title => colSet.has(title));
+        const columns = colOrder.filter(title => colSet.has(title) && (!selectedTitles || selectedTitles.has(title)));
         const months = Object.entries(monthMap)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([label, counts]) => ({ label, counts }));
@@ -839,7 +843,7 @@
   // ---- Run ----
   function runAnalysis() {
     const analysis = getAnalysis();
-    const cards    = getFilteredCards();
+    const cards    = analysis.id === 'moved-to-column' ? state.columns.flatMap(c => c.cards) : getFilteredCards();
     const results  = analysis.run(cards, getParams());
     const el       = document.getElementById('analyticsResults');
     analysis.renderResult(results, el);
