@@ -123,6 +123,11 @@ router.post('/:board/move-to/:name', writeRateLimit, withBoard(async (req, res, 
 
   if (!card.moves) card.moves = [];
   card.moves.push({ at: new Date().toISOString(), from: sourceColTitle, to: targetCol.title });
+
+  const actions = targetCol.actions || [];
+  if (actions.includes('markDone'))   { card.done = true;  card.doneAt = new Date().toISOString(); }
+  if (actions.includes('markUndone')) { card.done = false;  delete card.doneAt; }
+
   targetCol.cards.unshift(card);
   await saveBoardData(db, data);
   reply(card, targetCol.title, true);
@@ -176,6 +181,7 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
     if (normalized.link)        card.link        = normalized.link;
     if (normalized.startDate)   card.startDate   = normalized.startDate;
     if (normalized.endDate)     card.endDate     = normalized.endDate;
+    if (normalized.done)        { card.done = true; if (normalized.doneAt) card.doneAt = normalized.doneAt; }
     if (isDuplicate) card.duplicate = true; else existingTexts.add(normalized.text);
 
     inbox.cards.push(card);

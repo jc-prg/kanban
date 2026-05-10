@@ -45,12 +45,6 @@ function hideContextMenu() {
   ctxCard  = null;
 }
 
-document.getElementById('ctxInfo').addEventListener('click', async () => {
-  const card = ctxCard;
-  hideContextMenu();
-  if (card) openCardInfo(card);
-});
-
 document.getElementById('ctxEdit').addEventListener('click', () => {
   if (ctxColId && ctxCard) openEditModal(ctxColId, ctxCard);
   hideContextMenu();
