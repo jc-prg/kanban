@@ -972,6 +972,8 @@ function saveCardInPlace() {
 }
 
 // ---- Card info dialog ----
+let dateEditMode = false;
+
 function openCardInfo(card) {
   const backdrop = document.getElementById('cardInfoBackdrop');
   const content  = document.getElementById('cardInfoContent');
@@ -984,9 +986,20 @@ function openCardInfo(card) {
       let html = '';
       html += `<div class="card-info-title">${escHtml(card.text)}</div>`;
       html += '<table class="card-info-table">';
-      if (created) html += `<tr><th>Created</th><td>${escHtml(created)}</td></tr>`;
+      if (dateEditMode) {
+        html += `<tr><th>Created</th><td><input class="card-info-date-input" type="date" data-field="created" value="${escHtml(created || '')}"></td></tr>`;
+      } else if (created) {
+        html += `<tr><th>Created</th><td>${escHtml(created)}</td></tr>`;
+      }
       if (card.lastModified) html += `<tr><th>Last modified</th><td>${escHtml(new Date(card.lastModified).toLocaleString())}</td></tr>`;
-      if (card.doneAt) html += `<tr><th>Done</th><td>${escHtml(new Date(card.doneAt).toLocaleString())}</td></tr>`;
+      if (dateEditMode && card.done) {
+        const localVal = card.doneAt
+          ? (() => { const d = new Date(card.doneAt); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); })()
+          : '';
+        html += `<tr><th>Done at</th><td><input class="card-info-date-input" type="datetime-local" data-field="doneAt" value="${escHtml(localVal)}"></td></tr>`;
+      } else if (card.doneAt) {
+        html += `<tr><th>Done</th><td>${escHtml(new Date(card.doneAt).toLocaleString())}</td></tr>`;
+      }
       html += `<tr><th>Current column</th><td>${escHtml(column)}</td></tr>`;
       html += '</table>';
       if (moves && moves.length) {
@@ -1003,6 +1016,21 @@ function openCardInfo(card) {
         html += '<p class="card-info-empty">No move history.</p>';
       }
       content.innerHTML = html;
+
+      if (dateEditMode) {
+        content.querySelectorAll('.card-info-date-input').forEach(input => {
+          input.addEventListener('change', () => {
+            const liveCard = state.columns.flatMap(c => c.cards).find(c => c.id === card.id);
+            if (!liveCard) return;
+            if (input.dataset.field === 'created') {
+              liveCard.created = input.value;
+            } else if (input.dataset.field === 'doneAt') {
+              liveCard.doneAt = input.value ? new Date(input.value).toISOString() : undefined;
+            }
+            schedulesSave();
+          });
+        });
+      }
     })
     .catch(() => { content.innerHTML = '<span class="card-info-error">Failed to load card info.</span>'; });
 }

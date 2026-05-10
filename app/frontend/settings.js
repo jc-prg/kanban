@@ -395,6 +395,10 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       }, 600);
     });
 
+    document.getElementById('dateEditToggle').addEventListener('change', e => {
+      dateEditMode = e.target.checked;
+    });
+
     document.getElementById('inboxDateToggle').addEventListener('change', e => {
       (state.settings ??= {}).inboxWithDate = e.target.checked || undefined;
       schedulesSave();
