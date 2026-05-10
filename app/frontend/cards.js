@@ -986,6 +986,7 @@ function openCardInfo(card) {
       html += '<table class="card-info-table">';
       if (created) html += `<tr><th>Created</th><td>${escHtml(created)}</td></tr>`;
       if (card.lastModified) html += `<tr><th>Last modified</th><td>${escHtml(new Date(card.lastModified).toLocaleString())}</td></tr>`;
+      if (card.doneAt) html += `<tr><th>Done</th><td>${escHtml(new Date(card.doneAt).toLocaleString())}</td></tr>`;
       html += `<tr><th>Current column</th><td>${escHtml(column)}</td></tr>`;
       html += '</table>';
       if (moves && moves.length) {
