@@ -114,8 +114,8 @@
             weekMap[mon][m.to] = (weekMap[mon][m.to] || 0) + 1;
           });
         });
-        const currentColTitles = new Set(state.columns.map(c => c.title));
-        const columns = [...colSet].filter(col => currentColTitles.has(col)).sort();
+        const colOrder = state.columns.map(c => c.title);
+        const columns = colOrder.filter(title => colSet.has(title));
         const months = Object.entries(monthMap)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([label, counts]) => ({ label, counts }));
