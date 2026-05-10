@@ -58,7 +58,7 @@
     },
     {
       id: 'done-per-month',
-      label: 'Done per month',
+      label: 'Done per month/week',
       params: [],
       run(cards) {
         const monthMap = {};
@@ -373,7 +373,8 @@
         <button id="analyticsWeekNext" class="btn">4w ▶</button>
       </div>` : '';
 
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="analytics-histogram"
+    el.innerHTML = `<p class="analytics-section-label">Done per month</p>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="analytics-histogram"
                style="font-size:9px;font-family:'DM Mono',monospace;fill:var(--text-muted);display:block;margin-top:10px;max-width:100%">
       ${yLines}
       <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt + plotH}" style="stroke:var(--border)" stroke-width="1"/>
@@ -400,6 +401,14 @@
 
   const PAGE_SIZE = 12;
   const MONTHS    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function cwLabel(mon) {
+    const d = new Date(mon);
+    d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+    const yearStart = new Date(d.getFullYear(), 0, 1);
+    const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return `CW${week}`;
+  }
 
   function renderWeekChart() {
     const el = document.getElementById('analyticsWeekChartInner');
@@ -429,11 +438,11 @@
     }).join('');
 
     const bars = visible.map((w, i) => {
-      const bh = (w.count / maxCount) * plotH;
-      const x  = (ml + i * groupW + (groupW - barW) / 2).toFixed(1);
-      const y  = (mt + plotH - bh).toFixed(1);
-      const d  = new Date(w.mon);
-      return `<rect x="${x}" y="${y}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" style="fill:var(--accent)" opacity="0.85" rx="1.5"><title>${MONTHS[d.getMonth()]} ${d.getDate()}: ${w.count}</title></rect>`;
+      const bh  = (w.count / maxCount) * plotH;
+      const x   = (ml + i * groupW + (groupW - barW) / 2).toFixed(1);
+      const y   = (mt + plotH - bh).toFixed(1);
+      const cw  = cwLabel(w.mon);
+      return `<rect x="${x}" y="${y}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" style="fill:var(--accent)" opacity="0.85" rx="1.5"><title>${cw}: ${w.count}</title></rect>`;
     }).join('');
 
     const step = Math.max(1, Math.ceil(visible.length / 8));
@@ -441,8 +450,7 @@
       if (i % step !== 0) return '';
       const cx = (ml + i * groupW + groupW / 2).toFixed(1);
       const cy = H - mb + 12;
-      const d  = new Date(w.mon);
-      return `<text x="${cx}" y="${cy}" text-anchor="end" transform="rotate(-35,${cx},${cy})">${MONTHS[d.getMonth()]} ${d.getDate()}</text>`;
+      return `<text x="${cx}" y="${cy}" text-anchor="end" transform="rotate(-35,${cx},${cy})">${cwLabel(w.mon)}</text>`;
     }).join('');
 
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
@@ -459,7 +467,7 @@
     if (prevBtn) prevBtn.disabled = _weekOffset <= 0;
     if (nextBtn) nextBtn.disabled = _weekOffset + PAGE_SIZE >= _doneWeeks.length;
     if (rangeEl && visible.length) {
-      const fmt = s => { const d = new Date(s); return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; };
+      const fmt = s => { const d = new Date(s); return `${cwLabel(s)} ${d.getFullYear()}`; };
       rangeEl.textContent = `${fmt(visible[0].mon)} – ${fmt(visible[visible.length - 1].mon)}`;
     }
   }

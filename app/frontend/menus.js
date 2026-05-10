@@ -7,6 +7,7 @@ function showContextMenu(x, y, colId, card) {
   ctxCard  = card;
 
   document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
+  document.getElementById('ctxInfo').style.display = dateEditMode ? '' : 'none';
   document.getElementById('ctxColorRow').style.display = 'none';
 
   const submenu = document.getElementById('ctxMoveSubmenu');
@@ -44,6 +45,12 @@ function hideContextMenu() {
   ctxColId = null;
   ctxCard  = null;
 }
+
+document.getElementById('ctxInfo').addEventListener('click', async () => {
+  const card = ctxCard;
+  hideContextMenu();
+  if (card) openCardInfo(card);
+});
 
 document.getElementById('ctxEdit').addEventListener('click', () => {
   if (ctxColId && ctxCard) openEditModal(ctxColId, ctxCard);
