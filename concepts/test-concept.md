@@ -409,10 +409,10 @@ Implement in this order to get coverage fastest:
 - [x] Backend API tests: auth (A-1,2,6–10), board CRUD (B-1–12), board data (D-1–14) — 38 tests
 - [x] Unit tests: state mutations (S-1–10, 23 tests), render helpers (R-1–6, 13 tests) — 36 tests
 
-**Phase 2 — Core flows**
-- [ ] Backend: import, notes, attachments (sections 1.4–1.6)
-- [ ] Unit: search logic, notes helpers (sections 2.3–2.4)
-- [ ] Security tests (section 4)
+**Phase 2 — Core flows** ✓ complete
+- [x] Backend: import, notes, attachments (sections 1.4–1.6) — 39 tests
+- [x] Unit: search logic, notes helpers (sections 2.3–2.4) — 31 tests
+- [x] Security tests (section 4) — 15 tests
 
 **Phase 3 — E2E**
 - [ ] Auth, board CRUD, drag-drop, search E2E (sections 3.1–3.5)
