@@ -1,0 +1,11 @@
+{
+  "columns": [
+    {
+      "id": "col-1",
+      "title": "Inbox",
+      "cards": [
+        { "id": "card-1", "text": "First card", "created": "2025-01-01" }
+      ]
+    }
+  ]
+}

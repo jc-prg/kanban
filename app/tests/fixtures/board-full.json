@@ -1,0 +1,50 @@
+{
+  "columns": [
+    {
+      "id": "col-inbox",
+      "title": "Inbox",
+      "color": "#06b6d4",
+      "cards": [
+        {
+          "id": "card-a",
+          "text": "Alpha card",
+          "color": "#10b981",
+          "priority": 1,
+          "description": "**Bold** description",
+          "link": "https://example.com",
+          "startDate": "2025-01-01",
+          "endDate": "2025-12-31",
+          "created": "2025-01-01"
+        }
+      ]
+    },
+    {
+      "id": "col-todo",
+      "title": "Todo",
+      "cards": [
+        { "id": "card-b", "text": "Beta card", "created": "2025-02-01" }
+      ]
+    },
+    {
+      "id": "col-done",
+      "title": "Done",
+      "actions": ["markDone"],
+      "cards": [
+        {
+          "id": "card-c",
+          "text": "Done card",
+          "done": true,
+          "doneAt": "2025-03-01T10:00:00.000Z",
+          "created": "2025-01-15",
+          "moves": [
+            { "at": "2025-03-01T10:00:00.000Z", "from": "Todo", "to": "Done" }
+          ]
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "description": "Full fixture board",
+    "trackedColumns": ["Done"]
+  }
+}
