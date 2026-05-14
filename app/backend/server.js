@@ -10,6 +10,15 @@ const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize } = req
 
 const app = express();
 
+// Trust exactly one upstream reverse proxy (nginx/caddy) so req.ip reflects
+// the real client IP from X-Forwarded-For rather than the proxy's IP.
+// Only enable this when the app is behind a trusted proxy — without it,
+// all clients share one rate-limit bucket; with it in a direct-exposure
+// setup, clients could spoof X-Forwarded-For to bypass rate limits.
+if (process.env.TRUST_PROXY === '1') {
+  app.set('trust proxy', 1);
+}
+
 // Security headers — note: scriptSrc includes 'unsafe-inline' because the frontend
 // uses inline onclick handlers; remove it once the frontend is refactored.
 app.use(helmet({

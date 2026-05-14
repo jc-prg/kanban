@@ -95,6 +95,7 @@ All configuration is via `.env` (forwarded to both containers by `docker-compose
 | `COUCHDB_PORT` | `5984` | CouchDB port |
 | `BACKUP_DIR` | `data/` | Directory for JSON backups (`kanban-<name>-board.json`, `kanban-<name>-notes.json`, `extension-prompts.json`) |
 | `BACKUP_INTERVAL_MS` | `600000` | How often backups run (ms); default 10 min |
+| `TRUST_PROXY` | _(unset)_ | Set to `1` when running behind exactly one trusted reverse proxy (nginx/caddy); enables correct `req.ip` for rate limiting via `X-Forwarded-For` |
 
 The Fauxton admin UI is available at `http://localhost:5984/_utils`.
 
