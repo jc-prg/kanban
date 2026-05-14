@@ -72,11 +72,21 @@
           d.setDate(d.getDate() + diff);
           return d.toISOString().slice(0, 10);
         }
+        const doneColTitles = new Set(
+          state.columns.filter(c => /^done/i.test(c.title)).map(c => c.title)
+        );
         cards.forEach(c => {
-          if (!c.doneAt) return;
-          const month = c.doneAt.slice(0, 7);
+          let dateStr = c.doneAt ? c.doneAt.slice(0, 10) : null;
+          if (!dateStr) {
+            const doneMoves = (c.moves || []).filter(m => m.at && m.to && doneColTitles.has(m.to));
+            if (doneMoves.length) {
+              dateStr = doneMoves[doneMoves.length - 1].at.slice(0, 10);
+            }
+          }
+          if (!dateStr) return;
+          const month = dateStr.slice(0, 7);
           monthMap[month] = (monthMap[month] || 0) + 1;
-          const mon = monday(c.doneAt);
+          const mon = monday(dateStr);
           weekMap[mon] = (weekMap[mon] || 0) + 1;
         });
         const months = Object.entries(monthMap)
