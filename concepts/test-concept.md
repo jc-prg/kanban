@@ -31,6 +31,25 @@ tests/
 
 ---
 
+## Running the Tests
+
+```bash
+cd app
+npm test          # run all tests once
+npm run test:watch  # watch mode (re-runs on file change)
+```
+
+Individual projects can be filtered with `--project`:
+
+```bash
+npx vitest run --project api   # API integration tests only
+npx vitest run --project unit  # frontend unit tests only
+```
+
+No external services are required — CouchDB is fully mocked.
+
+---
+
 ## 1. Backend API Tests (`tests/api/`)
 
 All tests use supertest against a running Express app wired to an in-memory or isolated CouchDB instance. Each test suite seeds its own board document and tears it down after.
@@ -386,9 +405,9 @@ jobs:
 
 Implement in this order to get coverage fastest:
 
-**Phase 1 — Foundation (high value, low effort)**
-- [ ] Backend API tests: auth, board CRUD, board data PATCH/PUT (sections 1.1–1.3)
-- [ ] Unit tests: state mutations, `escHtml`/`safeLink` (sections 2.1–2.2)
+**Phase 1 — Foundation (high value, low effort)** ✓ complete
+- [x] Backend API tests: auth (A-1,2,6–10), board CRUD (B-1–12), board data (D-1–14) — 38 tests
+- [x] Unit tests: state mutations (S-1–10, 23 tests), render helpers (R-1–6, 13 tests) — 36 tests
 
 **Phase 2 — Core flows**
 - [ ] Backend: import, notes, attachments (sections 1.4–1.6)
