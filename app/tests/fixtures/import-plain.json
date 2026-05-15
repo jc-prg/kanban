@@ -1,0 +1,4 @@
+[
+  { "text": "Card from plain import", "priority": 2, "link": "https://example.com" },
+  { "text": "Another card", "color": "#7c6af7" }
+]

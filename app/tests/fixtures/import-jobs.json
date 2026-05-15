@@ -1,0 +1,14 @@
+[
+  {
+    "job-title": "Software Engineer",
+    "company": "ACME Corp",
+    "location": "Berlin",
+    "reason": "Strong technical match and remote-friendly policy"
+  },
+  {
+    "job-title": "Product Manager",
+    "company": "Startup GmbH",
+    "location": "Hamburg",
+    "reason": "Interesting domain, fits career goals"
+  }
+]

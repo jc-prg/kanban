@@ -1,0 +1,9 @@
+{
+  "relevant": [
+    { "text": "Good candidate", "priority": 1 },
+    { "text": "Another good one", "link": "https://example.com/job" }
+  ],
+  "excluded": [
+    { "text": "Not a fit", "priority": 4 }
+  ]
+}

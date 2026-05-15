@@ -1,0 +1,22 @@
+{
+  "pages": [
+    {
+      "id": "n-page1",
+      "title": "First Page",
+      "description": "Some notes here",
+      "link": "",
+      "linkedCards": [],
+      "hasAttachments": false,
+      "children": []
+    },
+    {
+      "id": "n-page2",
+      "title": "Second Page",
+      "description": "",
+      "link": "",
+      "linkedCards": [],
+      "hasAttachments": false,
+      "children": []
+    }
+  ]
+}

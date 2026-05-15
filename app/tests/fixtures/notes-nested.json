@@ -1,0 +1,32 @@
+{
+  "pages": [
+    {
+      "id": "n-root1",
+      "title": "Root Page",
+      "description": "Top-level page with children",
+      "link": "",
+      "linkedCards": [],
+      "hasAttachments": false,
+      "children": [
+        {
+          "id": "n-child1",
+          "title": "Child Page",
+          "description": "Nested under Root Page",
+          "link": "",
+          "linkedCards": [],
+          "hasAttachments": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "n-root2",
+      "title": "Another Root",
+      "description": "",
+      "link": "",
+      "linkedCards": ["card-x"],
+      "hasAttachments": false,
+      "children": []
+    }
+  ]
+}
