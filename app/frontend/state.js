@@ -218,7 +218,7 @@ function showSaveError() {
 }
 
 // ---- ID generator ----
-const uid = () => 'id-' + Math.random().toString(36).slice(2, 9);
+const uid = () => 'id-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
 
 // ---- State mutations ----
 function addColumn() {

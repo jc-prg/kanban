@@ -1,13 +1,10 @@
 const crypto = require('crypto');
 const { SESSION_SECRET, SESSION_MAX_AGE_MS, API_KEY } = require('./config');
 
-// Timing-safe comparison using fixed-length 128-byte buffers to avoid length leaks
 function safeEqual(a, b) {
-  const bufA = Buffer.alloc(128);
-  const bufB = Buffer.alloc(128);
-  Buffer.from(String(a || '')).copy(bufA, 0, 0, 128);
-  Buffer.from(String(b || '')).copy(bufB, 0, 0, 128);
-  return crypto.timingSafeEqual(bufA, bufB);
+  const sa = String(a || ''), sb = String(b || '');
+  if (sa.length !== sb.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(sa), Buffer.from(sb));
 }
 
 const RATE_WINDOW_MS = 15 * 60 * 1000; // 15-minute sliding window

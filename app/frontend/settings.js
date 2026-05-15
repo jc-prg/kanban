@@ -556,7 +556,7 @@ function convertTrelloExport(trello) {
     .filter(l => !l.closed)
     .sort((a, b) => a.pos - b.pos)
     .map(list => ({
-      id:    'id-' + Math.random().toString(36).slice(2, 9),
+      id:    'id-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join(''),
       title: list.name,
       cards: [...(cardsByList[list.id] || [])]
         .sort((a, b) => a.pos - b.pos)
@@ -565,7 +565,7 @@ function convertTrelloExport(trello) {
             .toISOString().slice(0, 10);
           const color = card.labels?.[0]?.color
             ? COLOR_MAP[card.labels[0].color] || null : null;
-          const c = { id: 'id-' + Math.random().toString(36).slice(2, 9), text: card.name, created };
+          const c = { id: 'id-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join(''), text: card.name, created };
           if (card.desc)                c.description = card.desc;
           if (card.due)                 c.endDate     = card.due.slice(0, 10);
           if (card.dueComplete)         c.done        = true;

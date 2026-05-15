@@ -47,13 +47,13 @@
 - [x] MED-10 — Remove unused `cors` package or configure it explicitly
 
 ### Low
-- [ ] LOW-01 — Fix `safeEqual` to compare lengths before timing-safe comparison
-- [ ] LOW-02 — Replace `Math.random()` IDs with `crypto.randomBytes` (server) / `crypto.getRandomValues` (browser)
+- [x] LOW-01 — Fix `safeEqual` to compare lengths before timing-safe comparison
+- [x] LOW-02 — Replace `Math.random()` IDs with `crypto.randomBytes` (server) / `crypto.getRandomValues` (browser)
 - [x] LOW-03 — Remove or gate the Fauxton link in the Settings dialog
-- [ ] LOW-04 — Add `sandbox` attribute to dynamically created `<iframe>` elements
-- [ ] LOW-05 — Remove `?login=` URL feature (see HIGH-05); eliminates extension memory risk
+- [x] LOW-04 — Add `sandbox` attribute to dynamically created `<iframe>` elements
+- [x] LOW-05 — Remove `?login=` URL feature (see HIGH-05); eliminates extension memory risk
 - [ ] LOW-06 — Generate API key with `openssl rand -hex 32`
-- [ ] LOW-07 — Add `.env.example` with placeholder values; ensure `.env` stays out of source control
+- [x] LOW-07 — Add `.env.example` with placeholder values; ensure `.env` stays out of source control
 
 ---
 

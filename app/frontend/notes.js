@@ -202,7 +202,7 @@ function getNotePath(id, pages, acc = []) {
 
 function addNotePage(parentId = null) {
   const page = {
-    id: 'n-' + Math.random().toString(36).slice(2, 9),
+    id: 'n-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join(''),
     title: 'New Page', description: '', link: '', linkedCards: [], children: [],
     lastModified: new Date().toISOString(),
   };
@@ -1143,6 +1143,7 @@ async function openAttachmentViewer(url, name, type) {
     } else {
       const iframe = document.createElement('iframe');
       iframe.src = obj; iframe.className = 'attach-viewer-iframe';
+      iframe.sandbox = 'allow-scripts allow-same-origin';
       content.appendChild(iframe);
     }
     document.getElementById('attachViewerDl').onclick = () => _triggerBlobDownload(_viewerBlob, name);

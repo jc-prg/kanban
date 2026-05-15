@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto  = require('crypto');
 const router  = express.Router();
 const { writeRateLimit }                                      = require('../auth');
 const { withBoard, withExistingBoard, loadBoardData, saveBoardData } = require('../db');
@@ -154,7 +155,7 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
     : 'Inbox';
   let inbox = data.columns.find(c => c.title === inboxTitle);
   if (!inbox) {
-    inbox = { id: 'id-' + Math.random().toString(36).slice(2, 9), title: inboxTitle, cards: [], color: '#06b6d4' };
+    inbox = { id: 'id-' + crypto.randomBytes(6).toString('hex'), title: inboxTitle, cards: [], color: '#06b6d4' };
     data.columns.unshift(inbox);
   }
 
@@ -171,7 +172,7 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
 
     const isDuplicate = existingTexts.has(normalized.text);
     const card = {
-      id: 'id-' + Math.random().toString(36).slice(2, 9),
+      id: 'id-' + crypto.randomBytes(6).toString('hex'),
       text: normalized.text,
       color: color || normalized.color || '#06b6d4',
       created: new Date().toISOString().slice(0, 10),
@@ -209,7 +210,7 @@ router.post('/:board/inbox', writeRateLimit, withBoard(async (req, res, db) => {
     : 'Inbox';
   let inbox = data.columns.find(c => c.title === inboxTitle);
   if (!inbox) {
-    inbox = { id: 'id-' + Math.random().toString(36).slice(2, 9), title: inboxTitle, cards: [], color: '#06b6d4' };
+    inbox = { id: 'id-' + crypto.randomBytes(6).toString('hex'), title: inboxTitle, cards: [], color: '#06b6d4' };
     data.columns.unshift(inbox);
   }
 
@@ -219,7 +220,7 @@ router.post('/:board/inbox', writeRateLimit, withBoard(async (req, res, db) => {
   for (const item of items) {
     const isDuplicate = existingTexts.has(item.text);
     const card = {
-      id:      'id-' + Math.random().toString(36).slice(2, 9),
+      id:      'id-' + crypto.randomBytes(6).toString('hex'),
       created: now.toISOString().slice(0, 10),
       ...item,
     };
