@@ -15,10 +15,11 @@ function _startNoteAutoSave() {
 }
 
 // ---- Notes State ----
-let notesState     = { pages: [] };
-let baseNotesState = null; // snapshot from last server load/save — the merge ancestor
-let notesEtag      = null;
-let notesSaveTimer = null;
+let notesState        = { pages: [] };
+let baseNotesState    = null; // snapshot from last server load/save — the merge ancestor
+let notesEtag         = null;
+let notesSaveTimer    = null;
+let _notesSaveInFlight = false; // true while the save HTTP request is in flight
 const NOTES_API        = API_BASE ? `${API_BASE}/notes`             : null;
 const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
 
@@ -92,6 +93,7 @@ function scheduleSaveNotes() {
   notesSaveTimer = setTimeout(async () => {
     notesSaveTimer = null;
     if (!NOTES_API) return;
+    _notesSaveInFlight = true;
     try {
       let r;
       const headers = { 'Content-Type': 'application/json' };
@@ -99,7 +101,7 @@ function scheduleSaveNotes() {
       if (baseNotesState) {
         const patch = buildNotesPatch(baseNotesState, notesState);
         if (patch !== null) {
-          if (!Object.keys(patch).length) return; // nothing changed
+          if (!Object.keys(patch).length) { _notesSaveInFlight = false; return; } // nothing changed
           r = await fetch(NOTES_API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
         } else {
           r = await fetch(NOTES_API, { method: 'PUT', headers, body: JSON.stringify(notesState) });
@@ -122,6 +124,7 @@ function scheduleSaveNotes() {
       if (newEtag) notesEtag = newEtag;
       baseNotesState = JSON.parse(JSON.stringify(notesState));
     } catch (e) { console.error('Notes save failed:', e.message); }
+    finally { _notesSaveInFlight = false; }
   }, 600);
 }
 
@@ -182,6 +185,10 @@ function mergeNotesStates(base, remote, local) {
 
 async function checkForNotesUpdates() {
   if (!NOTES_API || notesSaveTimer || !baseNotesState) return;
+  // In WebDAV mode skip the poll while any save is pending, in-flight, or
+  // local changes have not yet been committed (notesState drifted from base).
+  if (state?.settings?.webdav?.enabled &&
+      (_notesSaveInFlight || JSON.stringify(notesState) !== JSON.stringify(baseNotesState))) return;
   try {
     const headers = notesEtag ? { 'If-None-Match': notesEtag } : {};
     const r = await fetch(NOTES_API, { headers });
@@ -257,7 +264,6 @@ function deleteNotePage(id) {
   removeFrom(notesState.pages);
   renderNotesTree();
   scheduleSaveNotes();
-  if (state?.settings?.webdav?.enabled) setTimeout(loadNotes, 700); // after save debounce
 }
 
 // ---- Notes Sidebar ----
@@ -1079,7 +1085,6 @@ function renderAttachments(pageId, files) {
       if (!await showConfirm(`Delete "${f.name}"?`, { okLabel: 'Delete', danger: true })) return;
       await fetch(`${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
       loadAttachments(pageId);
-      if (state?.settings?.webdav?.enabled) loadNotes();
     });
     list.appendChild(item);
   }
@@ -1109,7 +1114,6 @@ async function _handleAttachUpload(pageId, fileList) {
   if (hint)  { hint.style.display = 'none'; hint.textContent = ''; }
   if (label) label.style.pointerEvents = '';
   loadAttachments(pageId);
-  if (isWebdav) loadNotes();
 }
 
 function _insertAttachmentMd(name, type) {
