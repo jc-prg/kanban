@@ -35,6 +35,7 @@ async function loadNotes() {
     }
   } catch (e) { notesState = { pages: [] }; }
   baseNotesState = JSON.parse(JSON.stringify(notesState));
+  _updateWebdavSidebarUi();
   renderNotesTree();
   restoreNotesSidebar();
   render();
@@ -182,6 +183,15 @@ async function checkForNotesUpdates() {
 
 setInterval(checkForNotesUpdates, 5000);
 
+// ---- WebDAV UI state ----
+function _updateWebdavSidebarUi() {
+  const isWebdav = state?.settings?.webdav?.enabled ?? false;
+  const label   = document.getElementById('notesSidebarLabel');
+  const syncBtn = document.getElementById('notesSyncBtn');
+  if (label)   label.textContent      = isWebdav ? 'WebDAV Notes' : 'Notes';
+  if (syncBtn) syncBtn.style.display  = isWebdav ? '' : 'none';
+}
+
 // ---- Notes Tree Helpers ----
 function findNotePage(id, pages) {
   for (const p of pages) {
@@ -281,6 +291,7 @@ function toggleNotesSidebar() {
   }
   sidebar?.classList.toggle('notes-sidebar--open', notesSidebarOpen);
   document.getElementById('notesToggleBtn')?.classList.toggle('open', notesSidebarOpen);
+  if (notesSidebarOpen && (state?.settings?.webdav?.enabled)) loadNotes();
   _saveNotesSidebarSettings();
 }
 
@@ -1038,6 +1049,7 @@ function renderAttachments(pageId, files) {
       if (!await showConfirm(`Delete "${f.name}"?`, { okLabel: 'Delete', danger: true })) return;
       await fetch(`${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
       loadAttachments(pageId);
+      if (state?.settings?.webdav?.enabled) loadNotes();
     });
     list.appendChild(item);
   }
@@ -1057,6 +1069,7 @@ async function _handleAttachUpload(pageId, fileList) {
     }
   }
   loadAttachments(pageId);
+  if (state?.settings?.webdav?.enabled) loadNotes();
 }
 
 function _insertAttachmentMd(name, type) {
@@ -1427,6 +1440,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _initTreeTouchDragDrop();
   initSidebarResize();
   document.getElementById('notesToggleBtn')?.addEventListener('click', toggleNotesSidebar);
+  document.getElementById('notesSyncBtn')?.addEventListener('click', loadNotes);
   document.getElementById('notesAddRootBtn')?.addEventListener('click', () => addNotePage(null));
   document.getElementById('notesSidebarFontBtn')?.addEventListener('click', toggleNotesFontSize);
 

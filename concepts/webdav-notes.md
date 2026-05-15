@@ -9,33 +9,38 @@ bidirectional access to the same Markdown files.
 CouchDB-based notes remain the default and are unaffected for boards that do
 not enable the option.
 
+**Status: implemented** — commits `1c9487b` (notes + migration) and `fff1aad`
+(attachments).
+
 ---
 
 ## Architecture overview
 
 ```
 Browser (kanban UI)
-      │ existing notes API  (GET/PUT /api/:board/notes)
+      │ existing notes API  (GET/PUT/PATCH /api/:board/notes)
+      │ existing attach API (GET/POST/DELETE /api/:board/notes/attachments/…)
       ▼
 Express backend
       │
-      ├─ webdavEnabled = false  ──►  CouchDB  (current default)
+      ├─ webdavEnabled = false  ──►  CouchDB  (default)
       │
       └─ webdavEnabled = true   ──►  WebDAV client  ──►  WebDAV server
-                                                          (Nextcloud, etc.)
+                                     (webdav-notes.js)    (Nextcloud, etc.)
                                                                ▲
                                                         Obsidian (Remotely Save)
 ```
 
-The frontend does not change. The notes API contract stays identical; only the
-storage layer swaps.
+The frontend notes UI does not change. The notes and attachment API contracts
+stay identical; only the storage layer swaps. CouchDB is kept as a
+read-through cache and offline fallback even in WebDAV mode.
 
 ---
 
 ## Board settings
 
-A new **WebDAV** section is added to the board settings dialog (only shown on
-board views, not the overview). It contains:
+A **Notes storage** section is added to the board settings dialog (board pages
+only). It contains:
 
 | Field | Type | Description |
 |---|---|---|
@@ -43,9 +48,10 @@ board views, not the overview). It contains:
 | Server URL | text | Base URL of the WebDAV collection, e.g. `https://cloud.example.com/remote.php/dav/files/user/kanban/my-board/` |
 | Username | text | WebDAV username |
 | Password | password | WebDAV password (stored in board settings, see Security note) |
-| Test connection | button | Sends a `PROPFIND` to the URL and shows success / error inline |
+| Test connection | button | Sends a `PROPFIND Depth:0` and shows success / error inline |
+| Save WebDAV settings | button | Explicit save — triggers migration when `enabled` changes, then reloads notes |
 
-### Settings schema addition
+### Settings schema
 
 ```jsonc
 "settings": {
@@ -54,7 +60,7 @@ board views, not the overview). It contains:
     "enabled": true,
     "url": "https://…/kanban/my-board/",
     "username": "alice",
-    "password": "…"   // see Security note
+    "password": "…"
   }
 }
 ```
@@ -68,9 +74,6 @@ move credentials to an env-var map keyed by board name.
 
 ## Data mapping: notes tree ↔ Markdown files
 
-The notes document is translated to a directory of Markdown files on the
-WebDAV server. The same mapping is used for all reads and writes.
-
 ### Tree → files
 
 ```
@@ -81,7 +84,9 @@ notes.pages
                           <title>/<child>.md  (recursive)
 ```
 
-### File content (YAML front-matter + body)
+Titles are sanitised for use as filenames (characters `/\<>:|*?"` replaced
+with `_`). Page IDs, links, and linked-card references are stored in YAML
+front-matter:
 
 ```markdown
 ---
@@ -94,106 +99,106 @@ linkedCards:
 The page body (description field) goes here as Markdown.
 ```
 
-On read the front-matter fields `id`, `link`, and `linkedCards` are recovered;
-`title` comes from the filename (strip `.md`, decode percent-encoding).
-On write only `description` is updated (the front-matter fields are
-round-tripped verbatim to preserve Obsidian-added metadata).
+On read, `id`, `link`, and `linkedCards` are recovered from front-matter;
+`title` comes from the filename. On write, the front-matter is round-tripped
+verbatim so Obsidian-added metadata is preserved.
 
 ### Attachments
 
-Notes attachments are stored in a sibling `_attachments/<pageId>/` folder on
-the WebDAV server. The existing attachment API routes proxy `GET`/`PUT`/
-`DELETE` to those paths when WebDAV mode is active.
+Notes attachments are stored under `_attachments/<pageId>/` relative to the
+WebDAV board root:
+
+```
+/                            ← board root (note .md files here)
+/_attachments/               ← all page attachments
+/_attachments/n-abc123/      ← attachments for page n-abc123
+/_attachments/n-abc123/photo.png
+```
+
+The `_attachments` directory and any other `_`-prefixed entries are never
+touched by the notes sync — `loadDir` skips them during reads and `syncDir`
+excludes them from orphan deletion.
+
+Card attachments are not affected by WebDAV mode; they remain stored locally.
 
 ---
 
-## Backend changes
+## Implementation
 
-### `app/backend/db.js` — WebDAV adapter
+### `app/backend/webdav-notes.js` (new file)
 
-Add two functions alongside `loadNotesData` / `saveNotesData`:
+Self-contained WebDAV client using Node's built-in `http`/`https` — no new
+npm dependency. Key internals:
 
-```js
-async function loadNotesFromWebdav(settings)  { … }  // PROPFIND + GET → notes object
-async function saveNotesToWebdav(settings, notes) { … }  // diff old vs new → PUT / DELETE / MKCOL
-```
+| Function | Description |
+|---|---|
+| `buildUrl(cfg, relPath)` | Constructs a full URL by percent-encoding each path segment and appending to `cfg.url` |
+| `wdRequest(cfg, method, relPath, opts)` | Low-level HTTP request; accepts string or Buffer body; returns `{ status, body, rawBody }` |
+| `parsePropfind(xml)` | Regex-based parser; extracts `href`, `isCollection`, and `size` (`getcontentlength`) from multistatus XML; handles both full-URL and path-only hrefs |
+| `parseFm(text)` | Parses YAML front-matter + body from a Markdown string |
+| `renderMd(page)` | Serialises a page to front-matter + body Markdown |
+| `listChildren(cfg, dirRelPath)` | `PROPFIND Depth:1` → `[{ name, isCollection, size }]` for direct children |
+| `loadDir(cfg, dirRelPath)` | Recursively builds the pages tree; skips `_`-prefixed entries |
+| `loadNotesFromWebdav(cfg)` | Entry point for load — returns `{ pages }` |
+| `syncDir(cfg, pages, dirRelPath)` | Recursive sync: `MKCOL` + `PUT` for new/updated pages; `DELETE` for orphans (skips `_`-prefixed entries) |
+| `saveNotesToWebdav(cfg, notes)` | Entry point for save |
+| `listAttachmentsFromWebdav(cfg, pageId)` | `PROPFIND` on `_attachments/<pageId>/` → `[{ name, size }]` |
+| `getAttachmentFromWebdav(cfg, pageId, filename)` | `GET` → raw `Buffer` |
+| `uploadAttachmentToWebdav(cfg, pageId, filename, buffer)` | `MKCOL` parent dirs if needed, then `PUT` |
+| `deleteAttachmentFromWebdav(cfg, pageId, filename)` | `DELETE` |
+| `mergeForMigration(couchPages, webdavPages)` | Merge helper — see Migration section |
+| `testWebdavConnection(cfg)` | `PROPFIND Depth:0` → `{ ok, error? }` |
 
-The adapter:
-1. Issues a `PROPFIND Depth:1` to enumerate existing `.md` files.
-2. Fetches each file with `GET` and parses front-matter + body.
-3. Reconstructs the `{ pages: […] }` tree from the file hierarchy.
-4. On save, computes the minimal set of `PUT` / `DELETE` / `MKCOL` calls needed
-   to reconcile the new tree with what exists on the server.
+### `app/backend/schemas.js`
 
-No new npm dependency is required: `node:https` / `node-fetch` (already
-indirectly available via Express deps) is enough for simple WebDAV calls.
-If a richer client is preferred, `webdav` (npm, MIT) provides a clean API.
+`webdav: { enabled, url, username, password }` added to `_settingsSchema` so
+existing board `PATCH` validation accepts it.
 
-### `app/backend/routes/notes.js` — dispatch
+### `app/backend/routes/notes.js`
 
-```js
-async function getNotesBackend(db, settings) {
-  if (settings?.webdav?.enabled) return loadNotesFromWebdav(settings.webdav);
-  return loadNotesData(db);
-}
+`GET`, `PUT`, and `PATCH /:board/notes` each call `getWebdavCfg(db)` to check
+whether WebDAV is active:
 
-async function saveNotesBackend(db, settings, data) {
-  if (settings?.webdav?.enabled) return saveNotesToWebdav(settings.webdav, data);
-  return saveNotesData(db, data);
-}
-```
+- **WebDAV active:** load from / save to WebDAV; also write to CouchDB as cache.
+  On load failure falls back to CouchDB cache silently.
+- **WebDAV inactive:** existing CouchDB path unchanged (ETag, `If-Match`,
+  rate-limit — all unchanged).
 
-The `GET /:board/notes` and `PUT /:board/notes` handlers call these wrappers
-instead of `loadNotesData` / `saveNotesData` directly. Everything else
-(validation, ETag, rate-limiting) remains unchanged.
+The `GET /:board/notes/export` ZIP route always reads from the CouchDB cache
+so it works regardless of WebDAV state.
 
-### `app/backend/routes/boards.js` — settings endpoint
+### `app/backend/routes/board.js`
 
-The new `webdav` sub-object must be accepted by the settings `PATCH` handler
-and persisted to the board document. The password field should be excluded from
-`GET /api/boards` list responses (return `webdav.enabled` and `webdav.url` but
-omit `webdav.password`).
+- **`POST /api/:board/webdav-test`** — tests connection without saving; returns
+  `{ ok, error? }`.
+- **`PATCH /:board/board` migration trigger** — when the patch includes
+  `settings.webdav.enabled` and its value changes, migration runs synchronously
+  before the settings are persisted. Migration failure is non-fatal (logged
+  server-side; settings are saved regardless).
 
-### New endpoint: `POST /api/:board/settings/webdav/test`
+### `app/backend/routes/attachments.js`
 
-Used by the "Test connection" button. Sends a `PROPFIND Depth:0` to the
-configured URL with the supplied credentials and returns `{ ok, error }`.
-Does not save anything.
+All four notes attachment routes check `getWebdavCfg(board)` and dispatch to
+WebDAV helpers when active:
 
----
+| Route | WebDAV path | WebDAV method |
+|---|---|---|
+| `GET /:board/notes/attachments/:pageId` | `_attachments/<pageId>/` | `PROPFIND` |
+| `POST /:board/notes/attachments/:pageId` | `_attachments/<pageId>/<filename>` | `PUT` (multer memoryStorage) |
+| `GET /:board/notes/attachments/:pageId/:filename` | `_attachments/<pageId>/<filename>` | `GET` → `Buffer` → `res.send` |
+| `DELETE /:board/notes/attachments/:pageId/:filename` | `_attachments/<pageId>/<filename>` | `DELETE` |
 
-## Frontend changes
+Card attachment routes (`/cards/attachments/…`) are always local.
 
-### Settings dialog — new WebDAV section
+### `app/frontend/index.html` + `app/frontend/settings.js`
 
-Shown only on board pages (same condition as `boardDescSection`):
-
-```html
-<div id="webdavSection">
-  <h3>Notes storage</h3>
-  <label>
-    <input type="checkbox" id="webdavEnabledToggle">
-    Use WebDAV server instead of local database
-  </label>
-  <div id="webdavFields">   <!-- hidden when toggle is off -->
-    <input id="webdavUrl"      type="url"      placeholder="https://…/kanban/board/">
-    <input id="webdavUsername" type="text"     placeholder="Username">
-    <input id="webdavPassword" type="password" placeholder="Password">
-    <button id="webdavTestBtn">Test connection</button>
-    <span   id="webdavTestResult"></span>
-  </div>
-</div>
-```
-
-`settings.js` reads/writes these fields alongside the existing settings fields.
-The password input is pre-filled only if a password is already stored
-(`value = storedPassword ? '••••••••' : ''`; a real change clears and
-re-enters).
-
-### Save behaviour
-
-WebDAV settings are saved via the existing `PATCH /api/:board/board` settings
-path. No separate save button — the main "Save settings" action covers it.
+- `#webdavSection` (hidden on overview, shown on board pages) with the fields
+  listed in Board settings above.
+- Enable toggle shows/hides the credentials fields.
+- Password field shows `••••••••` when a password is stored; the stored value
+  is re-used on save unless the field is changed.
+- "Save WebDAV settings" does a direct (non-debounced) `PATCH` so migration
+  completes before the button re-enables, then calls `loadNotes()`.
 
 ---
 
@@ -222,18 +227,14 @@ path. No separate save button — the main "Save settings" action covers it.
 4. The merged result becomes the new authoritative state and is written to the
    WebDAV server.
 5. The CouchDB notes document is updated to reflect the merged state (kept as
-   read-through cache; see Limitations).
+   read-through cache).
 6. `webdav.enabled = true` is saved to board settings.
 
 ### WebDAV → CouchDB (disabling WebDAV)
 
 1. Fetch the current state from the WebDAV server.
 2. Read the current CouchDB notes document.
-3. Apply the same merge logic:
-   - Pages only on WebDAV are added to the CouchDB document.
-   - Pages only in CouchDB are kept.
-   - Title collisions at the top level: the WebDAV page is renamed
-     `<title> (from webdav)` before merging; both pages are kept.
+3. Apply the same merge logic (WebDAV-side title collisions renamed).
 4. The merged result is written to CouchDB.
 5. `webdav.enabled = false` is saved to board settings.
 
@@ -252,7 +253,8 @@ it detects a change in `webdav.enabled`.
    them on the next `GET /api/:board/notes` call.
 
 > One Obsidian vault per board is the natural mapping. The vault root
-> corresponds to the board's WebDAV collection root.
+> corresponds to the board's WebDAV collection root. Attachments appear in the
+> `_attachments/` subfolder; Obsidian will not treat them as note files.
 
 ---
 
@@ -260,10 +262,11 @@ it detects a change in `webdav.enabled`.
 
 | Topic | Note |
 |---|---|
-| **Concurrent writes** | If Obsidian and the kanban UI write simultaneously, last write wins (no `_rev` locking on WebDAV). Acceptable for a single-user app; can be mitigated by saving from the UI only on explicit user action when WebDAV mode is active. |
-| **Offline / unreachable server** | Notes load must degrade gracefully when the WebDAV server is unreachable. Suggestion: return a cached copy from CouchDB (the last-known state is still written there as a read-through cache). |
-| **ETag / polling** | The `checkForUpdates` polling in `settings.js` currently checks the board ETag. Notes polling is separate (`loadNotes` on sidebar open). No change needed; Obsidian changes will appear the next time the sidebar is opened or notes are reloaded. |
-| **Credential exposure** | Storing the WebDAV password in the board document means it appears in JSON backups. Document this clearly in the settings UI. |
-| **Large vaults** | A full PROPFIND + GET on every `loadNotes` call is expensive for large vaults. Add a lightweight ETag / `Last-Modified` check: issue `PROPFIND` first; if the collection `getlastmodified` has not changed since the last load, return the cached notes object. |
-| **Page ID stability** | IDs (`n-abc123`) are stored in front-matter. If Obsidian renames a file without preserving front-matter, the ID is lost on the next read and a new one must be generated. The page link to cards will break. Consider treating `title` (filename) as the stable key when no `id` front-matter is present. |
-| **npm dependency** | The `webdav` npm package (MIT, well-maintained) removes the need to hand-roll PROPFIND XML parsing. Worth adding given the scope of WebDAV interaction involved. |
+| **Concurrent writes** | If Obsidian and the kanban UI write simultaneously, last write wins (no `_rev` locking on WebDAV). Acceptable for a single-user app. |
+| **Offline / unreachable server** | Implemented: load failure silently falls back to the CouchDB cache. The cache is updated on every successful save. |
+| **ETag / polling** | Notes are reloaded from WebDAV every time the sidebar opens. No ETags in WebDAV mode (skipped). Obsidian changes appear on the next sidebar open. |
+| **Credential exposure** | Storing the WebDAV password in the board document means it appears in JSON backups. Noted in the settings UI. |
+| **Large vaults** | A full PROPFIND + GET on every `loadNotes` call is expensive for large vaults. Future optimisation: cache `Last-Modified` and skip re-fetching unchanged files. |
+| **Page ID stability** | IDs (`n-abc123`) are stored in front-matter. If Obsidian renames a file and drops the front-matter, a new ID is generated and card links break. Mitigation: treat `title` (filename) as stable key when no `id` front-matter is present. |
+| **Attachment migration** | When switching backends, only note pages are merged. Attachments are not migrated — files stored locally stay local; files on WebDAV stay on WebDAV. A manual migration step or a future `/_migrate-attachments` endpoint would be needed. |
+| **npm dependency** | Implemented without a new dependency using Node's built-in `http`/`https` and a regex-based PROPFIND parser. |

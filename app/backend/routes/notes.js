@@ -23,12 +23,18 @@ async function getWebdavCfg(db) {
 router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
   const wdCfg = await getWebdavCfg(db);
   if (wdCfg) {
+    let notes;
     try {
-      res.json(await loadNotesFromWebdav(wdCfg));
+      notes = await loadNotesFromWebdav(wdCfg);
+      // Always keep CouchDB in sync as a cache/fallback
+      saveNotesData(db, notes).catch(err =>
+        console.error('[WebDAV] CouchDB cache update failed:', err.message)
+      );
     } catch (err) {
       console.error('[WebDAV] loadNotes failed, using CouchDB cache:', err.message);
-      res.json(await loadNotesData(db));
+      notes = await loadNotesData(db);
     }
+    res.json(notes);
     return;
   }
 
