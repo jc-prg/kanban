@@ -529,6 +529,47 @@
         </div>
       </label>
     </div>
+    <div class="settings-section" id="webdavSection" style="display:none">
+      <div class="settings-section-title">Notes storage<span class="settings-save-indicator" id="webdavSaveIndicator"></span></div>
+      <label class="settings-item">
+        <div class="settings-item-info">
+          <div class="settings-item-label">Use WebDAV server for notes</div>
+          <div class="settings-item-desc">Store notes on an external WebDAV server (e.g. Nextcloud) instead of the local database. Enables Obsidian sync via the Remotely Save plugin.</div>
+        </div>
+        <div class="settings-toggle">
+          <input type="checkbox" id="webdavEnabledToggle">
+          <span class="settings-toggle-track"></span>
+        </div>
+      </label>
+      <div id="webdavFields" style="display:none">
+        <label class="settings-item">
+          <div class="settings-item-info">
+            <div class="settings-item-label">Server URL</div>
+            <input id="webdavUrl" type="url" class="new-board-input" placeholder="https://cloud.example.com/remote.php/dav/files/user/kanban/board/" style="width:100%;margin-top:6px" autocomplete="off">
+          </div>
+        </label>
+        <label class="settings-item">
+          <div class="settings-item-info">
+            <div class="settings-item-label">Username</div>
+            <input id="webdavUsername" type="text" class="new-board-input" placeholder="Username" style="width:100%;margin-top:6px" autocomplete="off">
+          </div>
+        </label>
+        <label class="settings-item">
+          <div class="settings-item-info">
+            <div class="settings-item-label">Password</div>
+            <div class="settings-item-desc" style="color:var(--text-muted)">Stored in the board document — appears in JSON backups.</div>
+            <input id="webdavPassword" type="password" class="new-board-input" placeholder="Password" style="width:100%;margin-top:6px" autocomplete="new-password">
+          </div>
+        </label>
+        <div class="settings-item" style="gap:10px;align-items:center">
+          <button class="btn" id="webdavTestBtn">Test connection</button>
+          <span id="webdavTestResult" style="font-size:0.85em"></span>
+        </div>
+        <div class="settings-item">
+          <button class="btn btn-accent" id="webdavSaveBtn">Save WebDAV settings</button>
+        </div>
+      </div>
+    </div>
     <div class="settings-section" id="boardDeleteSection" style="display:none">
       <div class="settings-section-title">Danger zone</div>
       <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete board…</button>

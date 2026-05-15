@@ -3,12 +3,35 @@ const router   = express.Router();
 const archiver = require('archiver');
 const fs       = require('fs');
 const path     = require('path');
-const { writeRateLimit }                                            = require('../auth');
-const { withBoard, withExistingBoard, loadNotesData, saveNotesData } = require('../db');
-const { validateNotes, validateNotesPatch, schemaError }            = require('../schemas');
-const { NOTES_DOC_ID, ATTACHMENTS_DIR }                             = require('../config');
+const { writeRateLimit }                                                        = require('../auth');
+const { withBoard, withExistingBoard, loadBoardData, loadNotesData, saveNotesData } = require('../db');
+const { validateNotes, validateNotesPatch, schemaError }                        = require('../schemas');
+const { NOTES_DOC_ID, ATTACHMENTS_DIR }                                         = require('../config');
+const { loadNotesFromWebdav, saveNotesToWebdav }                                = require('../webdav-notes');
+
+// Returns the webdav config if enabled for this board, otherwise null.
+async function getWebdavCfg(db) {
+  try {
+    const boardData = await loadBoardData(db);
+    const wdCfg = boardData.settings?.webdav;
+    return wdCfg?.enabled ? wdCfg : null;
+  } catch {
+    return null;
+  }
+}
 
 router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
+  const wdCfg = await getWebdavCfg(db);
+  if (wdCfg) {
+    try {
+      res.json(await loadNotesFromWebdav(wdCfg));
+    } catch (err) {
+      console.error('[WebDAV] loadNotes failed, using CouchDB cache:', err.message);
+      res.json(await loadNotesData(db));
+    }
+    return;
+  }
+
   try {
     const { _id, _rev, ...data } = await db.get(NOTES_DOC_ID);
     const etag = `"${_rev}"`;
@@ -24,6 +47,15 @@ router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
 router.put('/:board/notes', writeRateLimit, withBoard(async (req, res, db) => {
   if (!validateNotes(req.body))
     return res.status(400).json({ error: 'Invalid notes data', details: schemaError(validateNotes) });
+
+  const wdCfg = await getWebdavCfg(db);
+  if (wdCfg) {
+    await saveNotesToWebdav(wdCfg, req.body);
+    const result = await saveNotesData(db, req.body);  // keep CouchDB as cache
+    res.setHeader('ETag', `"${result.rev}"`);
+    return res.json({ ok: true });
+  }
+
   const ifMatch = req.headers['if-match'];
   if (ifMatch) {
     let rev;
@@ -40,6 +72,27 @@ router.patch('/:board/notes', writeRateLimit, withBoard(async (req, res, db) => 
     return res.status(400).json({ error: 'Invalid notes patch', details: schemaError(validateNotesPatch) });
   const { updatedPages = [] } = req.body;
   if (!updatedPages.length) return res.json({ ok: true });
+
+  function upsertPage(pages, patch) {
+    for (const p of pages) {
+      if (p.id === patch.id) { Object.assign(p, patch); return true; }
+      if (p.children?.length && upsertPage(p.children, patch)) return true;
+    }
+    return false;
+  }
+
+  const wdCfg = await getWebdavCfg(db);
+  if (wdCfg) {
+    let notes;
+    try   { notes = await loadNotesFromWebdav(wdCfg); }
+    catch { notes = await loadNotesData(db); }
+    for (const page of updatedPages) upsertPage(notes.pages, page);
+    await saveNotesToWebdav(wdCfg, notes);
+    const result = await saveNotesData(db, notes);  // keep CouchDB as cache
+    res.setHeader('ETag', `"${result.rev}"`);
+    return res.json({ ok: true });
+  }
+
   let notes, currentRev;
   try {
     const { _id, _rev, ...data } = await db.get(NOTES_DOC_ID);
@@ -51,13 +104,6 @@ router.patch('/:board/notes', writeRateLimit, withBoard(async (req, res, db) => 
   }
   const ifMatch = req.headers['if-match'];
   if (ifMatch && currentRev && ifMatch !== `"${currentRev}"`) return res.status(409).json({ error: 'conflict' });
-  function upsertPage(pages, patch) {
-    for (const p of pages) {
-      if (p.id === patch.id) { Object.assign(p, patch); return true; }
-      if (p.children?.length && upsertPage(p.children, patch)) return true;
-    }
-    return false;
-  }
   for (const page of updatedPages) upsertPage(notes.pages, page);
   const result = await saveNotesData(db, notes);
   res.setHeader('ETag', `"${result.rev}"`);
@@ -66,6 +112,7 @@ router.patch('/:board/notes', writeRateLimit, withBoard(async (req, res, db) => 
 
 router.get('/:board/notes/export', withExistingBoard(async (req, res, db) => {
   const { board } = req.params;
+  // Export always reads from the CouchDB cache so it works even when WebDAV is active.
   const notes    = await loadNotesData(db);
   const boardDir = path.join(ATTACHMENTS_DIR, board);
 

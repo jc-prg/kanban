@@ -1,10 +1,13 @@
 const express = require('express');
 const crypto  = require('crypto');
 const router  = express.Router();
-const { writeRateLimit }                                      = require('../auth');
-const { withBoard, withExistingBoard, loadBoardData, saveBoardData } = require('../db');
+const { writeRateLimit }                                                    = require('../auth');
+const { withBoard, withExistingBoard, loadBoardData, saveBoardData,
+        loadNotesData, saveNotesData }                                       = require('../db');
 const { validateBoard, validateBoardPatch, validateInboxCards, schemaError } = require('../schemas');
-const { DOC_ID }                                              = require('../config');
+const { DOC_ID }                                                             = require('../config');
+const { loadNotesFromWebdav, saveNotesToWebdav, mergeForMigration,
+        testWebdavConnection }                                               = require('../webdav-notes');
 
 router.get('/:board/board', withExistingBoard(async (req, res, db) => {
   const { _id, _rev, ...data } = await db.get(DOC_ID);
@@ -66,6 +69,35 @@ router.patch('/:board/board', writeRateLimit, withBoard(async (req, res, db) => 
   }
   const update = { ...data, columns };
   if (settings !== undefined) {
+    const prevEnabled = data.settings?.webdav?.enabled;
+    const newEnabled  = settings.webdav?.enabled;
+
+    // Run migration when webdav.enabled changes
+    if (newEnabled !== prevEnabled) {
+      try {
+        if (newEnabled) {
+          // CouchDB → WebDAV: merge and push to remote
+          const couchNotes = await loadNotesData(db);
+          let wdNotes = { pages: [] };
+          try { wdNotes = await loadNotesFromWebdav(settings.webdav); } catch {}
+          const merged = { pages: mergeForMigration(couchNotes.pages, wdNotes.pages) };
+          await saveNotesToWebdav(settings.webdav, merged);
+          await saveNotesData(db, merged);
+        } else {
+          // WebDAV → CouchDB: merge and write to CouchDB
+          const couchNotes = await loadNotesData(db);
+          const prevCfg    = data.settings?.webdav;
+          let wdNotes = { pages: [] };
+          try { if (prevCfg) wdNotes = await loadNotesFromWebdav(prevCfg); } catch {}
+          const merged = { pages: mergeForMigration(couchNotes.pages, wdNotes.pages) };
+          await saveNotesData(db, merged);
+        }
+      } catch (err) {
+        console.error('[WebDAV] Migration failed:', err.message);
+        // Migration failure is non-fatal: settings are still saved.
+      }
+    }
+
     update.settings = settings;
     delete update.description;
     delete update.inboxWithDate;
@@ -75,6 +107,14 @@ router.patch('/:board/board', writeRateLimit, withBoard(async (req, res, db) => 
   const result = await db.insert({ _id: DOC_ID, _rev, ...update });
   res.setHeader('ETag', `"${result.rev}"`);
   res.json({ success: true });
+}));
+
+// WebDAV connection test — does not persist anything
+router.post('/:board/webdav-test', writeRateLimit, withExistingBoard(async (req, res) => {
+  const { url, username, password } = req.body || {};
+  if (!url) return res.status(400).json({ ok: false, error: 'url is required' });
+  const result = await testWebdavConnection({ url, username: username || '', password: password || '' });
+  res.json(result);
 }));
 
 router.get('/:board/all-columns', withBoard(async (req, res, db) => {

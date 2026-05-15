@@ -206,6 +206,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('archiveSection').style.display = '';
     document.getElementById('boardDeleteSection').style.display = '';
     document.getElementById('boardExportSection').style.display = '';
+    document.getElementById('webdavSection').style.display = '';
     document.getElementById('dbSection').style.display = 'none';
     document.getElementById('apiKeySection').style.display = 'none';
   }
@@ -313,6 +314,14 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       document.getElementById('autoSaveDialogsToggle').checked  = state.settings?.autoSaveDialogs   ?? false;
       document.getElementById('autoSaveIntervalInput').value    = state.settings?.autoSaveIntervalMin ?? 5;
       renderTrackedCols();
+
+      const wdCfg = state.settings?.webdav;
+      document.getElementById('webdavEnabledToggle').checked = wdCfg?.enabled ?? false;
+      document.getElementById('webdavFields').style.display  = wdCfg?.enabled ? '' : 'none';
+      document.getElementById('webdavUrl').value             = wdCfg?.url      || '';
+      document.getElementById('webdavUsername').value        = wdCfg?.username || '';
+      document.getElementById('webdavPassword').value        = wdCfg?.password ? '••••••••' : '';
+      document.getElementById('webdavTestResult').textContent = '';
     }
     loadApiKey();
     backdrop.style.display = 'flex';
@@ -530,6 +539,74 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
         });
       });
     }
+
+    // ---- WebDAV settings ----
+
+    document.getElementById('webdavEnabledToggle').addEventListener('change', e => {
+      document.getElementById('webdavFields').style.display = e.target.checked ? '' : 'none';
+    });
+
+    document.getElementById('webdavTestBtn').addEventListener('click', async () => {
+      const resultEl = document.getElementById('webdavTestResult');
+      resultEl.textContent = 'Testing…';
+      resultEl.style.color = '';
+      const url      = document.getElementById('webdavUrl').value.trim();
+      const username = document.getElementById('webdavUsername').value.trim();
+      const pwInput  = document.getElementById('webdavPassword').value;
+      const password = pwInput === '••••••••' ? (state.settings?.webdav?.password || '') : pwInput;
+      try {
+        const r    = await fetch(`${API_BASE}/webdav-test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, username, password }),
+        });
+        const data = await r.json();
+        resultEl.textContent = data.ok ? '✓ Connected' : `✗ ${data.error}`;
+        resultEl.style.color = data.ok ? 'var(--green, #10b981)' : 'var(--red, #ef4444)';
+      } catch {
+        resultEl.textContent = '✗ Request failed';
+        resultEl.style.color = 'var(--red, #ef4444)';
+      }
+    });
+
+    document.getElementById('webdavSaveBtn').addEventListener('click', async () => {
+      const btn      = document.getElementById('webdavSaveBtn');
+      const enabled  = document.getElementById('webdavEnabledToggle').checked;
+      const url      = document.getElementById('webdavUrl').value.trim();
+      const username = document.getElementById('webdavUsername').value.trim();
+      const pwInput  = document.getElementById('webdavPassword').value;
+      const password = pwInput === '••••••••' ? (state.settings?.webdav?.password || '') : pwInput;
+
+      const prevEnabled = state.settings?.webdav?.enabled ?? false;
+      const webdav      = enabled ? { enabled: true, url, username, password } : { enabled: false };
+
+      btn.disabled    = true;
+      btn.textContent = 'Saving…';
+      try {
+        const newSettings = { ...(state.settings || {}), webdav };
+        const headers     = { 'Content-Type': 'application/json' };
+        if (boardEtag) headers['If-Match'] = boardEtag;
+        const r = await fetch(API, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ settings: newSettings }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        boardEtag         = r.headers.get('ETag') || boardEtag;
+        state.settings    = newSettings;
+        baseState         = JSON.parse(JSON.stringify(state));
+        // Update password placeholder
+        document.getElementById('webdavPassword').value = password ? '••••••••' : '';
+        flashSaved('webdavSaveIndicator');
+        // Reload notes when switching to/from WebDAV
+        if (enabled !== prevEnabled || enabled) await loadNotes();
+      } catch (err) {
+        alert('Failed to save WebDAV settings: ' + err.message);
+      } finally {
+        btn.disabled    = false;
+        btn.textContent = 'Save WebDAV settings';
+      }
+    });
 
   }
 })();

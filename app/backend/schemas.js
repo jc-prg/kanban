@@ -48,7 +48,16 @@ const _settingsSchema = {
     notesSidebarWidth:     { type: 'number' },
     notesFontSize:         { type: 'number' },
     autoSaveDialogs:       { type: 'boolean' },
-    autoSaveIntervalMin:   { type: 'number' }
+    autoSaveIntervalMin:   { type: 'number' },
+    webdav: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        enabled:  { type: 'boolean' },
+        url:      { type: 'string' },
+        username: { type: 'string' },
+        password: { type: 'string' },
+      }
+    }
   }
 };
 
