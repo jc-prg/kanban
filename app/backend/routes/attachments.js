@@ -81,6 +81,18 @@ async function getWebdavCfg(board) {
   } catch { return null; }
 }
 
+// Local cache helpers for WebDAV attachment mirroring
+function _localAttachDir(board, pageId)            { return path.join(ATTACHMENTS_DIR, board, pageId); }
+function _localAttachFile(board, pageId, filename) { return path.join(ATTACHMENTS_DIR, board, pageId, filename); }
+function _cacheAttachment(board, pageId, filename, buffer) {
+  try {
+    fs.mkdirSync(_localAttachDir(board, pageId), { recursive: true });
+    fs.writeFileSync(_localAttachFile(board, pageId, filename), buffer);
+  } catch (err) {
+    console.error('[WebDAV] local attachment cache write failed:', err.message);
+  }
+}
+
 // ---- Notes attachments ----
 
 router.get('/:board/notes/attachments/:pageId', async (req, res) => {
@@ -91,7 +103,16 @@ router.get('/:board/notes/attachments/:pageId', async (req, res) => {
   const wdCfg = await getWebdavCfg(board);
   if (wdCfg) {
     try { return res.json(await listAttachmentsFromWebdav(wdCfg, pageId)); }
-    catch { return res.json([]); }
+    catch {
+      // Fall back to local cache
+      const dir = _localAttachDir(board, pageId);
+      if (!fs.existsSync(dir)) return res.json([]);
+      try {
+        return res.json(fs.readdirSync(dir).filter(n => !n.startsWith('.')).map(name => ({
+          name, size: fs.statSync(path.join(dir, name)).size,
+        })));
+      } catch { return res.json([]); }
+    }
   }
 
   const dir = path.join(ATTACHMENTS_DIR, board, pageId);
@@ -116,6 +137,7 @@ router.post('/:board/notes/attachments/:pageId', uploadRateLimit, async (req, re
     const filename = sanitizeFilename(req.file.originalname);
     try {
       await uploadAttachmentToWebdav(wdCfg, pageId, filename, req.file.buffer);
+      _cacheAttachment(board, pageId, filename, req.file.buffer);  // mirror to local
       return res.json({ name: filename, size: req.file.buffer.length });
     } catch (err) {
       return res.status(500).json({ error: 'WebDAV upload failed: ' + err.message });
@@ -138,9 +160,16 @@ router.get('/:board/notes/attachments/:pageId/:filename', async (req, res) => {
   if (wdCfg) {
     try {
       const buffer = await getAttachmentFromWebdav(wdCfg, pageId, filename);
+      _cacheAttachment(board, pageId, filename, buffer);  // mirror to local
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       return res.send(buffer);
     } catch (err) {
+      // Fall back to local cache
+      const localFile = _localAttachFile(board, pageId, filename);
+      if (fs.existsSync(localFile)) {
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.sendFile(filename, { root: _localAttachDir(board, pageId) });
+      }
       return res.status(err.status === 404 ? 404 : 500).json({ error: err.message });
     }
   }
@@ -159,6 +188,7 @@ router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, asy
   const wdCfg = await getWebdavCfg(board);
   if (wdCfg) {
     try { await deleteAttachmentFromWebdav(wdCfg, pageId, filename); } catch {}
+    try { fs.unlinkSync(_localAttachFile(board, pageId, filename)); } catch {}  // remove local cache
     return res.json({ ok: true });
   }
 
