@@ -18,10 +18,13 @@ function wdRequest(cfg, method, relPath, opts = {}) {
     const url  = buildUrl(cfg, relPath);
     const auth = 'Basic ' + Buffer.from(`${cfg.username || ''}:${cfg.password || ''}`).toString('base64');
     const headers = { Authorization: auth, ...opts.headers };
-    const body = opts.body != null ? Buffer.from(opts.body, 'utf8') : null;
+    // Accept both string and Buffer bodies
+    const body = opts.body != null
+      ? (Buffer.isBuffer(opts.body) ? opts.body : Buffer.from(opts.body, 'utf8'))
+      : null;
     if (body) {
       headers['Content-Length'] = String(body.length);
-      if (!headers['Content-Type']) headers['Content-Type'] = 'text/plain; charset=utf-8';
+      if (!headers['Content-Type']) headers['Content-Type'] = 'application/octet-stream';
     }
     const lib = url.protocol === 'https:' ? https : http;
     const req = lib.request({
@@ -33,7 +36,10 @@ function wdRequest(cfg, method, relPath, opts = {}) {
     }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
-      res.on('end',  () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end',  () => {
+        const rawBody = Buffer.concat(chunks);
+        resolve({ status: res.statusCode, body: rawBody.toString('utf8'), rawBody });
+      });
     });
     req.on('error', reject);
     if (body) req.write(body);
@@ -51,12 +57,13 @@ function parsePropfind(xml) {
     const inner = m[1];
     const hrefM = /<[^:>\s/]+:href\b[^>]*>\s*([^\s<]+)\s*<\/[^:>\s/]+:href>/i.exec(inner);
     if (!hrefM) continue;
-    // Extract pathname only — handles both relative paths and full URLs
     let href;
     try   { href = decodeURIComponent(new URL(hrefM[1].trim(), 'http://x').pathname); }
     catch { href = decodeURIComponent(hrefM[1].trim()); }
     const isCollection = /<[^:>\s/]+:collection\s*\/>/i.test(inner);
-    results.push({ href, isCollection });
+    const sizeM = /<[^:>\s/]+:getcontentlength\b[^>]*>(\d+)<\/[^:>\s/]+:getcontentlength>/i.exec(inner);
+    const size  = sizeM ? parseInt(sizeM[1], 10) : undefined;
+    results.push({ href, isCollection, size });
   }
   return results;
 }
@@ -75,7 +82,6 @@ function parseFm(text) {
     const kv = /^(\w+):\s*(.+)$/.exec(line);
     if (kv) meta[kv[1]] = kv[2].trim();
   }
-  // Parse YAML list  linkedCards:\n  - id-xxx
   const lcBlock = /^linkedCards:\s*\n((?:[ \t]+-[^\n]*\n?)*)/m.exec(fmText);
   meta.linkedCards = lcBlock
     ? [...lcBlock[1].matchAll(/[ \t]+-\s*(.+)/g)].map(lm => lm[1].trim())
@@ -105,11 +111,11 @@ function toFilename(title) {
 
 // ─── Directory listing ────────────────────────────────────────────────────────
 
-const PF_BODY    = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>';
-const PF_HEADERS = { 'Depth': '1', 'Content-Type': 'application/xml' };
+const PF_BODY          = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>';
+const PF_BODY_WITH_SIZE = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>';
+const PF_HEADERS       = { 'Depth': '1', 'Content-Type': 'application/xml' };
 
 async function listChildren(cfg, dirRelPath) {
-  // Returns [{ name, isCollection }] for direct children only.
   const dirUrl      = buildUrl(cfg, dirRelPath ? dirRelPath + '/' : '');
   const dirPathname = decodeURIComponent(dirUrl.pathname);
 
@@ -121,11 +127,11 @@ async function listChildren(cfg, dirRelPath) {
   if (res.status !== 207) throw new Error(`PROPFIND ${dirRelPath || '/'}: HTTP ${res.status}`);
 
   return parsePropfind(res.body)
-    .map(({ href, isCollection }) => {
+    .map(({ href, isCollection, size }) => {
       if (!href.startsWith(dirPathname)) return null;
       const name = href.slice(dirPathname.length).replace(/\/$/, '');
-      if (!name || name.includes('/')) return null;   // skip self and nested
-      return { name, isCollection };
+      if (!name || name.includes('/')) return null;
+      return { name, isCollection, size };
     })
     .filter(Boolean);
 }
@@ -140,6 +146,7 @@ async function loadDir(cfg, dirRelPath) {
   const pages = [];
 
   for (const { name, isCollection } of children) {
+    if (name.startsWith('_')) continue;   // skip _attachments and similar reserved dirs
     const childRel = dirRelPath ? `${dirRelPath}/${name}` : name;
 
     if (isCollection) {
@@ -189,7 +196,6 @@ async function loadNotesFromWebdav(cfg) {
 // ─── Save notes to WebDAV ─────────────────────────────────────────────────────
 
 async function syncDir(cfg, pages, dirRelPath) {
-  // Build map of what should exist at this level: name → 'file' | 'dir'
   const targetMap = new Map();
   for (const page of pages) {
     const fn = toFilename(page.title);
@@ -197,37 +203,32 @@ async function syncDir(cfg, pages, dirRelPath) {
     else                                  targetMap.set(fn + '.md', 'file');
   }
 
-  // Get current entries (best-effort)
   let existing = [];
   try { existing = await listChildren(cfg, dirRelPath); } catch {}
 
-  // Write / update each page
   for (const page of pages) {
     const fn  = toFilename(page.title);
     const rel = dirRelPath ? `${dirRelPath}/${fn}` : fn;
     const hasChildren = (page.children || []).length > 0;
 
     if (hasChildren) {
-      // Remove conflicting plain file if present
       if (existing.some(e => e.name === fn + '.md' && !e.isCollection))
         await wdRequest(cfg, 'DELETE', `${rel}.md`, {}).catch(() => {});
-      // Ensure directory exists (405/409 = already exists — fine)
       const mkr = await wdRequest(cfg, 'MKCOL', rel, {});
       if (mkr.status !== 201 && mkr.status !== 405 && mkr.status !== 409)
         throw new Error(`MKCOL ${rel}: HTTP ${mkr.status}`);
       await wdRequest(cfg, 'PUT', `${rel}/index.md`, { body: renderMd(page) });
       await syncDir(cfg, page.children, rel);
     } else {
-      // Remove conflicting directory if present
       if (existing.some(e => e.name === fn && e.isCollection))
         await wdRequest(cfg, 'DELETE', rel + '/', {}).catch(() => {});
       await wdRequest(cfg, 'PUT', `${rel}.md`, { body: renderMd(page) });
     }
   }
 
-  // Delete orphans — entries that exist on the server but are not in target
+  // Delete orphans — skip underscore-prefixed entries (_attachments etc.)
   for (const { name, isCollection } of existing) {
-    if (!targetMap.has(name)) {
+    if (!targetMap.has(name) && !name.startsWith('_')) {
       const entryRel = dirRelPath ? `${dirRelPath}/${name}` : name;
       await wdRequest(cfg, 'DELETE', isCollection ? entryRel + '/' : entryRel, {}).catch(() => {});
     }
@@ -238,11 +239,56 @@ async function saveNotesToWebdav(cfg, notes) {
   await syncDir(cfg, notes.pages || [], '');
 }
 
+// ─── Attachment helpers ───────────────────────────────────────────────────────
+
+// Attachments live at  _attachments/<pageId>/<filename>  relative to the board root.
+
+async function listAttachmentsFromWebdav(cfg, pageId) {
+  const dirRel      = `_attachments/${pageId}`;
+  const dirUrl      = buildUrl(cfg, dirRel + '/');
+  const dirPathname = decodeURIComponent(dirUrl.pathname);
+
+  const res = await wdRequest(cfg, 'PROPFIND', dirRel + '/', {
+    headers: { 'Depth': '1', 'Content-Type': 'application/xml' },
+    body: PF_BODY_WITH_SIZE,
+  });
+
+  if (res.status === 404) return [];
+  if (res.status !== 207) return [];
+
+  return parsePropfind(res.body)
+    .map(({ href, isCollection, size }) => {
+      if (isCollection) return null;
+      if (!href.startsWith(dirPathname)) return null;
+      const name = href.slice(dirPathname.length).replace(/\/$/, '');
+      if (!name || name.includes('/')) return null;
+      return { name, size: size ?? 0 };
+    })
+    .filter(Boolean);
+}
+
+async function getAttachmentFromWebdav(cfg, pageId, filename) {
+  const res = await wdRequest(cfg, 'GET', `_attachments/${pageId}/${filename}`, {});
+  if (res.status === 404) { const e = new Error('Not found'); e.status = 404; throw e; }
+  if (res.status !== 200) throw new Error(`GET attachment: HTTP ${res.status}`);
+  return res.rawBody;
+}
+
+async function uploadAttachmentToWebdav(cfg, pageId, filename, buffer) {
+  // Ensure parent directories exist (ignore 405/409 = already exists)
+  await wdRequest(cfg, 'MKCOL', '_attachments', {}).catch(() => {});
+  await wdRequest(cfg, 'MKCOL', `_attachments/${pageId}`, {}).catch(() => {});
+  const res = await wdRequest(cfg, 'PUT', `_attachments/${pageId}/${filename}`, { body: buffer });
+  if (res.status !== 201 && res.status !== 204)
+    throw new Error(`PUT attachment failed: HTTP ${res.status}`);
+}
+
+async function deleteAttachmentFromWebdav(cfg, pageId, filename) {
+  await wdRequest(cfg, 'DELETE', `_attachments/${pageId}/${filename}`, {});
+}
+
 // ─── Migration merge ──────────────────────────────────────────────────────────
 
-// Merges two top-level page arrays without deleting anything.
-// When a title exists on both sides (case-insensitive), the WebDAV page is
-// renamed "<title> (from webdav)" so both are preserved.
 function mergeForMigration(couchPages, webdavPages) {
   const couchTitles = new Set((couchPages || []).map(p => p.title.toLowerCase()));
   const renamedWebdav = (webdavPages || []).map(p =>
@@ -276,4 +322,8 @@ module.exports = {
   saveNotesToWebdav,
   mergeForMigration,
   testWebdavConnection,
+  listAttachmentsFromWebdav,
+  getAttachmentFromWebdav,
+  uploadAttachmentToWebdav,
+  deleteAttachmentFromWebdav,
 };
