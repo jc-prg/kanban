@@ -28,15 +28,30 @@ async function loadNotes() {
   _setWebdavSyncing(true);
   try {
     const r = await fetch(NOTES_API);
-    if (!r.ok) { notesState = { pages: [] }; }
-    else {
-      notesEtag  = r.headers.get('ETag');
-      notesState = await r.json();
-      if (!notesState.pages) notesState.pages = [];
+    if (r.ok) {
+      notesEtag = r.headers.get('ETag');
+      const remote = await r.json();
+      if (!remote.pages) remote.pages = [];
+      // If local unsaved changes exist (notesState drifted from baseNotesState since
+      // the last server sync), merge rather than blindly overwriting — otherwise edits
+      // made after submitNote() but within the 600 ms save debounce are silently lost.
+      if (baseNotesState && JSON.stringify(notesState) !== JSON.stringify(baseNotesState)) {
+        notesState     = mergeNotesStates(baseNotesState, remote, notesState);
+        baseNotesState = JSON.parse(JSON.stringify(remote));
+        scheduleSaveNotes(); // persist surviving local changes
+      } else {
+        notesState     = remote;
+        baseNotesState = JSON.parse(JSON.stringify(remote));
+      }
+    } else {
+      notesState     = { pages: [] };
+      baseNotesState = JSON.parse(JSON.stringify(notesState));
     }
-  } catch (e) { notesState = { pages: [] }; }
+  } catch (e) {
+    notesState     = { pages: [] };
+    baseNotesState = JSON.parse(JSON.stringify(notesState));
+  }
   _setWebdavSyncing(false);
-  baseNotesState = JSON.parse(JSON.stringify(notesState));
   _updateWebdavSidebarUi();
   renderNotesTree();
   restoreNotesSidebar();
