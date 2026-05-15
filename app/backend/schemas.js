@@ -87,6 +87,7 @@ const validateNotes = ajv.compile({
         link:           { type: 'string' },
         linkedCards:    { type: 'array', items: { type: 'string' } },
         hasAttachments: { type: 'boolean' },
+        attachments:    { type: 'array', items: { type: 'string' } },
         lastModified:   { type: 'string' },
         children:       { type: 'array', items: { $ref: '#/definitions/page' } }
       }
@@ -102,6 +103,7 @@ const _notePagePatchSchema = {
     link:           { type: 'string' },
     linkedCards:    { type: 'array', items: { type: 'string' } },
     hasAttachments: { type: 'boolean' },
+    attachments:    { type: 'array', items: { type: 'string' } },
     lastModified:   { type: 'string' }
   }
 };

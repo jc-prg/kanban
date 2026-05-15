@@ -72,7 +72,7 @@ function parsePropfind(xml) {
 
 function parseFm(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/s.exec(text);
-  if (!m) return { id: '', link: '', linkedCards: [], body: text.trim() };
+  if (!m) return { id: '', link: '', linkedCards: [], attachments: [], body: text.trim() };
 
   const fmText = m[1];
   const body   = m[2].trim();
@@ -87,7 +87,23 @@ function parseFm(text) {
     ? [...lcBlock[1].matchAll(/[ \t]+-\s*(.+)/g)].map(lm => lm[1].trim())
     : [];
 
-  return { id: meta.id || '', link: meta.link || '', linkedCards: meta.linkedCards, body };
+  const attBlock = /^attachments:\s*\n((?:[ \t]+-[^\n]*\n?)*)/m.exec(fmText);
+  const fmAttachments = attBlock
+    ? [...attBlock[1].matchAll(/[ \t]+-\s*(.+)/g)].map(am => am[1].trim())
+    : [];
+  // Also detect attachment: links in the body so hand-edited Obsidian files work too
+  const bodyAttachments = [...body.matchAll(/\(attachment:([^)\s]+)\)/g)].map(bm => bm[1]);
+  const attachments = [...new Set([...fmAttachments, ...bodyAttachments])];
+
+  return { id: meta.id || '', link: meta.link || '', linkedCards: meta.linkedCards, attachments, body };
+}
+
+function _collectAttachmentNames(page) {
+  const fromField = Array.isArray(page.attachments) ? page.attachments : [];
+  const fromBody  = page.description
+    ? [...page.description.matchAll(/\(attachment:([^)\s]+)\)/g)].map(bm => bm[1])
+    : [];
+  return [...new Set([...fromField, ...fromBody])];
 }
 
 function renderMd(page) {
@@ -97,6 +113,11 @@ function renderMd(page) {
   if (page.linkedCards?.length) {
     out += 'linkedCards:\n';
     for (const c of page.linkedCards) out += `  - ${c}\n`;
+  }
+  const attachments = _collectAttachmentNames(page);
+  if (attachments.length) {
+    out += 'attachments:\n';
+    for (const a of attachments) out += `  - ${a}\n`;
   }
   out += '---\n';
   if (page.description) out += '\n' + page.description;
@@ -157,11 +178,15 @@ async function loadDir(cfg, dirRelPath) {
       try {
         const r = await wdRequest(cfg, 'GET', `${childRel}/index.md`, {});
         if (r.status === 200) {
-          const fm   = parseFm(r.body);
-          page.id    = fm.id || page.id;
+          const fm         = parseFm(r.body);
+          page.id          = fm.id || page.id;
           page.description = fm.body;
           page.link        = fm.link;
           page.linkedCards = fm.linkedCards;
+          if (fm.attachments.length) {
+            page.attachments    = fm.attachments;
+            page.hasAttachments = true;
+          }
         }
       } catch {}
       page.children = await loadDir(cfg, childRel);
@@ -171,15 +196,20 @@ async function loadDir(cfg, dirRelPath) {
       try {
         const r = await wdRequest(cfg, 'GET', childRel, {});
         if (r.status === 200) {
-          const fm = parseFm(r.body);
-          pages.push({
+          const fm  = parseFm(r.body);
+          const page = {
             id:          fm.id || 'n-' + crypto.randomBytes(6).toString('hex'),
             title:       name.slice(0, -3),
             description: fm.body,
             link:        fm.link,
             linkedCards: fm.linkedCards,
             children:    [],
-          });
+          };
+          if (fm.attachments.length) {
+            page.attachments    = fm.attachments;
+            page.hasAttachments = true;
+          }
+          pages.push(page);
         }
       } catch {}
     }

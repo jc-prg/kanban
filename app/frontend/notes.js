@@ -1015,11 +1015,19 @@ function renderAttachments(pageId, files) {
   list.innerHTML = '';
 
   const page = findNotePage(pageId, notesState.pages);
-  if (page && !!page.hasAttachments !== (files.length > 0)) {
-    page.hasAttachments = files.length > 0;
-    page.lastModified   = new Date().toISOString();
-    scheduleSaveNotes();
-    renderNotesTree();
+  if (page) {
+    const newHasAttach   = files.length > 0;
+    const isWebdav       = state?.settings?.webdav?.enabled ?? false;
+    const newAttachments = isWebdav ? files.map(f => f.name) : null;
+    const attachChanged  = newAttachments !== null &&
+      JSON.stringify(page.attachments || []) !== JSON.stringify(newAttachments);
+    if (!!page.hasAttachments !== newHasAttach || attachChanged) {
+      page.hasAttachments = newHasAttach;
+      if (newAttachments !== null) page.attachments = newAttachments;
+      page.lastModified   = new Date().toISOString();
+      scheduleSaveNotes();
+      renderNotesTree();
+    }
   }
   if (!files.length) {
     const p = document.createElement('p');
