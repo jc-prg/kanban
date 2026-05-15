@@ -25,6 +25,7 @@ const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
 // ---- Notes Load / Save ----
 async function loadNotes() {
   if (!NOTES_API) return;
+  _setWebdavSyncing(true);
   try {
     const r = await fetch(NOTES_API);
     if (!r.ok) { notesState = { pages: [] }; }
@@ -34,6 +35,7 @@ async function loadNotes() {
       if (!notesState.pages) notesState.pages = [];
     }
   } catch (e) { notesState = { pages: [] }; }
+  _setWebdavSyncing(false);
   baseNotesState = JSON.parse(JSON.stringify(notesState));
   _updateWebdavSidebarUi();
   renderNotesTree();
@@ -192,6 +194,10 @@ function _updateWebdavSidebarUi() {
   if (syncBtn) syncBtn.style.display  = isWebdav ? '' : 'none';
 }
 
+function _setWebdavSyncing(syncing) {
+  document.getElementById('notesSyncBtn')?.classList.toggle('notes-sidebar-add-btn--spinning', syncing);
+}
+
 // ---- Notes Tree Helpers ----
 function findNotePage(id, pages) {
   for (const p of pages) {
@@ -236,6 +242,7 @@ function deleteNotePage(id) {
   removeFrom(notesState.pages);
   renderNotesTree();
   scheduleSaveNotes();
+  if (state?.settings?.webdav?.enabled) setTimeout(loadNotes, 700); // after save debounce
 }
 
 // ---- Notes Sidebar ----

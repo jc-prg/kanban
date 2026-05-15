@@ -76,6 +76,9 @@
 
 .notes-sidebar-add-btn:hover { color: var(--accent); background: var(--accent-glow); }
 
+@keyframes notesSpin { to { transform: rotate(360deg); } }
+.notes-sidebar-add-btn--spinning { animation: notesSpin 0.7s linear infinite; }
+
 .notes-tree-body {
   flex: 1;
   overflow-y: auto;
