@@ -606,7 +606,20 @@
 .note-attach-btn:hover         { color: var(--accent); background: var(--accent-glow); }
 .note-attach-btn--del:hover    { color: var(--danger); background: rgba(240,79,106,0.1); }
 
-.note-attach-upload-row { display: flex; gap: 6px; }
+.note-attach-upload-row { display: flex; align-items: center; gap: 6px; }
+
+.note-attach-upload-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.note-attach-upload-hint::before {
+  content: '↻';
+  display: inline-block;
+  animation: notesSpin 0.7s linear infinite;
+}
 
 .note-upload-label {
   font-size: 0.72rem;

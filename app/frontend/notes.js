@@ -1072,6 +1072,14 @@ function renderAttachments(pageId, files) {
 
 async function _handleAttachUpload(pageId, fileList) {
   if (!NOTES_ATTACH_API || !fileList.length) return;
+  const hint  = document.getElementById('noteAttachUploadHint');
+  const label = document.getElementById('noteAttachUploadLabel');
+  const isWebdav = state?.settings?.webdav?.enabled ?? false;
+  if (hint) {
+    hint.textContent = isWebdav ? 'Uploading to WebDAV…' : 'Uploading…';
+    hint.style.display = '';
+  }
+  if (label) label.style.pointerEvents = 'none';
   for (const file of Array.from(fileList)) {
     const fd = new FormData();
     fd.append('file', file);
@@ -1083,8 +1091,10 @@ async function _handleAttachUpload(pageId, fileList) {
       await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
     }
   }
+  if (hint)  { hint.style.display = 'none'; hint.textContent = ''; }
+  if (label) label.style.pointerEvents = '';
   loadAttachments(pageId);
-  if (state?.settings?.webdav?.enabled) loadNotes();
+  if (isWebdav) loadNotes();
 }
 
 function _insertAttachmentMd(name, type) {
