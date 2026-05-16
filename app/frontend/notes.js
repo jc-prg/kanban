@@ -21,12 +21,47 @@ let notesEtag      = null;
 let notesSaveTimer = null;
 const NOTES_API        = API_BASE ? `${API_BASE}/notes`             : null;
 const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
+const NOTES_PAGES_API  = API_BASE ? `${API_BASE}/notes/pages`       : null;
+const NOTES_FOLD_API   = API_BASE ? `${API_BASE}/notes/folders`     : null;
+
+// Per-page cache: pageId → { serverLastModified }
+const _pageMetaCache = new Map();
+
+function _webdavActive() { return !!(window.WEBDAV_CFG?.enabled && NOTES_PAGES_API); }
+
+// Call a per-operation notes endpoint; returns parsed JSON or throws
+async function _notesOp(method, url, body) {
+  const r = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body:    body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+// Apply a returned notes state from the server (used after per-op calls)
+function _applyNotesResult(data) {
+  if (data.notes) {
+    notesState     = _normalizeNotes(data.notes);
+    baseNotesState = JSON.parse(JSON.stringify(notesState));
+  }
+}
 
 // ---- Notes Load / Save ----
 function _normalizeNotes(data) {
   if (data && data.schemaVersion === 2 && Array.isArray(data.items)) return data;
   // v1 legacy: server should have migrated, but handle client-side just in case
   return { items: [], schemaVersion: 2 };
+}
+
+function _updateWebdavUi() {
+  const webdavOn = !!(window.WEBDAV_CFG?.enabled);
+  const labelEl  = document.getElementById('notesSidebarLabel');
+  const syncBtn  = document.getElementById('notesSyncBtn');
+  if (labelEl) labelEl.textContent = webdavOn ? 'WebDAV-Notes' : 'Notes';
+  if (syncBtn)  syncBtn.style.display = webdavOn ? '' : 'none';
 }
 
 async function loadNotes() {
@@ -41,9 +76,38 @@ async function loadNotes() {
   } catch (e) { notesState = { items: [], schemaVersion: 2 }; }
   _loadTreeOpenState();
   baseNotesState = JSON.parse(JSON.stringify(notesState));
+  _updateWebdavUi();
   renderNotesTree();
   restoreNotesSidebar();
   render();
+  // If WebDAV is active, sync from WebDAV in background (updates tree when done)
+  if (_webdavActive()) _runWebdavSync();
+}
+
+let _syncInProgress = false;
+
+async function _runWebdavSync() {
+  if (_syncInProgress) return;
+  _syncInProgress = true;
+  const btn = document.getElementById('notesSyncBtn');
+  if (btn) btn.classList.add('notes-sync-btn--spinning');
+  try {
+    const data = await _notesOp('POST', `${NOTES_API}/sync`);
+    if (data.notes) {
+      notesState     = _normalizeNotes(data.notes);
+      baseNotesState = JSON.parse(JSON.stringify(notesState));
+      renderNotesTree();
+    }
+  } catch (e) { console.error('WebDAV sync error:', e.message); }
+  finally {
+    _syncInProgress = false;
+    if (btn) btn.classList.remove('notes-sync-btn--spinning');
+  }
+}
+
+async function syncNotesWithWebdav() {
+  if (_syncInProgress || !window.WEBDAV_CFG?.enabled) return;
+  await _runWebdavSync();
 }
 
 // DFS-flatten only pages (not folders) from the items tree.
@@ -196,13 +260,26 @@ function _noteUid(prefix) {
   return prefix + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function addNotePage(parentId = null) {
+async function addNotePage(parentId = null) {
   const page = {
     type: 'page',
     id: _noteUid('n-'),
     title: 'New Page', description: '', link: '', linkedCards: [],
     lastModified: new Date().toISOString(),
   };
+
+  if (_webdavActive()) {
+    try {
+      const data = await _notesOp('POST', NOTES_PAGES_API, { page, parentId });
+      _applyNotesResult(data);
+      renderNotesTree();
+      openNoteModal(page.id, true);
+    } catch (e) {
+      await showConfirm(`Could not create page: ${e.message}`, { okLabel: 'OK' });
+    }
+    return;
+  }
+
   if (!parentId) {
     notesState.items.push(page);
   } else {
@@ -211,7 +288,6 @@ function addNotePage(parentId = null) {
       if (!parent.children) parent.children = [];
       parent.children.push(page);
     } else {
-      // parentId refers to a page or unknown item — fall back to root
       notesState.items.push(page);
     }
   }
@@ -220,13 +296,29 @@ function addNotePage(parentId = null) {
   openNoteModal(page.id, true);
 }
 
-function addNoteFolder(parentId = null) {
+async function addNoteFolder(parentId = null) {
   const folder = {
     type: 'folder',
     id: _noteUid('f-'),
     title: 'New Folder',
     children: [],
   };
+
+  if (_webdavActive()) {
+    try {
+      const data = await _notesOp('POST', NOTES_FOLD_API, { folder, parentId });
+      _applyNotesResult(data);
+      notesExpanded.add(folder.id);
+      _saveTreeOpenState();
+      renderNotesTree();
+      const el = document.querySelector(`[data-item-id="${folder.id}"]`);
+      if (el) _startFolderRename(el, findNoteItem(folder.id, notesState.items) || folder);
+    } catch (e) {
+      await showConfirm(`Could not create folder: ${e.message}`, { okLabel: 'OK' });
+    }
+    return;
+  }
+
   if (!parentId) {
     notesState.items.push(folder);
   } else {
@@ -240,12 +332,24 @@ function addNoteFolder(parentId = null) {
   _saveTreeOpenState();
   renderNotesTree();
   scheduleSaveNotes();
-  // Start inline rename for the newly created folder
   const el = document.querySelector(`[data-item-id="${folder.id}"]`);
   if (el) _startFolderRename(el, folder);
 }
 
-function deleteNoteItem(id) {
+async function deleteNoteItem(id) {
+  if (_webdavActive()) {
+    const item = findNoteItem(id, notesState.items);
+    const isFolder = item?.type === 'folder';
+    const apiUrl   = isFolder ? `${NOTES_FOLD_API}/${id}` : `${NOTES_PAGES_API}/${id}`;
+    try {
+      const data = await _notesOp('DELETE', apiUrl);
+      _applyNotesResult(data);
+      renderNotesTree();
+    } catch (e) {
+      await showConfirm(`Could not delete: ${e.message}`, { okLabel: 'OK' });
+    }
+    return;
+  }
   _removeItem(id, notesState.items);
   renderNotesTree();
   scheduleSaveNotes();
@@ -521,11 +625,25 @@ function _startFolderRename(itemEl, folder) {
   input.focus();
   input.select();
 
-  function commit() {
+  async function commit() {
     const next = input.value.trim() || prev;
     folder.title = next;
     renderNotesTree();
-    if (next !== prev) scheduleSaveNotes();
+    if (next !== prev) {
+      if (_webdavActive()) {
+        try {
+          const data = await _notesOp('PATCH', `${NOTES_FOLD_API}/${folder.id}`, { title: next });
+          _applyNotesResult(data);
+          renderNotesTree();
+        } catch (e) {
+          folder.title = prev; // rollback
+          renderNotesTree();
+          await showConfirm(`Could not rename folder: ${e.message}`, { okLabel: 'OK' });
+        }
+      } else {
+        scheduleSaveNotes();
+      }
+    }
   }
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', e => {
@@ -562,7 +680,7 @@ async function _crumbNavigate(pageId) {
   if (noteModalHasChanges()) {
     const result = await showConfirm('Save changes before navigating?', { okLabel: 'Save', altLabel: "Don't save", cancelLabel: 'Cancel' });
     if (result === false) return;  // Cancel — stay on page
-    if (result === true) submitNote();
+    if (result === true) await submitNote();
     // null → Don't save, navigate without saving
   }
   openNoteModal(pageId);
@@ -592,7 +710,7 @@ function _renderCrumb(path, currentTitle = null) {
   });
 }
 
-function openNoteModal(pageId, focusTitle = false) {
+async function openNoteModal(pageId, focusTitle = false) {
   const page = findNotePage(pageId, notesState.items);
   if (!page) return;
   noteModalPageId = pageId;
@@ -605,8 +723,8 @@ function openNoteModal(pageId, focusTitle = false) {
 
   renderLinkedCards(page.linkedCards || []);
 
-  const path = getNotePath(pageId, notesState.items);
-  _renderCrumb(path);
+  const notePath = getNotePath(pageId, notesState.items);
+  _renderCrumb(notePath);
 
   if ((page.description || '').trim()) showNoteDescPreview();
   else showNoteDescEditor();
@@ -625,6 +743,27 @@ function openNoteModal(pageId, focusTitle = false) {
   const nt = document.getElementById('notePageTitle');
   autoResizeTitle(nt);
   if (focusTitle) requestAnimationFrame(() => { nt.focus(); nt.select(); });
+
+  // WebDAV: fetch fresh content from server
+  if (_webdavActive()) {
+    const descEl    = document.getElementById('notePageDesc');
+    const previewEl = document.getElementById('notePageDescPreview');
+    const loadingHtml = '<span class="note-attach-empty">Loading…</span>';
+    previewEl.innerHTML = loadingHtml;
+    previewEl.style.display = '';
+    descEl.style.display = 'none';
+    try {
+      const data = await fetch(`${NOTES_PAGES_API}/${pageId}/content`).then(r => r.ok ? r.json() : null);
+      if (data) {
+        descEl.value = data.content || '';
+        noteModalOrig.desc = data.content || '';
+        page.description   = data.content || '';
+        _pageMetaCache.set(pageId, { serverLastModified: data.lastModified });
+      }
+    } catch { /* fall back to cached */ }
+    if (descEl.value.trim()) showNoteDescPreview();
+    else showNoteDescEditor();
+  }
 }
 
 function closeNoteModal() {
@@ -635,22 +774,59 @@ function closeNoteModal() {
   noteModalPageId = null;
 }
 
-function submitNote() {
+async function submitNote() {
   if (!noteModalPageId) return;
   const page = findNotePage(noteModalPageId, notesState.items);
   if (!page) return;
 
-  page.title        = document.getElementById('notePageTitle').value.trim() || 'Untitled';
-  page.description  = document.getElementById('notePageDesc').value;
-  page.link         = document.getElementById('notePageLink').value.trim();
-  page.lastModified = new Date().toISOString();
+  const newTitle = document.getElementById('notePageTitle').value.trim() || 'Untitled';
+  const newDesc  = document.getElementById('notePageDesc').value;
+  const newLink  = document.getElementById('notePageLink').value.trim();
 
-  noteModalOrig = { title: page.title, desc: page.description, link: page.link };
+  if (_webdavActive()) {
+    // Conflict check: compare server's current lastModified with what we fetched
+    const cached = _pageMetaCache.get(noteModalPageId);
+    if (cached?.serverLastModified) {
+      try {
+        const metaR = await fetch(`${NOTES_PAGES_API}/${noteModalPageId}/meta`);
+        if (metaR.ok) {
+          const meta = await metaR.json();
+          const serverTime = meta.lastModified ? new Date(meta.lastModified).getTime() : 0;
+          const cachedTime = new Date(cached.serverLastModified).getTime();
+          if (serverTime > cachedTime) {
+            const overwrite = await showConfirm(
+              'A newer version exists on the server. Overwrite it with your changes?',
+              { okLabel: 'Overwrite', cancelLabel: 'Cancel' }
+            );
+            if (!overwrite) return;
+          }
+        }
+      } catch { /* network error — proceed */ }
+    }
+
+    try {
+      const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${noteModalPageId}`, {
+        title: newTitle, description: newDesc, link: newLink,
+      });
+      _applyNotesResult(data);
+      // Update cache with new server time
+      _pageMetaCache.set(noteModalPageId, { serverLastModified: new Date().toISOString() });
+    } catch (e) {
+      await showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
+      return;
+    }
+  } else {
+    page.lastModified = new Date().toISOString();
+    scheduleSaveNotes();
+  }
+
+  page.title       = newTitle;
+  page.description = newDesc;
+  page.link        = newLink;
+  noteModalOrig    = { title: newTitle, desc: newDesc, link: newLink };
 
   _renderCrumb(getNotePath(noteModalPageId, notesState.items));
-
   renderNotesTree();
-  scheduleSaveNotes();
 
   const msg = document.getElementById('noteModalSavedMsg');
   msg.textContent = `${ICONS.done} saved`;
@@ -1344,7 +1520,20 @@ function _initTreeTouchDragDrop() {
     if (!dragged) return;
     if (position === 'into') { notesExpanded.add(item.dataset.itemId); _saveTreeOpenState(); }
     _insertIntoTree(dragged, item.dataset.itemId, position, notesState.items);
-    scheduleSaveNotes();
+
+    if (_webdavActive()) {
+      const isFolder  = dragged.type === 'folder';
+      const moveApi   = isFolder ? `${NOTES_FOLD_API}/${dragged.id}/move` : `${NOTES_PAGES_API}/${dragged.id}/move`;
+      const newParent = position === 'into' ? item.dataset.itemId : null;
+      _notesOp('POST', moveApi, { folderId: newParent, parentId: newParent })
+        .then(data => { _applyNotesResult(data); renderNotesTree(); })
+        .catch(async e => {
+          await showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });
+          await loadNotes();
+        });
+    } else {
+      scheduleSaveNotes();
+    }
     renderNotesTree();
   }
 
@@ -1417,7 +1606,21 @@ function _initTreeDragDrop() {
 
     if (position === 'into') { notesExpanded.add(targetId); _saveTreeOpenState(); }
     _insertIntoTree(dragged, targetId, position, notesState.items);
-    scheduleSaveNotes();
+
+    if (_webdavActive()) {
+      const isFolder  = dragged.type === 'folder';
+      const moveApi   = isFolder ? `${NOTES_FOLD_API}/${dragged.id}/move` : `${NOTES_PAGES_API}/${dragged.id}/move`;
+      // Determine new parent: 'into' → targetId is the folder; before/after → parent of target
+      const newParent = position === 'into' ? targetId : null;
+      _notesOp('POST', moveApi, { folderId: newParent, parentId: newParent })
+        .then(data => { _applyNotesResult(data); renderNotesTree(); })
+        .catch(async e => {
+          await showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });
+          await loadNotes(); // reload to undo optimistic update
+        });
+    } else {
+      scheduleSaveNotes();
+    }
     renderNotesTree();
   });
 }
@@ -1436,6 +1639,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('notesAddRootBtn')?.addEventListener('click', () => addNotePage(null));
   document.getElementById('notesAddFolderBtn')?.addEventListener('click', () => addNoteFolder(null));
   document.getElementById('notesSidebarFontBtn')?.addEventListener('click', toggleNotesFontSize);
+  document.getElementById('notesSyncBtn')?.addEventListener('click', syncNotesWithWebdav);
 
   document.getElementById('noteToggleLink')        ?.addEventListener('click', () => toggleNoteSection('noteLinkSection',        'noteToggleLink'));
   document.getElementById('noteToggleLinkedCards') ?.addEventListener('click', () => toggleNoteSection('noteLinkedCardsSection', 'noteToggleLinkedCards'));
@@ -1462,7 +1666,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('noteModalCancelBtn')?.addEventListener('click', () => tryCloseNoteModal());
-  document.getElementById('noteModalSaveBtn')?.addEventListener('click', () => { submitNote(); closeNoteModal(); });
+  document.getElementById('noteModalSaveBtn')?.addEventListener('click', async () => { await submitNote(); closeNoteModal(); });
   document.getElementById('noteModalDeleteBtn')?.addEventListener('click', async () => {
     if (!noteModalPageId) return;
     const page = findNotePage(noteModalPageId, notesState.items);
