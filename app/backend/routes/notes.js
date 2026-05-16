@@ -504,9 +504,12 @@ router.delete('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, r
   const cfg = await getWebdavConfig(db);
   if (cfg.enabled) {
     const boardAttachDir = ATTACHMENTS_DIR ? path.join(ATTACHMENTS_DIR, board) : null;
-    await deletePageWithAttachments(cfg, page, notes.items, boardAttachDir).catch(err => {
+    try {
+      await deletePageWithAttachments(cfg, page, notes.items, boardAttachDir);
+    } catch (err) {
       console.error('WebDAV delete page failed:', err.message);
-    });
+      return res.status(500).json({ error: `Could not delete page on WebDAV server: ${err.message}` });
+    }
   } else {
     // CouchDB-only: delete local attachment files for this page
     if (ATTACHMENTS_DIR) {
@@ -621,9 +624,12 @@ router.delete('/:board/notes/folders/:id', writeRateLimit, withBoard(async (req,
   const cfg = await getWebdavConfig(db);
   if (cfg.enabled) {
     const boardAttachDir = ATTACHMENTS_DIR ? path.join(ATTACHMENTS_DIR, board) : null;
-    await deleteFolderWithAttachments(cfg, folder, notes.items, boardAttachDir).catch(err => {
+    try {
+      await deleteFolderWithAttachments(cfg, folder, notes.items, boardAttachDir);
+    } catch (err) {
       console.error('WebDAV delete folder failed:', err.message);
-    });
+      return res.status(500).json({ error: `Could not delete folder on WebDAV server: ${err.message}` });
+    }
   }
   _removeItem(id, notes.items);
   const result = await saveNotesData(db, notes);
