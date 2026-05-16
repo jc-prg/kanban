@@ -102,7 +102,7 @@ async function _runWebdavSync() {
   const btn = document.getElementById('notesSyncBtn');
   if (btn) btn.classList.add('notes-sync-btn--spinning');
   try {
-    const data = await _notesOp('POST', `${NOTES_API}/sync`);
+    const data = await _notesOp('POST', `${NOTES_API}/sync`, { folderIds: [...notesExpanded] });
     if (data.notes) {
       notesState     = _normalizeNotes(data.notes);
       baseNotesState = JSON.parse(JSON.stringify(notesState));
@@ -519,6 +519,7 @@ function _renderFolderItem(folder, container, depth) {
 
   const el = document.createElement('div');
   el.className = 'notes-tree-item notes-tree-item--folder';
+  if (_webdavActive() && folder.orphaned) el.classList.add('notes-tree-item--orphaned');
   el.dataset.itemId   = folder.id;
   el.dataset.itemType = 'folder';
   el.dataset.depth    = depth;
@@ -534,10 +535,18 @@ function _renderFolderItem(folder, container, depth) {
       `<button class="notes-item-btn notes-item-btn--del" title="Delete folder">${ICONS.close}</button>` +
     `</div>`;
 
-  el.querySelector('.notes-toggle-btn').addEventListener('click', e => {
+  el.querySelector('.notes-toggle-btn').addEventListener('click', async e => {
     e.stopPropagation();
-    if (notesExpanded.has(folder.id)) notesExpanded.delete(folder.id); else notesExpanded.add(folder.id);
+    const expanding = !notesExpanded.has(folder.id);
+    if (expanding) notesExpanded.add(folder.id); else notesExpanded.delete(folder.id);
     _saveTreeOpenState();
+    if (expanding && _webdavActive()) {
+      el.classList.add('notes-tree-item--loading');
+      try {
+        const data = await _notesOp('POST', `${NOTES_FOLD_API}/${folder.id}/sync`);
+        _applyNotesResult(data);
+      } catch { /* fall back to cached content */ }
+    }
     renderNotesTree();
   });
 
@@ -579,6 +588,7 @@ function _renderFolderItem(folder, container, depth) {
 function _renderPageItem(page, container, depth) {
   const el = document.createElement('div');
   el.className = 'notes-tree-item notes-tree-item--page';
+  if (_webdavActive() && page.orphaned) el.classList.add('notes-tree-item--orphaned');
   el.dataset.itemId   = page.id;
   el.dataset.pageId   = page.id; // kept for card-drag-drop compatibility
   el.dataset.itemType = 'page';

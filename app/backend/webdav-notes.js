@@ -1,7 +1,8 @@
 'use strict';
 
-const fs   = require('fs');
-const path = require('path');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -22,6 +23,22 @@ function _titleToSlug(title) {
     .trim()
     .replace(/[/\\:*?"<>|\0]/g, '_')
     || 'untitled';
+}
+
+// Legacy slug (used before the current algorithm) — kept for backward-compat matching
+function _legacySlug(title) {
+  return (title || 'untitled')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '_')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    || 'untitled';
+}
+
+function _randomHex(bytes = 6) {
+  return crypto.randomBytes(bytes).toString('hex');
 }
 
 // Extract text content of a named tag, ignoring namespace prefixes.
@@ -137,26 +154,59 @@ async function wdGetMeta(cfg, relPath) {
 // Tree path helpers
 // ---------------------------------------------------------------------------
 
-// Build map: relPath → item, walking tree and computing paths from titles
+// Build map: relPath → item.
+// Items with a stored wdPath are keyed by that path (authoritative).
+// Items without wdPath fall back to the current slug; legacy slugs are added
+// as alias entries (and folders recurse under both prefixes) so that files
+// created before the slug algorithm change are still matched.
 function _buildPathMap(items, map, prefix) {
   for (const item of items) {
-    const slug = _titleToSlug(item.title);
     if (item.type === 'folder') {
-      const p = prefix + slug + '/';
+      const p = item.wdPath || (prefix + _titleToSlug(item.title) + '/');
+      if (!item.wdPath) {
+        const lp = prefix + _legacySlug(item.title) + '/';
+        if (lp !== p) {
+          map.set(lp, item);
+          _buildPathMap(item.children || [], map, lp); // children under legacy prefix
+        }
+      }
       map.set(p, item);
       _buildPathMap(item.children || [], map, p);
     } else {
-      map.set(prefix + slug + '.md', item);
+      const p = item.wdPath || (prefix + _titleToSlug(item.title) + '.md');
+      if (!item.wdPath) {
+        const lp = prefix + _legacySlug(item.title) + '.md';
+        if (lp !== p) map.set(lp, item);
+      }
+      map.set(p, item);
     }
   }
 }
 
-// Returns relative WebDAV path for an item given the full tree
+// Returns relative WebDAV path for an item.
+// Uses item.wdPath if stored; otherwise computes from tree structure,
+// honouring parent folders' stored wdPaths as prefixes.
 function buildPath(item, tree) {
-  const map = new Map();
-  _buildPathMap(tree, map, '');
-  for (const [p, it] of map) { if (it === item || it.id === item.id) return p; }
-  return null;
+  if (item.wdPath) return item.wdPath;
+  function _find(items, prefix) {
+    for (const it of items) {
+      const p = it.wdPath || (prefix + _titleToSlug(it.title) + (it.type === 'folder' ? '/' : '.md'));
+      if (it === item || it.id === item.id) return p;
+      if (it.type === 'folder') { const r = _find(it.children || [], p); if (r) return r; }
+    }
+    return null;
+  }
+  return _find(tree, '');
+}
+
+// Recursively update wdPath on all descendants of a folder after it is
+// renamed or moved (oldPrefix → newPrefix).
+function _updateChildWdPaths(children, oldPrefix, newPrefix) {
+  for (const item of children) {
+    if (item.wdPath && item.wdPath.startsWith(oldPrefix))
+      item.wdPath = newPrefix + item.wdPath.slice(oldPrefix.length);
+    if (item.type === 'folder') _updateChildWdPaths(item.children || [], oldPrefix, newPrefix);
+  }
 }
 
 // Returns the folder prefix (e.g. "folder/sub/") for a page's _attachments location.
@@ -235,13 +285,20 @@ function _slugMatch(seg, title) {
   return _titleToSlug(title) === seg;
 }
 
-// Find or create folder in items by slug, returning it (mutates items if creating)
-function _findOrCreateFolder(items, slugSegment) {
-  let folder = items.find(it => it.type === 'folder' && _slugMatch(slugSegment, it.title));
+// Find or create folder in items, returning it (mutates items if creating).
+// Matching: stored wdPath first, then slug comparison against title.
+// New folders get a random ID that doesn't embed the name.
+function _findOrCreateFolder(items, slugSegment, wdPath) {
+  let folder = wdPath
+    ? items.find(it => it.type === 'folder' && it.wdPath === wdPath)
+    : null;
+  if (!folder)
+    folder = items.find(it => it.type === 'folder' && _slugMatch(slugSegment, it.title));
   if (!folder) {
-    folder = { type: 'folder', id: 'f-' + slugSegment + '-' + Date.now(), title: slugSegment, children: [] };
+    folder = { type: 'folder', id: 'f-' + _randomHex(), title: slugSegment, children: [] };
     items.push(folder);
   }
+  if (wdPath && !folder.wdPath) folder.wdPath = wdPath;
   return folder;
 }
 
@@ -255,83 +312,101 @@ function _collectPageIds(items) {
   return ids;
 }
 
+// Shared helper: apply a WebDAV entry's content to an existing item.
+function _applyWdContent(existing, relPath, meta, body, wdEntry) {
+  if (!existing.wdPath) existing.wdPath = relPath;
+  existing.description    = body;
+  existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
+  if (meta.title)         existing.title        = meta.title;
+  existing.link           = meta.link || '';
+  existing.linkedCards    = _parseLinkedCards(meta.linkedCards);
+  existing.hasAttachments = Array.isArray(meta.attachments) ? meta.attachments.length > 0 : !!meta.attachments;
+  delete existing.orphaned;
+}
+
+// Shared helper: build a new page item from a WebDAV file entry.
+function _newPageFromWd(relPath, meta, body, wdEntry) {
+  return {
+    type:           'page',
+    id:             meta.id || ('n-wd-' + _randomHex()),
+    wdPath:         relPath,
+    title:          meta.title || relPath.split('/').pop().replace(/\.md$/, ''),
+    description:    body,
+    link:           meta.link || '',
+    linkedCards:    _parseLinkedCards(meta.linkedCards),
+    lastModified:   wdEntry.lastModified || new Date().toISOString(),
+    hasAttachments: !!meta.attachments,
+  };
+}
+
 async function syncFromWebdav(cfg, tree) {
-  // 1. PROPFIND depth:infinity
   const wdEntries = await wdPropfind(cfg, '', 'infinity');
 
-  // Build path → wdEntry map (skip root itself, _attachments dirs, non-md files at collection level)
   const wdMap = new Map();
   for (const e of wdEntries) {
     const h = e.href.replace(/^\//, '');
     if (!h || h === '' || h.split('/').includes('_attachments')) continue;
-    // Skip hidden files/folders (any path segment starting with '.')
     if (h.split('/').some(seg => seg.startsWith('.'))) continue;
-    // Only keep directories and .md files
     if (!e.isCollection && !h.endsWith('.md')) continue;
     wdMap.set(h, e);
   }
 
-  // 2. Build path → item map from cached tree
-  const pathMap = new Map();
-  _buildPathMap(tree.items || [], pathMap, '');
-
+  // Build pathMap from newTree so mutations affect the returned tree.
   const newTree = JSON.parse(JSON.stringify(tree));
-  let changed = false;
+  const pathMap = new Map();
+  _buildPathMap(newTree.items || [], pathMap, '');
 
-  // 3. For each WebDAV file/dir, update or create in tree
+  let changed = false;
+  const matchedIds = new Set();
+
   for (const [relPath, wdEntry] of wdMap) {
     if (wdEntry.isCollection) {
-      // Ensure folder exists in tree — simple flat approach: only root-level folders
       const seg = relPath.replace(/\/$/, '');
       if (!seg.includes('/')) {
-        if (!pathMap.has(relPath)) {
-          _findOrCreateFolder(newTree.items, seg);
+        const existing = pathMap.get(relPath);
+        if (existing) {
+          matchedIds.add(existing.id);
+          if (!existing.wdPath) { existing.wdPath = relPath; changed = true; }
+          delete existing.orphaned;
+        } else {
+          const folder = _findOrCreateFolder(newTree.items, seg, relPath);
+          matchedIds.add(folder.id);
+          // Rebuild so children of the new folder are visible in subsequent lookups.
+          pathMap.clear();
+          _buildPathMap(newTree.items, pathMap, '');
           changed = true;
         }
       }
       continue;
     }
 
-    // .md file
     const existing = pathMap.get(relPath);
     const wdTime   = wdEntry.lastModified ? new Date(wdEntry.lastModified).getTime() : 0;
 
     if (existing) {
+      matchedIds.add(existing.id);
       const cacheTime = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
-      if (wdTime > cacheTime) {
+      if (!existing.wdPath || wdTime > cacheTime) {
         try {
           const text = await wdGet(cfg, relPath);
           const { meta, body } = parseFm(text);
-          existing.description    = body;
-          existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
-          if (meta.title)         existing.title        = meta.title;
-          existing.link           = meta.link || '';
-          existing.linkedCards    = _parseLinkedCards(meta.linkedCards);
-          existing.hasAttachments = Array.isArray(meta.attachments) ? meta.attachments.length > 0 : !!meta.attachments;
+          _applyWdContent(existing, relPath, meta, body, wdEntry);
           changed = true;
         } catch { /* skip on error */ }
+      } else {
+        if (!existing.wdPath) { existing.wdPath = relPath; changed = true; }
+        delete existing.orphaned;
       }
     } else {
-      // New file from WebDAV — create page
       try {
         const text = await wdGet(cfg, relPath);
         const { meta, body } = parseFm(text);
+        const newPage = _newPageFromWd(relPath, meta, body, wdEntry);
+        matchedIds.add(newPage.id);
         const segments = relPath.split('/');
-        const titleFromSlug = segments[segments.length - 1].replace(/\.md$/, '');
-        const newPage = {
-          type:           'page',
-          id:             meta.id || ('n-wd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
-          title:          meta.title || titleFromSlug,
-          description:    body,
-          link:           meta.link || '',
-          linkedCards:    _parseLinkedCards(meta.linkedCards),
-          lastModified:   wdEntry.lastModified || new Date().toISOString(),
-          hasAttachments: !!meta.attachments,
-        };
-        // Place in correct folder or root
         if (segments.length > 1) {
           const folderSeg = segments[0];
-          const folder    = _findOrCreateFolder(newTree.items, folderSeg);
+          const folder = _findOrCreateFolder(newTree.items, folderSeg, folderSeg + '/');
           folder.children.push(newPage);
         } else {
           newTree.items.push(newPage);
@@ -341,13 +416,16 @@ async function syncFromWebdav(cfg, tree) {
     }
   }
 
-  // 4. Mark items absent from WebDAV as orphaned
-  for (const [relPath, item] of pathMap) {
-    if (item.type === 'page' && !wdMap.has(relPath)) {
-      item.orphaned = true;
-      changed = true;
+  // Mark pages absent from WebDAV as orphaned.
+  function _markOrphans(items) {
+    for (const item of items) {
+      if (item.type !== 'folder' && !matchedIds.has(item.id)) {
+        if (!item.orphaned) { item.orphaned = true; changed = true; }
+      }
+      if (item.type === 'folder') _markOrphans(item.children || []);
     }
   }
+  _markOrphans(newTree.items);
 
   return { tree: newTree, changed };
 }
@@ -367,53 +445,43 @@ async function syncRootFromWebdav(cfg, tree) {
     wdMap.set(h, e);
   }
 
-  const pathMap = new Map();
-  _buildPathMap(tree.items || [], pathMap, '');
-
   const newTree = JSON.parse(JSON.stringify(tree));
+  const pathMap = new Map();
+  _buildPathMap(newTree.items || [], pathMap, '');
+
   let changed = false;
 
   for (const [relPath, wdEntry] of wdMap) {
     if (wdEntry.isCollection) {
       const seg = relPath.replace(/\/$/, '');
-      if (!pathMap.has(relPath)) {
-        _findOrCreateFolder(newTree.items, seg);
+      const existing = pathMap.get(relPath);
+      if (existing) {
+        if (!existing.wdPath) { existing.wdPath = relPath; changed = true; }
+      } else {
+        _findOrCreateFolder(newTree.items, seg, relPath);
         changed = true;
       }
       continue;
     }
-    // Root-level .md file
     const existing = pathMap.get(relPath);
     const wdTime   = wdEntry.lastModified ? new Date(wdEntry.lastModified).getTime() : 0;
     if (existing) {
       const cacheTime = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
-      if (wdTime > cacheTime) {
+      if (!existing.wdPath || wdTime > cacheTime) {
         try {
           const text = await wdGet(cfg, relPath);
           const { meta, body } = parseFm(text);
-          existing.description    = body;
-          existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
-          if (meta.title)         existing.title        = meta.title;
-          existing.link           = meta.link || '';
-          existing.linkedCards    = _parseLinkedCards(meta.linkedCards);
-          existing.hasAttachments = Array.isArray(meta.attachments) ? meta.attachments.length > 0 : !!meta.attachments;
+          _applyWdContent(existing, relPath, meta, body, wdEntry);
           changed = true;
         } catch { /* skip */ }
+      } else if (!existing.wdPath) {
+        existing.wdPath = relPath; changed = true;
       }
     } else {
       try {
         const text = await wdGet(cfg, relPath);
         const { meta, body } = parseFm(text);
-        const newPage = {
-          type:           'page',
-          id:             meta.id || ('n-wd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
-          title:          meta.title || relPath.replace(/\.md$/, ''),
-          description:    body,
-          link:           meta.link || '',
-          linkedCards:    _parseLinkedCards(meta.linkedCards),
-          lastModified:   wdEntry.lastModified || new Date().toISOString(),
-          hasAttachments: !!meta.attachments,
-        };
+        const newPage = _newPageFromWd(relPath, meta, body, wdEntry);
         newTree.items.push(newPage);
         changed = true;
       } catch { /* skip */ }
@@ -425,13 +493,20 @@ async function syncRootFromWebdav(cfg, tree) {
 // Sync direct children of one folder from WebDAV (PROPFIND depth:1).
 // Used when a folder is expanded in the UI.
 async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
-  // Locate the folder's WebDAV path from the tree
-  const pathMap = new Map();
-  _buildPathMap(tree.items || [], pathMap, '');
-  let folderPath = null;
-  for (const [p, item] of pathMap) {
-    if (item.id === folderId && item.type === 'folder') { folderPath = p; break; }
-  }
+  // Locate the folder — prefer stored wdPath, fall back to computed.
+  const folderItem = (() => {
+    function _find(items) {
+      for (const it of items) {
+        if (it.id === folderId && it.type === 'folder') return it;
+        if (it.type === 'folder') { const r = _find(it.children || []); if (r) return r; }
+      }
+      return null;
+    }
+    return _find(tree.items || []);
+  })();
+  if (!folderItem) return { tree, changed: false };
+
+  const folderPath = buildPath(folderItem, tree.items || []);
   if (!folderPath) return { tree, changed: false };
 
   let wdEntries;
@@ -441,7 +516,6 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
   const wdMap = new Map();
   for (const e of wdEntries) {
     const h = e.href.replace(/^\//, '');
-    // skip the folder itself
     if (!h || h === folderPath || h === folderPath.replace(/\/$/, '')) continue;
     if (h.split('/').includes('_attachments')) continue;
     if (h.split('/').some(seg => seg.startsWith('.'))) continue;
@@ -452,17 +526,20 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
   const newTree    = JSON.parse(JSON.stringify(tree));
   const newPathMap = new Map();
   _buildPathMap(newTree.items, newPathMap, '');
-  const folderItem = newPathMap.get(folderPath);
-  if (!folderItem) return { tree, changed: false };
-  if (!folderItem.children) folderItem.children = [];
+  const newFolderItem = newPathMap.get(folderPath);
+  if (!newFolderItem) return { tree, changed: false };
+  if (!newFolderItem.children) newFolderItem.children = [];
 
   let changed = false;
 
   for (const [relPath, wdEntry] of wdMap) {
     if (wdEntry.isCollection) {
-      if (!newPathMap.has(relPath)) {
+      const existing = newPathMap.get(relPath);
+      if (existing) {
+        if (!existing.wdPath) { existing.wdPath = relPath; changed = true; }
+      } else {
         const seg = relPath.replace(/\/$/, '').split('/').pop();
-        _findOrCreateFolder(folderItem.children, seg);
+        _findOrCreateFolder(newFolderItem.children, seg, relPath);
         newPathMap.clear();
         _buildPathMap(newTree.items, newPathMap, '');
         changed = true;
@@ -473,34 +550,22 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
     const wdTime   = wdEntry.lastModified ? new Date(wdEntry.lastModified).getTime() : 0;
     if (existing) {
       const cacheTime = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
-      if (wdTime > cacheTime) {
+      if (!existing.wdPath || wdTime > cacheTime) {
         try {
           const text = await wdGet(cfg, relPath);
           const { meta, body } = parseFm(text);
-          existing.description    = body;
-          existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
-          if (meta.title)         existing.title        = meta.title;
-          existing.link           = meta.link || '';
-          existing.linkedCards    = _parseLinkedCards(meta.linkedCards);
-          existing.hasAttachments = Array.isArray(meta.attachments) ? meta.attachments.length > 0 : !!meta.attachments;
+          _applyWdContent(existing, relPath, meta, body, wdEntry);
           changed = true;
         } catch { /* skip */ }
+      } else if (!existing.wdPath) {
+        existing.wdPath = relPath; changed = true;
       }
     } else {
       try {
         const text = await wdGet(cfg, relPath);
         const { meta, body } = parseFm(text);
-        const newPage = {
-          type:           'page',
-          id:             meta.id || ('n-wd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
-          title:          meta.title || relPath.split('/').pop().replace(/\.md$/, ''),
-          description:    body,
-          link:           meta.link || '',
-          linkedCards:    _parseLinkedCards(meta.linkedCards),
-          lastModified:   wdEntry.lastModified || new Date().toISOString(),
-          hasAttachments: !!meta.attachments,
-        };
-        folderItem.children.push(newPage);
+        const newPage = _newPageFromWd(relPath, meta, body, wdEntry);
+        newFolderItem.children.push(newPage);
         newPathMap.clear();
         _buildPathMap(newTree.items, newPathMap, '');
         changed = true;
@@ -572,5 +637,5 @@ module.exports = {
   buildPath, getAttachmentPrefix, parseFm, renderMd,
   syncFromWebdav, syncRootFromWebdav, syncFolderChildrenFromWebdav,
   deletePageWithAttachments, deleteFolderWithAttachments,
-  _titleToSlug, _buildPathMap, _collectPageIds,
+  _titleToSlug, _buildPathMap, _collectPageIds, _updateChildWdPaths,
 };

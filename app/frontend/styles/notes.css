@@ -140,6 +140,11 @@
 .notes-tree-item--dragging {
   opacity: 0.4;
 }
+.notes-tree-item--loading {
+  opacity: 0.55;
+  pointer-events: none;
+  animation: note-loading-blink 1s ease-in-out infinite;
+}
 
 .notes-toggle-btn {
   background: none;
@@ -191,6 +196,11 @@
 
 .notes-item-title:hover { color: var(--accent); }
 .notes-item-title--root { }
+
+.notes-tree-item--orphaned .notes-item-title,
+.notes-tree-item--orphaned .notes-item-folder-title { color: #c9971a; }
+.notes-tree-item--orphaned .notes-item-title:hover,
+.notes-tree-item--orphaned .notes-item-folder-title:hover { color: var(--accent); }
 
 .notes-item-indicators {
   display: flex;
