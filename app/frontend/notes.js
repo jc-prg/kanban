@@ -756,6 +756,18 @@ async function openNoteModal(pageId, focusTitle = false) {
     noteAutoSaveEl.checked = state.settings?.autoSaveDialogs ?? false;
     if (noteAutoSaveEl.checked) _startNoteAutoSave(); else _stopNoteAutoSave();
   }
+  // WebDAV info button
+  const _wdInfoBtn = document.getElementById('noteWdInfoBtn');
+  const _wdInfoPop = document.getElementById('noteWdInfoPopover');
+  if (_wdInfoBtn) {
+    _wdInfoBtn.style.display = _webdavActive() ? '' : 'none';
+    if (_wdInfoPop) _wdInfoPop.style.display = 'none';
+    if (_webdavActive()) {
+      document.getElementById('noteWdInfoId').textContent   = page.id;
+      document.getElementById('noteWdInfoPath').textContent = page.wdPath || '(not yet synced)';
+    }
+  }
+
   document.getElementById('noteModal').style.display = 'flex';
   if (!_pendingNewPage) history.replaceState(null, '', '#note:' + pageId);
   const nt = document.getElementById('notePageTitle');
@@ -789,6 +801,8 @@ async function openNoteModal(pageId, focusTitle = false) {
 
 function closeNoteModal() {
   _stopNoteAutoSave();
+  const _wdInfoPop = document.getElementById('noteWdInfoPopover');
+  if (_wdInfoPop) _wdInfoPop.style.display = 'none';
   if (location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('noteModal').style.display = 'none';
   document.getElementById('noteCreateCardForm').style.display = 'none';
@@ -1743,6 +1757,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('noteModal')?.addEventListener('click', e => {
     if (_noteModalMousedown && e.target.id === 'noteModal') tryCloseNoteModal();
+  });
+
+  document.getElementById('noteWdInfoBtn')?.addEventListener('click', () => {
+    const pop = document.getElementById('noteWdInfoPopover');
+    if (pop) pop.style.display = pop.style.display === 'none' ? '' : 'none';
   });
 
   document.getElementById('noteModalCancelBtn')?.addEventListener('click', () => tryCloseNoteModal());

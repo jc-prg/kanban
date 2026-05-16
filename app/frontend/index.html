@@ -681,6 +681,7 @@
           <button class="card-section-toggle" id="noteToggleLink" title="Link"><span data-icon="link" data-icon-w="12" data-icon-h="12"></span></button>
           <button class="card-section-toggle" id="noteToggleLinkedCards" title="Linked Cards"><span data-icon="linkedCards" data-icon-w="12" data-icon-h="12"></span></button>
           <button class="card-section-toggle" id="noteToggleAttachments" title="Attachments"><span data-icon="attachment" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="noteWdInfoBtn" title="WebDAV info" style="display:none"><span data-icon="cardInfo" data-icon-w="12" data-icon-h="12"></span></button>
         </div>
         <div id="noteLinkSection" style="display:none">
           <div class="modal-field">
@@ -720,6 +721,10 @@
               <input id="noteAttachInput" type="file" multiple style="display:none">
             </div>
           </div>
+        </div>
+        <div id="noteWdInfoPopover" class="note-wd-info-popover" style="display:none">
+          <div class="note-wd-info-row"><span class="note-wd-info-label">ID</span><code id="noteWdInfoId" class="note-wd-info-value"></code></div>
+          <div class="note-wd-info-row"><span class="note-wd-info-label">WebDAV path</span><code id="noteWdInfoPath" class="note-wd-info-value"></code></div>
         </div>
       </div>
     </div>
