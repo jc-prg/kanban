@@ -1397,7 +1397,7 @@
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
-  background: var(--bg-base, #111);
+  background: var(--bg);
   border-radius: 6px;
 }
 .icon-lib-preview {
@@ -1406,20 +1406,20 @@
   justify-content: center;
   width: 30px;
   height: 30px;
-  background: var(--surface, #1a1a1a);
+  background: var(--surface);
   border-radius: 5px;
   flex-shrink: 0;
 }
 .icon-lib-glyph {
   font-size: 15px;
   line-height: 1;
-  color: var(--text-base);
+  color: var(--text);
 }
 .icon-lib-svg {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-base);
+  color: var(--text);
 }
 .icon-lib-meta {
   display: flex;
@@ -1430,10 +1430,14 @@
 .icon-lib-name {
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--text-base);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+@media (prefers-color-scheme: light) {
+  .icon-lib-item { background: #e8e8ee; }
+  .icon-lib-name { color: #000; }
 }
 .icon-lib-badge {
   display: inline-block;

@@ -24,10 +24,11 @@ const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
 const NOTES_PAGES_API  = API_BASE ? `${API_BASE}/notes/pages`       : null;
 const NOTES_FOLD_API   = API_BASE ? `${API_BASE}/notes/folders`     : null;
 
-// Per-page cache: pageId → { serverLastModified }
-const _pageMetaCache = new Map();
 
 function _webdavActive() { return !!(window.WEBDAV_CFG?.enabled && NOTES_PAGES_API); }
+
+// lastModified from frontmatter at the time each page was loaded — used for conflict detection
+const _pageLoadedAt = new Map();
 
 // Call a per-operation notes endpoint; returns parsed JSON or throws
 async function _notesOp(method, url, body) {
@@ -66,6 +67,13 @@ function _updateWebdavUi() {
 
 async function loadNotes() {
   if (!NOTES_API) return;
+
+  // Show loading indicator — GET /notes syncs WebDAV inline and can take a moment
+  const treeBody = document.getElementById('notesTreeBody');
+  if (treeBody) treeBody.innerHTML = '<p class="notes-empty notes-loading">Loading…</p>';
+  const syncBtn = document.getElementById('notesSyncBtn');
+  if (syncBtn) syncBtn.classList.add('notes-sync-btn--spinning');
+
   try {
     const r = await fetch(NOTES_API);
     if (!r.ok) { notesState = { items: [], schemaVersion: 2 }; }
@@ -74,14 +82,14 @@ async function loadNotes() {
       notesState = _normalizeNotes(await r.json());
     }
   } catch (e) { notesState = { items: [], schemaVersion: 2 }; }
+
+  if (syncBtn) syncBtn.classList.remove('notes-sync-btn--spinning');
   _loadTreeOpenState();
   baseNotesState = JSON.parse(JSON.stringify(notesState));
   _updateWebdavUi();
   renderNotesTree();
   restoreNotesSidebar();
   render();
-  // If WebDAV is active, sync from WebDAV in background (updates tree when done)
-  if (_webdavActive()) _runWebdavSync();
 }
 
 let _syncInProgress = false;
@@ -758,7 +766,8 @@ async function openNoteModal(pageId, focusTitle = false) {
         descEl.value = data.content || '';
         noteModalOrig.desc = data.content || '';
         page.description   = data.content || '';
-        _pageMetaCache.set(pageId, { serverLastModified: data.lastModified });
+        _pageLoadedAt.set(pageId, data.lastModified || null);
+
       }
     } catch { /* fall back to cached */ }
     if (descEl.value.trim()) showNoteDescPreview();
@@ -784,16 +793,16 @@ async function submitNote() {
   const newLink  = document.getElementById('notePageLink').value.trim();
 
   if (_webdavActive()) {
-    // Conflict check: compare server's current lastModified with what we fetched
-    const cached = _pageMetaCache.get(noteModalPageId);
-    if (cached?.serverLastModified) {
+    // Conflict check: re-read the MD file and compare frontmatter lastModified
+    const loadedAt = _pageLoadedAt.get(noteModalPageId);
+    if (loadedAt) {
       try {
-        const metaR = await fetch(`${NOTES_PAGES_API}/${noteModalPageId}/meta`);
-        if (metaR.ok) {
-          const meta = await metaR.json();
-          const serverTime = meta.lastModified ? new Date(meta.lastModified).getTime() : 0;
-          const cachedTime = new Date(cached.serverLastModified).getTime();
-          if (serverTime > cachedTime) {
+        const r = await fetch(`${NOTES_PAGES_API}/${noteModalPageId}/content`);
+        if (r.ok) {
+          const { lastModified: serverLM } = await r.json();
+          const serverTime = serverLM ? new Date(serverLM).getTime() : 0;
+          const localTime  = new Date(loadedAt).getTime();
+          if (serverTime > localTime) {
             const overwrite = await showConfirm(
               'A newer version exists on the server. Overwrite it with your changes?',
               { okLabel: 'Overwrite', cancelLabel: 'Cancel' }
@@ -807,10 +816,11 @@ async function submitNote() {
     try {
       const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${noteModalPageId}`, {
         title: newTitle, description: newDesc, link: newLink,
+        linkedCards: page.linkedCards || [],
       });
       _applyNotesResult(data);
       // Update cache with new server time
-      _pageMetaCache.set(noteModalPageId, { serverLastModified: new Date().toISOString() });
+
     } catch (e) {
       await showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
       return;
@@ -916,6 +926,23 @@ function showNoteDescEditor() {
   document.getElementById('notePageDesc').style.display = '';
 }
 
+// Save a linkedCards change: PATCH via WebDAV if active, otherwise schedule CouchDB save.
+async function _saveLinkedCards(page) {
+  if (_webdavActive()) {
+    try {
+      const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${page.id}`, {
+        linkedCards: page.linkedCards,
+      });
+      _applyNotesResult(data);
+    } catch (e) {
+      console.warn('WebDAV linked cards save failed, using CouchDB:', e.message);
+      scheduleSaveNotes();
+    }
+  } else {
+    scheduleSaveNotes();
+  }
+}
+
 // ---- Linked Cards ----
 function renderLinkedCards(ids) {
   const container = document.getElementById('noteLinkedCardsList');
@@ -947,15 +974,15 @@ function renderLinkedCards(ids) {
     if (card && col) {
       mini.querySelector('.note-mini-card-body').addEventListener('click', () => { closeNoteModal(); openEditModal(col.id, card); });
     }
-    mini.querySelector('.note-mini-card-remove').addEventListener('click', e => {
+    mini.querySelector('.note-mini-card-remove').addEventListener('click', async e => {
       e.stopPropagation();
       const page = findNotePage(noteModalPageId, notesState.items);
       if (!page) return;
       page.linkedCards  = (page.linkedCards || []).filter(c => c !== id);
       page.lastModified = new Date().toISOString();
       renderLinkedCards(page.linkedCards);
-      scheduleSaveNotes();
       render();
+      await _saveLinkedCards(page);
     });
 
     container.appendChild(mini);
@@ -997,7 +1024,7 @@ function getOrCreateInbox() {
   return inbox;
 }
 
-function createAndLinkCard(text) {
+async function createAndLinkCard(text) {
   if (!text.trim()) return;
   const inbox  = getOrCreateInbox();
   const cardId = uid();
@@ -1015,7 +1042,7 @@ function createAndLinkCard(text) {
     (target.linkedCards ??= []).push(cardId);
     target.lastModified = new Date().toISOString();
     renderLinkedCards(target.linkedCards);
-    scheduleSaveNotes();
+    await _saveLinkedCards(target);
   }
 }
 
@@ -1050,7 +1077,7 @@ function initNoteCardSearch() {
       item.innerHTML =
         `<span class="note-card-search-col">${escHtml(card.col)}</span>` +
         `<span class="note-card-search-text">${escHtml(short)}</span>`;
-      item.addEventListener('click', () => {
+      item.addEventListener('click', async () => {
         const page = findNotePage(noteModalPageId, notesState.items);
         if (!page) return;
         if (!page.linkedCards) page.linkedCards = [];
@@ -1058,8 +1085,8 @@ function initNoteCardSearch() {
           page.linkedCards.push(card.id);
           page.lastModified = new Date().toISOString();
           renderLinkedCards(page.linkedCards);
-          scheduleSaveNotes();
           render();
+          await _saveLinkedCards(page);
         }
         input.value = '';
         results.style.display = 'none';
@@ -1134,9 +1161,9 @@ document.addEventListener('drop', async e => {
 
   (target.linkedCards ??= []).push(cardId);
   target.lastModified = new Date().toISOString();
-  scheduleSaveNotes();
   if (noteModalPageId === pageId) renderLinkedCards(target.linkedCards);
   render();
+  await _saveLinkedCards(target);
 }, true);
 
 function initNotesDropZone() { /* wired above via document capture listeners */ }
@@ -1176,9 +1203,9 @@ document.addEventListener('touchend', e => {
     if (!await showConfirm(`Link "${label}" to page "${target.title}"?`, { okLabel: 'Link card' })) return;
     (target.linkedCards ??= []).push(cardId);
     target.lastModified = new Date().toISOString();
-    scheduleSaveNotes();
     if (noteModalPageId === pageId) renderLinkedCards(target.linkedCards);
     render();
+    await _saveLinkedCards(target);
   })();
 }, true);
 

@@ -168,16 +168,18 @@ function parseFm(text) {
   return { meta, body: m[2] };
 }
 
-function renderMd(page) {
-  const lines = ['---', `id: ${page.id}`];
-  if (page.link)          lines.push(`link: "${page.link}"`);
-  if (page.linkedCards?.length) {
-    lines.push('linkedCards:');
-    for (const c of page.linkedCards) lines.push(`  - ${c}`);
-  }
-  if (page.lastModified)  lines.push(`lastModified: ${page.lastModified}`);
+function renderMd(page, attachmentFiles = []) {
+  const lines = ['---', `id: ${page.id}`, `title: ${yamlStr(page.title || '')}`];
+  if (page.link)                lines.push(`link: ${yamlStr(page.link)}`);
+  if (page.linkedCards?.length) lines.push(`linkedCards: ${page.linkedCards.join(', ')}`);
+  if (page.lastModified)        lines.push(`lastModified: ${page.lastModified}`);
+  if (attachmentFiles.length)   lines.push(`attachments: ${attachmentFiles.map(f => `[[${f}]]`).join(', ')}`);
   lines.push('---', '', page.description || '');
   return lines.join('\n');
+}
+
+function yamlStr(s) {
+  return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
 // ---------------------------------------------------------------------------
@@ -253,10 +255,14 @@ async function syncFromWebdav(cfg, tree) {
         try {
           const text = await wdGet(cfg, relPath);
           const { meta, body } = parseFm(text);
-          existing.description  = body;
-          existing.lastModified = wdEntry.lastModified || new Date().toISOString();
-          if (meta.link)         existing.link         = meta.link;
-          if (meta.linkedCards)  existing.linkedCards  = meta.linkedCards.split(',').map(s => s.trim()).filter(Boolean);
+          existing.description    = body;
+          existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
+          if (meta.title)         existing.title        = meta.title;
+          existing.link           = meta.link || '';
+          existing.linkedCards    = meta.linkedCards
+            ? meta.linkedCards.split(',').map(s => s.trim()).filter(Boolean)
+            : [];
+          existing.hasAttachments = !!meta.attachments;
           changed = true;
         } catch { /* skip on error */ }
       }
@@ -268,13 +274,16 @@ async function syncFromWebdav(cfg, tree) {
         const segments = relPath.split('/');
         const titleFromSlug = segments[segments.length - 1].replace(/\.md$/, '');
         const newPage = {
-          type:         'page',
-          id:           meta.id || ('n-wd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
-          title:        meta.title || titleFromSlug,
-          description:  body,
-          link:         meta.link || '',
-          linkedCards:  [],
-          lastModified: wdEntry.lastModified || new Date().toISOString(),
+          type:           'page',
+          id:             meta.id || ('n-wd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
+          title:          meta.title || titleFromSlug,
+          description:    body,
+          link:           meta.link || '',
+          linkedCards:    meta.linkedCards
+            ? meta.linkedCards.split(',').map(s => s.trim()).filter(Boolean)
+            : [],
+          lastModified:   wdEntry.lastModified || new Date().toISOString(),
+          hasAttachments: !!meta.attachments,
         };
         // Place in correct folder or root
         if (segments.length > 1) {

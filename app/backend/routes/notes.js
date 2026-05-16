@@ -7,12 +7,101 @@ const { writeRateLimit }                                            = require('.
 const { withBoard, withExistingBoard, loadNotesData, saveNotesData } = require('../db');
 const { validateNotes, validateNotesPatch, schemaError }            = require('../schemas');
 const { NOTES_DOC_ID, ATTACHMENTS_DIR }                             = require('../config');
-const { getWebdavConfig } = require('./prompts');
 const {
   wdGet, wdPut, wdDelete, wdMove, wdMkcol, wdGetMeta,
   buildPath, parseFm, renderMd, syncFromWebdav,
   deletePageWithAttachments, deleteFolderWithAttachments,
 } = require('../webdav-notes');
+
+// ---------------------------------------------------------------------------
+// WebDAV config — stored per board under _id 'webdav-config'
+// ---------------------------------------------------------------------------
+const WEBDAV_CFG_ID = 'webdav-config';
+
+async function _loadWebdavDoc(db) {
+  try {
+    const { _id, _rev, ...data } = await db.get(WEBDAV_CFG_ID);
+    return { _rev, ...data };
+  } catch (err) {
+    if (err.statusCode === 404) return {};
+    throw err;
+  }
+}
+
+/** Returns full config including password — for internal backend use only. */
+async function getWebdavConfig(db) {
+  const doc = await _loadWebdavDoc(db);
+  return { enabled: doc.enabled ?? false, url: doc.url || '', user: doc.user || '', password: doc.password || '' };
+}
+
+router.get('/:board/webdav-config', withExistingBoard(async (req, res, db) => {
+  try {
+    const doc = await _loadWebdavDoc(db);
+    res.json({
+      enabled:     doc.enabled     ?? false,
+      url:         doc.url         || '',
+      user:        doc.user        || '',
+      hasPassword: !!(doc.password),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}));
+
+router.post('/:board/webdav-config/test', writeRateLimit, withExistingBoard(async (req, res, db) => {
+  try {
+    const stored   = await getWebdavConfig(db);
+    const url      = (typeof req.body.url  === 'string' && req.body.url.trim())  ? req.body.url.trim()  : stored.url;
+    const user     = (typeof req.body.user === 'string')                          ? req.body.user.trim() : stored.user;
+    const password = (typeof req.body.password === 'string' && req.body.password.length > 0)
+      ? req.body.password
+      : stored.password;
+
+    if (!url) return res.json({ ok: false, error: 'No WebDAV URL configured' });
+
+    const testUrl = url.endsWith('/') ? url : url + '/';
+    const headers = { Depth: '0', 'Content-Type': 'application/xml' };
+    if (user || password)
+      headers['Authorization'] = 'Basic ' + Buffer.from(`${user}:${password}`).toString('base64');
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    let r;
+    try {
+      r = await fetch(testUrl, { method: 'PROPFIND', headers, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (r.status === 207)
+      return res.json({ ok: true, message: `Connected — HTTP ${r.status} Multi-Status` });
+    if (r.status === 401 || r.status === 403)
+      return res.json({ ok: false, error: `Authentication failed (HTTP ${r.status})` });
+    if (r.status === 405)
+      return res.json({ ok: false, error: `Server reachable but PROPFIND not allowed (HTTP 405) — not a WebDAV endpoint?` });
+    return res.json({ ok: false, error: `Unexpected response: HTTP ${r.status}` });
+  } catch (err) {
+    const msg = err.name === 'AbortError' ? 'Connection timed out (8 s)' : err.message;
+    res.json({ ok: false, error: msg });
+  }
+}));
+
+router.put('/:board/webdav-config', writeRateLimit, withBoard(async (req, res, db) => {
+  try {
+    const { enabled, url, user, password } = req.body;
+    const existing = await _loadWebdavDoc(db);
+    const doc = {
+      _id:     WEBDAV_CFG_ID,
+      ...(existing._rev ? { _rev: existing._rev } : {}),
+      enabled: !!enabled,
+      url:     (typeof url  === 'string' ? url.trim()  : existing.url  || ''),
+      user:    (typeof user === 'string' ? user.trim() : existing.user || ''),
+      password: (typeof password === 'string' && password.length > 0)
+        ? password
+        : (existing.password || ''),
+    };
+    await db.insert(doc);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}));
 
 // ---------------------------------------------------------------------------
 // v1 → v2 migration
@@ -62,19 +151,61 @@ function normalizeNotes(data) {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Escape a string for YAML flow scalar (double-quoted). */
+function yamlStr(s) {
+  return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+}
+
+/** List attachment filenames for a page from the local filesystem. */
+function _getAttachmentFiles(board, pageId) {
+  if (!ATTACHMENTS_DIR) return [];
+  const dir = path.join(ATTACHMENTS_DIR, board, pageId);
+  try {
+    return fs.existsSync(dir) ? fs.readdirSync(dir).filter(n => !n.startsWith('.')) : [];
+  } catch { return []; }
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
 router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
   try {
-    const { _id, _rev, ...raw } = await db.get(NOTES_DOC_ID);
-    const data  = normalizeNotes(raw);
-    const etag  = `"${_rev}"`;
-    if (req.headers['if-none-match'] === etag) return res.status(304).end();
-    res.setHeader('ETag', etag);
+    let _rev, data;
+    try {
+      const { _id, _rev: rev, ...raw } = await db.get(NOTES_DOC_ID);
+      _rev = rev;
+      data = normalizeNotes(raw);
+    } catch (err) {
+      if (err.statusCode === 404) { data = { items: [], schemaVersion: 2 }; }
+      else throw err;
+    }
+
+    const cfg = await getWebdavConfig(db);
+    if (cfg.enabled) {
+      try {
+        const { tree, changed } = await syncFromWebdav(cfg, data);
+        if (changed) {
+          const result = await saveNotesData(db, tree);
+          _rev = result.rev;
+          data = tree;
+        }
+      } catch (wdErr) {
+        // WebDAV unavailable — serve from CouchDB cache
+        console.warn('WebDAV sync failed, serving from CouchDB cache:', wdErr.message);
+      }
+    }
+
+    const etag = _rev ? `"${_rev}"` : null;
+    if (etag) {
+      if (req.headers['if-none-match'] === etag) return res.status(304).end();
+      res.setHeader('ETag', etag);
+    }
     res.json(data);
   } catch (err) {
-    if (err.statusCode === 404) return res.json({ items: [], schemaVersion: 2 });
     throw err;
   }
 }));
@@ -142,11 +273,24 @@ router.get('/:board/notes/export', withExistingBoard(async (req, res, db) => {
         addItems(item.children || [], prefix + safeName + '/');
       } else {
         const dir = prefix + safeName + '/';
-        const md  = (item.description || '').replace(/\(attachment:([^)\s]+)\)/g, '(./attachments/$1)');
-        archive.append(md, { name: dir + 'page.md' });
         const aDir = path.join(boardDir, item.id);
-        if (fs.existsSync(aDir))
-          fs.readdirSync(aDir).filter(n => !n.startsWith('.')).forEach(f => {
+        const attachmentFiles = fs.existsSync(aDir)
+          ? fs.readdirSync(aDir).filter(n => !n.startsWith('.'))
+          : [];
+
+        // Build YAML frontmatter
+        const fmLines = ['---', `title: ${yamlStr(item.title || 'Untitled')}`];
+        if (item.link) fmLines.push(`link: ${yamlStr(item.link)}`);
+        if (item.linkedCards && item.linkedCards.length)
+          fmLines.push('linkedCards:', ...item.linkedCards.map(id => `  - ${id}`));
+        if (attachmentFiles.length)
+          fmLines.push('attachments:', ...attachmentFiles.map(f => `  - ${path.basename(f)}`));
+        fmLines.push('---', '');
+
+        const body = (item.description || '').replace(/\(attachment:([^)\s]+)\)/g, '(./attachments/$1)');
+        archive.append(fmLines.join('\n') + body, { name: dir + 'page.md' });
+
+        attachmentFiles.forEach(f => {
             const entryName = dir + 'attachments/' + path.basename(f);
             if (!entryName.includes('..')) archive.file(path.join(aDir, f), { name: entryName });
           });
@@ -209,7 +353,7 @@ function _insertItem(item, parentId, items) {
 
 // GET /:board/notes/pages/:id/content  — fetch page body fresh from WebDAV
 router.get('/:board/notes/pages/:id/content', withExistingBoard(async (req, res, db) => {
-  const cfg = await getWebdavConfig();
+  const cfg = await getWebdavConfig(db);
   if (!cfg.enabled) return res.status(400).json({ error: 'WebDAV not enabled' });
   const notes = await _loadNotes(db);
   const page  = _findItem(req.params.id, notes.items);
@@ -229,7 +373,7 @@ router.get('/:board/notes/pages/:id/content', withExistingBoard(async (req, res,
 
 // GET /:board/notes/pages/:id/meta  — get last-modified from WebDAV (conflict check)
 router.get('/:board/notes/pages/:id/meta', withExistingBoard(async (req, res, db) => {
-  const cfg = await getWebdavConfig();
+  const cfg = await getWebdavConfig(db);
   if (!cfg.enabled) return res.status(400).json({ error: 'WebDAV not enabled' });
   const notes = await _loadNotes(db);
   const page  = _findItem(req.params.id, notes.items);
@@ -246,19 +390,24 @@ router.get('/:board/notes/pages/:id/meta', withExistingBoard(async (req, res, db
 
 // POST /:board/notes/pages  — create page (+ WebDAV PUT)
 router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db) => {
+  const { board } = req.params;
   const { page, parentId } = req.body;
   if (!page?.id || !page?.title) return res.status(400).json({ error: 'page.id and page.title required' });
   const notes = await _loadNotes(db);
   if (_findItem(page.id, notes.items)) return res.status(409).json({ error: 'Page ID already exists' });
   _insertItem({ type: 'page', ...page }, parentId || null, notes.items);
-  const cfg = await getWebdavConfig();
+  const cfg = await getWebdavConfig(db);
   if (cfg.enabled) {
     const inserted = _findItem(page.id, notes.items);
     const pagePath = buildPath(inserted, notes.items);
     if (pagePath) {
-      const dir = pagePath.includes('/') ? pagePath.substring(0, pagePath.lastIndexOf('/') + 1) : '';
-      if (dir) await wdMkcol(cfg, dir).catch(() => {});
-      await wdPut(cfg, pagePath, renderMd(inserted));
+      try {
+        const dir = pagePath.includes('/') ? pagePath.substring(0, pagePath.lastIndexOf('/') + 1) : '';
+        if (dir) await wdMkcol(cfg, dir).catch(() => {});
+        await wdPut(cfg, pagePath, renderMd(inserted, _getAttachmentFiles(board, inserted.id)));
+      } catch (err) {
+        console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
+      }
     }
   }
   const result = await saveNotesData(db, notes);
@@ -267,12 +416,12 @@ router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db
 
 // PATCH /:board/notes/pages/:id  — update page fields (title, content, link, linkedCards)
 router.patch('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, res, db) => {
-  const { id } = req.params;
+  const { id, board } = req.params;
   const notes  = await _loadNotes(db);
   const page   = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
 
-  const cfg        = await getWebdavConfig();
+  const cfg        = await getWebdavConfig(db);
   const oldPath    = cfg.enabled ? buildPath(page, notes.items) : null;
   const titleChanged = req.body.title !== undefined && req.body.title !== page.title;
 
@@ -283,11 +432,17 @@ router.patch('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, re
   page.lastModified = new Date().toISOString();
 
   if (cfg.enabled && oldPath) {
-    const newPath = buildPath(page, notes.items);
-    if (titleChanged && newPath && newPath !== oldPath) {
-      await wdMove(cfg, oldPath, newPath);
-    } else if (newPath) {
-      await wdPut(cfg, newPath, renderMd(page));
+    try {
+      const newPath    = buildPath(page, notes.items);
+      const attachFiles = _getAttachmentFiles(board, page.id);
+      if (titleChanged && newPath && newPath !== oldPath) {
+        await wdMove(cfg, oldPath, newPath);
+        await wdPut(cfg, newPath, renderMd(page, attachFiles));
+      } else if (newPath) {
+        await wdPut(cfg, newPath, renderMd(page, attachFiles));
+      }
+    } catch (err) {
+      console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
     }
   }
   const result = await saveNotesData(db, notes);
@@ -301,7 +456,7 @@ router.delete('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, r
   const page  = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
 
-  const cfg = await getWebdavConfig();
+  const cfg = await getWebdavConfig(db);
   if (cfg.enabled) {
     const boardAttachDir = ATTACHMENTS_DIR ? path.join(ATTACHMENTS_DIR, board) : null;
     await deletePageWithAttachments(cfg, page, notes.items, boardAttachDir).catch(err => {
@@ -327,18 +482,22 @@ router.post('/:board/notes/pages/:id/move', writeRateLimit, withBoard(async (req
   const page  = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
 
-  const cfg     = await getWebdavConfig();
+  const cfg     = await getWebdavConfig(db);
   const oldPath = cfg.enabled ? buildPath(page, notes.items) : null;
 
   _removeItem(id, notes.items);
   _insertItem(page, folderId || null, notes.items);
 
   if (cfg.enabled && oldPath) {
-    const newPath = buildPath(page, notes.items);
-    if (newPath && newPath !== oldPath) {
-      const dir = newPath.includes('/') ? newPath.substring(0, newPath.lastIndexOf('/') + 1) : '';
-      if (dir) await wdMkcol(cfg, dir).catch(() => {});
-      await wdMove(cfg, oldPath, newPath);
+    try {
+      const newPath = buildPath(page, notes.items);
+      if (newPath && newPath !== oldPath) {
+        const dir = newPath.includes('/') ? newPath.substring(0, newPath.lastIndexOf('/') + 1) : '';
+        if (dir) await wdMkcol(cfg, dir).catch(() => {});
+        await wdMove(cfg, oldPath, newPath);
+      }
+    } catch (err) {
+      console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
     }
   }
   const result = await saveNotesData(db, notes);
@@ -352,7 +511,7 @@ router.post('/:board/notes/folders', writeRateLimit, withBoard(async (req, res, 
   const notes = await _loadNotes(db);
   if (_findItem(folder.id, notes.items)) return res.status(409).json({ error: 'Folder ID already exists' });
   _insertItem({ type: 'folder', ...folder, children: folder.children || [] }, parentId || null, notes.items);
-  const cfg = await getWebdavConfig();
+  const cfg = await getWebdavConfig(db);
   if (cfg.enabled) {
     const inserted   = _findItem(folder.id, notes.items);
     const folderPath = buildPath(inserted, notes.items);
@@ -371,12 +530,16 @@ router.patch('/:board/notes/folders/:id', writeRateLimit, withBoard(async (req, 
   const folder = _findItem(id, notes.items);
   if (!folder || folder.type !== 'folder') return res.status(404).json({ error: 'Folder not found' });
 
-  const cfg     = await getWebdavConfig();
+  const cfg     = await getWebdavConfig(db);
   const oldPath = cfg.enabled ? buildPath(folder, notes.items) : null;
   folder.title  = title;
   if (cfg.enabled && oldPath) {
-    const newPath = buildPath(folder, notes.items);
-    if (newPath && newPath !== oldPath) await wdMove(cfg, oldPath, newPath);
+    try {
+      const newPath = buildPath(folder, notes.items);
+      if (newPath && newPath !== oldPath) await wdMove(cfg, oldPath, newPath);
+    } catch (err) {
+      console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
+    }
   }
   const result = await saveNotesData(db, notes);
   res.json({ ok: true, notes, rev: result.rev });
@@ -389,7 +552,7 @@ router.delete('/:board/notes/folders/:id', writeRateLimit, withBoard(async (req,
   const folder = _findItem(id, notes.items);
   if (!folder || folder.type !== 'folder') return res.status(404).json({ error: 'Folder not found' });
 
-  const cfg = await getWebdavConfig();
+  const cfg = await getWebdavConfig(db);
   if (cfg.enabled) {
     const boardAttachDir = ATTACHMENTS_DIR ? path.join(ATTACHMENTS_DIR, board) : null;
     await deleteFolderWithAttachments(cfg, folder, notes.items, boardAttachDir).catch(err => {
@@ -409,13 +572,17 @@ router.post('/:board/notes/folders/:id/move', writeRateLimit, withBoard(async (r
   const folder = _findItem(id, notes.items);
   if (!folder || folder.type !== 'folder') return res.status(404).json({ error: 'Folder not found' });
 
-  const cfg     = await getWebdavConfig();
+  const cfg     = await getWebdavConfig(db);
   const oldPath = cfg.enabled ? buildPath(folder, notes.items) : null;
   _removeItem(id, notes.items);
   _insertItem(folder, parentId || null, notes.items);
   if (cfg.enabled && oldPath) {
-    const newPath = buildPath(folder, notes.items);
-    if (newPath && newPath !== oldPath) await wdMove(cfg, oldPath, newPath);
+    try {
+      const newPath = buildPath(folder, notes.items);
+      if (newPath && newPath !== oldPath) await wdMove(cfg, oldPath, newPath);
+    } catch (err) {
+      console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
+    }
   }
   const result = await saveNotesData(db, notes);
   res.json({ ok: true, notes, rev: result.rev });
@@ -423,7 +590,7 @@ router.post('/:board/notes/folders/:id/move', writeRateLimit, withBoard(async (r
 
 // POST /:board/notes/sync  — sync tree from WebDAV → CouchDB
 router.post('/:board/notes/sync', withBoard(async (req, res, db) => {
-  const cfg = await getWebdavConfig();
+  const cfg = await getWebdavConfig(db);
   if (!cfg.enabled) return res.json({ ok: true, changed: false, notes: await _loadNotes(db) });
   const notes = await _loadNotes(db);
   try {

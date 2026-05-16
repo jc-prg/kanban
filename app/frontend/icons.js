@@ -109,9 +109,19 @@ function _svgNotePages(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg>`;
 }
 
-// Circular arrows — WebDAV sync
+// Single circular arrow — sync / refresh
 function _svgSync(w = 12, h = 12) {
-  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 2A5 5 0 0 0 1.5 6"/><path d="M8.5 1l2 1.2-.1 2.3"/><path d="M1.5 10A5 5 0 0 0 10.5 6"/><path d="M3.5 11l-2-1.2.1-2.3"/></svg>`;
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 6a4.5 4.5 0 1 1-1.4-3.2"/><path d="M8.7 1.4L9.1 2.8L7.6 2.4"/></svg>`;
+}
+
+// Folder — note folders, file system folders
+function _svgFolder(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 5h10v5.5a.8.8 0 0 1-.8.8H1.8a.8.8 0 0 1-.8-.8V5z"/><path d="M1 5V3.5a.8.8 0 0 1 .8-.8h2.7L6 5"/></svg>`;
+}
+
+// Folder with stem and baseline — network/shared folder (e.g. WebDAV remote)
+function _svgNetworkFolder(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 3.5h10v4a.8.8 0 0 1-.8.8H1.8a.8.8 0 0 1-.8-.8V3.5z"/><path d="M1 3.5V2a.8.8 0 0 1 .8-.8h2.7L6 3.5"/><line x1="6" y1="8.3" x2="6" y2="10.5"/><line x1="2.5" y1="10.5" x2="9.5" y2="10.5"/></svg>`;
 }
 
 const SVGICONS = {
@@ -129,8 +139,10 @@ const SVGICONS = {
   description:  _svgDescription,
   moveTo:       _svgMoveTo,
   actions:      _svgActions,
-  notePages:    _svgNotePages,
-  sync:         _svgSync,
+  notePages:      _svgNotePages,
+  sync:           _svgSync,
+  folder:         _svgFolder,
+  networkFolder:  _svgNetworkFolder,
 };
 
 // ---- Icon registry (used to render the icon library in settings) ----
@@ -167,8 +179,11 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgDate(16, 16),         name: 'Date',             usage: 'Card start / end dates' },
   { type: 'svg', svg: _svgPriority(14, 16),     name: 'Priority',         usage: 'Card priority level (1–5)' },
   { type: 'svg', svg: _svgColorPalette(16, 16), name: 'Color palette',    usage: 'Color selection in card modal' },
-  { type: 'svg', svg: _svgCardInfo(16, 16),     name: 'Card info',        usage: 'Card info / history (context menu and card modal)' },
-  { type: 'svg', svg: _svgNotePages(16, 16),    name: 'Note pages',       usage: 'Note pages linked to this card' },
+  { type: 'svg', svg: _svgCardInfo(16, 16),       name: 'Card info',        usage: 'Card info / history (context menu and card modal)' },
+  { type: 'svg', svg: _svgNotePages(16, 16),     name: 'Note pages',       usage: 'Note pages linked to this card' },
+  { type: 'svg', svg: _svgSync(16, 16),          name: 'Sync',             usage: 'WebDAV sync status and trigger' },
+  { type: 'svg', svg: _svgFolder(16, 16),        name: 'Folder',           usage: 'Folder in the notes tree or file system' },
+  { type: 'svg', svg: _svgNetworkFolder(16, 16), name: 'Network folder',   usage: 'Remote folder (WebDAV / shared network location)' },
 ];
 
 // ---- Render icon library grid ----
