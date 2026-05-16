@@ -259,19 +259,29 @@ Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_
 
 ### Notes document (`_id: "notes"`)
 
-Stored as a separate CouchDB document per board.
+Stored as a separate CouchDB document per board. Schema version 2 — older v1 documents (with a `pages` array) are migrated automatically on read.
 
 ```jsonc
 {
-  "pages": [
+  "schemaVersion": 2,
+  "items": [
+    // folder — may contain any mix of pages and sub-folders
     {
-      "id": "string",
-      "title": "string",
-      "description": "string",  // optional, rendered as Markdown
-      "link": "string",          // optional, http/https only
-      "linkedCards": [],         // optional, card IDs linked to this page
-      "hasAttachments": false,   // optional, true when files have been uploaded
-      "children": []             // optional, nested pages (same structure, recursive)
+      "type":     "folder",
+      "id":       "string",
+      "title":    "string",
+      "children": []         // recursive — same item structure
+    },
+    // page
+    {
+      "type":         "page",
+      "id":           "string",
+      "title":        "string",
+      "description":  "string",   // optional, rendered as Markdown
+      "link":         "string",   // optional, http/https only
+      "linkedCards":  [],         // optional, card IDs linked to this page
+      "hasAttachments": false,    // optional, true when files have been uploaded
+      "lastModified": "ISO-8601"  // optional, set on save
     }
   ]
 }
