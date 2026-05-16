@@ -752,14 +752,12 @@ async function openNoteModal(pageId, focusTitle = false) {
   autoResizeTitle(nt);
   if (focusTitle) requestAnimationFrame(() => { nt.focus(); nt.select(); });
 
+  const loadingEl = document.getElementById('noteModalLoading');
+
   // WebDAV: fetch fresh content from server
   if (_webdavActive()) {
-    const descEl    = document.getElementById('notePageDesc');
-    const previewEl = document.getElementById('notePageDescPreview');
-    const loadingHtml = '<span class="note-attach-empty">Loading…</span>';
-    previewEl.innerHTML = loadingHtml;
-    previewEl.style.display = '';
-    descEl.style.display = 'none';
+    const descEl = document.getElementById('notePageDesc');
+    if (loadingEl) loadingEl.style.display = 'flex';
     try {
       const data = await fetch(`${NOTES_PAGES_API}/${pageId}/content`).then(r => r.ok ? r.json() : null);
       if (data) {
@@ -767,11 +765,15 @@ async function openNoteModal(pageId, focusTitle = false) {
         noteModalOrig.desc = data.content || '';
         page.description   = data.content || '';
         _pageLoadedAt.set(pageId, data.lastModified || null);
-
       }
     } catch { /* fall back to cached */ }
+    finally {
+      if (loadingEl) loadingEl.style.display = 'none';
+    }
     if (descEl.value.trim()) showNoteDescPreview();
     else showNoteDescEditor();
+  } else {
+    if (loadingEl) loadingEl.style.display = 'none';
   }
 }
 

@@ -719,12 +719,23 @@ function handleUrlHash() {
     }
   } else if (hash.startsWith('note:')) {
     const noteId = hash.slice(5);
-    if (findNotePage(noteId, notesState.items || notesState.pages || [])) openNoteModal(noteId);
+    if (findNotePage(noteId, notesState.items || notesState.pages || [])) {
+      openNoteModal(noteId);
+    } else {
+      document.getElementById('noteModal').style.display = 'none';
+      const loadingEl = document.getElementById('noteModalLoading');
+      if (loadingEl) loadingEl.style.display = 'none';
+    }
   }
 }
 
 // ---- After-auth routing ----
 async function afterAuth() {
+  if (location.hash.startsWith('#note:')) {
+    document.getElementById('noteModal').style.display = 'flex';
+    const loadingEl = document.getElementById('noteModalLoading');
+    if (loadingEl) loadingEl.style.display = 'flex';
+  }
   // Prime WebDAV config before anything else reads window.WEBDAV_CFG (board-only)
   if (BOARD_NAME && typeof loadWebdavSettings === 'function') await loadWebdavSettings();
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
