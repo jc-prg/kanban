@@ -515,7 +515,7 @@ function renderNotesList(items, container, depth) {
 
 function _renderFolderItem(folder, container, depth) {
   const isExpanded  = notesExpanded.has(folder.id);
-  const hasChildren = (folder.children || []).length > 0;
+  const hasChildren = (folder.children || []).length > 0 || _webdavActive();
 
   const el = document.createElement('div');
   el.className = 'notes-tree-item notes-tree-item--folder';
