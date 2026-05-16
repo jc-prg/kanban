@@ -450,15 +450,19 @@ async function syncRootFromWebdav(cfg, tree) {
   _buildPathMap(newTree.items || [], pathMap, '');
 
   let changed = false;
+  const matchedIds = new Set();
 
   for (const [relPath, wdEntry] of wdMap) {
     if (wdEntry.isCollection) {
       const seg = relPath.replace(/\/$/, '');
       const existing = pathMap.get(relPath);
       if (existing) {
+        matchedIds.add(existing.id);
         if (!existing.wdPath) { existing.wdPath = relPath; changed = true; }
+        delete existing.orphaned;
       } else {
-        _findOrCreateFolder(newTree.items, seg, relPath);
+        const folder = _findOrCreateFolder(newTree.items, seg, relPath);
+        matchedIds.add(folder.id);
         changed = true;
       }
       continue;
@@ -466,6 +470,7 @@ async function syncRootFromWebdav(cfg, tree) {
     const existing = pathMap.get(relPath);
     const wdTime   = wdEntry.lastModified ? new Date(wdEntry.lastModified).getTime() : 0;
     if (existing) {
+      matchedIds.add(existing.id);
       const cacheTime = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
       if (!existing.wdPath || wdTime > cacheTime) {
         try {
@@ -482,11 +487,20 @@ async function syncRootFromWebdav(cfg, tree) {
         const text = await wdGet(cfg, relPath);
         const { meta, body } = parseFm(text);
         const newPage = _newPageFromWd(relPath, meta, body, wdEntry);
+        matchedIds.add(newPage.id);
         newTree.items.push(newPage);
         changed = true;
       } catch { /* skip */ }
     }
   }
+
+  // Mark root-level items absent from WebDAV as orphaned (scoped to what we queried).
+  for (const item of newTree.items) {
+    if (!matchedIds.has(item.id)) {
+      if (!item.orphaned) { item.orphaned = true; changed = true; }
+    }
+  }
+
   return { tree: newTree, changed };
 }
 
@@ -531,15 +545,19 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
   if (!newFolderItem.children) newFolderItem.children = [];
 
   let changed = false;
+  const matchedIds = new Set();
 
   for (const [relPath, wdEntry] of wdMap) {
     if (wdEntry.isCollection) {
       const existing = newPathMap.get(relPath);
       if (existing) {
+        matchedIds.add(existing.id);
         if (!existing.wdPath) { existing.wdPath = relPath; changed = true; }
+        delete existing.orphaned;
       } else {
         const seg = relPath.replace(/\/$/, '').split('/').pop();
-        _findOrCreateFolder(newFolderItem.children, seg, relPath);
+        const folder = _findOrCreateFolder(newFolderItem.children, seg, relPath);
+        matchedIds.add(folder.id);
         newPathMap.clear();
         _buildPathMap(newTree.items, newPathMap, '');
         changed = true;
@@ -549,6 +567,7 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
     const existing = newPathMap.get(relPath);
     const wdTime   = wdEntry.lastModified ? new Date(wdEntry.lastModified).getTime() : 0;
     if (existing) {
+      matchedIds.add(existing.id);
       const cacheTime = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
       if (!existing.wdPath || wdTime > cacheTime) {
         try {
@@ -565,6 +584,7 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
         const text = await wdGet(cfg, relPath);
         const { meta, body } = parseFm(text);
         const newPage = _newPageFromWd(relPath, meta, body, wdEntry);
+        matchedIds.add(newPage.id);
         newFolderItem.children.push(newPage);
         newPathMap.clear();
         _buildPathMap(newTree.items, newPathMap, '');
@@ -572,6 +592,14 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
       } catch { /* skip */ }
     }
   }
+
+  // Mark direct children of this folder absent from WebDAV as orphaned.
+  for (const item of newFolderItem.children) {
+    if (!matchedIds.has(item.id)) {
+      if (!item.orphaned) { item.orphaned = true; changed = true; }
+    }
+  }
+
   return { tree: newTree, changed };
 }
 
