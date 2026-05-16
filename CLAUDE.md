@@ -287,6 +287,41 @@ Stored as a separate CouchDB document per board. Schema version 2 — older v1 d
 }
 ```
 
+### WebDAV file format (on the server)
+
+Each note page is stored as a Markdown file with a YAML front-matter block. Folders map to WebDAV collections (directories).
+
+**Directory layout:**
+```
+<webdav-root>/
+  page-title.md              # root-level page (slug = title with / \ : * ? " < > | replaced by _)
+  folder-name/               # folder (same slugging)
+    child-page.md
+    _attachments/            # attachments for pages inside this folder
+      <pageId>_filename.ext
+  _attachments/              # attachments for root-level pages
+    <pageId>_filename.ext
+```
+
+**File format:**
+```markdown
+---
+id: n-abc123
+title: "My Note"
+source: "kanban"             # optional — set when written by the app
+link: "https://example.com" # optional
+linkedCards:                 # optional — each entry is "Card title (id-xxx)"
+  - Some card (id-abc123)
+lastModified: 2024-01-15T10:30:00.000Z
+attachments:                 # optional — filenames without the pageId prefix
+  - document.pdf
+---
+
+Markdown body of the note…
+```
+
+The `id` front-matter field ties the file back to the CouchDB item. On first sync the app writes its internal ID; files created directly on the WebDAV server (without an `id` field) get a generated `n-wd-<hex>` ID when imported. The `wdPath` field stored on CouchDB items tracks the authoritative relative path after any renames or moves, so the file is found even if the title slug would differ.
+
 ### WebDAV config document (`_id: "webdav-config"`)
 
 Stored as a separate CouchDB document per board. Never exposed to the browser (password stays server-side).
