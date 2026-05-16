@@ -11,7 +11,7 @@ const { getWebdavConfig }                 = require('./notes');
 const { wdPutBinary, wdDelete, wdMkcol, _titleToSlug } = require('../webdav-notes');
 
 function safePageId(id) {
-  return typeof id === 'string' && /^n-[a-z0-9]{1,20}$/.test(id);
+  return typeof id === 'string' && /^n-(?:wd-)?[a-z0-9]{1,20}$/.test(id);
 }
 function safeCardId(id) {
   return typeof id === 'string' && /^id-[a-z0-9]{1,10}$/.test(id);
