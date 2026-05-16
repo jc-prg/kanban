@@ -124,10 +124,10 @@ All tests use supertest against a running Express app wired to an in-memory or i
 
 | # | Test | Expected |
 |---|---|---|
-| N-1 | `GET /api/:board/notes` — no notes yet | 200, empty `{ pages: [] }` |
-| N-2 | `PUT /api/:board/notes` — valid nested structure | 200 |
-| N-3 | `PUT /api/:board/notes` — depth 3 (grandchild) | 400 |
-| N-4 | `PUT /api/:board/notes` — missing `pages` field | 400 |
+| N-1 | `GET /api/:board/notes` — no notes yet | 200, empty `{ items: [], schemaVersion: 2 }` |
+| N-2 | `PUT /api/:board/notes` — valid v2 structure (`items` with folders and pages) | 200 |
+| N-3 | `PUT /api/:board/notes` — depth 3 nesting | 200 — depth limit is UI-only; backend accepts any nesting |
+| N-4 | `PUT /api/:board/notes` — missing `items` field | 400 |
 | N-5 | `PUT /api/:board/notes` — page with invalid id (not `n-`) | 400 |
 | N-6 | `POST /api/:board/notes/attachments/:pageId` — upload file | 200 `{ name, size }` |
 | N-7 | `GET /api/:board/notes/attachments/:pageId` | Array with uploaded file |
@@ -136,6 +136,62 @@ All tests use supertest against a running Express app wired to an in-memory or i
 | N-10 | Upload file > 50 MB | 413 |
 | N-11 | Upload to invalid pageId (path traversal attempt) | 400 |
 | N-12 | `GET /api/:board/notes/export` | 200, ZIP stream with markdown files |
+
+### 1.7 Notes per-operation API — v2 endpoints (`notes-ops.test.js`)
+
+These endpoints were added in the v2 implementation (all routes live in
+`routes/notes.js`). WebDAV is mocked; the tests verify CouchDB mutations and
+the correct WebDAV primitive is called.
+
+#### WebDAV config
+
+| # | Test | Expected |
+|---|---|---|
+| WC-1 | `GET /:board/webdav-config` | 200 `{ enabled, url, user, hasPassword }` — no password in response |
+| WC-2 | `PUT /:board/webdav-config` — save credentials | 200; re-GET confirms values stored |
+| WC-3 | `POST /:board/webdav-config/test` — mock returns 207 | 200 `{ ok: true }` |
+| WC-4 | `POST /:board/webdav-config/test` — mock returns 401 | 200 `{ ok: false, error: "Authentication failed…" }` |
+| WC-5 | `POST /:board/webdav-config/test` — connection timeout | 200 `{ ok: false, error: "Connection timed out" }` |
+
+#### Page operations
+
+| # | Test | Expected |
+|---|---|---|
+| NP-1 | `POST /:board/notes/pages` — create at root | 201, page in `data.notes.items`; WebDAV PUT called |
+| NP-2 | `POST /:board/notes/pages` — create inside folder (`parentId`) | Page appears in folder's `children` |
+| NP-3 | `POST /:board/notes/pages` — duplicate `page.id` | 409 |
+| NP-4 | `PATCH /:board/notes/pages/:id` — update title | WebDAV MOVE called; new title in returned notes |
+| NP-5 | `PATCH /:board/notes/pages/:id` — update content only (same title) | WebDAV PUT called (no MOVE); content in returned notes |
+| NP-6 | `PATCH /:board/notes/pages/:id` — unknown id | 404 |
+| NP-7 | `DELETE /:board/notes/pages/:id` | Page removed from notes; WebDAV DELETE called |
+| NP-8 | `DELETE /:board/notes/pages/:id` — WebDAV DELETE fails | 500; page NOT removed from CouchDB |
+| NP-9 | `POST /:board/notes/pages/:id/move` — move to folder | Page appears in target folder; WebDAV MOVE called |
+| NP-10 | `POST /:board/notes/pages/:id/move` — move to root (`folderId: null`) | Page at root level |
+| NP-11 | `POST /:board/notes/pages/:id/move` — with `targetId` + `position: "before"` | Page inserted before target in array |
+| NP-12 | `GET /:board/notes/pages/:id/content` — WebDAV enabled | 200 `{ content, lastModified }` |
+| NP-13 | `GET /:board/notes/pages/:id/content` — WebDAV disabled | 400 |
+| NP-14 | `GET /:board/notes/pages/:id/meta` | 200 `{ lastModified, size }` |
+
+#### Folder operations
+
+| # | Test | Expected |
+|---|---|---|
+| NF-1 | `POST /:board/notes/folders` — create at root | Folder in `items`; WebDAV MKCOL called |
+| NF-2 | `POST /:board/notes/folders` — create nested (`parentId`) | Folder in parent's `children` |
+| NF-3 | `PATCH /:board/notes/folders/:id` — rename | WebDAV MOVE called; `wdPath` updated on folder and all descendants |
+| NF-4 | `DELETE /:board/notes/folders/:id` | Folder removed; WebDAV DELETE called |
+| NF-5 | `DELETE /:board/notes/folders/:id` — WebDAV DELETE fails | 500; folder NOT removed from CouchDB |
+| NF-6 | `POST /:board/notes/folders/:id/move` — move to new parent | Folder and children appear under new parent |
+| NF-7 | `POST /:board/notes/folders/:id/sync` | Returns updated subtree; saves if changed |
+
+#### Sync
+
+| # | Test | Expected |
+|---|---|---|
+| NS-1 | `POST /:board/notes/sync` no body — full scan | `syncFromWebdav` called; new WD files added to tree |
+| NS-2 | `POST /:board/notes/sync` `{ folderIds: [] }` — lazy | `syncRootFromWebdav` only |
+| NS-3 | `POST /:board/notes/sync` — file absent from WD | Item marked `orphaned: true` |
+| NS-4 | `POST /:board/notes/sync` — WebDAV disabled | 200 `{ ok: true, changed: false }` |
 
 ### 1.6 Card Attachments (`card-attachments.test.js`)
 
@@ -199,10 +255,12 @@ Pure-function tests using Vitest + jsdom. No network calls.
 
 | # | Test | Expected |
 |---|---|---|
-| NT-1 | `addNotePage(parentId)` creates child with unique `n-` id | Page appears in tree |
-| NT-2 | Adding child to depth-2 node is prevented | No grandchild created |
-| NT-3 | `deleteNotePage(id)` removes page and all its children | No orphaned children |
+| NT-1 | `addNotePage(parentId=null)` creates page at root with unique `n-` id and `type:"page"` | Page appears in `items` |
+| NT-2 | `addNoteFolder(parentId)` creates folder with unique `f-` id and `type:"folder"` | Folder in `items` or parent's `children` |
+| NT-3 | `deleteNoteItem(id)` on a page removes it; `deleteNoteItem(id)` on a folder removes folder and all contained pages | No orphaned items |
 | NT-4 | Linked card appears in page; unlinking removes it | `linkedCards` array updated |
+| NT-5 | `buildNotesPatch` — page content change, same tree structure | Returns `{ updatedPages: [changedPage] }` |
+| NT-6 | `buildNotesPatch` — page moved between folders (structure change) | Returns `null` (caller falls back to PUT) |
 
 ### 2.5 Analytics computations (`analytics.test.js`)
 
@@ -286,9 +344,9 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | # | Scenario |
 |---|---|
 | E-N-1 | Open notes sidebar → tree renders |
-| E-N-2 | Add top-level page → appears in tree |
-| E-N-3 | Add child page → nested under parent |
-| E-N-4 | Add grandchild page → blocked (max depth 2) |
+| E-N-2 | Add top-level page → appears in tree at root |
+| E-N-3 | Add folder → add page inside folder → page nested under folder |
+| E-N-4 | Add subfolder inside folder → add page inside it; attempt to add third-level subfolder → button absent (UI depth limit = 2 folder levels) |
 | E-N-5 | Edit page → markdown description previewed |
 | E-N-6 | Upload attachment to page → file listed |
 | E-N-7 | Insert attachment as markdown → `![name](url)` appears in editor |
@@ -319,7 +377,7 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | E-M-3 | Task list `- [ ] item` → interactive checkbox in preview |
 | E-M-4 | Code block → copy button present |
 | E-M-5 | `[toc]` in note description → table of contents rendered |
-| E-M-6 | `[subpages]` in note → child page titles rendered |
+| E-M-6 | ~~`[subpages]` in note → child page titles rendered~~ — **removed**: pages no longer have children in v2; only folders contain items |
 
 ### 3.9 Import flow (`import.spec.js`)
 
@@ -414,6 +472,13 @@ Implement in this order to get coverage fastest:
 - [x] Unit: search logic, notes helpers (sections 2.3–2.4) — 31 tests
 - [x] Security tests (section 4) — 15 tests
 
+**Phase 2.5 — Notes v2 per-operation API**
+- [ ] WebDAV config endpoints (WC-1–5)
+- [ ] Page operations (NP-1–14)
+- [ ] Folder operations (NF-1–7)
+- [ ] Sync (NS-1–4)
+- [ ] Unit: `buildNotesPatch` structural vs. content changes (NT-5–6)
+
 **Phase 3 — E2E**
 - [ ] Auth, board CRUD, drag-drop, search E2E (sections 3.1–3.5)
 - [ ] Notes E2E (section 3.6)
@@ -431,8 +496,8 @@ Create `tests/fixtures/` with:
 
 - `board-minimal.json` — one column, one card, no optional fields
 - `board-full.json` — multiple columns, cards with all fields, settings
-- `notes-simple.json` — flat pages, no children
-- `notes-nested.json` — pages with one level of children
+- `notes-simple.json` — flat pages at root, no folders (`schemaVersion: 2`)
+- `notes-nested.json` — folders containing pages, one level of nesting (`schemaVersion: 2`)
 - `import-plain.json` — plain array for import
 - `import-classified.json` — `{ relevant, excluded }` format
 - `import-jobs.json` — job-application objects
