@@ -77,6 +77,20 @@ beforeAll(() => {
 ;var __addNoteFolder    = function(parentId) { return addNoteFolder(parentId); };
 ;var __deleteNoteItem   = function(id) { return deleteNoteItem(id); };
 ;var __deleteNotePage   = function(id) { return deleteNotePage(id); };
+;var __getPendingPage   = function() { return _pendingNewPage; };
+;var __insertPendingPage = function() {
+  if (!_pendingNewPage) return null;
+  var p = _pendingNewPage; _pendingNewPage = null;
+  if (!p.parentId) { notesState.items.push(p.page); }
+  else {
+    var par = findNoteItem(p.parentId, notesState.items);
+    if (par && par.type === 'folder') {
+      if (!par.children) par.children = [];
+      par.children.push(p.page);
+    } else { notesState.items.push(p.page); }
+  }
+  renderNotesTree(); return p.page;
+};
 ;var __calls = { renderNotesTree: 0, scheduleSaveNotes: 0, openNoteModal: 0, openNoteModalLastArg: undefined };
 ;var __resetCalls = function() { __calls.renderNotesTree = 0; __calls.scheduleSaveNotes = 0; __calls.openNoteModal = 0; __calls.openNoteModalLastArg = undefined; };
 ;renderNotesTree   = function() { __calls.renderNotesTree++; };
@@ -99,20 +113,34 @@ describe('addNotePage()', () => {
   it('NT-1: creates top-level page with unique n- id', () => {
     ctx.__addNotePage(null)
 
+    // Page is pending until first save — not yet in state
+    const pending = ctx.__getPendingPage()
+    expect(pending).not.toBeNull()
+    expect(pending.page.type).toBe('page')
+    expect(pending.page.id).toMatch(/^n-/)
+    expect(pending.page.title).toBeTruthy()
+    expect(ctx.__calls.openNoteModal).toBe(1)
+    expect(ctx.__calls.openNoteModalLastArg).toBe(pending.page.id)
+
+    // After committing (simulates first modal save), page appears in state
+    ctx.__insertPendingPage()
     const items = ctx.__getNotesState().items
     expect(items).toHaveLength(1)
     expect(items[0].type).toBe('page')
     expect(items[0].id).toMatch(/^n-/)
-    expect(items[0].title).toBeTruthy()
     expect(ctx.__calls.renderNotesTree).toBe(1)
-    expect(ctx.__calls.openNoteModalLastArg).toBe(items[0].id)
   })
 
   it('NT-1: each call produces a unique id', () => {
     ctx.__addNotePage(null)
+    const id1 = ctx.__getPendingPage().page.id
+    ctx.__insertPendingPage()
+
     ctx.__addNotePage(null)
-    const items = ctx.__getNotesState().items
-    expect(items[0].id).not.toBe(items[1].id)
+    const id2 = ctx.__getPendingPage().page.id
+    ctx.__insertPendingPage()
+
+    expect(id1).not.toBe(id2)
   })
 
   it('creates page inside a folder', () => {
@@ -121,6 +149,7 @@ describe('addNotePage()', () => {
     ctx.__resetCalls()
 
     ctx.__addNotePage(folderId)
+    ctx.__insertPendingPage()
 
     const folder = ctx.__getNotesState().items[0]
     expect(folder.type).toBe('folder')
@@ -131,10 +160,12 @@ describe('addNotePage()', () => {
 
   it('ignores parentId that refers to a page (pages cannot contain pages)', () => {
     ctx.__addNotePage(null)
+    ctx.__insertPendingPage()
     const pageId = ctx.__getNotesState().items[0].id
     ctx.__resetCalls()
 
-    ctx.__addNotePage(pageId) // should fall back to root
+    ctx.__addNotePage(pageId) // parentId is a page → should fall back to root
+    ctx.__insertPendingPage()
 
     const items = ctx.__getNotesState().items
     expect(items).toHaveLength(2) // both at root level
@@ -194,6 +225,7 @@ describe('addNoteFolder() — depth behaviour', () => {
 describe('deleteNoteItem()', () => {
   it('NT-3: removes top-level page', () => {
     ctx.__addNotePage(null)
+    ctx.__insertPendingPage()
     const id = ctx.__getNotesState().items[0].id
     ctx.__resetCalls()
 
@@ -217,6 +249,7 @@ describe('deleteNoteItem()', () => {
     ctx.__addNoteFolder(null)
     const folderId = ctx.__getNotesState().items[0].id
     ctx.__addNotePage(folderId)
+    ctx.__insertPendingPage()
     const pageId = ctx.__getNotesState().items[0].children[0].id
 
     ctx.__deleteNoteItem(pageId)
@@ -228,6 +261,7 @@ describe('deleteNoteItem()', () => {
 
   it('deleteNotePage alias works the same way', () => {
     ctx.__addNotePage(null)
+    ctx.__insertPendingPage()
     const id = ctx.__getNotesState().items[0].id
 
     ctx.__deleteNotePage(id)
