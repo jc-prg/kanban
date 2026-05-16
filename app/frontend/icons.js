@@ -109,6 +109,11 @@ function _svgNotePages(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg>`;
 }
 
+// Circular arrows — WebDAV sync
+function _svgSync(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 2A5 5 0 0 0 1.5 6"/><path d="M8.5 1l2 1.2-.1 2.3"/><path d="M1.5 10A5 5 0 0 0 10.5 6"/><path d="M3.5 11l-2-1.2.1-2.3"/></svg>`;
+}
+
 const SVGICONS = {
   attachment:   _svgAttachment,
   link:         _svgLink,
@@ -125,6 +130,7 @@ const SVGICONS = {
   moveTo:       _svgMoveTo,
   actions:      _svgActions,
   notePages:    _svgNotePages,
+  sync:         _svgSync,
 };
 
 // ---- Icon registry (used to render the icon library in settings) ----

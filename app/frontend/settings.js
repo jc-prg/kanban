@@ -273,10 +273,13 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       // Board view: show stats for this board only
       const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.filter(card => !card.text?.startsWith('#')).length, 0);
 
-      function countPages(pages) {
-        return (pages || []).reduce((s, p) => s + 1 + countPages(p.children), 0);
+      const notesItems = typeof notesState !== 'undefined' ? (notesState.items || notesState.pages || []) : [];
+      function countItems(items) {
+        let n = 0;
+        for (const it of items) { if (it.type === 'folder') n += countItems(it.children || []); else n++; }
+        return n;
       }
-      const totalPages = countPages(typeof notesState !== 'undefined' ? notesState.pages : []);
+      const totalPages = countItems(notesItems);
 
       let attachCount = 0, attachSize = 0;
       try {
@@ -315,10 +318,101 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       renderTrackedCols();
     }
     loadApiKey();
+    loadWebdavSettings();
     backdrop.style.display = 'flex';
   }
 
   function closeSettings() { backdrop.style.display = 'none'; }
+
+  // ---- WebDAV config (stored server-side) ----
+
+  function _webdavFieldsVisible(show) {
+    document.getElementById('webdavFields').style.display = show ? '' : 'none';
+  }
+
+  async function loadWebdavSettings() {
+    try {
+      const r = await fetch('/api/webdav-config');
+      if (!r.ok) return;
+      const cfg = await r.json();
+      document.getElementById('webdavEnabledToggle').checked = cfg.enabled;
+      document.getElementById('webdavUrl').value             = cfg.url  || '';
+      document.getElementById('webdavUser').value            = cfg.user || '';
+      document.getElementById('webdavPass').value            = '';
+      document.getElementById('webdavPass').placeholder      = cfg.hasPassword ? '••••••••' : 'password';
+      _webdavFieldsVisible(cfg.enabled);
+      // Expose to the rest of the frontend (no password — backend handles it)
+      window.WEBDAV_CFG = cfg.enabled ? { enabled: true, url: cfg.url, user: cfg.user } : null;
+    } catch (_) {}
+  }
+
+  function flashIndicator(id, text) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    setTimeout(() => { el.textContent = ''; }, 2000);
+  }
+
+  document.getElementById('webdavEnabledToggle').addEventListener('change', function () {
+    _webdavFieldsVisible(this.checked);
+  });
+
+  function _showWebdavTestResult(ok, message) {
+    const el = document.getElementById('webdavTestResult');
+    el.textContent = (ok ? '✓ ' : '✗ ') + message;
+    el.className   = 'settings-webdav-result ' + (ok ? 'settings-webdav-result--ok' : 'settings-webdav-result--err');
+    el.style.display = '';
+  }
+
+  document.getElementById('webdavTestBtn').addEventListener('click', async () => {
+    const btn      = document.getElementById('webdavTestBtn');
+    const resultEl = document.getElementById('webdavTestResult');
+    const url      = document.getElementById('webdavUrl').value.trim();
+    const user     = document.getElementById('webdavUser').value.trim();
+    const pass     = document.getElementById('webdavPass').value;
+
+    btn.disabled     = true;
+    btn.textContent  = 'Testing…';
+    resultEl.style.display = 'none';
+
+    try {
+      const body = { url, user };
+      if (pass) body.password = pass;
+      const r    = await fetch('/api/webdav-config/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      _showWebdavTestResult(data.ok, data.ok ? data.message : data.error);
+    } catch (e) {
+      _showWebdavTestResult(false, 'Request failed: ' + e.message);
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Test connection';
+    }
+  });
+
+  document.getElementById('webdavSaveBtn').addEventListener('click', async () => {
+    const enabled = document.getElementById('webdavEnabledToggle').checked;
+    const url     = document.getElementById('webdavUrl').value.trim();
+    const user    = document.getElementById('webdavUser').value.trim();
+    const pass    = document.getElementById('webdavPass').value;
+    const body    = { enabled, url, user };
+    if (pass) body.password = pass;
+    try {
+      const r = await fetch('/api/webdav-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) { flashIndicator('webdavSaveIndicator', ' error'); return; }
+      await loadWebdavSettings();
+      flashIndicator('webdavSaveIndicator', ' ✓');
+    } catch (_) { flashIndicator('webdavSaveIndicator', ' error'); }
+  });
+
+  // Expose global loader so afterAuth can prime window.WEBDAV_CFG at startup
+  window.loadWebdavSettings = loadWebdavSettings;
 
   document.getElementById('menuSettings').addEventListener('click', () => {
     hideMenu();
@@ -590,12 +684,14 @@ function handleUrlHash() {
     }
   } else if (hash.startsWith('note:')) {
     const noteId = hash.slice(5);
-    if (findNotePage(noteId, notesState.pages)) openNoteModal(noteId);
+    if (findNotePage(noteId, notesState.items || notesState.pages || [])) openNoteModal(noteId);
   }
 }
 
 // ---- After-auth routing ----
 async function afterAuth() {
+  // Prime WebDAV config before anything else reads window.WEBDAV_CFG
+  if (typeof loadWebdavSettings === 'function') await loadWebdavSettings();
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;

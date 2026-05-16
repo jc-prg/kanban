@@ -638,12 +638,12 @@ function renderCardLinkedPages(cardId) {
   if (!list) return;
 
   const linked = [];
-  (function search(pages) {
-    for (const p of pages) {
-      if ((p.linkedCards || []).includes(cardId)) linked.push(p);
-      if (p.children?.length) search(p.children);
+  (function search(items) {
+    for (const item of items) {
+      if (item.type === 'folder') { search(item.children || []); continue; }
+      if ((item.linkedCards || []).includes(cardId)) linked.push(item);
     }
-  })(typeof notesState !== 'undefined' ? notesState.pages : []);
+  })(typeof notesState !== 'undefined' ? (notesState.items || notesState.pages || []) : []);
 
   const hasLinked = linked.length > 0;
   const wide = window.innerWidth >= 1200;
@@ -656,7 +656,7 @@ function renderCardLinkedPages(cardId) {
     chip.className = 'card-linked-page-chip';
     chip.textContent = page.title;
     const path = typeof getNotePath === 'function'
-      ? getNotePath(page.id, notesState.pages)
+      ? getNotePath(page.id, notesState.items || notesState.pages || [])
       : null;
     chip.title = path ? path.map(p => p.title).join(' › ') : page.title;
     chip.addEventListener('click', () => { closeModal(); openNoteModal(page.id); });

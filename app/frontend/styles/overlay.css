@@ -798,6 +798,46 @@
 
 .tracked-col-name { flex: 1; }
 
+.settings-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.settings-field-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 80px;
+}
+
+.settings-field-row .new-board-input {
+  flex: 1;
+}
+
+.settings-webdav-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+#webdavFields {
+  margin-top: 10px;
+}
+
+.settings-webdav-result {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.settings-webdav-result--ok  { color: #10b981; background: rgba(16,185,129,0.1); }
+.settings-webdav-result--err { color: var(--danger); background: rgba(240,79,106,0.1); }
+
 .settings-apikey-row {
   display: flex;
   gap: 8px;

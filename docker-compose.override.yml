@@ -1,0 +1,8 @@
+# Development overrides — NOT for production.
+# Docker Compose automatically merges this file when present.
+# Remove or rename this file before deploying to production.
+services:
+  kanban:
+    volumes:
+      - ./app/frontend:/app/frontend
+      - ./app/backend/server.js:/app/backend/server.js

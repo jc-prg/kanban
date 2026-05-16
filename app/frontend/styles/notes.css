@@ -76,6 +76,16 @@
 
 .notes-sidebar-add-btn:hover { color: var(--accent); background: var(--accent-glow); }
 
+.notes-sync-btn--spinning {
+  animation: notes-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes notes-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 .notes-tree-body {
   flex: 1;
   overflow-y: auto;
@@ -212,6 +222,35 @@
 .notes-item-btn--add:hover { color: var(--accent); background: var(--accent-glow); }
 .notes-item-btn--del:hover { color: var(--danger); background: rgba(240,79,106,0.1); }
 
+/* ---- Folder items ---- */
+.notes-tree-item--folder > .notes-item-title-wrap > .notes-item-folder-title {
+  font-weight: 600;
+}
+
+.notes-item-folder-title {
+  cursor: pointer;
+}
+
+.notes-folder-rename-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 1px 2px;
+  outline: none;
+  width: 100%;
+}
+
+.notes-folder-rename-input:focus {
+  border-bottom-color: var(--accent);
+}
+
 /* ---- Sidebar font-size toggle button ---- */
 .notes-font-btn {
   font-family: 'Syne', sans-serif;
@@ -223,8 +262,10 @@
 .notes-sidebar--font-lg .notes-font-btn { font-size: 1.05rem; }
 
 /* Font size overrides for sidebar tree titles */
-.notes-sidebar--font-md .notes-item-title { font-size: 0.9rem; }
-.notes-sidebar--font-lg .notes-item-title { font-size: 1.05rem; }
+.notes-sidebar--font-md .notes-item-title,
+.notes-sidebar--font-md .notes-folder-rename-input { font-size: 0.9rem; }
+.notes-sidebar--font-lg .notes-item-title,
+.notes-sidebar--font-lg .notes-folder-rename-input { font-size: 1.05rem; }
 
 /* ---- Note Edit Modal ---- */
 .note-modal {

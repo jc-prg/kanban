@@ -70,12 +70,12 @@ function getLinkBadgeHtml(url, href) {
 function _buildNoteLinkedSet() {
   const s = new Set();
   if (typeof notesState === 'undefined') return s;
-  (function collect(pages) {
-    for (const p of pages) {
-      for (const id of (p.linkedCards || [])) s.add(id);
-      collect(p.children || []);
+  (function collect(items) {
+    for (const item of items) {
+      if (item.type === 'folder') { collect(item.children || []); continue; }
+      for (const id of (item.linkedCards || [])) s.add(id);
     }
-  })(notesState.pages);
+  })(notesState.items || notesState.pages || []);
   return s;
 }
 

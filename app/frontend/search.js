@@ -98,13 +98,16 @@
     return str.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   }
 
-  function collectPages(pages, words, acc, breadcrumb) {
-    for (const page of pages) {
-      const path = [...breadcrumb, page];
-      const hay  = normalize(page.title + ' ' + (page.description || ''));
+  function collectPages(items, words, acc, breadcrumb) {
+    for (const item of items) {
+      if (item.type === 'folder') {
+        collectPages(item.children || [], words, acc, breadcrumb);
+        continue;
+      }
+      const path = [...breadcrumb, item];
+      const hay  = normalize(item.title + ' ' + (item.description || ''));
       if (words.length === 0 || words.every(w => hay.includes(w)))
-        acc.push({ page, path });
-      if (page.children?.length) collectPages(page.children, words, acc, path);
+        acc.push({ page: item, path });
     }
   }
 
@@ -133,7 +136,7 @@
     } else {
       const results = [];
       if (typeof notesState !== 'undefined')
-        collectPages(notesState.pages, words, results, []);
+        collectPages(notesState.items || notesState.pages || [], words, results, []);
       renderPageResults(results);
     }
   }
