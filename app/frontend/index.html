@@ -42,7 +42,6 @@
     <div class="header-dropdown" id="headerDropdown">
       <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
       <button class="header-dd-item" id="menuFindCard">Find</button>
-      <button class="header-dd-item" id="menuPrompts">Prompts</button>
       <button class="header-dd-item" id="menuAnalytics">Analyze</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
@@ -295,36 +294,6 @@
   </div>
 </div>
 
-<div id="promptsBackdrop" class="modal-backdrop" style="display:none">
-  <div class="modal prompts-modal">
-    <h2>Prompts</h2>
-    <div class="prompts-tabs">
-      <button class="prompts-tab active" data-tab="searchProfile">Search Profile</button>
-      <button class="prompts-tab" data-tab="criteriaInclude">Include</button>
-      <button class="prompts-tab" data-tab="criteriaExclude">Exclude</button>
-      <button class="prompts-tab" data-tab="searchRadius">Radius</button>
-    </div>
-    <div class="prompts-panels">
-      <div class="prompts-panel active" data-panel="searchProfile">
-        <textarea id="promptSearchProfile" class="prompt-textarea" placeholder="Describe the ideal candidate profile to search for…"></textarea>
-      </div>
-      <div class="prompts-panel" data-panel="criteriaInclude">
-        <textarea id="promptCriteriaInclude" class="prompt-textarea" placeholder="List criteria a job must meet to be included…"></textarea>
-      </div>
-      <div class="prompts-panel" data-panel="criteriaExclude">
-        <textarea id="promptCriteriaExclude" class="prompt-textarea" placeholder="List criteria that disqualify a job…"></textarea>
-      </div>
-      <div class="prompts-panel" data-panel="searchRadius">
-        <textarea id="promptSearchRadius" class="prompt-textarea" placeholder="Describe the geographic search radius…"></textarea>
-      </div>
-    </div>
-    <p id="promptsSaveMsg" class="prompts-save-msg"></p>
-    <div class="modal-actions">
-      <button class="btn" id="promptsCancelBtn">Cancel</button>
-      <button class="btn btn-accent" id="promptsSaveBtn">Save</button>
-    </div>
-  </div>
-</div>
 
 <div id="searchBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal search-modal">
@@ -543,6 +512,32 @@
         Send the key in HTTP requests via <code>x-api-key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.
         Set <code>API_KEY</code> in <code>.env</code> to enable external access.
       </p>
+    </div>
+    <div class="settings-section" id="promptsSection">
+      <div class="settings-section-title">Prompts<span class="settings-save-indicator" id="promptsSaveIndicator"></span></div>
+      <div class="prompts-tabs">
+        <button class="prompts-tab active" data-tab="searchProfile">Search Profile</button>
+        <button class="prompts-tab" data-tab="criteriaInclude">Include</button>
+        <button class="prompts-tab" data-tab="criteriaExclude">Exclude</button>
+        <button class="prompts-tab" data-tab="searchRadius">Radius</button>
+      </div>
+      <div class="prompts-panels">
+        <div class="prompts-panel active" data-panel="searchProfile">
+          <textarea id="promptSearchProfile" class="prompt-textarea" placeholder="Describe the ideal candidate profile to search for…"></textarea>
+        </div>
+        <div class="prompts-panel" data-panel="criteriaInclude">
+          <textarea id="promptCriteriaInclude" class="prompt-textarea" placeholder="List criteria a job must meet to be included…"></textarea>
+        </div>
+        <div class="prompts-panel" data-panel="criteriaExclude">
+          <textarea id="promptCriteriaExclude" class="prompt-textarea" placeholder="List criteria that disqualify a job…"></textarea>
+        </div>
+        <div class="prompts-panel" data-panel="searchRadius">
+          <textarea id="promptSearchRadius" class="prompt-textarea" placeholder="Describe the geographic search radius…"></textarea>
+        </div>
+      </div>
+      <div class="settings-webdav-actions">
+        <button class="btn btn-accent" id="promptsSaveBtn">Save prompts</button>
+      </div>
     </div>
     <div class="settings-section" id="boardExportSection" style="display:none">
       <div class="settings-section-title">Export / Import</div>

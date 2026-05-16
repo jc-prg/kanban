@@ -2,7 +2,7 @@ async function initInbox() {
   document.querySelector('.board-area').style.display = 'none';
   document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
-  ['menuInbox', 'menuPrompts', 'menuStatistics', 'menuSettings'].forEach(id => {
+  ['menuInbox', 'menuStatistics', 'menuSettings'].forEach(id => {
     document.getElementById(id).style.display = 'none';
   });
 

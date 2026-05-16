@@ -111,79 +111,6 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   document.getElementById('loginError').style.display = 'none';
 });
 
-// ---- Prompts dialog ----
-(function () {
-  const backdrop = document.getElementById('promptsBackdrop');
-  const saveMsg  = document.getElementById('promptsSaveMsg');
-
-  backdrop.querySelectorAll('.prompts-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      backdrop.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
-      backdrop.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
-      tab.classList.add('active');
-      backdrop.querySelector(`.prompts-panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
-    });
-  });
-
-  function setMsg(text, isError) {
-    saveMsg.textContent = text;
-    saveMsg.className = 'prompts-save-msg' + (isError ? ' prompts-save-msg-error' : ' prompts-save-msg-ok');
-    if (text) setTimeout(() => { saveMsg.textContent = ''; saveMsg.className = 'prompts-save-msg'; }, 3000);
-  }
-
-  window.openPromptsDialog = async function () {
-    backdrop.querySelectorAll('.prompts-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
-    backdrop.querySelectorAll('.prompts-panel').forEach((p, i) => p.classList.toggle('active', i === 0));
-    saveMsg.textContent = '';
-    saveMsg.className = 'prompts-save-msg';
-    document.getElementById('promptSearchProfile').value   = '';
-    document.getElementById('promptCriteriaInclude').value = '';
-    document.getElementById('promptCriteriaExclude').value = '';
-    document.getElementById('promptSearchRadius').value    = '';
-    backdrop.style.display = 'flex';
-    try {
-      const r = await fetch('/api/prompts');
-      if (!r.ok) throw new Error();
-      const data = await r.json();
-      document.getElementById('promptSearchProfile').value   = data.searchProfile   || '';
-      document.getElementById('promptCriteriaInclude').value = data.criteriaInclude || '';
-      document.getElementById('promptCriteriaExclude').value = data.criteriaExclude || '';
-      document.getElementById('promptSearchRadius').value    = data.searchRadius    || '';
-    } catch {
-      setMsg('Failed to load prompts.', true);
-    }
-  };
-
-  function closePromptsDialog() { backdrop.style.display = 'none'; }
-
-  document.getElementById('promptsCancelBtn').addEventListener('click', closePromptsDialog);
-  backdrop.addEventListener('click', e => { if (e.target === backdrop) closePromptsDialog(); });
-
-  document.getElementById('promptsSaveBtn').addEventListener('click', async () => {
-    const body = {
-      searchProfile:   document.getElementById('promptSearchProfile').value,
-      criteriaInclude: document.getElementById('promptCriteriaInclude').value,
-      criteriaExclude: document.getElementById('promptCriteriaExclude').value,
-      searchRadius:    document.getElementById('promptSearchRadius').value,
-    };
-    try {
-      const r = await fetch('/api/prompts', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) throw new Error();
-      setMsg('Saved.', false);
-    } catch {
-      setMsg('Failed to save.', true);
-    }
-  });
-
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && backdrop.style.display !== 'none') closePromptsDialog();
-  });
-})();
-
 // ---- Settings dialog ----
 (function () {
   const backdrop = document.getElementById('settingsBackdrop');
@@ -208,7 +135,51 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('boardExportSection').style.display = '';
     document.getElementById('dbSection').style.display = 'none';
     document.getElementById('apiKeySection').style.display = 'none';
+    document.getElementById('promptsSection').style.display = 'none';
+  } else {
+    document.getElementById('menuSettings').textContent = 'Global settings';
+    document.getElementById('webdavSection').style.display = 'none';
   }
+
+  // ---- Prompts tabs (overview only) ----
+  const promptsSection = document.getElementById('promptsSection');
+  promptsSection.querySelectorAll('.prompts-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      promptsSection.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
+      promptsSection.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      promptsSection.querySelector(`.prompts-panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
+    });
+  });
+
+  async function loadPrompts() {
+    try {
+      const r = await fetch('/api/prompts');
+      if (!r.ok) return;
+      const data = await r.json();
+      document.getElementById('promptSearchProfile').value   = data.searchProfile   || '';
+      document.getElementById('promptCriteriaInclude').value = data.criteriaInclude || '';
+      document.getElementById('promptCriteriaExclude').value = data.criteriaExclude || '';
+      document.getElementById('promptSearchRadius').value    = data.searchRadius    || '';
+    } catch {}
+  }
+
+  document.getElementById('promptsSaveBtn').addEventListener('click', async () => {
+    const body = {
+      searchProfile:   document.getElementById('promptSearchProfile').value,
+      criteriaInclude: document.getElementById('promptCriteriaInclude').value,
+      criteriaExclude: document.getElementById('promptCriteriaExclude').value,
+      searchRadius:    document.getElementById('promptSearchRadius').value,
+    };
+    try {
+      const r = await fetch('/api/prompts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) flashIndicator('promptsSaveIndicator', ' ✓');
+    } catch {}
+  });
 
   async function loadApiKey() {
     const input = document.getElementById('apiKeyDisplay');
@@ -319,6 +290,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     }
     loadApiKey();
     loadWebdavSettings();
+    if (!BOARD_NAME) loadPrompts();
     backdrop.style.display = 'flex';
   }
 
@@ -332,7 +304,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   async function loadWebdavSettings() {
     try {
-      const r = await fetch('/api/webdav-config');
+      const r = await fetch(`/api/${BOARD_NAME}/webdav-config`);
       if (!r.ok) return;
       const cfg = await r.json();
       document.getElementById('webdavEnabledToggle').checked = cfg.enabled;
@@ -377,7 +349,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     try {
       const body = { url, user };
       if (pass) body.password = pass;
-      const r    = await fetch('/api/webdav-config/test', {
+      const r    = await fetch(`/api/${BOARD_NAME}/webdav-config/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -400,7 +372,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     const body    = { enabled, url, user };
     if (pass) body.password = pass;
     try {
-      const r = await fetch('/api/webdav-config', {
+      const r = await fetch(`/api/${BOARD_NAME}/webdav-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -690,8 +662,8 @@ function handleUrlHash() {
 
 // ---- After-auth routing ----
 async function afterAuth() {
-  // Prime WebDAV config before anything else reads window.WEBDAV_CFG
-  if (typeof loadWebdavSettings === 'function') await loadWebdavSettings();
+  // Prime WebDAV config before anything else reads window.WEBDAV_CFG (board-only)
+  if (BOARD_NAME && typeof loadWebdavSettings === 'function') await loadWebdavSettings();
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;

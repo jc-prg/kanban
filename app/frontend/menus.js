@@ -398,8 +398,7 @@ document.addEventListener('keydown', e => {
 
   document.getElementById('menuFindCard').addEventListener('click', () => { closeMenu(); openSearch(); });
   document.getElementById('menuAnalytics').addEventListener('click', () => { closeMenu(); openAnalytics(); });
-  document.getElementById('menuPrompts').addEventListener('click', () => { closeMenu(); openPromptsDialog(); });
-  document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); openStatsDialog(); });
+document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); openStatsDialog(); });
   document.getElementById('statsCloseBtn').addEventListener('click', () => { document.getElementById('statsBackdrop').style.display = 'none'; });
   document.getElementById('menuLogout').addEventListener('click', async () => {
     closeMenu();
