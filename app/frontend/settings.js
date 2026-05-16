@@ -744,6 +744,15 @@ async function afterAuth() {
     document.getElementById('boardSwitchWrap').style.display = '';
     document.getElementById('notesToggleBtn').style.display = '';
     await load();
+    // If the sidebar was open on last visit, open it immediately and show a
+    // loading indicator so the panel is visible while notes are being fetched.
+    if (state.settings?.notesSidebarOpen) {
+      const w = state.settings?.notesSidebarWidth;
+      if (w >= SIDEBAR_MIN) sidebarWidth = Math.min(w, _sidebarMax());
+      toggleNotesSidebar();
+      const treeBody = document.getElementById('notesTreeBody');
+      if (treeBody) treeBody.innerHTML = '<p class="notes-empty notes-loading">Loading\u2026</p>';
+    }
     await loadNotes();
     loadCardAttachSet();
     handleUrlHash();

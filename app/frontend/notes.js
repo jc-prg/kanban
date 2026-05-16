@@ -258,6 +258,18 @@ function findNotePage(id, items) {
   return null;
 }
 
+// Return the parent folder id of the item with given id (null = root, undefined = not found)
+function _getParentId(id, items, parentId = null) {
+  for (const item of items) {
+    if (item.id === id) return parentId;
+    if (item.type === 'folder') {
+      const r = _getParentId(id, item.children || [], item.id);
+      if (r !== undefined) return r;
+    }
+  }
+  return undefined;
+}
+
 // Get breadcrumb path from root to the item with given id
 function getNotePath(id, items, acc = []) {
   for (const item of items) {
@@ -1629,17 +1641,22 @@ function _initTreeTouchDragDrop() {
     _clearTreeDrop();
     if (!position) return;
 
+    const ttTargetId     = item.dataset.itemId;
+    const targetParentId = _getParentId(ttTargetId, notesState.items) ?? null;
     const dragged = _removeFromTree(savedId, notesState.items);
     if (!dragged) return;
-    if (position === 'into') { notesExpanded.add(item.dataset.itemId); _saveTreeOpenState(); }
-    _insertIntoTree(dragged, item.dataset.itemId, position, notesState.items);
+    if (position === 'into') { notesExpanded.add(ttTargetId); _saveTreeOpenState(); }
+    _insertIntoTree(dragged, ttTargetId, position, notesState.items);
 
     if (_webdavActive()) {
       _setTreeMoveLock(true);
       const isFolder  = dragged.type === 'folder';
       const moveApi   = isFolder ? `${NOTES_FOLD_API}/${dragged.id}/move` : `${NOTES_PAGES_API}/${dragged.id}/move`;
-      const newParent = position === 'into' ? item.dataset.itemId : null;
-      _notesOp('POST', moveApi, { folderId: newParent, parentId: newParent })
+      const newParent = position === 'into' ? ttTargetId : targetParentId;
+      const body = position === 'into'
+        ? { folderId: newParent, parentId: newParent }
+        : { folderId: newParent, parentId: newParent, targetId: ttTargetId, position };
+      _notesOp('POST', moveApi, body)
         .then(data => { _applyNotesResult(data); renderNotesTree(); })
         .catch(async e => {
           await showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });
@@ -1717,6 +1734,8 @@ function _initTreeDragDrop() {
     if (!position) return;
 
     const targetId = item.dataset.itemId;
+    // Capture target's current parent BEFORE mutating the tree
+    const targetParentId = _getParentId(targetId, notesState.items) ?? null;
     const dragged  = _removeFromTree(_treeDragId, notesState.items);
     if (!dragged) return;
 
@@ -1727,9 +1746,12 @@ function _initTreeDragDrop() {
       _setTreeMoveLock(true);
       const isFolder  = dragged.type === 'folder';
       const moveApi   = isFolder ? `${NOTES_FOLD_API}/${dragged.id}/move` : `${NOTES_PAGES_API}/${dragged.id}/move`;
-      // Determine new parent: 'into' → targetId is the folder; before/after → parent of target
-      const newParent = position === 'into' ? targetId : null;
-      _notesOp('POST', moveApi, { folderId: newParent, parentId: newParent })
+      // 'into': new parent is the target folder; 'before'/'after': keep target's parent
+      const newParent = position === 'into' ? targetId : targetParentId;
+      const body = position === 'into'
+        ? { folderId: newParent, parentId: newParent }
+        : { folderId: newParent, parentId: newParent, targetId, position };
+      _notesOp('POST', moveApi, body)
         .then(data => { _applyNotesResult(data); renderNotesTree(); })
         .catch(async e => {
           await showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });

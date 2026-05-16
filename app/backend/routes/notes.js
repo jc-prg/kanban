@@ -342,15 +342,22 @@ function _removeItem(id, items) {
   return null;
 }
 
-function _insertItem(item, parentId, items) {
-  if (!parentId) { items.push(item); return true; }
-  const parent = _findItem(parentId, items);
-  if (parent && parent.type === 'folder') {
-    if (!parent.children) parent.children = [];
-    parent.children.push(item);
-    return true;
+function _insertItem(item, parentId, items, targetId = null, position = null) {
+  let targetArr;
+  if (!parentId) {
+    targetArr = items;
+  } else {
+    const parent = _findItem(parentId, items);
+    targetArr = (parent?.type === 'folder') ? (parent.children ??= []) : items;
   }
-  items.push(item); // fallback to root
+  if (targetId && (position === 'before' || position === 'after')) {
+    const idx = targetArr.findIndex(i => i.id === targetId);
+    if (idx !== -1) {
+      targetArr.splice(position === 'before' ? idx : idx + 1, 0, item);
+      return true;
+    }
+  }
+  targetArr.push(item); // fallback: append
   return true;
 }
 
@@ -518,7 +525,7 @@ router.delete('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, r
 // POST /:board/notes/pages/:id/move  — move page to different folder (or root)
 router.post('/:board/notes/pages/:id/move', writeRateLimit, withBoard(async (req, res, db) => {
   const { id } = req.params;
-  const { folderId } = req.body; // null/undefined = move to root
+  const { folderId, targetId, position } = req.body; // null/undefined = move to root
   const notes = await _loadNotes(db);
   const page  = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
@@ -527,7 +534,7 @@ router.post('/:board/notes/pages/:id/move', writeRateLimit, withBoard(async (req
   const oldPath = cfg.enabled ? (page.wdPath || buildPath(page, notes.items)) : null;
 
   _removeItem(id, notes.items);
-  _insertItem(page, folderId || null, notes.items);
+  _insertItem(page, folderId || null, notes.items, targetId || null, position || null);
 
   if (cfg.enabled && oldPath) {
     try {
@@ -626,7 +633,7 @@ router.delete('/:board/notes/folders/:id', writeRateLimit, withBoard(async (req,
 // POST /:board/notes/folders/:id/move  — move folder to different parent (or root)
 router.post('/:board/notes/folders/:id/move', writeRateLimit, withBoard(async (req, res, db) => {
   const { id }      = req.params;
-  const { parentId } = req.body;
+  const { parentId, targetId, position } = req.body;
   const notes  = await _loadNotes(db);
   const folder = _findItem(id, notes.items);
   if (!folder || folder.type !== 'folder') return res.status(404).json({ error: 'Folder not found' });
@@ -634,7 +641,7 @@ router.post('/:board/notes/folders/:id/move', writeRateLimit, withBoard(async (r
   const cfg     = await getWebdavConfig(db);
   const oldPath = cfg.enabled ? (folder.wdPath || buildPath(folder, notes.items)) : null;
   _removeItem(id, notes.items);
-  _insertItem(folder, parentId || null, notes.items);
+  _insertItem(folder, parentId || null, notes.items, targetId || null, position || null);
   if (cfg.enabled && oldPath) {
     try {
       const savedWdPath = folder.wdPath;
