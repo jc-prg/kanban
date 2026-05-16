@@ -228,10 +228,13 @@
   line-height: 1;
 }
 
-.notes-item-btn--add:hover { color: var(--accent); background: var(--accent-glow); }
+.notes-item-btn--add:hover,
+.notes-item-btn--add-folder:hover { color: var(--accent); background: var(--accent-glow); }
 .notes-item-btn--del:hover { color: var(--danger); background: rgba(240,79,106,0.1); }
 
 /* ---- Folder items ---- */
+
+.notes-tree-item--folder .notes-item-btns { margin-left: auto; }
 
 .notes-item-folder-title {
   cursor: pointer;

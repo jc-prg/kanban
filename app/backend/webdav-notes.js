@@ -163,6 +163,14 @@ function buildPath(item, tree) {
   return null;
 }
 
+// Returns the folder prefix (e.g. "folder/sub/") for a page's _attachments location.
+// Root-level pages return "".
+function getAttachmentPrefix(page, tree) {
+  const p = buildPath(page, tree);
+  if (!p || !p.includes('/')) return '';
+  return p.substring(0, p.lastIndexOf('/') + 1);
+}
+
 // ---------------------------------------------------------------------------
 // Front-matter
 // ---------------------------------------------------------------------------
@@ -259,7 +267,7 @@ async function syncFromWebdav(cfg, tree) {
   const wdMap = new Map();
   for (const e of wdEntries) {
     const h = e.href.replace(/^\//, '');
-    if (!h || h === '' || h.startsWith('_attachments')) continue;
+    if (!h || h === '' || h.split('/').includes('_attachments')) continue;
     // Skip hidden files/folders (any path segment starting with '.')
     if (h.split('/').some(seg => seg.startsWith('.'))) continue;
     // Only keep directories and .md files
@@ -352,41 +360,62 @@ async function syncFromWebdav(cfg, tree) {
 // Deletion helpers
 // ---------------------------------------------------------------------------
 
-function _listLocalAttachments(boardAttachDir, pageId) {
+// Returns original filenames (without the "<pageId>_" prefix) for a page's attachments.
+function _listLocalAttachments(boardAttachDir, pageId, prefix = '') {
   if (!boardAttachDir) return [];
-  const dir = path.join(boardAttachDir, pageId);
-  try { return fs.existsSync(dir) ? fs.readdirSync(dir).filter(n => !n.startsWith('.')) : []; }
-  catch { return []; }
+  const dir = path.join(boardAttachDir, prefix, '_attachments');
+  try {
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter(n => !n.startsWith('.') && n.startsWith(pageId + '_'))
+      .map(n => n.slice(pageId.length + 1));
+  } catch { return []; }
 }
 
 async function deletePageWithAttachments(cfg, page, tree, boardAttachDir) {
   const pagePath = buildPath(page, tree);
+  const prefix   = pagePath && pagePath.includes('/') ? pagePath.substring(0, pagePath.lastIndexOf('/') + 1) : '';
   if (pagePath) await wdDelete(cfg, pagePath);
-  // Delete WebDAV _attachments/<pageId>_<filename> entries
-  for (const f of _listLocalAttachments(boardAttachDir, page.id))
-    await wdDelete(cfg, `_attachments/${page.id}_${f}`).catch(() => {});
-  // Delete local files
+  const attachFiles = _listLocalAttachments(boardAttachDir, page.id, prefix);
+  for (const f of attachFiles)
+    await wdDelete(cfg, `${prefix}_attachments/${page.id}_${f}`).catch(() => {});
   if (boardAttachDir) {
-    try { fs.rmSync(path.join(boardAttachDir, page.id), { recursive: true, force: true }); } catch { /* ok */ }
+    for (const f of attachFiles) {
+      try { fs.unlinkSync(path.join(boardAttachDir, prefix, '_attachments', `${page.id}_${f}`)); } catch { /* ok */ }
+    }
   }
 }
 
 async function deleteFolderWithAttachments(cfg, folder, tree, boardAttachDir) {
-  const pageIds    = _collectPageIds(folder.children || []);
+  // Collect pages with their attachment prefixes before the folder is removed from the tree
+  const pageInfos = [];
+  function _collect(items) {
+    for (const item of items) {
+      if (item.type === 'page') {
+        const p      = buildPath(item, tree);
+        const prefix = p && p.includes('/') ? p.substring(0, p.lastIndexOf('/') + 1) : '';
+        pageInfos.push({ id: item.id, prefix });
+      }
+      if (item.type === 'folder') _collect(item.children || []);
+    }
+  }
+  _collect(folder.children || []);
+
   const folderPath = buildPath(folder, tree);
-  if (folderPath) await wdDelete(cfg, folderPath);
-  for (const id of pageIds) {
-    for (const f of _listLocalAttachments(boardAttachDir, id))
-      await wdDelete(cfg, `_attachments/${id}_${f}`).catch(() => {});
-    if (boardAttachDir) {
-      try { fs.rmSync(path.join(boardAttachDir, id), { recursive: true, force: true }); } catch { /* ok */ }
+  if (folderPath) await wdDelete(cfg, folderPath); // WebDAV recursive delete covers _attachments inside
+
+  if (boardAttachDir) {
+    for (const { id, prefix } of pageInfos) {
+      for (const f of _listLocalAttachments(boardAttachDir, id, prefix)) {
+        try { fs.unlinkSync(path.join(boardAttachDir, prefix, '_attachments', `${id}_${f}`)); } catch { /* ok */ }
+      }
     }
   }
 }
 
 module.exports = {
   wdGet, wdPut, wdPutBinary, wdDelete, wdMove, wdMkcol, wdPropfind, wdGetMeta,
-  buildPath, parseFm, renderMd,
+  buildPath, getAttachmentPrefix, parseFm, renderMd,
   syncFromWebdav, deletePageWithAttachments, deleteFolderWithAttachments,
   _titleToSlug, _buildPathMap, _collectPageIds,
 };

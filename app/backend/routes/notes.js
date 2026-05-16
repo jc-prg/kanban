@@ -9,7 +9,7 @@ const { validateNotes, validateNotesPatch, schemaError }            = require('.
 const { NOTES_DOC_ID, ATTACHMENTS_DIR }                             = require('../config');
 const {
   wdGet, wdPut, wdDelete, wdMove, wdMkcol, wdGetMeta,
-  buildPath, parseFm, renderMd, syncFromWebdav,
+  buildPath, getAttachmentPrefix, parseFm, renderMd, syncFromWebdav,
   deletePageWithAttachments, deleteFolderWithAttachments,
 } = require('../webdav-notes');
 
@@ -159,12 +159,15 @@ function yamlStr(s) {
   return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
-/** List attachment filenames for a page from the local filesystem. */
-function _getAttachmentFiles(board, pageId) {
+/** List original attachment filenames for a page from the local filesystem. */
+function _getAttachmentFiles(board, pageId, prefix = '') {
   if (!ATTACHMENTS_DIR) return [];
-  const dir = path.join(ATTACHMENTS_DIR, board, pageId);
+  const dir = path.join(ATTACHMENTS_DIR, board, prefix, '_attachments');
   try {
-    return fs.existsSync(dir) ? fs.readdirSync(dir).filter(n => !n.startsWith('.')) : [];
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter(n => !n.startsWith('.') && n.startsWith(pageId + '_'))
+      .map(n => n.slice(pageId.length + 1));
   } catch { return []; }
 }
 
@@ -266,34 +269,36 @@ router.get('/:board/notes/export', withExistingBoard(async (req, res, db) => {
   res.setHeader('Content-Disposition', `attachment; filename="notes-${board}.zip"`);
   archive.pipe(res);
 
-  function addItems(items, prefix) {
+  function addItems(items, zipPrefix) {
     for (const item of items) {
       const safeName = (item.title || 'Untitled').replace(/[/\\<>:|*?"]/g, '_').trim();
       if (item.type === 'folder') {
-        addItems(item.children || [], prefix + safeName + '/');
+        addItems(item.children || [], zipPrefix + safeName + '/');
       } else {
-        const dir = prefix + safeName + '/';
-        const aDir = path.join(boardDir, item.id);
-        const attachmentFiles = fs.existsSync(aDir)
-          ? fs.readdirSync(aDir).filter(n => !n.startsWith('.'))
+        const dir         = zipPrefix + safeName + '/';
+        const attachPrefix = getAttachmentPrefix(item, notes.items);
+        const aDir         = path.join(boardDir, attachPrefix, '_attachments');
+        const storedFiles  = fs.existsSync(aDir)
+          ? fs.readdirSync(aDir).filter(n => !n.startsWith('.') && n.startsWith(item.id + '_'))
           : [];
+        const originalNames = storedFiles.map(n => n.slice(item.id.length + 1));
 
         // Build YAML frontmatter
         const fmLines = ['---', `title: ${yamlStr(item.title || 'Untitled')}`];
         if (item.link) fmLines.push(`link: ${yamlStr(item.link)}`);
         if (item.linkedCards && item.linkedCards.length)
           fmLines.push('linkedCards:', ...item.linkedCards.map(id => `  - ${id}`));
-        if (attachmentFiles.length)
-          fmLines.push('attachments:', ...attachmentFiles.map(f => `  - ${path.basename(f)}`));
+        if (originalNames.length)
+          fmLines.push('attachments:', ...originalNames.map(f => `  - ${path.basename(f)}`));
         fmLines.push('---', '');
 
         const body = (item.description || '').replace(/_attachments\/n-[a-z0-9]+_([^)\s]+)/g, './attachments/$1');
         archive.append(fmLines.join('\n') + body, { name: dir + 'page.md' });
 
-        attachmentFiles.forEach(f => {
-            const entryName = dir + 'attachments/' + path.basename(f);
-            if (!entryName.includes('..')) archive.file(path.join(aDir, f), { name: entryName });
-          });
+        originalNames.forEach(f => {
+          const entryName = dir + 'attachments/' + path.basename(f);
+          if (!entryName.includes('..')) archive.file(path.join(aDir, `${item.id}_${f}`), { name: entryName });
+        });
       }
     }
   }
@@ -425,7 +430,7 @@ router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db
         const dir = pagePath.includes('/') ? pagePath.substring(0, pagePath.lastIndexOf('/') + 1) : '';
         if (dir) await wdMkcol(cfg, dir).catch(() => {});
         const lcEntries = await _linkedCardEntries(db, inserted.linkedCards);
-        await wdPut(cfg, pagePath, renderMd(inserted, _getAttachmentFiles(board, inserted.id), _sourceUrl(req, board, inserted.id), lcEntries));
+        await wdPut(cfg, pagePath, renderMd(inserted, _getAttachmentFiles(board, inserted.id, getAttachmentPrefix(inserted, notes.items)), _sourceUrl(req, board, inserted.id), lcEntries));
       } catch (err) {
         console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
       }
@@ -455,7 +460,7 @@ router.patch('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, re
   if (cfg.enabled && oldPath) {
     try {
       const newPath    = buildPath(page, notes.items);
-      const attachFiles = _getAttachmentFiles(board, page.id);
+      const attachFiles = _getAttachmentFiles(board, page.id, getAttachmentPrefix(page, notes.items));
       const source    = _sourceUrl(req, board, page.id);
       const lcEntries = await _linkedCardEntries(db, page.linkedCards);
       if (titleChanged && newPath && newPath !== oldPath) {
@@ -486,10 +491,13 @@ router.delete('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, r
       console.error('WebDAV delete page failed:', err.message);
     });
   } else {
-    // CouchDB-only: delete local attachments
+    // CouchDB-only: delete local attachment files for this page
     if (ATTACHMENTS_DIR) {
-      const localDir = path.join(ATTACHMENTS_DIR, board, id);
-      try { fs.rmSync(localDir, { recursive: true, force: true }); } catch { /* ok */ }
+      const prefix  = getAttachmentPrefix(page, notes.items);
+      const aDir    = path.join(ATTACHMENTS_DIR, board, prefix, '_attachments');
+      for (const f of _getAttachmentFiles(board, page.id, prefix)) {
+        try { fs.unlinkSync(path.join(aDir, `${page.id}_${f}`)); } catch { /* ok */ }
+      }
     }
   }
   _removeItem(id, notes.items);

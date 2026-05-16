@@ -5,10 +5,10 @@ const path    = require('path');
 const multer  = require('multer');
 const { writeRateLimit, uploadRateLimit } = require('../auth');
 const { validBoardName, getBoardDb }      = require('../db');
-const { ATTACHMENTS_DIR }                 = require('../config');
+const { ATTACHMENTS_DIR, NOTES_DOC_ID }   = require('../config');
 const { getDbSizeBytes }                  = require('../backup');
 const { getWebdavConfig }                 = require('./notes');
-const { wdPutBinary, wdDelete, wdMkcol } = require('../webdav-notes');
+const { wdPutBinary, wdDelete, wdMkcol, _titleToSlug } = require('../webdav-notes');
 
 function safePageId(id) {
   return typeof id === 'string' && /^n-[a-z0-9]{1,20}$/.test(id);
@@ -47,57 +47,105 @@ function fileFilter(req, file, cb) {
   cb(null, true);
 }
 
-function makeDiskStorage(subParamName) {
-  return multer.diskStorage({
-    destination(req, file, cb) {
-      const dir = path.join(ATTACHMENTS_DIR, req.params.board, req.params[subParamName]);
-      fs.mkdirSync(dir, { recursive: true });
-      cb(null, dir);
-    },
-    filename(req, file, cb) {
-      const safe = file.originalname
-        .replace(/[^a-zA-Z0-9._\- ]/g, '_').replace(/\s+/g, '_')
-        .replace(/^\./, '_').slice(0, 200) || 'file';
-      cb(null, safe);
-    },
-  });
+function _safeFilePart(name) {
+  return name.replace(/[^a-zA-Z0-9._\- ]/g, '_').replace(/\s+/g, '_')
+    .replace(/^\./, '_').slice(0, 200) || 'file';
 }
 
 const MULTER_OPTS = { fileFilter, limits: { fileSize: 50 * 1024 * 1024 } };
-const upload     = multer({ ...MULTER_OPTS, storage: makeDiskStorage('pageId') });
-const uploadCard = multer({ ...MULTER_OPTS, storage: makeDiskStorage('cardId') });
+
+// Card attachment storage (path does not depend on notes tree)
+const uploadCard = multer({
+  ...MULTER_OPTS,
+  storage: multer.diskStorage({
+    destination(req, file, cb) {
+      const dir = path.join(ATTACHMENTS_DIR, req.params.board, req.params.cardId);
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename(req, file, cb) { cb(null, _safeFilePart(file.originalname)); },
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Notes attachment helpers
+// ---------------------------------------------------------------------------
+
+/** Walk a v2 notes items array to find the folder-slug prefix of a page. */
+function _findPagePrefix(items, pageId, prefix = '') {
+  for (const item of items) {
+    if (item.type === 'page' && item.id === pageId) return prefix;
+    if (item.type === 'folder') {
+      const slug   = _titleToSlug(item.title);
+      const result = _findPagePrefix(item.children || [], pageId, prefix + slug + '/');
+      if (result !== null) return result;
+    }
+  }
+  return null;
+}
+
+/** Load notes tree from CouchDB and return the _attachments prefix for pageId. */
+async function _getPageAttachmentPrefix(board, pageId) {
+  try {
+    const db  = await getBoardDb(board);
+    const raw = await db.get(NOTES_DOC_ID).catch(() => null);
+    if (!raw) return '';
+    const items = (raw.schemaVersion === 2 && Array.isArray(raw.items)) ? raw.items : [];
+    return _findPagePrefix(items, pageId) ?? '';
+  } catch { return ''; }
+}
 
 // ---- Notes attachments ----
 
-router.get('/:board/notes/attachments/:pageId', (req, res) => {
+router.get('/:board/notes/attachments/:pageId', async (req, res) => {
   const { board, pageId } = req.params;
   if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
   if (!safePageId(pageId))   return res.status(400).json({ error: 'Invalid page id' });
-  const dir = path.join(ATTACHMENTS_DIR, board, pageId);
+  const prefix = await _getPageAttachmentPrefix(board, pageId);
+  const dir    = path.join(ATTACHMENTS_DIR, board, prefix, '_attachments');
   if (!fs.existsSync(dir)) return res.json([]);
   try {
-    const files = fs.readdirSync(dir).filter(n => !n.startsWith('.')).map(name => ({
-      name, size: fs.statSync(path.join(dir, name)).size,
-    }));
+    const files = fs.readdirSync(dir)
+      .filter(n => !n.startsWith('.') && n.startsWith(pageId + '_'))
+      .map(name => ({ name: name.slice(pageId.length + 1), size: fs.statSync(path.join(dir, name)).size }));
     res.json(files);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/:board/notes/attachments/:pageId', uploadRateLimit, (req, res) => {
+router.post('/:board/notes/attachments/:pageId', uploadRateLimit, async (req, res) => {
   const { board, pageId } = req.params;
   if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
   if (!safePageId(pageId))   return res.status(400).json({ error: 'Invalid page id' });
-  upload.single('file')(req, res, async err => {
+
+  const prefix    = await _getPageAttachmentPrefix(board, pageId);
+  const uploadDir = path.join(ATTACHMENTS_DIR, board, prefix, '_attachments');
+
+  const storage = multer.diskStorage({
+    destination(req, file, cb) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    },
+    filename(req, file, cb) { cb(null, `${pageId}_${_safeFilePart(file.originalname)}`); },
+  });
+
+  multer({ ...MULTER_OPTS, storage }).single('file')(req, res, async err => {
     if (err)       return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    res.json({ name: req.file.filename, size: req.file.size });
+    const originalName = req.file.filename.slice(pageId.length + 1);
+    res.json({ name: originalName, size: req.file.size });
     try {
       const db  = await getBoardDb(board);
       const cfg = await getWebdavConfig(db);
       if (cfg.enabled) {
-        await wdMkcol(cfg, '_attachments/').catch(() => {});
+        // Ensure all ancestor folders and _attachments collection exist
+        if (prefix) {
+          const parts = prefix.replace(/\/$/, '').split('/');
+          let cumPath = '';
+          for (const part of parts) { cumPath += part + '/'; await wdMkcol(cfg, cumPath).catch(() => {}); }
+        }
+        await wdMkcol(cfg, `${prefix}_attachments/`).catch(() => {});
         const buf = fs.readFileSync(req.file.path);
-        await wdPutBinary(cfg, `_attachments/${pageId}_${req.file.filename}`, buf, req.file.mimetype || 'application/octet-stream');
+        await wdPutBinary(cfg, `${prefix}_attachments/${req.file.filename}`, buf, req.file.mimetype || 'application/octet-stream');
       }
     } catch (wdErr) {
       console.warn('WebDAV attachment upload failed:', wdErr.message);
@@ -105,26 +153,30 @@ router.post('/:board/notes/attachments/:pageId', uploadRateLimit, (req, res) => 
   });
 });
 
-router.get('/:board/notes/attachments/:pageId/:filename', (req, res) => {
+router.get('/:board/notes/attachments/:pageId/:filename', async (req, res) => {
   const { board, pageId, filename } = req.params;
   if (!validBoardName(board) || !safePageId(pageId) || !safeFilename(filename))
     return res.status(400).json({ error: 'Invalid request' });
-  const root = path.join(ATTACHMENTS_DIR, board, pageId);
-  if (!fs.existsSync(path.join(root, filename))) return res.status(404).json({ error: 'Not found' });
+  const prefix = await _getPageAttachmentPrefix(board, pageId);
+  const dir    = path.join(ATTACHMENTS_DIR, board, prefix, '_attachments');
+  const stored = `${pageId}_${filename}`;
+  if (!fs.existsSync(path.join(dir, stored))) return res.status(404).json({ error: 'Not found' });
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.sendFile(filename, { root });
+  res.sendFile(stored, { root: dir });
 });
 
 router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, async (req, res) => {
   const { board, pageId, filename } = req.params;
   if (!validBoardName(board) || !safePageId(pageId) || !safeFilename(filename))
     return res.status(400).json({ error: 'Invalid request' });
-  try { fs.unlinkSync(path.join(ATTACHMENTS_DIR, board, pageId, filename)); } catch {}
+  const prefix = await _getPageAttachmentPrefix(board, pageId);
+  const dir    = path.join(ATTACHMENTS_DIR, board, prefix, '_attachments');
+  try { fs.unlinkSync(path.join(dir, `${pageId}_${filename}`)); } catch {}
   res.json({ ok: true });
   try {
     const db  = await getBoardDb(board);
     const cfg = await getWebdavConfig(db);
-    if (cfg.enabled) await wdDelete(cfg, `_attachments/${pageId}_${filename}`);
+    if (cfg.enabled) await wdDelete(cfg, `${prefix}_attachments/${pageId}_${filename}`);
   } catch (wdErr) {
     console.warn('WebDAV attachment delete failed:', wdErr.message);
   }
@@ -199,13 +251,49 @@ router.get('/:board/attachment-stats', (req, res) => {
   if (!fs.existsSync(boardDir)) return res.json({ count: 0, size: 0 });
   let count = 0, size = 0;
   try {
-    for (const sub of fs.readdirSync(boardDir)) {
-      const subDir = path.join(boardDir, sub);
+    function scan(dir) {
+      for (const entry of fs.readdirSync(dir)) {
+        if (entry.startsWith('.')) continue;
+        const full = path.join(dir, entry);
+        try {
+          if (fs.statSync(full).isDirectory()) {
+            if (entry === '_attachments') {
+              for (const f of fs.readdirSync(full).filter(n => !n.startsWith('.'))) {
+                count++;
+                size += fs.statSync(path.join(full, f)).size;
+              }
+            } else {
+              scan(full);
+            }
+          } else {
+            // card attachments stored flat under their cardId dir
+            count++;
+            size += fs.statSync(full).size;
+          }
+        } catch {}
+      }
+    }
+    // Board dir contains cardId dirs (flat files) and folder-path dirs (_attachments inside)
+    for (const entry of fs.readdirSync(boardDir)) {
+      if (entry.startsWith('.')) continue;
+      const full = path.join(boardDir, entry);
       try {
-        if (!fs.statSync(subDir).isDirectory()) continue;
-        for (const file of fs.readdirSync(subDir).filter(n => !n.startsWith('.'))) {
-          count++;
-          size += fs.statSync(path.join(subDir, file)).size;
+        if (!fs.statSync(full).isDirectory()) continue;
+        if (entry === '_attachments') {
+          // root-level notes attachments
+          for (const f of fs.readdirSync(full).filter(n => !n.startsWith('.'))) {
+            count++;
+            size += fs.statSync(path.join(full, f)).size;
+          }
+        } else if (/^id-[a-z0-9]{1,10}$/.test(entry)) {
+          // card attachment dir — flat files
+          for (const f of fs.readdirSync(full).filter(n => !n.startsWith('.'))) {
+            count++;
+            size += fs.statSync(path.join(full, f)).size;
+          }
+        } else {
+          // folder path — scan recursively for nested _attachments
+          scan(full);
         }
       } catch {}
     }

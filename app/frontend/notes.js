@@ -541,6 +541,7 @@ function _renderFolderItem(folder, container, depth) {
     `<button class="notes-toggle-btn${hasChildren ? '' : ' notes-toggle-btn--hidden'}" title="${isExpanded ? 'Collapse' : 'Expand'}">${isExpanded ? ICONS.collapse : ICONS.expand}</button>` +
     `<span class="notes-item-title notes-item-folder-title${depth === 0 ? ' notes-item-title--root' : ''}">${escHtml(folder.title)}</span>` +
     `<div class="notes-item-btns">` +
+      (depth < 2 ? `<button class="notes-item-btn notes-item-btn--add-folder" title="Add subfolder">${_svgFolder(10, 10)}</button>` : '') +
       `<button class="notes-item-btn notes-item-btn--add" title="Add page to folder">+</button>` +
       `<button class="notes-item-btn notes-item-btn--del" title="Delete folder">${ICONS.close}</button>` +
     `</div>`;
@@ -555,6 +556,13 @@ function _renderFolderItem(folder, container, depth) {
   el.querySelector('.notes-item-folder-title').addEventListener('click', e => {
     e.stopPropagation();
     _startFolderRename(el, folder);
+  });
+
+  el.querySelector('.notes-item-btn--add-folder')?.addEventListener('click', e => {
+    e.stopPropagation();
+    notesExpanded.add(folder.id);
+    _saveTreeOpenState();
+    addNoteFolder(folder.id);
   });
 
   el.querySelector('.notes-item-btn--add').addEventListener('click', e => {
