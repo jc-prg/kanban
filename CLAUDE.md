@@ -276,3 +276,29 @@ Stored as a separate CouchDB document per board.
   ]
 }
 ```
+
+### WebDAV config document (`_id: "webdav-config"`)
+
+Stored as a separate CouchDB document per board. Never exposed to the browser (password stays server-side).
+
+```jsonc
+{
+  "enabled": true,
+  "url":     "https://dav.example.com/notes/",
+  "user":    "alice",
+  "password": "s3cr3t"           // stored on the server, never returned to the frontend
+}
+```
+
+### Webhook config document (`_id: "webhook-config"`)
+
+Stored as a separate CouchDB document per board.
+
+```jsonc
+{
+  "enabled": true,
+  "name":    "Deploy",           // label shown as the board menu button
+  "url":     "https://hooks.example.com/…",
+  "method":  "POST"              // GET | POST | PUT | PATCH
+}
+```
