@@ -154,6 +154,11 @@ All `/api/*` routes require authentication via one of:
 | `PUT` | `/api/:board/notes` | Replace notes document; body: full notes object |
 | `GET` | `/api/:board/notes/export` | Download notes as a ZIP archive (Markdown + attachments) |
 | `GET` | `/api/:board/attachment-stats` | Returns `{ count, size }` for all attachments on the board |
+| `GET` | `/api/:board/webhook-config` | Load webhook config: `{ enabled, name, url, method }` |
+| `PUT` | `/api/:board/webhook-config` | Save webhook config; body: `{ enabled, name, url, method }` |
+| `POST` | `/api/:board/webhook/trigger` | Fire the configured webhook server-side; returns `{ ok, status?, error? }` |
+
+Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`) per board. The configured button name appears in the board menu; clicking it fires `POST /:board/webhook/trigger` which makes a server-side HTTP request (GET/POST/PUT/PATCH) to the URL and returns the result in a dialog.
 
 ### Notes attachments (`:pageId` format: `n-<alphanumeric>`)
 
