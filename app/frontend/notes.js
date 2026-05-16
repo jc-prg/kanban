@@ -1283,18 +1283,27 @@ function renderAttachments(pageId, files) {
 
 async function _handleAttachUpload(pageId, fileList) {
   if (!NOTES_ATTACH_API || !fileList.length) return;
-  for (const file of Array.from(fileList)) {
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
-    if (r.ok) {
-      _appendAttachMd('notePageDesc', (await r.json()).name);
-    } else {
-      const data = await r.json().catch(() => ({}));
-      await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+  const label = document.querySelector('label[for="noteAttachInput"]');
+  const input = document.getElementById('noteAttachInput');
+  if (label) label.textContent = 'Uploading…';
+  if (input) input.disabled = true;
+  try {
+    for (const file of Array.from(fileList)) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
+      if (r.ok) {
+        _appendAttachMd('notePageDesc', (await r.json()).name);
+      } else {
+        const data = await r.json().catch(() => ({}));
+        await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+      }
     }
+  } finally {
+    if (label) label.textContent = '+ Upload';
+    if (input) input.disabled = false;
+    loadAttachments(pageId);
   }
-  loadAttachments(pageId);
 }
 
 function _insertAttachmentMd(name, type) {

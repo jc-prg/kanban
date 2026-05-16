@@ -86,6 +86,16 @@ async function wdPut(cfg, relPath, content) {
     throw new Error(`PUT ${relPath} → ${r.status}`);
 }
 
+async function wdPutBinary(cfg, relPath, buffer, mimeType = 'application/octet-stream') {
+  const r = await fetch(_resolveUrl(cfg, relPath), {
+    method:  'PUT',
+    headers: { ..._authHeader(cfg), 'Content-Type': mimeType },
+    body:    buffer,
+  });
+  if (!r.ok && r.status !== 201 && r.status !== 204)
+    throw new Error(`PUT ${relPath} → ${r.status}`);
+}
+
 async function wdDelete(cfg, relPath) {
   const r = await fetch(_resolveUrl(cfg, relPath), { method: 'DELETE', headers: _authHeader(cfg) });
   if (!r.ok && r.status !== 404) throw new Error(`DELETE ${relPath} → ${r.status}`);
@@ -369,7 +379,7 @@ async function deleteFolderWithAttachments(cfg, folder, tree, boardAttachDir) {
 }
 
 module.exports = {
-  wdGet, wdPut, wdDelete, wdMove, wdMkcol, wdPropfind, wdGetMeta,
+  wdGet, wdPut, wdPutBinary, wdDelete, wdMove, wdMkcol, wdPropfind, wdGetMeta,
   buildPath, parseFm, renderMd,
   syncFromWebdav, deletePageWithAttachments, deleteFolderWithAttachments,
   _titleToSlug, _buildPathMap, _collectPageIds,

@@ -4,9 +4,11 @@ const fs      = require('fs');
 const path    = require('path');
 const multer  = require('multer');
 const { writeRateLimit, uploadRateLimit } = require('../auth');
-const { validBoardName }                  = require('../db');
+const { validBoardName, getBoardDb }      = require('../db');
 const { ATTACHMENTS_DIR }                 = require('../config');
 const { getDbSizeBytes }                  = require('../backup');
+const { getWebdavConfig }                 = require('./notes');
+const { wdPutBinary, wdDelete, wdMkcol } = require('../webdav-notes');
 
 function safePageId(id) {
   return typeof id === 'string' && /^n-[a-z0-9]{1,20}$/.test(id);
@@ -85,10 +87,21 @@ router.post('/:board/notes/attachments/:pageId', uploadRateLimit, (req, res) => 
   const { board, pageId } = req.params;
   if (!validBoardName(board)) return res.status(400).json({ error: 'Invalid board name' });
   if (!safePageId(pageId))   return res.status(400).json({ error: 'Invalid page id' });
-  upload.single('file')(req, res, err => {
+  upload.single('file')(req, res, async err => {
     if (err)       return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     res.json({ name: req.file.filename, size: req.file.size });
+    try {
+      const db  = await getBoardDb(board);
+      const cfg = await getWebdavConfig(db);
+      if (cfg.enabled) {
+        await wdMkcol(cfg, `_attachments/${pageId}/`).catch(() => {});
+        const buf = fs.readFileSync(req.file.path);
+        await wdPutBinary(cfg, `_attachments/${pageId}/${req.file.filename}`, buf, req.file.mimetype || 'application/octet-stream');
+      }
+    } catch (wdErr) {
+      console.warn('WebDAV attachment upload failed:', wdErr.message);
+    }
   });
 });
 
@@ -102,12 +115,19 @@ router.get('/:board/notes/attachments/:pageId/:filename', (req, res) => {
   res.sendFile(filename, { root });
 });
 
-router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, (req, res) => {
+router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, async (req, res) => {
   const { board, pageId, filename } = req.params;
   if (!validBoardName(board) || !safePageId(pageId) || !safeFilename(filename))
     return res.status(400).json({ error: 'Invalid request' });
   try { fs.unlinkSync(path.join(ATTACHMENTS_DIR, board, pageId, filename)); } catch {}
   res.json({ ok: true });
+  try {
+    const db  = await getBoardDb(board);
+    const cfg = await getWebdavConfig(db);
+    if (cfg.enabled) await wdDelete(cfg, `_attachments/${pageId}/${filename}`);
+  } catch (wdErr) {
+    console.warn('WebDAV attachment delete failed:', wdErr.message);
+  }
 });
 
 // ---- Card attachments ----

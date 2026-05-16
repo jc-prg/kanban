@@ -627,3 +627,4 @@ router.post('/:board/notes/sync', withBoard(async (req, res, db) => {
 }));
 
 module.exports = router;
+module.exports.getWebdavConfig = getWebdavConfig;
