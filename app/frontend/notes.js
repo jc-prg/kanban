@@ -290,19 +290,7 @@ async function addNotePage(parentId = null) {
     return;
   }
 
-  if (!parentId) {
-    notesState.items.push(page);
-  } else {
-    const parent = findNoteItem(parentId, notesState.items);
-    if (parent && parent.type === 'folder') {
-      if (!parent.children) parent.children = [];
-      parent.children.push(page);
-    } else {
-      notesState.items.push(page);
-    }
-  }
-  renderNotesTree();
-  scheduleSaveNotes();
+  _pendingNewPage = { page, parentId };
   openNoteModal(page.id, true);
 }
 
@@ -693,6 +681,7 @@ function resetNoteSections() {
 // ---- Note Modal ----
 let noteModalPageId = null;
 let noteModalOrig = { title: '', desc: '', link: '' };
+let _pendingNewPage = null; // { page, parentId } — set when "+" is clicked, inserted on first save
 
 async function _crumbNavigate(pageId) {
   if (noteModalHasChanges()) {
@@ -729,7 +718,8 @@ function _renderCrumb(path, currentTitle = null) {
 }
 
 async function openNoteModal(pageId, focusTitle = false) {
-  const page = findNotePage(pageId, notesState.items);
+  let page = findNotePage(pageId, notesState.items);
+  if (!page && _pendingNewPage?.page.id === pageId) page = _pendingNewPage.page;
   if (!page) return;
   noteModalPageId = pageId;
 
@@ -757,7 +747,7 @@ async function openNoteModal(pageId, focusTitle = false) {
     if (noteAutoSaveEl.checked) _startNoteAutoSave(); else _stopNoteAutoSave();
   }
   document.getElementById('noteModal').style.display = 'flex';
-  history.replaceState(null, '', '#note:' + pageId);
+  if (!_pendingNewPage) history.replaceState(null, '', '#note:' + pageId);
   const nt = document.getElementById('notePageTitle');
   autoResizeTitle(nt);
   if (focusTitle) requestAnimationFrame(() => { nt.focus(); nt.select(); });
@@ -791,11 +781,13 @@ function closeNoteModal() {
   document.getElementById('noteModal').style.display = 'none';
   document.getElementById('noteCreateCardForm').style.display = 'none';
   noteModalPageId = null;
+  _pendingNewPage = null;
 }
 
 async function submitNote() {
   if (!noteModalPageId) return;
-  const page = findNotePage(noteModalPageId, notesState.items);
+  let page = findNotePage(noteModalPageId, notesState.items);
+  if (!page && _pendingNewPage?.page.id === noteModalPageId) page = _pendingNewPage.page;
   if (!page) return;
 
   const newTitle = document.getElementById('notePageTitle').value.trim() || 'Untitled';
@@ -809,6 +801,25 @@ async function submitNote() {
 }
 
 async function _submitNote(newTitle, newDesc, newLink, page) {
+
+  // First save of a new (pending) page: insert it into state now
+  if (_pendingNewPage && _pendingNewPage.page.id === page.id) {
+    const { parentId } = _pendingNewPage;
+    if (!parentId) {
+      notesState.items.push(page);
+    } else {
+      const parent = findNoteItem(parentId, notesState.items);
+      if (parent && parent.type === 'folder') {
+        if (!parent.children) parent.children = [];
+        parent.children.push(page);
+      } else {
+        notesState.items.push(page);
+      }
+    }
+    _pendingNewPage = null;
+    if (!_webdavActive()) renderNotesTree();
+    history.replaceState(null, '', '#note:' + page.id);
+  }
 
   if (_webdavActive()) {
     // Conflict check: re-read the MD file and compare frontmatter lastModified
