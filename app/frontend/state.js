@@ -69,6 +69,32 @@ function showConfirm(msg, { okLabel = 'Confirm', cancelLabel = 'Cancel', altLabe
   });
 }
 
+// ---- Message dialog (info-only, no cancel) ----
+function showMessage(msg) {
+  return new Promise(resolve => {
+    document.getElementById('dialogMsg').textContent = msg;
+    const okBtn = document.getElementById('dialogOkBtn');
+    okBtn.textContent = 'OK';
+    okBtn.className   = 'btn btn-accent';
+    const cancelBtn = document.getElementById('dialogCancelBtn');
+    cancelBtn.style.display = 'none';
+    document.getElementById('dialogAltBtn').style.display = 'none';
+    const backdrop = document.getElementById('dialogBackdrop');
+    backdrop.style.display = 'flex';
+
+    const finish = () => {
+      backdrop.style.display  = 'none';
+      cancelBtn.style.display = '';
+      resolve();
+    };
+    okBtn.onclick = finish;
+    const onKey = e => {
+      if (e.key === 'Enter' || e.key === 'Escape') { document.removeEventListener('keydown', onKey); finish(); }
+    };
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 // ---- Constants ----
 const COLORS         = ['#7c6af7','#f59e0b','#10b981','#ec4899','#3b82f6','#f97316','#14b8a6','#ef4444'];
 const COL_COLORS     = ['#7c6af7','#f59e0b','#10b981','#ec4899','#3b82f6','#f97316','#14b8a6','#06b6d4'];

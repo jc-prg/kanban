@@ -44,6 +44,7 @@
       <button class="header-dd-item" id="menuFindCard">Find</button>
       <button class="header-dd-item" id="menuAnalytics">Analyze</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
+      <button class="header-dd-item" id="menuWebhook" style="display:none"></button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
       <div class="header-dd-separator"></div>
       <button class="header-dd-item header-dd-logout" id="menuLogout">Log out</button>
@@ -527,6 +528,46 @@
               </div>
               <div id="webdavTestResult" class="settings-webdav-result" style="display:none"></div>
             </div>
+          </div>
+        </div>
+
+        <div class="settings-section" id="webhookSection" data-settings-label="Webhook">
+          <div class="settings-section-title">
+            <span>Webhook</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Enable webhook</div>
+                <div class="settings-item-desc">Add a trigger button to the board menu. Clicking it sends a POST request server-side to the configured URL.</div>
+              </div>
+              <div class="settings-toggle">
+                <input type="checkbox" id="webhookEnabledToggle">
+                <span class="settings-toggle-track"></span>
+              </div>
+            </label>
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="webhookName">Button label</label>
+              <input id="webhookName" class="new-board-input" type="text" maxlength="64" placeholder="e.g. Deploy" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="webhookUrl">Webhook URL</label>
+              <input id="webhookUrl" class="new-board-input" type="url" placeholder="https://hooks.example.com/…" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="webhookMethod">HTTP Method</label>
+              <select id="webhookMethod" class="new-board-input">
+                <option value="POST">POST</option>
+                <option value="GET">GET</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+              </select>
+            </div>
+            <div class="settings-webdav-actions">
+              <button class="btn btn-accent" id="webhookSaveBtn">Save</button>
+            </div>
+            <div id="webhookSaveResult" class="settings-webdav-result" style="display:none"></div>
           </div>
         </div>
 

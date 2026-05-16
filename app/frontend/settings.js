@@ -139,6 +139,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   } else {
     document.getElementById('menuSettings').textContent = 'Global settings';
     document.getElementById('webdavSection').style.display = 'none';
+    document.getElementById('webhookSection').style.display = 'none';
   }
 
   // ---- Prompts tabs (overview only) ----
@@ -349,6 +350,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     }
     loadApiKey();
     loadWebdavSettings();
+    if (BOARD_NAME) loadWebhookSettings();
     if (!BOARD_NAME) { loadPrompts(); renderIconLibrary(); }
     buildSettingsNav();
     backdrop.style.display = 'flex';
@@ -448,6 +450,59 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   // Expose global loader so afterAuth can prime window.WEBDAV_CFG at startup
   window.loadWebdavSettings = loadWebdavSettings;
+
+  // ---- Webhook config (board-only, stored server-side) ----
+
+  function _updateWebhookMenuItem(cfg) {
+    const btn = document.getElementById('menuWebhook');
+    if (cfg.enabled && cfg.name && cfg.url) {
+      btn.textContent  = cfg.name;
+      btn.style.display = '';
+    } else {
+      btn.style.display = 'none';
+    }
+  }
+
+  async function loadWebhookSettings() {
+    if (!BOARD_NAME) return;
+    try {
+      const r = await fetch(`/api/${BOARD_NAME}/webhook-config`);
+      if (!r.ok) return;
+      const cfg = await r.json();
+      document.getElementById('webhookEnabledToggle').checked = cfg.enabled;
+      document.getElementById('webhookName').value            = cfg.name   || '';
+      document.getElementById('webhookUrl').value             = cfg.url    || '';
+      document.getElementById('webhookMethod').value          = cfg.method || 'POST';
+      _updateWebhookMenuItem(cfg);
+    } catch (_) {}
+  }
+
+  window.loadWebhookSettings = loadWebhookSettings;
+
+  document.getElementById('webhookSaveBtn').addEventListener('click', async () => {
+    const enabled = document.getElementById('webhookEnabledToggle').checked;
+    const name    = document.getElementById('webhookName').value.trim();
+    const url     = document.getElementById('webhookUrl').value.trim();
+    const method  = document.getElementById('webhookMethod').value;
+    const resultEl = document.getElementById('webhookSaveResult');
+    resultEl.style.display = 'none';
+    try {
+      const r = await fetch(`/api/${BOARD_NAME}/webhook-config`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ enabled, name, url, method }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        resultEl.textContent = '✗ ' + (data.error || 'Failed to save');
+        resultEl.className   = 'settings-webdav-result settings-webdav-result--err';
+        resultEl.style.display = '';
+        return;
+      }
+      _updateWebhookMenuItem({ enabled, name, url });
+      flashIndicator(' ✓');
+    } catch (_) { flashIndicator(' error'); }
+  });
 
   document.getElementById('menuSettings').addEventListener('click', () => {
     hideMenu();
@@ -736,8 +791,9 @@ async function afterAuth() {
     const loadingEl = document.getElementById('noteModalLoading');
     if (loadingEl) loadingEl.style.display = 'flex';
   }
-  // Prime WebDAV config before anything else reads window.WEBDAV_CFG (board-only)
-  if (BOARD_NAME && typeof loadWebdavSettings === 'function') await loadWebdavSettings();
+  // Prime WebDAV and webhook config at startup (board-only)
+  if (BOARD_NAME && typeof loadWebdavSettings  === 'function') await loadWebdavSettings();
+  if (BOARD_NAME && typeof loadWebhookSettings === 'function') await loadWebhookSettings();
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;

@@ -503,6 +503,7 @@
 .dialog-msg {
   font-size: 0.88rem;
   line-height: 1.65;
+  white-space: pre-wrap;
   color: var(--text);
   margin-bottom: 20px;
 }

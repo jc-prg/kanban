@@ -396,6 +396,28 @@ document.addEventListener('keydown', e => {
     });
   }
 
+  document.getElementById('menuWebhook').addEventListener('click', async () => {
+    closeMenu();
+    const btn = document.getElementById('menuWebhook');
+    const origText = btn.textContent;
+    btn.disabled    = true;
+    btn.textContent = 'Sending…';
+    let msg;
+    try {
+      const r    = await fetch(`/api/${BOARD_NAME}/webhook/trigger`, { method: 'POST' });
+      const data = await r.json();
+      msg = data.ok
+        ? `✓ Webhook sent successfully (HTTP ${data.status}).`
+        : `✗ Webhook failed:\n${data.error || 'Unknown error'}`;
+    } catch (err) {
+      msg = `✗ Request error:\n${err.message}`;
+    }
+    btn.textContent = '';
+    btn.disabled    = false;
+    btn.textContent = origText;
+    await showMessage(msg);
+  });
+
   document.getElementById('menuFindCard').addEventListener('click', () => { closeMenu(); openSearch(); });
   document.getElementById('menuAnalytics').addEventListener('click', () => { closeMenu(); openAnalytics(); });
 document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); openStatsDialog(); });

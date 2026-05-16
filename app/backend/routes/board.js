@@ -6,6 +6,79 @@ const { withBoard, withExistingBoard, loadBoardData, saveBoardData } = require('
 const { validateBoard, validateBoardPatch, validateInboxCards, schemaError } = require('../schemas');
 const { DOC_ID }                                              = require('../config');
 
+// ---------------------------------------------------------------------------
+// Webhook config — stored per board under _id 'webhook-config'
+// ---------------------------------------------------------------------------
+const WEBHOOK_CFG_ID = 'webhook-config';
+
+async function _loadWebhookDoc(db) {
+  try {
+    const { _id, _rev, ...data } = await db.get(WEBHOOK_CFG_ID);
+    return { _rev, ...data };
+  } catch (err) {
+    if (err.statusCode === 404) return {};
+    throw err;
+  }
+}
+
+router.get('/:board/webhook-config', withExistingBoard(async (req, res, db) => {
+  try {
+    const doc = await _loadWebhookDoc(db);
+    res.json({ enabled: doc.enabled ?? false, name: doc.name || '', url: doc.url || '', method: doc.method || 'POST' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}));
+
+router.put('/:board/webhook-config', writeRateLimit, withBoard(async (req, res, db) => {
+  try {
+    const { enabled, name, url, method } = req.body;
+    if (typeof url === 'string' && url.trim() && !/^https?:\/\//.test(url.trim()))
+      return res.status(400).json({ error: 'URL must start with http:// or https://' });
+    const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH']);
+    const existing = await _loadWebhookDoc(db);
+    const safeMethod = (typeof method === 'string' && ALLOWED_METHODS.has(method.toUpperCase()))
+      ? method.toUpperCase() : (existing.method || 'POST');
+    const doc = {
+      _id:     WEBHOOK_CFG_ID,
+      ...(existing._rev ? { _rev: existing._rev } : {}),
+      enabled: !!enabled,
+      name:    typeof name === 'string' ? name.trim().slice(0, 64) : (existing.name || ''),
+      url:     typeof url  === 'string' ? url.trim()               : (existing.url  || ''),
+      method:  safeMethod,
+    };
+    await db.insert(doc);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}));
+
+router.post('/:board/webhook/trigger', writeRateLimit, withExistingBoard(async (req, res, db) => {
+  try {
+    const doc = await _loadWebhookDoc(db);
+    if (!doc.enabled || !doc.url)
+      return res.status(400).json({ ok: false, error: 'Webhook not configured or disabled' });
+    const method = doc.method || 'POST';
+    const payload = { board: req.params.board, triggeredAt: new Date().toISOString() };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    let r;
+    try {
+      const hasBody = method !== 'GET';
+      r = await fetch(doc.url, {
+        method,
+        headers: hasBody ? { 'Content-Type': 'application/json' } : {},
+        ...(hasBody ? { body: JSON.stringify(payload) } : {}),
+        signal:  controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (r.ok) res.json({ ok: true, status: r.status });
+    else      res.json({ ok: false, error: `Webhook returned HTTP ${r.status}` });
+  } catch (err) {
+    const msg = err.name === 'AbortError' ? 'Webhook timed out (10 s)' : err.message;
+    res.json({ ok: false, error: msg });
+  }
+}));
+
 router.get('/:board/board', withExistingBoard(async (req, res, db) => {
   const { _id, _rev, ...data } = await db.get(DOC_ID);
   const etag = `"${_rev}"`;
