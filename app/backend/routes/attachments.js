@@ -95,9 +95,9 @@ router.post('/:board/notes/attachments/:pageId', uploadRateLimit, (req, res) => 
       const db  = await getBoardDb(board);
       const cfg = await getWebdavConfig(db);
       if (cfg.enabled) {
-        await wdMkcol(cfg, `_attachments/${pageId}/`).catch(() => {});
+        await wdMkcol(cfg, '_attachments/').catch(() => {});
         const buf = fs.readFileSync(req.file.path);
-        await wdPutBinary(cfg, `_attachments/${pageId}/${req.file.filename}`, buf, req.file.mimetype || 'application/octet-stream');
+        await wdPutBinary(cfg, `_attachments/${pageId}_${req.file.filename}`, buf, req.file.mimetype || 'application/octet-stream');
       }
     } catch (wdErr) {
       console.warn('WebDAV attachment upload failed:', wdErr.message);
@@ -124,7 +124,7 @@ router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, asy
   try {
     const db  = await getBoardDb(board);
     const cfg = await getWebdavConfig(db);
-    if (cfg.enabled) await wdDelete(cfg, `_attachments/${pageId}/${filename}`);
+    if (cfg.enabled) await wdDelete(cfg, `_attachments/${pageId}_${filename}`);
   } catch (wdErr) {
     console.warn('WebDAV attachment delete failed:', wdErr.message);
   }

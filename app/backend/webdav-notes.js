@@ -352,28 +352,34 @@ async function syncFromWebdav(cfg, tree) {
 // Deletion helpers
 // ---------------------------------------------------------------------------
 
+function _listLocalAttachments(boardAttachDir, pageId) {
+  if (!boardAttachDir) return [];
+  const dir = path.join(boardAttachDir, pageId);
+  try { return fs.existsSync(dir) ? fs.readdirSync(dir).filter(n => !n.startsWith('.')) : []; }
+  catch { return []; }
+}
+
 async function deletePageWithAttachments(cfg, page, tree, boardAttachDir) {
   const pagePath = buildPath(page, tree);
   if (pagePath) await wdDelete(cfg, pagePath);
-  // Also delete WebDAV _attachments/<pageId>/
-  await wdDelete(cfg, `_attachments/${page.id}/`);
-  // Delete local CouchDB attachment files
+  // Delete WebDAV _attachments/<pageId>_<filename> entries
+  for (const f of _listLocalAttachments(boardAttachDir, page.id))
+    await wdDelete(cfg, `_attachments/${page.id}_${f}`).catch(() => {});
+  // Delete local files
   if (boardAttachDir) {
-    const localDir = path.join(boardAttachDir, page.id);
-    try { fs.rmSync(localDir, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(path.join(boardAttachDir, page.id), { recursive: true, force: true }); } catch { /* ok */ }
   }
 }
 
 async function deleteFolderWithAttachments(cfg, folder, tree, boardAttachDir) {
-  const pageIds  = _collectPageIds(folder.children || []);
+  const pageIds    = _collectPageIds(folder.children || []);
   const folderPath = buildPath(folder, tree);
   if (folderPath) await wdDelete(cfg, folderPath);
-  // Delete attachment dirs
   for (const id of pageIds) {
-    await wdDelete(cfg, `_attachments/${id}/`).catch(() => {});
+    for (const f of _listLocalAttachments(boardAttachDir, id))
+      await wdDelete(cfg, `_attachments/${id}_${f}`).catch(() => {});
     if (boardAttachDir) {
-      const localDir = path.join(boardAttachDir, id);
-      try { fs.rmSync(localDir, { recursive: true, force: true }); } catch { /* ok */ }
+      try { fs.rmSync(path.join(boardAttachDir, id), { recursive: true, force: true }); } catch { /* ok */ }
     }
   }
 }
