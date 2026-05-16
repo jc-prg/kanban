@@ -287,7 +287,7 @@ router.get('/:board/notes/export', withExistingBoard(async (req, res, db) => {
           fmLines.push('attachments:', ...attachmentFiles.map(f => `  - ${path.basename(f)}`));
         fmLines.push('---', '');
 
-        const body = (item.description || '').replace(/\(attachment:([^)\s]+)\)/g, '(./attachments/$1)');
+        const body = (item.description || '').replace(/_attachments\/n-[a-z0-9]+_([^)\s]+)/g, './attachments/$1');
         archive.append(fmLines.join('\n') + body, { name: dir + 'page.md' });
 
         attachmentFiles.forEach(f => {

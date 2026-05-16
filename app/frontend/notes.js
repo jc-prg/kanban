@@ -1311,7 +1311,8 @@ function _insertAttachmentMd(name, type) {
   if (!ta) return;
   showNoteDescEditor();
   ta.focus();
-  const md = (type === 'image' || type === 'svg') ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
+  const pfx = `_attachments/${noteModalPageId}_`;
+  const md = (type === 'image' || type === 'svg') ? `![${name}](${pfx}${name})` : `[${name}](${pfx}${name})`;
   const s = ta.selectionStart ?? ta.value.length;
   ta.setRangeText(md, s, ta.selectionEnd ?? s, 'end');
 }
@@ -1335,8 +1336,10 @@ async function resolveAttachments(container) {
   if (!noteModalPageId || !NOTES_ATTACH_API) return;
   const base = `${NOTES_ATTACH_API}/${noteModalPageId}`;
 
-  for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
-    const fn = img.getAttribute('src').slice('attachment:'.length);
+  const attachPfx = `_attachments/${noteModalPageId}_`;
+
+  for (const img of container.querySelectorAll('img[src^="_attachments/"]')) {
+    const fn = img.getAttribute('src').slice(attachPfx.length);
     try {
       const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
       if (!r.ok) continue;
@@ -1353,8 +1356,8 @@ async function resolveAttachments(container) {
     } catch {}
   }
 
-  for (const a of container.querySelectorAll('a[href^="attachment:"]')) {
-    const fn = a.getAttribute('href').slice('attachment:'.length);
+  for (const a of container.querySelectorAll('a[href^="_attachments/"]')) {
+    const fn = a.getAttribute('href').slice(attachPfx.length);
     const url = `${base}/${encodeURIComponent(fn)}`;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
