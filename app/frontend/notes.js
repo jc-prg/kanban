@@ -792,6 +792,14 @@ async function submitNote() {
   const newDesc  = document.getElementById('notePageDesc').value;
   const newLink  = document.getElementById('notePageLink').value.trim();
 
+  const saveBtn = document.getElementById('noteModalSaveBtn');
+  if (saveBtn) { saveBtn.textContent = 'Saving…'; saveBtn.disabled = true; }
+  try { await _submitNote(newTitle, newDesc, newLink, page); }
+  finally { if (saveBtn) { saveBtn.textContent = 'Save'; saveBtn.disabled = false; } }
+}
+
+async function _submitNote(newTitle, newDesc, newLink, page) {
+
   if (_webdavActive()) {
     // Conflict check: re-read the MD file and compare frontmatter lastModified
     const loadedAt = _pageLoadedAt.get(noteModalPageId);
