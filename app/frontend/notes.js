@@ -1293,7 +1293,7 @@ async function _handleAttachUpload(pageId, fileList) {
       fd.append('file', file);
       const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
       if (r.ok) {
-        _appendAttachMd('notePageDesc', (await r.json()).name);
+        _appendAttachMd('notePageDesc', (await r.json()).name, `_attachments/${pageId}_`);
       } else {
         const data = await r.json().catch(() => ({}));
         await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
@@ -1393,7 +1393,7 @@ async function openAttachmentViewer(url, name, type) {
     } else {
       const iframe = document.createElement('iframe');
       iframe.src = obj; iframe.className = 'attach-viewer-iframe';
-      iframe.sandbox = 'allow-scripts allow-same-origin';
+      if (type !== 'pdf') iframe.sandbox = 'allow-scripts allow-same-origin';
       content.appendChild(iframe);
     }
     document.getElementById('attachViewerDl').onclick = () => _triggerBlobDownload(_viewerBlob, name);

@@ -458,9 +458,9 @@ function renderCardAttachments(cardId, files) {
   }
 }
 
-function _appendAttachMd(taId, name) {
+function _appendAttachMd(taId, name, prefix = 'attachment:') {
   const ft = _attachType(name);
-  const md = (ft === 'image' || ft === 'svg') ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
+  const md = (ft === 'image' || ft === 'svg') ? `![${name}](${prefix}${name})` : `[${name}](${prefix}${name})`;
   const ta = document.getElementById(taId);
   if (!ta) return;
   if (ta.value) {
