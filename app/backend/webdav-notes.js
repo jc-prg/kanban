@@ -20,11 +20,7 @@ function _resolveUrl(cfg, relPath) {
 function _titleToSlug(title) {
   return (title || 'untitled')
     .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '_')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
+    .replace(/[/\\:*?"<>|\0]/g, '_')
     || 'untitled';
 }
 
@@ -356,6 +352,164 @@ async function syncFromWebdav(cfg, tree) {
   return { tree: newTree, changed };
 }
 
+// Shallow sync — only root-level items (folders + .md files at the root).
+// Folder children are left untouched so they can be loaded lazily.
+async function syncRootFromWebdav(cfg, tree) {
+  const wdEntries = await wdPropfind(cfg, '', '1');
+
+  const wdMap = new Map();
+  for (const e of wdEntries) {
+    const h = e.href.replace(/^\//, '');
+    if (!h || h === '') continue;
+    if (h.split('/').includes('_attachments')) continue;
+    if (h.split('/').some(seg => seg.startsWith('.'))) continue;
+    if (!e.isCollection && !h.endsWith('.md')) continue;
+    wdMap.set(h, e);
+  }
+
+  const pathMap = new Map();
+  _buildPathMap(tree.items || [], pathMap, '');
+
+  const newTree = JSON.parse(JSON.stringify(tree));
+  let changed = false;
+
+  for (const [relPath, wdEntry] of wdMap) {
+    if (wdEntry.isCollection) {
+      const seg = relPath.replace(/\/$/, '');
+      if (!pathMap.has(relPath)) {
+        _findOrCreateFolder(newTree.items, seg);
+        changed = true;
+      }
+      continue;
+    }
+    // Root-level .md file
+    const existing = pathMap.get(relPath);
+    const wdTime   = wdEntry.lastModified ? new Date(wdEntry.lastModified).getTime() : 0;
+    if (existing) {
+      const cacheTime = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
+      if (wdTime > cacheTime) {
+        try {
+          const text = await wdGet(cfg, relPath);
+          const { meta, body } = parseFm(text);
+          existing.description    = body;
+          existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
+          if (meta.title)         existing.title        = meta.title;
+          existing.link           = meta.link || '';
+          existing.linkedCards    = _parseLinkedCards(meta.linkedCards);
+          existing.hasAttachments = Array.isArray(meta.attachments) ? meta.attachments.length > 0 : !!meta.attachments;
+          changed = true;
+        } catch { /* skip */ }
+      }
+    } else {
+      try {
+        const text = await wdGet(cfg, relPath);
+        const { meta, body } = parseFm(text);
+        const newPage = {
+          type:           'page',
+          id:             meta.id || ('n-wd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
+          title:          meta.title || relPath.replace(/\.md$/, ''),
+          description:    body,
+          link:           meta.link || '',
+          linkedCards:    _parseLinkedCards(meta.linkedCards),
+          lastModified:   wdEntry.lastModified || new Date().toISOString(),
+          hasAttachments: !!meta.attachments,
+        };
+        newTree.items.push(newPage);
+        changed = true;
+      } catch { /* skip */ }
+    }
+  }
+  return { tree: newTree, changed };
+}
+
+// Sync direct children of one folder from WebDAV (PROPFIND depth:1).
+// Used when a folder is expanded in the UI.
+async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
+  // Locate the folder's WebDAV path from the tree
+  const pathMap = new Map();
+  _buildPathMap(tree.items || [], pathMap, '');
+  let folderPath = null;
+  for (const [p, item] of pathMap) {
+    if (item.id === folderId && item.type === 'folder') { folderPath = p; break; }
+  }
+  if (!folderPath) return { tree, changed: false };
+
+  let wdEntries;
+  try { wdEntries = await wdPropfind(cfg, folderPath, '1'); }
+  catch { return { tree, changed: false }; }
+
+  const wdMap = new Map();
+  for (const e of wdEntries) {
+    const h = e.href.replace(/^\//, '');
+    // skip the folder itself
+    if (!h || h === folderPath || h === folderPath.replace(/\/$/, '')) continue;
+    if (h.split('/').includes('_attachments')) continue;
+    if (h.split('/').some(seg => seg.startsWith('.'))) continue;
+    if (!e.isCollection && !h.endsWith('.md')) continue;
+    wdMap.set(h, e);
+  }
+
+  const newTree    = JSON.parse(JSON.stringify(tree));
+  const newPathMap = new Map();
+  _buildPathMap(newTree.items, newPathMap, '');
+  const folderItem = newPathMap.get(folderPath);
+  if (!folderItem) return { tree, changed: false };
+  if (!folderItem.children) folderItem.children = [];
+
+  let changed = false;
+
+  for (const [relPath, wdEntry] of wdMap) {
+    if (wdEntry.isCollection) {
+      if (!newPathMap.has(relPath)) {
+        const seg = relPath.replace(/\/$/, '').split('/').pop();
+        _findOrCreateFolder(folderItem.children, seg);
+        newPathMap.clear();
+        _buildPathMap(newTree.items, newPathMap, '');
+        changed = true;
+      }
+      continue;
+    }
+    const existing = newPathMap.get(relPath);
+    const wdTime   = wdEntry.lastModified ? new Date(wdEntry.lastModified).getTime() : 0;
+    if (existing) {
+      const cacheTime = existing.lastModified ? new Date(existing.lastModified).getTime() : 0;
+      if (wdTime > cacheTime) {
+        try {
+          const text = await wdGet(cfg, relPath);
+          const { meta, body } = parseFm(text);
+          existing.description    = body;
+          existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
+          if (meta.title)         existing.title        = meta.title;
+          existing.link           = meta.link || '';
+          existing.linkedCards    = _parseLinkedCards(meta.linkedCards);
+          existing.hasAttachments = Array.isArray(meta.attachments) ? meta.attachments.length > 0 : !!meta.attachments;
+          changed = true;
+        } catch { /* skip */ }
+      }
+    } else {
+      try {
+        const text = await wdGet(cfg, relPath);
+        const { meta, body } = parseFm(text);
+        const newPage = {
+          type:           'page',
+          id:             meta.id || ('n-wd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
+          title:          meta.title || relPath.split('/').pop().replace(/\.md$/, ''),
+          description:    body,
+          link:           meta.link || '',
+          linkedCards:    _parseLinkedCards(meta.linkedCards),
+          lastModified:   wdEntry.lastModified || new Date().toISOString(),
+          hasAttachments: !!meta.attachments,
+        };
+        folderItem.children.push(newPage);
+        newPathMap.clear();
+        _buildPathMap(newTree.items, newPathMap, '');
+        changed = true;
+      } catch { /* skip */ }
+    }
+  }
+  return { tree: newTree, changed };
+}
+
 // ---------------------------------------------------------------------------
 // Deletion helpers
 // ---------------------------------------------------------------------------
@@ -416,6 +570,7 @@ async function deleteFolderWithAttachments(cfg, folder, tree, boardAttachDir) {
 module.exports = {
   wdGet, wdPut, wdPutBinary, wdDelete, wdMove, wdMkcol, wdPropfind, wdGetMeta,
   buildPath, getAttachmentPrefix, parseFm, renderMd,
-  syncFromWebdav, deletePageWithAttachments, deleteFolderWithAttachments,
+  syncFromWebdav, syncRootFromWebdav, syncFolderChildrenFromWebdav,
+  deletePageWithAttachments, deleteFolderWithAttachments,
   _titleToSlug, _buildPathMap, _collectPageIds,
 };
