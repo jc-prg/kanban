@@ -65,23 +65,28 @@ const validateBoardPatch = ajv.compile({
     settings:         _settingsSchema
   }
 });
+// v2 notes schema: items array of folders and pages
+const _noteItemSchema = {
+  type: 'object', required: ['type', 'id', 'title'],
+  properties: {
+    type:           { type: 'string', enum: ['folder', 'page'] },
+    id:             { type: 'string', minLength: 1 },
+    title:          { type: 'string' },
+    // folder-only
+    children:       { type: 'array' },
+    // page-only
+    description:    { type: 'string' },
+    link:           { type: 'string' },
+    linkedCards:    { type: 'array', items: { type: 'string' } },
+    hasAttachments: { type: 'boolean' },
+    lastModified:   { type: 'string' },
+  }
+};
 const validateNotes = ajv.compile({
-  type: 'object', required: ['pages'], additionalProperties: false,
-  properties: { pages: { type: 'array', items: { $ref: '#/definitions/page' } } },
-  definitions: {
-    page: {
-      type: 'object', required: ['id', 'title'], additionalProperties: false,
-      properties: {
-        id:             { type: 'string', minLength: 1 },
-        title:          { type: 'string' },
-        description:    { type: 'string' },
-        link:           { type: 'string' },
-        linkedCards:    { type: 'array', items: { type: 'string' } },
-        hasAttachments: { type: 'boolean' },
-        lastModified:   { type: 'string' },
-        children:       { type: 'array', items: { $ref: '#/definitions/page' } }
-      }
-    }
+  type: 'object', required: ['items'], additionalProperties: false,
+  properties: {
+    items:         { type: 'array', items: _noteItemSchema },
+    schemaVersion: { type: 'integer' },
   }
 });
 const _notePagePatchSchema = {

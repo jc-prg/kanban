@@ -101,7 +101,7 @@ const dbMock = {
       const { _id, _rev, ...data } = await db.get('notes')
       return data
     } catch (err) {
-      if (err.statusCode === 404) return { pages: [] }
+      if (err.statusCode === 404) return { items: [], schemaVersion: 2 }
       throw err
     }
   },
@@ -142,25 +142,39 @@ afterAll(() => {
 // GET /:board/notes (N-1)
 // ---------------------------------------------------------------------------
 describe('GET /:board/notes', () => {
-  it('N-1: no notes doc → 200 with empty pages array', async () => {
+  it('N-1: no notes doc → 200 with empty items array (v2)', async () => {
     mockDbCtx.db = makeMockDb()  // no notesDoc
 
     const res = await request(app).get(`/api/${BOARD}/notes`).set(AUTH)
 
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({ pages: [] })
+    expect(res.body).toEqual({ items: [], schemaVersion: 2 })
   })
 
-  it('existing notes doc → 200 with pages', async () => {
+  it('v2 notes doc → 200 with items', async () => {
     mockDbCtx.db = makeMockDb({
-      notesDoc: { pages: [{ id: 'n-abc', title: 'My Page', children: [] }] },
+      notesDoc: { items: [{ type: 'page', id: 'n-abc', title: 'My Page' }], schemaVersion: 2 },
     })
 
     const res = await request(app).get(`/api/${BOARD}/notes`).set(AUTH)
 
     expect(res.status).toBe(200)
-    expect(res.body.pages).toHaveLength(1)
-    expect(res.body.pages[0].title).toBe('My Page')
+    expect(res.body.items).toHaveLength(1)
+    expect(res.body.items[0].title).toBe('My Page')
+    expect(res.body.schemaVersion).toBe(2)
+  })
+
+  it('v1 notes doc (pages) → automatically migrated to v2 items on GET', async () => {
+    mockDbCtx.db = makeMockDb({
+      notesDoc: { pages: [{ id: 'n-abc', title: 'Old Page', children: [] }] },
+    })
+
+    const res = await request(app).get(`/api/${BOARD}/notes`).set(AUTH)
+
+    expect(res.status).toBe(200)
+    expect(res.body.schemaVersion).toBe(2)
+    expect(Array.isArray(res.body.items)).toBe(true)
+    expect(res.body.items.some(i => i.title === 'Old Page')).toBe(true)
   })
 })
 
@@ -172,46 +186,48 @@ describe('PUT /:board/notes', () => {
     mockDbCtx.db = makeMockDb()
   })
 
-  it('N-2: valid nested notes structure → 200 { ok: true }', async () => {
+  it('N-2: valid v2 notes structure with folder and page → 200 { ok: true }', async () => {
     const res = await request(app)
       .put(`/api/${BOARD}/notes`)
       .set(AUTH)
       .send({
-        pages: [
+        items: [
           {
-            id: 'n-parent', title: 'Parent',
-            children: [{ id: 'n-child', title: 'Child', children: [] }],
+            type: 'folder', id: 'f-parent', title: 'Section',
+            children: [{ type: 'page', id: 'n-child', title: 'Child' }],
           },
+          { type: 'page', id: 'n-root', title: 'Root Page' },
         ],
+        schemaVersion: 2,
       })
 
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
   })
 
-  it('N-3: missing pages field → 400', async () => {
+  it('N-3: missing items field → 400', async () => {
     const res = await request(app)
       .put(`/api/${BOARD}/notes`)
       .set(AUTH)
-      .send({ title: 'oops, not pages' })
+      .send({ title: 'oops, not items' })
 
     expect(res.status).toBe(400)
   })
 
-  it('N-4: page missing required title field → 400', async () => {
+  it('N-4: item missing required title field → 400', async () => {
     const res = await request(app)
       .put(`/api/${BOARD}/notes`)
       .set(AUTH)
-      .send({ pages: [{ id: 'n-abc' }] })  // title required
+      .send({ items: [{ type: 'page', id: 'n-abc' }] })  // title required
 
     expect(res.status).toBe(400)
   })
 
-  it('N-5: page id fails minLength → 400', async () => {
+  it('N-5: item id fails minLength → 400', async () => {
     const res = await request(app)
       .put(`/api/${BOARD}/notes`)
       .set(AUTH)
-      .send({ pages: [{ id: '', title: 'Blank id' }] })  // id minLength: 1
+      .send({ items: [{ type: 'page', id: '', title: 'Blank id' }] })  // id minLength: 1
 
     expect(res.status).toBe(400)
   })
@@ -323,10 +339,8 @@ describe('GET /:board/notes/export', () => {
   it('N-12: export → 200 application/zip with Content-Disposition', async () => {
     mockDbCtx.db = makeMockDb({
       notesDoc: {
-        pages: [{
-          id: 'n-exp1', title: 'Export Page',
-          description: '# Hello', children: [],
-        }],
+        items: [{ type: 'page', id: 'n-exp1', title: 'Export Page', description: '# Hello' }],
+        schemaVersion: 2,
       },
     })
 

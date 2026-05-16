@@ -15,53 +15,77 @@ function _startNoteAutoSave() {
 }
 
 // ---- Notes State ----
-let notesState     = { pages: [] };
-let baseNotesState = null; // snapshot from last server load/save — the merge ancestor
+let notesState     = { items: [], schemaVersion: 2 };
+let baseNotesState = null; // snapshot from last server load/save — used for patch diffing
 let notesEtag      = null;
 let notesSaveTimer = null;
 const NOTES_API        = API_BASE ? `${API_BASE}/notes`             : null;
 const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
 
 // ---- Notes Load / Save ----
+function _normalizeNotes(data) {
+  if (data && data.schemaVersion === 2 && Array.isArray(data.items)) return data;
+  // v1 legacy: server should have migrated, but handle client-side just in case
+  return { items: [], schemaVersion: 2 };
+}
+
 async function loadNotes() {
   if (!NOTES_API) return;
   try {
     const r = await fetch(NOTES_API);
-    if (!r.ok) { notesState = { pages: [] }; }
+    if (!r.ok) { notesState = { items: [], schemaVersion: 2 }; }
     else {
       notesEtag  = r.headers.get('ETag');
-      notesState = await r.json();
-      if (!notesState.pages) notesState.pages = [];
+      notesState = _normalizeNotes(await r.json());
     }
-  } catch (e) { notesState = { pages: [] }; }
+  } catch (e) { notesState = { items: [], schemaVersion: 2 }; }
+  _loadTreeOpenState();
   baseNotesState = JSON.parse(JSON.stringify(notesState));
   renderNotesTree();
   restoreNotesSidebar();
   render();
 }
 
-// DFS-flatten note pages, stripping `children` from each entry.
-// Returns a Map<id, pageOwnFields> in DFS traversal order.
-function _flattenNotePages(pages, out = new Map()) {
-  for (const p of pages) {
-    const { children, ...own } = p;
-    out.set(p.id, own);
-    if (children?.length) _flattenNotePages(children, out);
+// DFS-flatten only pages (not folders) from the items tree.
+// Returns a Map<id, pageFields> in DFS traversal order.
+function _flattenNotePages(items, out = new Map()) {
+  for (const item of items) {
+    if (item.type === 'page') {
+      const { children, ...own } = item;
+      out.set(item.id, own);
+    } else if (item.type === 'folder') {
+      _flattenNotePages(item.children || [], out);
+    } else {
+      // v1 legacy: page without type field
+      const { children, ...own } = item;
+      out.set(item.id, own);
+      if (item.children?.length) _flattenNotePages(item.children, out);
+    }
+  }
+  return out;
+}
+
+// DFS item structure signature (type:id pairs) for structural comparison.
+function _itemDFSStructure(items, out = []) {
+  for (const item of items) {
+    out.push((item.type || 'page')[0] + ':' + item.id);
+    if (item.type === 'folder') _itemDFSStructure(item.children || [], out);
   }
   return out;
 }
 
 // Returns { updatedPages } for content-only changes, {} for no changes,
-// or null when structure changed (add/remove/reorder) — caller should fall back to PUT.
+// or null when structure changed (add/remove/reorder/move) — caller should fall back to PUT.
 function buildNotesPatch(base, current) {
-  const baseFlat = _flattenNotePages(base.pages);
-  const currFlat = _flattenNotePages(current.pages);
+  const baseItems = base.items || base.pages || [];
+  const currItems = current.items || current.pages || [];
 
-  // Same set of IDs in same DFS order?
-  const baseIds = [...baseFlat.keys()];
-  const currIds = [...currFlat.keys()];
-  if (JSON.stringify(baseIds) !== JSON.stringify(currIds)) return null;
+  const baseStruct = _itemDFSStructure(baseItems);
+  const currStruct = _itemDFSStructure(currItems);
+  if (JSON.stringify(baseStruct) !== JSON.stringify(currStruct)) return null;
 
+  const baseFlat = _flattenNotePages(baseItems);
+  const currFlat = _flattenNotePages(currItems);
   const updatedPages = [];
   for (const [id, curr] of currFlat) {
     if (JSON.stringify(curr) !== JSON.stringify(baseFlat.get(id))) updatedPages.push(curr);
@@ -90,12 +114,8 @@ function scheduleSaveNotes() {
         r = await fetch(NOTES_API, { method: 'PUT', headers, body: JSON.stringify(notesState) });
       }
       if (r.status === 409) {
-        const localSnapshot = JSON.parse(JSON.stringify(notesState));
-        const baseSnapshot  = JSON.parse(JSON.stringify(baseNotesState));
+        // On conflict: reload from server (remote wins) then re-queue save
         await loadNotes();
-        notesState = mergeNotesStates(baseSnapshot, notesState, localSnapshot);
-        renderNotesTree();
-        render();
         scheduleSaveNotes();
         return;
       }
@@ -107,126 +127,132 @@ function scheduleSaveNotes() {
   }, 600);
 }
 
-// Remove a page by id from any level of a page tree (mutates in place).
-function _removePage(id, pages) {
-  for (let i = 0; i < pages.length; i++) {
-    if (pages[i].id === id) { pages.splice(i, 1); return true; }
-    if (pages[i].children?.length && _removePage(id, pages[i].children)) return true;
+// Remove an item (folder or page) by id from the items tree (mutates in place).
+function _removeItem(id, items) {
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].id === id) { items.splice(i, 1); return true; }
+    if (items[i].type === 'folder' && items[i].children?.length && _removeItem(id, items[i].children)) return true;
   }
   return false;
 }
 
-// 3-way merge: remote wins for structure, local wins for own-field edits.
-// When both sides changed the same page, newer lastModified wins.
-function mergeNotesStates(base, remote, local) {
-  const merged    = JSON.parse(JSON.stringify(remote));
-  const baseFlat  = _flattenNotePages(base.pages);
-  const localFlat = _flattenNotePages(local.pages);
-  const remoteFlat = _flattenNotePages(remote.pages);
-
-  // Pages new in local but not in base and not in remote → append to root
-  for (const [id] of localFlat) {
-    if (!baseFlat.has(id) && !remoteFlat.has(id)) {
-      const p = findNotePage(id, local.pages);
-      if (p) merged.pages.push(JSON.parse(JSON.stringify(p)));
-    }
-  }
-
-  // Pages deleted in local (present in base, absent in local) → remove from merged
-  for (const [id] of baseFlat) {
-    if (!localFlat.has(id)) _removePage(id, merged.pages);
-  }
-
-  // Field-level merge for pages present in both local and base
-  for (const [id, localPage] of localFlat) {
-    const basePage = baseFlat.get(id);
-    if (!basePage) continue; // new in local, handled above
-    const mergedPageRef = findNotePage(id, merged.pages);
-    if (!mergedPageRef) continue; // removed in remote → remote wins
-    if (JSON.stringify(localPage) === JSON.stringify(basePage)) continue; // no local change
-
-    const remotePage   = remoteFlat.get(id);
-    const remoteChanged = remotePage && JSON.stringify(remotePage) !== JSON.stringify(basePage);
-
-    if (!remoteChanged) {
-      // Only local changed → apply local own fields (children preserved in mergedPageRef)
-      for (const key of Object.keys(localPage)) mergedPageRef[key] = localPage[key];
-    } else {
-      // Both changed → newer lastModified wins
-      if ((localPage.lastModified || '') > (remotePage.lastModified || '')) {
-        for (const key of Object.keys(localPage)) mergedPageRef[key] = localPage[key];
-      }
-    }
-  }
-
-  return merged;
-}
-
-async function checkForNotesUpdates() {
-  if (!NOTES_API || notesSaveTimer || !baseNotesState) return;
-  try {
-    const headers = notesEtag ? { 'If-None-Match': notesEtag } : {};
-    const r = await fetch(NOTES_API, { headers });
-    if (r.status === 304) return;
-    if (!r.ok) return;
-    notesEtag = r.headers.get('ETag');
-    const remote = await r.json();
-    if (JSON.stringify(remote) === JSON.stringify(notesState)) return;
-    notesState    = mergeNotesStates(baseNotesState, remote, notesState);
-    baseNotesState = JSON.parse(JSON.stringify(remote));
-    renderNotesTree();
-    render();
-    scheduleSaveNotes(); // persist any local changes that survived the merge
-  } catch (e) { /* ignore network errors */ }
-}
-
-setInterval(checkForNotesUpdates, 5000);
-
 // ---- Notes Tree Helpers ----
-function findNotePage(id, pages) {
-  for (const p of pages) {
-    if (p.id === id) return p;
-    if (p.children?.length) { const f = findNotePage(id, p.children); if (f) return f; }
+
+// sessionStorage persistence for folder open/close state
+function _treeStateKey() {
+  return 'notes-tree-open-' + (API_BASE || 'local');
+}
+function _saveTreeOpenState() {
+  try { sessionStorage.setItem(_treeStateKey(), JSON.stringify([...notesExpanded])); } catch (_) {}
+}
+function _loadTreeOpenState() {
+  try {
+    const saved = sessionStorage.getItem(_treeStateKey());
+    if (saved) { notesExpanded.clear(); for (const id of JSON.parse(saved)) notesExpanded.add(id); }
+  } catch (_) {}
+}
+
+// Find any item (folder or page) by id
+function findNoteItem(id, items) {
+  for (const item of items) {
+    if (item.id === id) return item;
+    if (item.type === 'folder') { const f = findNoteItem(id, item.children || []); if (f) return f; }
   }
   return null;
 }
 
-function getNotePath(id, pages, acc = []) {
-  for (const p of pages) {
-    const path = [...acc, p];
-    if (p.id === id) return path;
-    if (p.children?.length) { const f = getNotePath(id, p.children, path); if (f) return f; }
+// Find a page by id (skips folders)
+function findNotePage(id, items) {
+  for (const item of items) {
+    if (item.type === 'page' && item.id === id) return item;
+    if (item.type === 'folder') { const f = findNotePage(id, item.children || []); if (f) return f; }
+    // v1 legacy: items without type
+    if (!item.type && item.id === id) return item;
   }
   return null;
+}
+
+// Get breadcrumb path from root to the item with given id
+function getNotePath(id, items, acc = []) {
+  for (const item of items) {
+    const p = [...acc, item];
+    if (item.id === id) return p;
+    if (item.type === 'folder') { const f = getNotePath(id, item.children || [], p); if (f) return f; }
+  }
+  return null;
+}
+
+// Count leaf pages recursively inside a list of items
+function _countPages(items) {
+  let n = 0;
+  for (const item of items) {
+    if (item.type === 'page') n++;
+    else if (item.type === 'folder') n += _countPages(item.children || []);
+  }
+  return n;
+}
+
+function _noteUid(prefix) {
+  return prefix + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function addNotePage(parentId = null) {
   const page = {
-    id: 'n-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join(''),
-    title: 'New Page', description: '', link: '', linkedCards: [], children: [],
+    type: 'page',
+    id: _noteUid('n-'),
+    title: 'New Page', description: '', link: '', linkedCards: [],
     lastModified: new Date().toISOString(),
   };
   if (!parentId) {
-    notesState.pages.push(page);
+    notesState.items.push(page);
   } else {
-    const parent = findNotePage(parentId, notesState.pages);
-    if (parent) { if (!parent.children) parent.children = []; parent.children.push(page); }
+    const parent = findNoteItem(parentId, notesState.items);
+    if (parent && parent.type === 'folder') {
+      if (!parent.children) parent.children = [];
+      parent.children.push(page);
+    } else {
+      // parentId refers to a page or unknown item — fall back to root
+      notesState.items.push(page);
+    }
   }
   renderNotesTree();
   scheduleSaveNotes();
   openNoteModal(page.id, true);
 }
 
-function deleteNotePage(id) {
-  function removeFrom(arr) {
-    const idx = arr.findIndex(p => p.id === id);
-    if (idx !== -1) { arr.splice(idx, 1); return true; }
-    return arr.some(p => p.children?.length && removeFrom(p.children));
+function addNoteFolder(parentId = null) {
+  const folder = {
+    type: 'folder',
+    id: _noteUid('f-'),
+    title: 'New Folder',
+    children: [],
+  };
+  if (!parentId) {
+    notesState.items.push(folder);
+  } else {
+    const parent = findNoteItem(parentId, notesState.items);
+    if (parent && parent.type === 'folder') {
+      if (!parent.children) parent.children = [];
+      parent.children.push(folder);
+    }
   }
-  removeFrom(notesState.pages);
+  notesExpanded.add(folder.id);
+  _saveTreeOpenState();
+  renderNotesTree();
+  scheduleSaveNotes();
+  // Start inline rename for the newly created folder
+  const el = document.querySelector(`[data-item-id="${folder.id}"]`);
+  if (el) _startFolderRename(el, folder);
+}
+
+function deleteNoteItem(id) {
+  _removeItem(id, notesState.items);
   renderNotesTree();
   scheduleSaveNotes();
 }
+
+// Alias for backward compatibility (used in note modal delete button)
+function deleteNotePage(id) { return deleteNoteItem(id); }
 
 // ---- Notes Sidebar ----
 const notesExpanded = new Set();
@@ -365,83 +391,147 @@ function renderNotesTree() {
   const container = document.getElementById('notesTreeBody');
   if (!container) return;
   container.innerHTML = '';
-  if (!notesState.pages.length) {
+  if (!notesState.items.length) {
     const empty = document.createElement('p');
     empty.className = 'notes-empty';
     empty.textContent = 'No pages yet';
     container.appendChild(empty);
     return;
   }
-  renderNotesList(notesState.pages, container, 0);
+  renderNotesList(notesState.items, container, 0);
 }
 
-function renderNotesList(pages, container, depth) {
-  for (const page of pages) {
-    const hasChildren = page.children?.length > 0;
-    const canHaveChildren = depth < 2;
-    const isExpanded = notesExpanded.has(page.id);
-
-    const item = document.createElement('div');
-    item.className = 'notes-tree-item';
-    item.dataset.pageId = page.id;
-    item.dataset.depth = depth;
-    item.draggable = true;
-    item.style.paddingLeft = (depth * 14 + 6) + 'px';
-
-    const hasLink        = !!page.link?.trim();
-    const hasCards       = page.linkedCards?.length > 0;
-    const hasAttachments = !!page.hasAttachments;
-    const indicators =
-      (hasLink        ? `<span class="notes-item-indicator" title="Has link">${SVGICONS.link(9, 9)}</span>` : '') +
-      (hasCards       ? `<span class="notes-item-indicator" title="${page.linkedCards.length} linked card(s)">${SVGICONS.linkedCards(9, 9)}</span>` : '') +
-      (hasAttachments ? `<span class="notes-item-indicator" title="Has attachments">${SVGICONS.attachment(9, 9)}</span>` : '');
-
-    item.innerHTML =
-      `<button class="notes-toggle-btn${hasChildren ? '' : ' notes-toggle-btn--hidden'}" title="${isExpanded ? 'Collapse' : 'Expand'}">${isExpanded ? ICONS.collapse : ICONS.expand}</button>` +
-      `<span class="notes-item-title-wrap">` +
-        `<span class="notes-item-title${depth === 0 ? ' notes-item-title--root' : ''}">${escHtml(page.title)}</span>` +
-        (indicators ? `<span class="notes-item-indicators">${indicators}</span>` : '') +
-      `</span>` +
-      `<div class="notes-item-btns">` +
-        (canHaveChildren ? `<button class="notes-item-btn notes-item-btn--add" title="Add subpage">+</button>` : '') +
-        `<button class="notes-item-btn notes-item-btn--del" title="Delete page">${ICONS.close}</button>` +
-      `</div>`;
-
-    item.querySelector('.notes-item-title').addEventListener('click', () => openNoteModal(page.id));
-
-    const toggleBtn = item.querySelector('.notes-toggle-btn');
-    if (hasChildren) {
-      toggleBtn.addEventListener('click', e => {
-        e.stopPropagation();
-        if (notesExpanded.has(page.id)) notesExpanded.delete(page.id); else notesExpanded.add(page.id);
-        renderNotesTree();
-      });
+function renderNotesList(items, container, depth) {
+  for (const item of items) {
+    if (item.type === 'folder') {
+      _renderFolderItem(item, container, depth);
+    } else {
+      _renderPageItem(item, container, depth);
     }
-
-    const addBtn = item.querySelector('.notes-item-btn--add');
-    if (addBtn) {
-      addBtn.addEventListener('click', e => {
-        e.stopPropagation();
-        notesExpanded.add(page.id);
-        addNotePage(page.id);
-      });
-    }
-
-    item.querySelector('.notes-item-btn--del').addEventListener('click', async e => {
-      e.stopPropagation();
-      const msg = page.children?.length
-        ? `Delete "${page.title}" and all its subpages?`
-        : `Delete page "${page.title}"?`;
-      if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) {
-        if (noteModalPageId === page.id) closeNoteModal();
-        deleteNotePage(page.id);
-      }
-    });
-
-    container.appendChild(item);
-
-    if (hasChildren && isExpanded) renderNotesList(page.children, container, depth + 1);
   }
+}
+
+function _renderFolderItem(folder, container, depth) {
+  const isExpanded  = notesExpanded.has(folder.id);
+  const hasChildren = (folder.children || []).length > 0;
+
+  const el = document.createElement('div');
+  el.className = 'notes-tree-item notes-tree-item--folder';
+  el.dataset.itemId   = folder.id;
+  el.dataset.itemType = 'folder';
+  el.dataset.depth    = depth;
+  el.draggable = true;
+  el.style.paddingLeft = (depth * 14 + 6) + 'px';
+
+  el.innerHTML =
+    `<button class="notes-toggle-btn${hasChildren ? '' : ' notes-toggle-btn--hidden'}" title="${isExpanded ? 'Collapse' : 'Expand'}">${isExpanded ? ICONS.collapse : ICONS.expand}</button>` +
+    `<span class="notes-item-title notes-item-folder-title${depth === 0 ? ' notes-item-title--root' : ''}">${escHtml(folder.title)}</span>` +
+    `<div class="notes-item-btns">` +
+      `<button class="notes-item-btn notes-item-btn--add" title="Add page to folder">+</button>` +
+      `<button class="notes-item-btn notes-item-btn--del" title="Delete folder">${ICONS.close}</button>` +
+    `</div>`;
+
+  el.querySelector('.notes-toggle-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    if (notesExpanded.has(folder.id)) notesExpanded.delete(folder.id); else notesExpanded.add(folder.id);
+    _saveTreeOpenState();
+    renderNotesTree();
+  });
+
+  el.querySelector('.notes-item-folder-title').addEventListener('click', e => {
+    e.stopPropagation();
+    _startFolderRename(el, folder);
+  });
+
+  el.querySelector('.notes-item-btn--add').addEventListener('click', e => {
+    e.stopPropagation();
+    notesExpanded.add(folder.id);
+    _saveTreeOpenState();
+    addNotePage(folder.id);
+  });
+
+  el.querySelector('.notes-item-btn--del').addEventListener('click', async e => {
+    e.stopPropagation();
+    const count = _countPages(folder.children || []);
+    const msg = count > 0
+      ? `Delete folder "${folder.title}" and its ${count} page${count !== 1 ? 's' : ''}?`
+      : `Delete folder "${folder.title}"?`;
+    if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) {
+      deleteNoteItem(folder.id);
+    }
+  });
+
+  container.appendChild(el);
+
+  if (isExpanded) renderNotesList(folder.children || [], container, depth + 1);
+}
+
+function _renderPageItem(page, container, depth) {
+  const el = document.createElement('div');
+  el.className = 'notes-tree-item notes-tree-item--page';
+  el.dataset.itemId   = page.id;
+  el.dataset.pageId   = page.id; // kept for card-drag-drop compatibility
+  el.dataset.itemType = 'page';
+  el.dataset.depth    = depth;
+  el.draggable = true;
+  el.style.paddingLeft = (depth * 14 + 6) + 'px';
+
+  const hasLink        = !!page.link?.trim();
+  const hasCards       = (page.linkedCards || []).length > 0;
+  const hasAttachments = !!page.hasAttachments;
+  const indicators =
+    (hasLink        ? `<span class="notes-item-indicator" title="Has link">${SVGICONS.link(9, 9)}</span>` : '') +
+    (hasCards       ? `<span class="notes-item-indicator" title="${page.linkedCards.length} linked card(s)">${SVGICONS.linkedCards(9, 9)}</span>` : '') +
+    (hasAttachments ? `<span class="notes-item-indicator" title="Has attachments">${SVGICONS.attachment(9, 9)}</span>` : '');
+
+  el.innerHTML =
+    `<span class="notes-toggle-btn notes-toggle-btn--hidden"></span>` +
+    `<span class="notes-item-title-wrap">` +
+      `<span class="notes-item-title${depth === 0 ? ' notes-item-title--root' : ''}">${escHtml(page.title)}</span>` +
+      (indicators ? `<span class="notes-item-indicators">${indicators}</span>` : '') +
+    `</span>` +
+    `<div class="notes-item-btns">` +
+      `<button class="notes-item-btn notes-item-btn--del" title="Delete page">${ICONS.close}</button>` +
+    `</div>`;
+
+  el.querySelector('.notes-item-title').addEventListener('click', () => openNoteModal(page.id));
+
+  el.querySelector('.notes-item-btn--del').addEventListener('click', async e => {
+    e.stopPropagation();
+    if (await showConfirm(`Delete page "${page.title}"?`, { okLabel: 'Delete', danger: true })) {
+      if (noteModalPageId === page.id) closeNoteModal();
+      deleteNoteItem(page.id);
+    }
+  });
+
+  container.appendChild(el);
+}
+
+function _startFolderRename(itemEl, folder) {
+  const titleEl = itemEl.querySelector('.notes-item-folder-title');
+  if (!titleEl || titleEl.querySelector('input')) return; // already renaming
+  const prev = folder.title;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'notes-folder-rename-input';
+  input.value = prev;
+  titleEl.textContent = '';
+  titleEl.appendChild(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    const next = input.value.trim() || prev;
+    folder.title = next;
+    renderNotesTree();
+    if (next !== prev) scheduleSaveNotes();
+  }
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = prev; input.removeEventListener('blur', commit); titleEl.textContent = prev; }
+  });
 }
 
 // ---- Collapsible note sections ----
@@ -503,7 +593,7 @@ function _renderCrumb(path, currentTitle = null) {
 }
 
 function openNoteModal(pageId, focusTitle = false) {
-  const page = findNotePage(pageId, notesState.pages);
+  const page = findNotePage(pageId, notesState.items);
   if (!page) return;
   noteModalPageId = pageId;
 
@@ -515,7 +605,7 @@ function openNoteModal(pageId, focusTitle = false) {
 
   renderLinkedCards(page.linkedCards || []);
 
-  const path = getNotePath(pageId, notesState.pages);
+  const path = getNotePath(pageId, notesState.items);
   _renderCrumb(path);
 
   if ((page.description || '').trim()) showNoteDescPreview();
@@ -547,7 +637,7 @@ function closeNoteModal() {
 
 function submitNote() {
   if (!noteModalPageId) return;
-  const page = findNotePage(noteModalPageId, notesState.pages);
+  const page = findNotePage(noteModalPageId, notesState.items);
   if (!page) return;
 
   page.title        = document.getElementById('notePageTitle').value.trim() || 'Untitled';
@@ -557,7 +647,7 @@ function submitNote() {
 
   noteModalOrig = { title: page.title, desc: page.description, link: page.link };
 
-  _renderCrumb(getNotePath(noteModalPageId, notesState.pages));
+  _renderCrumb(getNotePath(noteModalPageId, notesState.items));
 
   renderNotesTree();
   scheduleSaveNotes();
@@ -635,69 +725,6 @@ function buildToc(el) {
   headings.forEach(h => obs.observe(h));
 }
 
-function buildSubpages(el) {
-  const placeholder = [...el.querySelectorAll('p')].find(p => p.textContent.trim().toLowerCase() === '[subpages]');
-  if (!placeholder) return;
-
-  const page = findNotePage(noteModalPageId, notesState.pages);
-  const children = page?.children?.length ? page.children : [];
-
-  const wrap = document.createElement('div');
-  wrap.className = 'md-subpages';
-  const label = document.createElement('span');
-  label.className = 'md-toc-label';
-  label.textContent = 'Subpages';
-  wrap.appendChild(label);
-
-  function _buildItem(child, depth) {
-    const hasLink        = !!child.link?.trim();
-    const hasCards       = child.linkedCards?.length > 0;
-    const hasAttachments = !!child.hasAttachments;
-    const grandchildren  = child.children?.length ? child.children : [];
-
-    const li = document.createElement('li');
-    li.className = `md-subpages-item md-subpages-depth-${depth}`;
-
-    const row = document.createElement('div');
-    row.className = 'md-subpages-row';
-
-    const a = document.createElement('a');
-    a.className = 'md-subpages-title';
-    a.textContent = child.title;
-    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); _crumbNavigate(child.id); });
-    row.appendChild(a);
-
-    const meta = document.createElement('span');
-    meta.className = 'md-subpages-meta';
-    if (hasCards)       meta.insertAdjacentHTML('beforeend', `<span class="notes-item-indicator" title="${child.linkedCards.length} linked card(s)">${SVGICONS.linkedCards(9, 9)}</span>`);
-    if (hasLink)        meta.insertAdjacentHTML('beforeend', `<span class="notes-item-indicator" title="Has link">${SVGICONS.link(9, 9)}</span>`);
-    if (hasAttachments) meta.insertAdjacentHTML('beforeend', `<span class="notes-item-indicator" title="Has attachments">${SVGICONS.attachment(9, 9)}</span>`);
-    if (meta.children.length) row.appendChild(meta);
-    li.appendChild(row);
-
-    if (depth < 2 && grandchildren.length) {
-      const sub = document.createElement('ul');
-      sub.className = 'md-subpages-children';
-      grandchildren.forEach(gc => sub.appendChild(_buildItem(gc, depth + 1)));
-      li.appendChild(sub);
-    }
-
-    return li;
-  }
-
-  if (!children.length) {
-    const empty = document.createElement('span');
-    empty.className = 'md-subpages-empty';
-    empty.textContent = 'No subpages yet';
-    wrap.appendChild(empty);
-  } else {
-    const ul = document.createElement('ul');
-    children.forEach(child => ul.appendChild(_buildItem(child, 1)));
-    wrap.appendChild(ul);
-  }
-
-  placeholder.replaceWith(wrap);
-}
 
 function _applyNoteFormat(action) {
   applyDescFormat(document.getElementById('notePageDesc'), action);
@@ -705,7 +732,7 @@ function _applyNoteFormat(action) {
 
 function showNoteDescPreview() {
   showMarkdownPreview('notePageDesc', 'notePageDescPreview', 'noteDescToolbar', showNoteDescEditor,
-    el => { buildToc(el); buildSubpages(el); resolveAttachments(el); });
+    el => { buildToc(el); resolveAttachments(el); });
 }
 
 function showNoteDescEditor() {
@@ -746,7 +773,7 @@ function renderLinkedCards(ids) {
     }
     mini.querySelector('.note-mini-card-remove').addEventListener('click', e => {
       e.stopPropagation();
-      const page = findNotePage(noteModalPageId, notesState.pages);
+      const page = findNotePage(noteModalPageId, notesState.items);
       if (!page) return;
       page.linkedCards  = (page.linkedCards || []).filter(c => c !== id);
       page.lastModified = new Date().toISOString();
@@ -807,7 +834,7 @@ function createAndLinkCard(text) {
   schedulesSave();
   render();
 
-  const target = findNotePage(noteModalPageId, notesState.pages);
+  const target = findNotePage(noteModalPageId, notesState.items);
   if (target && !(target.linkedCards || []).includes(cardId)) {
     (target.linkedCards ??= []).push(cardId);
     target.lastModified = new Date().toISOString();
@@ -827,7 +854,7 @@ function initNoteCardSearch() {
     results.innerHTML = '';
     if (!q) { results.style.display = 'none'; return; }
 
-    const page = findNotePage(noteModalPageId, notesState.pages);
+    const page = findNotePage(noteModalPageId, notesState.items);
     const linked = new Set(page?.linkedCards || []);
     const matches = [];
     for (const col of (state.columns || [])) {
@@ -848,7 +875,7 @@ function initNoteCardSearch() {
         `<span class="note-card-search-col">${escHtml(card.col)}</span>` +
         `<span class="note-card-search-text">${escHtml(short)}</span>`;
       item.addEventListener('click', () => {
-        const page = findNotePage(noteModalPageId, notesState.pages);
+        const page = findNotePage(noteModalPageId, notesState.items);
         if (!page) return;
         if (!page.linkedCards) page.linkedCards = [];
         if (!page.linkedCards.includes(card.id)) {
@@ -893,7 +920,7 @@ document.addEventListener('dragstart', e => {
 
 document.addEventListener('dragover', e => {
   if (!_notesDragCard) return;
-  const item = e.target.closest('.notes-tree-item');
+  const item = e.target.closest('.notes-tree-item--page');
   if (_notesDragOverItem && _notesDragOverItem !== item) {
     _notesDragOverItem.classList.remove('notes-tree-item--drag-over');
     _notesDragOverItem = null;
@@ -922,8 +949,8 @@ document.addEventListener('drop', async e => {
   const card = col?.cards.find(c => c.id === cardId);
   if (!card) return;
 
-  const pageId = item.dataset.pageId;
-  const target = findNotePage(pageId, notesState.pages);
+  const pageId = item.dataset.itemId || item.dataset.pageId;
+  const target = findNotePage(pageId, notesState.items);
   if (!target || (target.linkedCards || []).includes(cardId)) return;
 
   const label = card.text.length > 60 ? card.text.slice(0, 60) + '…' : card.text;
@@ -945,7 +972,7 @@ document.addEventListener('touchmove', e => {
   touchDrag.ghost.el.style.display = 'none';
   const under = document.elementFromPoint(t.clientX, t.clientY);
   touchDrag.ghost.el.style.display = '';
-  const item = under?.closest('.notes-tree-item');
+  const item = under?.closest('.notes-tree-item--page');
   if (_notesDragOverItem && _notesDragOverItem !== item) {
     _notesDragOverItem.classList.remove('notes-tree-item--drag-over');
     _notesDragOverItem = null;
@@ -966,8 +993,8 @@ document.addEventListener('touchend', e => {
     const col  = state.columns.find(c => c.id === colId);
     const card = col?.cards.find(c => c.id === cardId);
     if (!card) return;
-    const pageId = item.dataset.pageId;
-    const target = findNotePage(pageId, notesState.pages);
+    const pageId = item.dataset.itemId || item.dataset.pageId;
+    const target = findNotePage(pageId, notesState.items);
     if (!target || (target.linkedCards || []).includes(cardId)) return;
     const label = card.text.length > 60 ? card.text.slice(0, 60) + '…' : card.text;
     if (!await showConfirm(`Link "${label}" to page "${target.title}"?`, { okLabel: 'Link card' })) return;
@@ -996,7 +1023,7 @@ function renderAttachments(pageId, files) {
   if (!list) return;
   list.innerHTML = '';
 
-  const page = findNotePage(pageId, notesState.pages);
+  const page = findNotePage(pageId, notesState.items);
   if (page && !!page.hasAttachments !== (files.length > 0)) {
     page.hasAttachments = files.length > 0;
     page.lastModified   = new Date().toISOString();
@@ -1161,32 +1188,29 @@ function closeAttachmentViewer() {
 // ---- Notes tree drag & drop ----
 let _treeDragId = null;
 
-function _subtreeHeight(page) {
-  if (!page.children?.length) return 0;
-  return 1 + Math.max(...page.children.map(_subtreeHeight));
-}
-
-function _removeFromTree(id, pages) {
-  for (let i = 0; i < pages.length; i++) {
-    if (pages[i].id === id) return pages.splice(i, 1)[0];
-    const r = _removeFromTree(id, pages[i].children || []);
-    if (r) return r;
+function _removeFromTree(id, items) {
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].id === id) return items.splice(i, 1)[0];
+    if (items[i].type === 'folder') {
+      const r = _removeFromTree(id, items[i].children || []);
+      if (r) return r;
+    }
   }
   return null;
 }
 
-function _insertIntoTree(page, targetId, position, pages) {
-  for (let i = 0; i < pages.length; i++) {
-    if (pages[i].id === targetId) {
-      if (position === 'before') { pages.splice(i, 0, page); return true; }
-      if (position === 'after')  { pages.splice(i + 1, 0, page); return true; }
-      if (position === 'into')   {
-        if (!pages[i].children) pages[i].children = [];
-        pages[i].children.unshift(page);
+function _insertIntoTree(dragged, targetId, position, items) {
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].id === targetId) {
+      if (position === 'before') { items.splice(i, 0, dragged); return true; }
+      if (position === 'after')  { items.splice(i + 1, 0, dragged); return true; }
+      if (position === 'into' && items[i].type === 'folder') {
+        if (!items[i].children) items[i].children = [];
+        items[i].children.unshift(dragged);
         return true;
       }
     }
-    if (_insertIntoTree(page, targetId, position, pages[i].children || [])) return true;
+    if (items[i].type === 'folder' && _insertIntoTree(dragged, targetId, position, items[i].children || [])) return true;
   }
   return false;
 }
@@ -1223,30 +1247,26 @@ function _initTreeTouchDragDrop() {
 
     const item = el?.closest('.notes-tree-item');
     if (ttOverItem && ttOverItem !== item) { _clearTreeDrop(); ttOverItem = null; }
-    if (!item || item.dataset.pageId === ttDragId) return;
+    if (!item || item.dataset.itemId === ttDragId) return;
 
-    const draggedPage = findNotePage(ttDragId, notesState.pages);
-    if (!draggedPage) return;
-    const dragHeight  = _subtreeHeight(draggedPage);
-    const targetDepth = +item.dataset.depth;
-    const rect        = item.getBoundingClientRect();
-    const ratio       = (y - rect.top) / rect.height;
-    const canBefore   = targetDepth + dragHeight <= 2;
-    const canInto     = targetDepth < 2 && targetDepth + 1 + dragHeight <= 2;
+    const rect     = item.getBoundingClientRect();
+    const ratio    = (y - rect.top) / rect.height;
+    const isFolder = item.dataset.itemType === 'folder';
+    const canInto  = isFolder;
 
     _clearTreeDrop();
-    if      (canBefore && ratio < 0.3)  item.classList.add('notes-tree-item--drop-before');
-    else if (canBefore && ratio > 0.7)  item.classList.add('notes-tree-item--drop-after');
-    else if (canInto)                   item.classList.add('notes-tree-item--drop-into');
-    else if (canBefore && ratio <= 0.5) item.classList.add('notes-tree-item--drop-before');
-    else if (canBefore)                 item.classList.add('notes-tree-item--drop-after');
+    if      (ratio < 0.3)             item.classList.add('notes-tree-item--drop-before');
+    else if (ratio > 0.7)             item.classList.add('notes-tree-item--drop-after');
+    else if (canInto)                 item.classList.add('notes-tree-item--drop-into');
+    else if (ratio <= 0.5)            item.classList.add('notes-tree-item--drop-before');
+    else                              item.classList.add('notes-tree-item--drop-after');
     ttOverItem = item;
   }
 
   container.addEventListener('touchstart', e => {
     const item = e.target.closest('.notes-tree-item');
     if (!item || e.target.closest('button')) return;
-    ttDragId  = item.dataset.pageId;
+    ttDragId  = item.dataset.itemId;
     ttDragEl  = item;
     ttStartX  = e.touches[0].clientX;
     ttStartY  = e.touches[0].clientY;
@@ -1311,7 +1331,7 @@ function _initTreeTouchDragDrop() {
 
     const item = ttOverItem;
     ttOverItem = null;
-    if (!item || item.dataset.pageId === savedId) { _clearTreeDrop(); return; }
+    if (!item || item.dataset.itemId === savedId) { _clearTreeDrop(); return; }
 
     const position = item.classList.contains('notes-tree-item--drop-before') ? 'before'
                    : item.classList.contains('notes-tree-item--drop-after')  ? 'after'
@@ -1320,10 +1340,10 @@ function _initTreeTouchDragDrop() {
     _clearTreeDrop();
     if (!position) return;
 
-    const page = _removeFromTree(savedId, notesState.pages);
-    if (!page) return;
-    if (position === 'into') notesExpanded.add(item.dataset.pageId);
-    _insertIntoTree(page, item.dataset.pageId, position, notesState.pages);
+    const dragged = _removeFromTree(savedId, notesState.items);
+    if (!dragged) return;
+    if (position === 'into') { notesExpanded.add(item.dataset.itemId); _saveTreeOpenState(); }
+    _insertIntoTree(dragged, item.dataset.itemId, position, notesState.items);
     scheduleSaveNotes();
     renderNotesTree();
   }
@@ -1339,7 +1359,7 @@ function _initTreeDragDrop() {
   container.addEventListener('dragstart', e => {
     const item = e.target.closest('.notes-tree-item');
     if (!item) return;
-    _treeDragId = item.dataset.pageId;
+    _treeDragId = item.dataset.itemId;
     e.dataTransfer.effectAllowed = 'move';
     setTimeout(() => item.classList.add('notes-tree-item--dragging'), 0);
   });
@@ -1354,32 +1374,18 @@ function _initTreeDragDrop() {
   container.addEventListener('dragover', e => {
     if (!_treeDragId) return;
     const item = e.target.closest('.notes-tree-item');
-    if (!item || item.dataset.pageId === _treeDragId) { _clearTreeDrop(); return; }
+    if (!item || item.dataset.itemId === _treeDragId) { _clearTreeDrop(); return; }
 
-    const draggedPage = findNotePage(_treeDragId, notesState.pages);
-    if (!draggedPage) return;
-    const dragHeight  = _subtreeHeight(draggedPage);
-    const targetDepth = +item.dataset.depth;
-
-    const rect  = item.getBoundingClientRect();
-    const ratio = (e.clientY - rect.top) / rect.height;
-
-    const canBefore = targetDepth + dragHeight <= 2;
-    const canInto   = targetDepth < 2 && targetDepth + 1 + dragHeight <= 2;
-    const canAfter  = canBefore;
+    const rect     = item.getBoundingClientRect();
+    const ratio    = (e.clientY - rect.top) / rect.height;
+    const isFolder = item.dataset.itemType === 'folder';
 
     _clearTreeDrop();
-    if (canBefore && ratio < 0.3) {
-      item.classList.add('notes-tree-item--drop-before');
-    } else if (canAfter && ratio > 0.7) {
-      item.classList.add('notes-tree-item--drop-after');
-    } else if (canInto) {
-      item.classList.add('notes-tree-item--drop-into');
-    } else if (canBefore && ratio <= 0.5) {
-      item.classList.add('notes-tree-item--drop-before');
-    } else if (canAfter) {
-      item.classList.add('notes-tree-item--drop-after');
-    }
+    if      (ratio < 0.3)  item.classList.add('notes-tree-item--drop-before');
+    else if (ratio > 0.7)  item.classList.add('notes-tree-item--drop-after');
+    else if (isFolder)     item.classList.add('notes-tree-item--drop-into');
+    else if (ratio <= 0.5) item.classList.add('notes-tree-item--drop-before');
+    else                   item.classList.add('notes-tree-item--drop-after');
 
     if (item.classList.contains('notes-tree-item--drop-before') ||
         item.classList.contains('notes-tree-item--drop-after')  ||
@@ -1396,7 +1402,7 @@ function _initTreeDragDrop() {
     e.preventDefault();
     if (!_treeDragId) return;
     const item = e.target.closest('.notes-tree-item');
-    if (!item || item.dataset.pageId === _treeDragId) { _clearTreeDrop(); return; }
+    if (!item || item.dataset.itemId === _treeDragId) { _clearTreeDrop(); return; }
 
     const position = item.classList.contains('notes-tree-item--drop-before') ? 'before'
                    : item.classList.contains('notes-tree-item--drop-after')  ? 'after'
@@ -1405,12 +1411,12 @@ function _initTreeDragDrop() {
     _clearTreeDrop();
     if (!position) return;
 
-    const targetId = item.dataset.pageId;
-    const page = _removeFromTree(_treeDragId, notesState.pages);
-    if (!page) return;
+    const targetId = item.dataset.itemId;
+    const dragged  = _removeFromTree(_treeDragId, notesState.items);
+    if (!dragged) return;
 
-    if (position === 'into') notesExpanded.add(targetId);
-    _insertIntoTree(page, targetId, position, notesState.pages);
+    if (position === 'into') { notesExpanded.add(targetId); _saveTreeOpenState(); }
+    _insertIntoTree(dragged, targetId, position, notesState.items);
     scheduleSaveNotes();
     renderNotesTree();
   });
@@ -1428,6 +1434,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSidebarResize();
   document.getElementById('notesToggleBtn')?.addEventListener('click', toggleNotesSidebar);
   document.getElementById('notesAddRootBtn')?.addEventListener('click', () => addNotePage(null));
+  document.getElementById('notesAddFolderBtn')?.addEventListener('click', () => addNoteFolder(null));
   document.getElementById('notesSidebarFontBtn')?.addEventListener('click', toggleNotesFontSize);
 
   document.getElementById('noteToggleLink')        ?.addEventListener('click', () => toggleNoteSection('noteLinkSection',        'noteToggleLink'));
@@ -1458,15 +1465,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('noteModalSaveBtn')?.addEventListener('click', () => { submitNote(); closeNoteModal(); });
   document.getElementById('noteModalDeleteBtn')?.addEventListener('click', async () => {
     if (!noteModalPageId) return;
-    const page = findNotePage(noteModalPageId, notesState.pages);
+    const page = findNotePage(noteModalPageId, notesState.items);
     if (!page) return;
-    const msg = page.children?.length
-      ? `Delete "${page.title}" and all its subpages?`
-      : `Delete page "${page.title}"?`;
-    if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) {
+    if (await showConfirm(`Delete page "${page.title}"?`, { okLabel: 'Delete', danger: true })) {
       const id = noteModalPageId;
       closeNoteModal();
-      deleteNotePage(id);
+      deleteNoteItem(id);
     }
   });
 
@@ -1499,7 +1503,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('notePageTitle')?.addEventListener('input', e => {
     e.target.value = e.target.value.replace(/\n/g, ''); // no newlines in title
     autoResizeTitle(e.target);
-    const path = getNotePath(noteModalPageId, notesState.pages);
+    const path = getNotePath(noteModalPageId, notesState.items);
     if (path && path.length > 1) {
       const live = e.target.value.trim() || 'New Page';
       _renderCrumb(path, live);

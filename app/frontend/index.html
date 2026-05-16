@@ -105,7 +105,8 @@
     <div class="notes-sidebar-header">
       <span class="notes-sidebar-label">Notes</span>
       <button class="notes-sidebar-add-btn notes-font-btn" id="notesSidebarFontBtn" title="Change font size">A</button>
-<button class="notes-sidebar-add-btn" id="notesAddRootBtn" title="Add page">+</button>
+      <button class="notes-sidebar-add-btn" id="notesAddFolderBtn" title="Add folder">&#128193;</button>
+      <button class="notes-sidebar-add-btn" id="notesAddRootBtn" title="Add page">+</button>
     </div>
     <div class="notes-tree-body" id="notesTreeBody"></div>
   </div>
@@ -566,7 +567,6 @@
               <button class="note-tb-btn" data-fmt="code"     title="Code block">&lt;/&gt;</button>
               <span class="note-tb-sep"></span>
               <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
-              <button class="note-tb-btn" data-fmt="subpages" title="Subpages">[sub]</button>
             </div>
           </div>
           <div id="notePageDescPreview" class="card-desc-preview" style="display:none"></div>
