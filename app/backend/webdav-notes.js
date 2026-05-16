@@ -187,7 +187,7 @@ function parseFm(text) {
       meta[kv[1]] = kv[2].trim().replace(/^"(.*)"$/, '$1');
     }
   }
-  return { meta, body: m[2] };
+  return { meta, body: m[2].replace(/^\r?\n/, '') };
 }
 
 /** Extract card IDs from linkedCards frontmatter value.
