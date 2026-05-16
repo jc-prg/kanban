@@ -42,6 +42,7 @@ beforeAll(() => {
     clearTimeout: () => {},
     render:       renderMock,   // state.js calls render() as a global
     ICONS:        {},           // referenced by showSaved (only if schedulesSave runs)
+    crypto:       globalThis.crypto,
   })
 
   // Append var-based shim accessors that run in the SAME script execution so

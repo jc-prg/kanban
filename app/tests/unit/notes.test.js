@@ -57,6 +57,7 @@ beforeAll(() => {
     // ICONS used in some render paths
     ICONS: {},
     SVGICONS: { description: () => '' },
+    crypto: globalThis.crypto,
   })
 
   // Load notes.js and append shims.
