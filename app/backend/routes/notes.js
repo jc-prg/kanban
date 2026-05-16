@@ -26,6 +26,7 @@ router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
     let notes;
     try {
       notes = await loadNotesFromWebdav(wdCfg);
+      if (!notes.deletedPageIds) notes.deletedPageIds = [];
       // Always keep CouchDB in sync as a cache/fallback
       saveNotesData(db, notes).catch(err =>
         console.error('[WebDAV] CouchDB cache update failed:', err.message)
@@ -33,6 +34,7 @@ router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
     } catch (err) {
       console.error('[WebDAV] loadNotes failed, using CouchDB cache:', err.message);
       notes = await loadNotesData(db);
+      if (!notes.deletedPageIds) notes.deletedPageIds = [];
     }
     res.json(notes);
     return;
@@ -57,7 +59,9 @@ router.put('/:board/notes', writeRateLimit, withBoard(async (req, res, db) => {
   const wdCfg = await getWebdavCfg(db);
   if (wdCfg) {
     await saveNotesToWebdav(wdCfg, req.body);
-    const result = await saveNotesData(db, req.body);  // keep CouchDB as cache
+    // Clear deletedPageIds from the cache — WebDAV sync already processed them.
+    const notesForCache = { ...req.body, deletedPageIds: [] };
+    const result = await saveNotesData(db, notesForCache);
     res.setHeader('ETag', `"${result.rev}"`);
     return res.json({ ok: true });
   }
@@ -89,12 +93,14 @@ router.patch('/:board/notes', writeRateLimit, withBoard(async (req, res, db) => 
 
   const wdCfg = await getWebdavCfg(db);
   if (wdCfg) {
-    let notes;
-    try   { notes = await loadNotesFromWebdav(wdCfg); }
-    catch { notes = await loadNotesData(db); }
+    // Load from CouchDB cache — avoids an expensive WebDAV round-trip on every keystroke.
+    // deletedPageIds from the cache will be empty (cleared after the last PUT sync),
+    // so PATCH will not trigger any orphan deletion — which is correct for content-only edits.
+    const notes = await loadNotesData(db);
+    if (!notes.deletedPageIds) notes.deletedPageIds = [];
     for (const page of updatedPages) upsertPage(notes.pages, page);
     await saveNotesToWebdav(wdCfg, notes);
-    const result = await saveNotesData(db, notes);  // keep CouchDB as cache
+    const result = await saveNotesData(db, notes);  // cache already has deletedPageIds: []
     res.setHeader('ETag', `"${result.rev}"`);
     return res.json({ ok: true });
   }

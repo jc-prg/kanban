@@ -76,7 +76,10 @@ const validateBoardPatch = ajv.compile({
 });
 const validateNotes = ajv.compile({
   type: 'object', required: ['pages'], additionalProperties: false,
-  properties: { pages: { type: 'array', items: { $ref: '#/definitions/page' } } },
+  properties: {
+    pages:          { type: 'array', items: { $ref: '#/definitions/page' } },
+    deletedPageIds: { type: 'array', items: { type: 'string' } }
+  },
   definitions: {
     page: {
       type: 'object', required: ['id', 'title'], additionalProperties: false,

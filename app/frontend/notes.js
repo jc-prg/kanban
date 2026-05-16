@@ -15,11 +15,12 @@ function _startNoteAutoSave() {
 }
 
 // ---- Notes State ----
-let notesState        = { pages: [] };
+let notesState        = { pages: [], deletedPageIds: [] };
 let baseNotesState    = null; // snapshot from last server load/save — the merge ancestor
 let notesEtag         = null;
 let notesSaveTimer    = null;
 let _notesSaveInFlight = false; // true while the save HTTP request is in flight
+let _lastNotesSync     = 0;     // Date.now() of last successful loadNotes() — used to debounce sidebar opens
 const NOTES_API        = API_BASE ? `${API_BASE}/notes`             : null;
 const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
 
@@ -33,6 +34,7 @@ async function loadNotes() {
       notesEtag = r.headers.get('ETag');
       const remote = await r.json();
       if (!remote.pages) remote.pages = [];
+      if (!remote.deletedPageIds) remote.deletedPageIds = [];
       // If local unsaved changes exist (notesState drifted from baseNotesState since
       // the last server sync), merge rather than blindly overwriting — otherwise edits
       // made after submitNote() but within the 600 ms save debounce are silently lost.
@@ -45,16 +47,18 @@ async function loadNotes() {
         baseNotesState = JSON.parse(JSON.stringify(remote));
       }
     } else {
-      notesState     = { pages: [] };
+      notesState     = { pages: [], deletedPageIds: [] };
       baseNotesState = JSON.parse(JSON.stringify(notesState));
     }
   } catch (e) {
-    notesState     = { pages: [] };
+    notesState     = { pages: [], deletedPageIds: [] };
     baseNotesState = JSON.parse(JSON.stringify(notesState));
   }
+  _lastNotesSync = Date.now();
   _setWebdavSyncing(false);
   _updateWebdavSidebarUi();
   renderNotesTree();
+  if (noteModalPageId) loadAttachments(noteModalPageId);
   restoreNotesSidebar();
   render();
 }
@@ -93,7 +97,9 @@ function scheduleSaveNotes() {
   notesSaveTimer = setTimeout(async () => {
     notesSaveTimer = null;
     if (!NOTES_API) return;
+    const isWebdav = state?.settings?.webdav?.enabled ?? false;
     _notesSaveInFlight = true;
+    if (isWebdav) _setWebdavSyncing(true);
     try {
       let r;
       const headers = { 'Content-Type': 'application/json' };
@@ -123,8 +129,15 @@ function scheduleSaveNotes() {
       const newEtag = r.headers.get('ETag');
       if (newEtag) notesEtag = newEtag;
       baseNotesState = JSON.parse(JSON.stringify(notesState));
-    } catch (e) { console.error('Notes save failed:', e.message); }
-    finally { _notesSaveInFlight = false; }
+      if (isWebdav) _setWebdavSaveError(null);
+    } catch (e) {
+      console.error('Notes save failed:', e.message);
+      if (isWebdav) _setWebdavSaveError('Sync failed: ' + e.message);
+    }
+    finally {
+      _notesSaveInFlight = false;
+      if (isWebdav) _setWebdavSyncing(false);
+    }
   }, 600);
 }
 
@@ -141,6 +154,9 @@ function _removePage(id, pages) {
 // When both sides changed the same page, newer lastModified wins.
 function mergeNotesStates(base, remote, local) {
   const merged    = JSON.parse(JSON.stringify(remote));
+  // Union deletedPageIds from both sides — local deletions that haven't been synced yet must survive the merge.
+  const deletedUnion = new Set([...(remote.deletedPageIds || []), ...(local.deletedPageIds || [])]);
+  merged.deletedPageIds = [...deletedUnion];
   const baseFlat  = _flattenNotePages(base.pages);
   const localFlat = _flattenNotePages(local.pages);
   const remoteFlat = _flattenNotePages(remote.pages);
@@ -220,6 +236,18 @@ function _setWebdavSyncing(syncing) {
   document.getElementById('notesSyncBtn')?.classList.toggle('notes-sidebar-add-btn--spinning', syncing);
 }
 
+function _setWebdavSaveError(msg) {
+  const btn = document.getElementById('notesSyncBtn');
+  if (!btn) return;
+  if (msg) {
+    btn.title = msg;
+    btn.classList.add('notes-sidebar-add-btn--error');
+  } else {
+    btn.title = 'Sync with WebDAV';
+    btn.classList.remove('notes-sidebar-add-btn--error');
+  }
+}
+
 // ---- Notes Tree Helpers ----
 function findNotePage(id, pages) {
   for (const p of pages) {
@@ -255,10 +283,22 @@ function addNotePage(parentId = null) {
   openNoteModal(page.id, true);
 }
 
+function _collectPageIds(page) {
+  const ids = [page.id];
+  for (const child of (page.children || [])) ids.push(..._collectPageIds(child));
+  return ids;
+}
+
 function deleteNotePage(id) {
   function removeFrom(arr) {
     const idx = arr.findIndex(p => p.id === id);
-    if (idx !== -1) { arr.splice(idx, 1); return true; }
+    if (idx !== -1) {
+      const [removed] = arr.splice(idx, 1);
+      // Track all removed ids so WebDAV sync knows which orphan files to delete.
+      const removedIds = _collectPageIds(removed);
+      notesState.deletedPageIds = [...new Set([...(notesState.deletedPageIds || []), ...removedIds])];
+      return true;
+    }
     return arr.some(p => p.children?.length && removeFrom(p.children));
   }
   removeFrom(notesState.pages);
@@ -319,7 +359,7 @@ function toggleNotesSidebar() {
   }
   sidebar?.classList.toggle('notes-sidebar--open', notesSidebarOpen);
   document.getElementById('notesToggleBtn')?.classList.toggle('open', notesSidebarOpen);
-  if (notesSidebarOpen && (state?.settings?.webdav?.enabled)) loadNotes();
+  if (notesSidebarOpen && (state?.settings?.webdav?.enabled) && Date.now() - _lastNotesSync > 10000) loadNotes();
   _saveNotesSidebarSettings();
 }
 

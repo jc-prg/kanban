@@ -95,7 +95,15 @@ function parseFm(text) {
   const bodyAttachments = [...body.matchAll(/\(attachment:([^)\s]+)\)/g)].map(bm => bm[1]);
   const attachments = [...new Set([...fmAttachments, ...bodyAttachments])];
 
-  return { id: meta.id || '', link: meta.link || '', linkedCards: meta.linkedCards, attachments, body };
+  return {
+    id:           meta.id || '',
+    link:         meta.link || '',
+    linkedCards:  meta.linkedCards,
+    attachments,
+    lastModified: meta.lastModified || '',
+    order:        meta.order !== undefined ? parseInt(meta.order, 10) : undefined,
+    body,
+  };
 }
 
 function _collectAttachmentNames(page) {
@@ -106,9 +114,10 @@ function _collectAttachmentNames(page) {
   return [...new Set([...fromField, ...fromBody])];
 }
 
-function renderMd(page) {
+function renderMd(page, order) {
   let out = '---\n';
   out += `id: ${page.id}\n`;
+  if (order !== undefined) out += `order: ${order}\n`;
   if (page.link) out += `link: ${page.link}\n`;
   if (page.linkedCards?.length) {
     out += 'linkedCards:\n';
@@ -119,6 +128,7 @@ function renderMd(page) {
     out += 'attachments:\n';
     for (const a of attachments) out += `  - ${a}\n`;
   }
+  if (page.lastModified) out += `lastModified: ${page.lastModified}\n`;
   out += '---\n';
   if (page.description) out += '\n' + page.description;
   return out;
@@ -159,12 +169,23 @@ async function listChildren(cfg, dirRelPath) {
 
 // ─── Load notes from WebDAV ───────────────────────────────────────────────────
 
+// Try to read a directory's index file — accepts both index.md and Index.md.
+async function _readIndex(cfg, dirRelPath) {
+  for (const name of ['index.md', 'Index.md']) {
+    try {
+      const r = await wdRequest(cfg, 'GET', `${dirRelPath}/${name}`, {});
+      if (r.status === 200) return r.body;
+    } catch {}
+  }
+  return null;
+}
+
 async function loadDir(cfg, dirRelPath) {
   let children;
   try { children = await listChildren(cfg, dirRelPath); }
   catch { return []; }
 
-  const pages = [];
+  const entries = []; // { page, order }
 
   for (const { name, isCollection } of children) {
     if (name.startsWith('_')) continue;   // skip _attachments and similar reserved dirs
@@ -175,24 +196,25 @@ async function loadDir(cfg, dirRelPath) {
         id: 'n-' + crypto.randomBytes(6).toString('hex'),
         title: name, description: '', link: '', linkedCards: [],
       };
-      try {
-        const r = await wdRequest(cfg, 'GET', `${childRel}/index.md`, {});
-        if (r.status === 200) {
-          const fm         = parseFm(r.body);
-          page.id          = fm.id || page.id;
-          page.description = fm.body;
-          page.link        = fm.link;
-          page.linkedCards = fm.linkedCards;
-          if (fm.attachments.length) {
-            page.attachments    = fm.attachments;
-            page.hasAttachments = true;
-          }
+      let order;
+      const text = await _readIndex(cfg, childRel);
+      if (text !== null) {
+        const fm         = parseFm(text);
+        page.id          = fm.id || page.id;
+        page.description = fm.body;
+        page.link        = fm.link;
+        page.linkedCards = fm.linkedCards;
+        if (fm.lastModified) page.lastModified = fm.lastModified;
+        if (fm.attachments.length) {
+          page.attachments    = fm.attachments;
+          page.hasAttachments = true;
         }
-      } catch {}
+        order = fm.order;
+      }
       page.children = await loadDir(cfg, childRel);
-      pages.push(page);
+      entries.push({ page, order });
 
-    } else if (name.endsWith('.md') && name !== 'index.md') {
+    } else if (name.endsWith('.md') && name.toLowerCase() !== 'index.md') {
       try {
         const r = await wdRequest(cfg, 'GET', childRel, {});
         if (r.status === 200) {
@@ -205,17 +227,20 @@ async function loadDir(cfg, dirRelPath) {
             linkedCards: fm.linkedCards,
             children:    [],
           };
+          if (fm.lastModified) page.lastModified = fm.lastModified;
           if (fm.attachments.length) {
             page.attachments    = fm.attachments;
             page.hasAttachments = true;
           }
-          pages.push(page);
+          entries.push({ page, order: fm.order });
         }
       } catch {}
     }
   }
 
-  return pages;
+  // Sort by the `order` field written by kanban; files without it (Obsidian-native) sort last.
+  entries.sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+  return entries.map(e => e.page);
 }
 
 async function loadNotesFromWebdav(cfg) {
@@ -225,7 +250,7 @@ async function loadNotesFromWebdav(cfg) {
 
 // ─── Save notes to WebDAV ─────────────────────────────────────────────────────
 
-async function syncDir(cfg, pages, dirRelPath) {
+async function syncDir(cfg, pages, dirRelPath, deletedIds, allPageIds) {
   const targetMap = new Map();
   for (const page of pages) {
     const fn = toFilename(page.title);
@@ -236,7 +261,8 @@ async function syncDir(cfg, pages, dirRelPath) {
   let existing = [];
   try { existing = await listChildren(cfg, dirRelPath); } catch {}
 
-  for (const page of pages) {
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
     const fn  = toFilename(page.title);
     const rel = dirRelPath ? `${dirRelPath}/${fn}` : fn;
     const hasChildren = (page.children || []).length > 0;
@@ -247,26 +273,51 @@ async function syncDir(cfg, pages, dirRelPath) {
       const mkr = await wdRequest(cfg, 'MKCOL', rel, {});
       if (mkr.status !== 201 && mkr.status !== 405 && mkr.status !== 409)
         throw new Error(`MKCOL ${rel}: HTTP ${mkr.status}`);
-      await wdRequest(cfg, 'PUT', `${rel}/index.md`, { body: renderMd(page) });
-      await syncDir(cfg, page.children, rel);
+      await wdRequest(cfg, 'PUT', `${rel}/index.md`, { body: renderMd(page, i) });
+      await syncDir(cfg, page.children, rel, deletedIds, allPageIds);
     } else {
       if (existing.some(e => e.name === fn && e.isCollection))
         await wdRequest(cfg, 'DELETE', rel + '/', {}).catch(() => {});
-      await wdRequest(cfg, 'PUT', `${rel}.md`, { body: renderMd(page) });
+      await wdRequest(cfg, 'PUT', `${rel}.md`, { body: renderMd(page, i) });
     }
   }
 
-  // Delete orphans — skip underscore-prefixed entries (_attachments etc.)
+  // Remove orphaned entries — but only when we know it is safe:
+  //  • id is in allPageIds  → page still exists but was renamed or moved; new location
+  //    was already written above, so deleting the stale path is correct.
+  //  • id is in deletedIds  → page was explicitly deleted by the user in kanban.
+  //  • id is unknown / null → file was created by Obsidian; leave it untouched.
   for (const { name, isCollection } of existing) {
-    if (!targetMap.has(name) && !name.startsWith('_')) {
-      const entryRel = dirRelPath ? `${dirRelPath}/${name}` : name;
+    if (targetMap.has(name) || name.startsWith('_')) continue;
+    const entryRel = dirRelPath ? `${dirRelPath}/${name}` : name;
+    let id = null;
+    if (isCollection) {
+      const text = await _readIndex(cfg, entryRel);
+      if (text !== null) id = parseFm(text).id;
+    } else {
+      try {
+        const r = await wdRequest(cfg, 'GET', entryRel, {});
+        if (r.status === 200) id = parseFm(r.body).id;
+      } catch {}
+    }
+    if (id && (allPageIds.has(id) || deletedIds.has(id))) {
       await wdRequest(cfg, 'DELETE', isCollection ? entryRel + '/' : entryRel, {}).catch(() => {});
     }
   }
 }
 
+function _collectAllIds(pages, out = new Set()) {
+  for (const page of pages) {
+    out.add(page.id);
+    if (page.children?.length) _collectAllIds(page.children, out);
+  }
+  return out;
+}
+
 async function saveNotesToWebdav(cfg, notes) {
-  await syncDir(cfg, notes.pages || [], '');
+  const deletedIds = new Set(notes.deletedPageIds || []);
+  const allPageIds = _collectAllIds(notes.pages || []);
+  await syncDir(cfg, notes.pages || [], '', deletedIds, allPageIds);
 }
 
 // ─── Attachment helpers ───────────────────────────────────────────────────────

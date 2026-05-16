@@ -78,6 +78,7 @@
 
 @keyframes notesSpin { to { transform: rotate(360deg); } }
 .notes-sidebar-add-btn--spinning { animation: notesSpin 0.7s linear infinite; }
+.notes-sidebar-add-btn--error { color: var(--danger, #ef4444); }
 
 .notes-tree-body {
   flex: 1;
