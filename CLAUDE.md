@@ -154,9 +154,14 @@ All `/api/*` routes require authentication via one of:
 | `PUT` | `/api/:board/notes` | Replace notes document; body: full notes object |
 | `GET` | `/api/:board/notes/export` | Download notes as a ZIP archive (Markdown + attachments) |
 | `GET` | `/api/:board/attachment-stats` | Returns `{ count, size }` for all attachments on the board |
+| `GET` | `/api/:board/webdav-config` | Load WebDAV config: `{ enabled, url, user, hasPassword }` |
+| `PUT` | `/api/:board/webdav-config` | Save WebDAV config; body: `{ enabled, url, user, password? }` |
+| `POST` | `/api/:board/webdav-config/test` | Test WebDAV connectivity; returns `{ ok, message?, error? }` |
 | `GET` | `/api/:board/webhook-config` | Load webhook config: `{ enabled, name, url, method }` |
 | `PUT` | `/api/:board/webhook-config` | Save webhook config; body: `{ enabled, name, url, method }` |
 | `POST` | `/api/:board/webhook/trigger` | Fire the configured webhook server-side; returns `{ ok, status?, error? }` |
+
+WebDAV config is stored as a separate CouchDB document (`_id: "webdav-config"`) per board. When enabled, notes are synced with the configured WebDAV server (e.g. Nextcloud). Credentials are stored server-side and never sent to the browser.
 
 Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`) per board. The configured button name appears in the board menu; clicking it fires `POST /:board/webhook/trigger` which makes a server-side HTTP request (GET/POST/PUT/PATCH) to the URL and returns the result in a dialog.
 

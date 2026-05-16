@@ -23,6 +23,7 @@ docker compose up -d --build
 - Add / delete cards (card text is editable inline)
 - Color tags per card
 - Auto-save to `data.json` (debounced, 600ms)
+- WebDAV sync: sync notes with a WebDAV server (e.g. Nextcloud) per board — credentials stored server-side
 - Webhook trigger: configure a URL and label per board; a button appears in the board menu that fires a server-side HTTP request (GET/POST/PUT/PATCH) to the URL and shows the response in a dialog
 
 ## Files
@@ -37,6 +38,9 @@ docker compose up -d --build
 - `GET  /api/column/:name` – Cards in a single column (case-insensitive name)
 - `POST /api/move-to/:name` – Move a card to the named column; body: `{ "job-title", "company", "location" }`
 - `POST /api/import` – Bulk-import cards; body: JSON array or `{ "relevant": [], "excluded": [] }`; returns `{ added, skipped }`
+- `GET  /api/:board/webdav-config` – Load WebDAV config
+- `PUT  /api/:board/webdav-config` – Save WebDAV config; body: `{ enabled, url, user, password? }`
+- `POST /api/:board/webdav-config/test` – Test WebDAV connectivity
 - `GET  /api/:board/webhook-config` – Load webhook config
 - `PUT  /api/:board/webhook-config` – Save webhook config; body: `{ enabled, name, url, method }`
 - `POST /api/:board/webhook/trigger` – Fire the configured webhook server-side
