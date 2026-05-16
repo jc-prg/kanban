@@ -30,16 +30,30 @@ function _webdavActive() { return !!(window.WEBDAV_CFG?.enabled && NOTES_PAGES_A
 // lastModified from frontmatter at the time each page was loaded — used for conflict detection
 const _pageLoadedAt = new Map();
 
+// Reference-counted sync-button spinner — increments on start, decrements on finish.
+// Using a counter so concurrent operations don't cancel each other's spin.
+let _webdavPending = 0;
+function _webdavBtnSpin(delta) {
+  _webdavPending = Math.max(0, _webdavPending + delta);
+  const btn = document.getElementById('notesSyncBtn');
+  if (btn) btn.classList.toggle('notes-sync-btn--spinning', _webdavPending > 0);
+}
+
 // Call a per-operation notes endpoint; returns parsed JSON or throws
 async function _notesOp(method, url, body) {
-  const r = await fetch(url, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body:    body ? JSON.stringify(body) : undefined,
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-  return data;
+  _webdavBtnSpin(+1);
+  try {
+    const r = await fetch(url, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body:    body ? JSON.stringify(body) : undefined,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  } finally {
+    _webdavBtnSpin(-1);
+  }
 }
 
 // Apply a returned notes state from the server (used after per-op calls)
@@ -99,8 +113,7 @@ let _syncInProgress = false;
 async function _runWebdavSync() {
   if (_syncInProgress) return;
   _syncInProgress = true;
-  const btn = document.getElementById('notesSyncBtn');
-  if (btn) btn.classList.add('notes-sync-btn--spinning');
+  // Note: _notesOp handles the sync-button spinner via _webdavBtnSpin
   try {
     const data = await _notesOp('POST', `${NOTES_API}/sync`, { folderIds: [...notesExpanded] });
     if (data.notes) {
@@ -111,7 +124,6 @@ async function _runWebdavSync() {
   } catch (e) { console.error('WebDAV sync error:', e.message); }
   finally {
     _syncInProgress = false;
-    if (btn) btn.classList.remove('notes-sync-btn--spinning');
   }
 }
 
@@ -1457,6 +1469,12 @@ function closeAttachmentViewer() {
 
 // ---- Notes tree drag & drop ----
 let _treeDragId = null;
+let _treeMoveInProgress = false;
+
+function _setTreeMoveLock(locked) {
+  _treeMoveInProgress = locked;
+  // button spinning is handled automatically by _notesOp via _webdavBtnSpin
+}
 
 function _removeFromTree(id, items) {
   for (let i = 0; i < items.length; i++) {
@@ -1534,6 +1552,7 @@ function _initTreeTouchDragDrop() {
   }
 
   container.addEventListener('touchstart', e => {
+    if (_treeMoveInProgress) return;
     const item = e.target.closest('.notes-tree-item');
     if (!item || e.target.closest('button')) return;
     ttDragId  = item.dataset.itemId;
@@ -1616,6 +1635,7 @@ function _initTreeTouchDragDrop() {
     _insertIntoTree(dragged, item.dataset.itemId, position, notesState.items);
 
     if (_webdavActive()) {
+      _setTreeMoveLock(true);
       const isFolder  = dragged.type === 'folder';
       const moveApi   = isFolder ? `${NOTES_FOLD_API}/${dragged.id}/move` : `${NOTES_PAGES_API}/${dragged.id}/move`;
       const newParent = position === 'into' ? item.dataset.itemId : null;
@@ -1624,7 +1644,8 @@ function _initTreeTouchDragDrop() {
         .catch(async e => {
           await showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });
           await loadNotes();
-        });
+        })
+        .finally(() => _setTreeMoveLock(false));
     } else {
       scheduleSaveNotes();
     }
@@ -1640,6 +1661,7 @@ function _initTreeDragDrop() {
   if (!container) return;
 
   container.addEventListener('dragstart', e => {
+    if (_treeMoveInProgress) { e.preventDefault(); return; }
     const item = e.target.closest('.notes-tree-item');
     if (!item) return;
     _treeDragId = item.dataset.itemId;
@@ -1702,6 +1724,7 @@ function _initTreeDragDrop() {
     _insertIntoTree(dragged, targetId, position, notesState.items);
 
     if (_webdavActive()) {
+      _setTreeMoveLock(true);
       const isFolder  = dragged.type === 'folder';
       const moveApi   = isFolder ? `${NOTES_FOLD_API}/${dragged.id}/move` : `${NOTES_PAGES_API}/${dragged.id}/move`;
       // Determine new parent: 'into' → targetId is the folder; before/after → parent of target
@@ -1711,7 +1734,8 @@ function _initTreeDragDrop() {
         .catch(async e => {
           await showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });
           await loadNotes(); // reload to undo optimistic update
-        });
+        })
+        .finally(() => _setTreeMoveLock(false));
     } else {
       scheduleSaveNotes();
     }
