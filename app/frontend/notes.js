@@ -61,7 +61,9 @@ function _updateWebdavUi() {
   const webdavOn = !!(window.WEBDAV_CFG?.enabled);
   const labelEl  = document.getElementById('notesSidebarLabel');
   const syncBtn  = document.getElementById('notesSyncBtn');
-  if (labelEl) labelEl.textContent = webdavOn ? 'WebDAV-Notes' : 'Notes';
+  if (labelEl) labelEl.innerHTML = webdavOn
+    ? _svgNetworkFolder(12, 12) + '\u00a0Notes'
+    : 'Notes';
   if (syncBtn)  syncBtn.style.display = webdavOn ? '' : 'none';
 }
 

@@ -190,7 +190,7 @@
 }
 
 .notes-item-title:hover { color: var(--accent); }
-.notes-item-title--root { font-weight: 700; }
+.notes-item-title--root { }
 
 .notes-item-indicators {
   display: flex;
@@ -232,12 +232,10 @@
 .notes-item-btn--del:hover { color: var(--danger); background: rgba(240,79,106,0.1); }
 
 /* ---- Folder items ---- */
-.notes-tree-item--folder > .notes-item-title-wrap > .notes-item-folder-title {
-  font-weight: 600;
-}
 
 .notes-item-folder-title {
   cursor: pointer;
+  font-weight: 700;
 }
 
 .notes-folder-rename-input {
