@@ -127,7 +127,6 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   if (BOARD_NAME) {
     document.getElementById('settingsTitle').textContent = `Board settings: ${BOARD_NAME}`;
     document.getElementById('menuSettings').textContent  = 'Board settings';
-    document.getElementById('boardDescSection').style.display = '';
     document.getElementById('boardRenameSection').style.display = '';
     document.getElementById('importSection').style.display = '';
     document.getElementById('archiveSection').style.display = '';
@@ -136,6 +135,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('dbSection').style.display = 'none';
     document.getElementById('apiKeySection').style.display = 'none';
     document.getElementById('promptsSection').style.display = 'none';
+    document.getElementById('iconLibrarySection').style.display = 'none';
   } else {
     document.getElementById('menuSettings').textContent = 'Global settings';
     document.getElementById('webdavSection').style.display = 'none';
@@ -177,8 +177,67 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (r.ok) flashIndicator('promptsSaveIndicator', ' ✓');
+      if (r.ok) flashIndicator(' ✓');
     } catch {}
+  });
+
+  // ---- Nav (desktop) & accordion (mobile) ----
+
+  function selectSettingsSection(id) {
+    document.querySelectorAll('#settingsContent > .settings-section').forEach(s => {
+      s.classList.toggle('settings-section--active', s.id === id);
+    });
+    document.querySelectorAll('.settings-nav-item').forEach(btn => {
+      btn.classList.toggle('settings-nav-item--active', btn.dataset.target === id);
+    });
+  }
+
+  function buildSettingsNav() {
+    const navList = document.getElementById('settingsNavList');
+    const search  = document.getElementById('settingsSearch');
+    navList.innerHTML = '';
+    search.value = '';
+
+    document.querySelectorAll('#settingsContent > .settings-section').forEach(s => {
+      s.classList.remove('settings-section--active');
+    });
+
+    const visible = [...document.querySelectorAll('#settingsContent > .settings-section')]
+      .filter(s => s.style.display !== 'none' && s.dataset.settingsLabel);
+
+    visible.forEach(section => {
+      const btn = document.createElement('button');
+      btn.className = 'settings-nav-item';
+      btn.textContent = section.dataset.settingsLabel;
+      btn.dataset.target = section.id;
+      btn.addEventListener('click', () => selectSettingsSection(section.id));
+      navList.appendChild(btn);
+    });
+
+    const isDesktop = window.matchMedia('(min-width: 640px)').matches;
+    if (isDesktop) {
+      if (visible.length > 0) selectSettingsSection(visible[0].id);
+    } else {
+      visible.forEach(s => s.classList.add('settings-section--collapsed'));
+    }
+  }
+
+  document.getElementById('settingsSearch').addEventListener('input', function () {
+    const q = this.value.toLowerCase().trim();
+    let firstMatch = null;
+    document.querySelectorAll('.settings-nav-item').forEach(btn => {
+      const match = !q || btn.textContent.toLowerCase().includes(q);
+      btn.style.display = match ? '' : 'none';
+      if (match && !firstMatch) firstMatch = btn.dataset.target;
+    });
+    if (firstMatch) selectSettingsSection(firstMatch);
+  });
+
+  // Mobile accordion — toggle button collapses/expands section body
+  document.querySelectorAll('.settings-section-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.closest('.settings-section').classList.toggle('settings-section--collapsed');
+    });
   });
 
   async function loadApiKey() {
@@ -290,7 +349,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     }
     loadApiKey();
     loadWebdavSettings();
-    if (!BOARD_NAME) loadPrompts();
+    if (!BOARD_NAME) { loadPrompts(); renderIconLibrary(); }
+    buildSettingsNav();
     backdrop.style.display = 'flex';
   }
 
@@ -318,10 +378,13 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     } catch (_) {}
   }
 
-  function flashIndicator(id, text) {
-    const el = document.getElementById(id);
+  function flashIndicator(text) {
+    const el = document.getElementById('settingsSaveIndicator');
+    if (!el) return;
     el.textContent = text;
-    setTimeout(() => { el.textContent = ''; }, 2000);
+    el.classList.add('settings-save-indicator--visible');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.textContent = ''; el.classList.remove('settings-save-indicator--visible'); }, 2000);
   }
 
   document.getElementById('webdavEnabledToggle').addEventListener('change', function () {
@@ -377,10 +440,10 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!r.ok) { flashIndicator('webdavSaveIndicator', ' error'); return; }
+      if (!r.ok) { flashIndicator(' error'); return; }
       await loadWebdavSettings();
-      flashIndicator('webdavSaveIndicator', ' ✓');
-    } catch (_) { flashIndicator('webdavSaveIndicator', ' error'); }
+      flashIndicator(' ✓');
+    } catch (_) { flashIndicator(' error'); }
   });
 
   // Expose global loader so afterAuth can prime window.WEBDAV_CFG at startup
@@ -442,8 +505,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       }
     });
 
-    function flashSaved(indicatorId) {
-      const el = document.getElementById(indicatorId);
+    function flashSaved() {
+      const el = document.getElementById('settingsSaveIndicator');
       if (!el) return;
       el.textContent = `${ICONS.done} saved`;
       el.classList.add('settings-save-indicator--visible');
@@ -457,7 +520,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       descTimer = setTimeout(() => {
         (state.settings ??= {}).description = document.getElementById('boardDescription').value.trim() || undefined;
         schedulesSave();
-        flashSaved('descSaveIndicator');
+        flashSaved();
       }, 600);
     });
 
@@ -468,13 +531,13 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('inboxDateToggle').addEventListener('change', e => {
       (state.settings ??= {}).inboxWithDate = e.target.checked || undefined;
       schedulesSave();
-      flashSaved('importSaveIndicator');
+      flashSaved();
     });
 
     document.getElementById('boardArchivedToggle').addEventListener('change', e => {
       (state.settings ??= {}).archived = e.target.checked || undefined;
       schedulesSave();
-      flashSaved('archiveSaveIndicator');
+      flashSaved();
     });
 
     document.getElementById('persistCollapseToggle').addEventListener('change', e => {
@@ -482,13 +545,13 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       if (!e.target.checked) state.settings.collapsedColumnIds = undefined;
       persistCollapseState();
       schedulesSave();
-      flashSaved('importSaveIndicator');
+      flashSaved();
     });
 
     document.getElementById('autoSaveDialogsToggle').addEventListener('change', e => {
       (state.settings ??= {}).autoSaveDialogs = e.target.checked || undefined;
       schedulesSave();
-      flashSaved('importSaveIndicator');
+      flashSaved();
     });
 
     document.getElementById('autoSaveIntervalInput').addEventListener('change', e => {
@@ -496,7 +559,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       e.target.value = val;
       (state.settings ??= {}).autoSaveIntervalMin = val === 5 ? undefined : val;
       schedulesSave();
-      flashSaved('importSaveIndicator');
+      flashSaved();
     });
 
     document.getElementById('boardExportBtn').addEventListener('click', async () => {
@@ -592,7 +655,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
           const selected = [...list.querySelectorAll('.tracked-col-cb:checked')].map(c => c.value);
           (state.settings ??= {}).trackedColumns = selected.length ? selected : undefined;
           schedulesSave();
-          flashSaved('importSaveIndicator');
+          flashSaved();
         });
       });
     }

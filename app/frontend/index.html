@@ -391,178 +391,249 @@
 <div id="settingsBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal settings-modal">
     <h2 id="settingsTitle">Settings</h2>
-    <div class="settings-section" id="boardRenameSection" style="display:none">
-      <div class="settings-section-title">Rename</div>
-      <div class="settings-rename-row">
-        <input id="boardRenameInput" class="new-board-input" type="text" maxlength="12" spellcheck="false" autocomplete="off">
-        <button class="btn btn-accent" id="boardRenameBtn">Rename</button>
-      </div>
-      <p id="boardRenameError" class="new-board-error" style="display:none"></p>
-    </div>
-    <div class="settings-section" id="boardDescSection" style="display:none">
-      <div class="settings-section-title">Description<span class="settings-save-indicator" id="descSaveIndicator"></span></div>
-      <textarea id="boardDescription" class="prompt-textarea" style="min-height:80px" placeholder="Short description shown in the board overview…"></textarea>
-    </div>
-    <div class="settings-section" id="dbSection">
-      <div class="settings-section-title">Database</div>
-      <a class="settings-item" id="fauxton-link" target="_blank" rel="noopener">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Database admin (Fauxton)</div>
-          <div class="settings-item-desc">CouchDB management UI — browse documents, run queries, manage the database</div>
+    <div class="settings-layout">
+      <nav class="settings-nav" id="settingsNav">
+        <input id="settingsSearch" class="settings-search" type="search" placeholder="Search…" autocomplete="off" spellcheck="false">
+        <div id="settingsNavList" class="settings-nav-list"></div>
+      </nav>
+      <div class="settings-content" id="settingsContent">
+
+        <div class="settings-section" id="boardRenameSection" data-settings-label="Board" style="display:none">
+          <div class="settings-section-title">
+            <span>Board</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="settings-rename-row">
+              <input id="boardRenameInput" class="new-board-input" type="text" maxlength="12" spellcheck="false" autocomplete="off">
+              <button class="btn btn-accent" id="boardRenameBtn">Rename</button>
+            </div>
+            <p id="boardRenameError" class="new-board-error" style="display:none"></p>
+            <textarea id="boardDescription" class="prompt-textarea" style="min-height:80px" placeholder="Short description shown in the board overview…"></textarea>
+          </div>
         </div>
-        <span class="settings-item-arrow"><span data-icon="openLink"></span></span>
-      </a>
-    </div>
-    <div class="settings-section" id="importSection" style="display:none">
-      <div class="settings-section-title">Settings<span class="settings-save-indicator" id="importSaveIndicator"></span></div>
-      <label class="settings-item">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Inbox column with date</div>
-          <div class="settings-item-desc">Creates "Inbox 25.04." instead of "Inbox" on each import</div>
+
+        <div class="settings-section" id="dbSection" data-settings-label="Database">
+          <div class="settings-section-title">
+            <span>Database</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <a class="settings-item" id="fauxton-link" target="_blank" rel="noopener">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Database admin (Fauxton)</div>
+                <div class="settings-item-desc">CouchDB management UI — browse documents, run queries, manage the database</div>
+              </div>
+              <span class="settings-item-arrow"><span data-icon="openLink"></span></span>
+            </a>
+          </div>
         </div>
-        <div class="settings-toggle">
-          <input type="checkbox" id="inboxDateToggle">
-          <span class="settings-toggle-track"></span>
+
+        <div class="settings-section" id="importSection" data-settings-label="Behavior" style="display:none">
+          <div class="settings-section-title">
+            <span>Behavior</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Inbox column with date</div>
+                <div class="settings-item-desc">Creates "Inbox 25.04." instead of "Inbox" on each import</div>
+              </div>
+              <div class="settings-toggle">
+                <input type="checkbox" id="inboxDateToggle">
+                <span class="settings-toggle-track"></span>
+              </div>
+            </label>
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Remember collapsed columns</div>
+                <div class="settings-item-desc">Saves which columns are collapsed; inbox auto-collapse is unaffected</div>
+              </div>
+              <div class="settings-toggle">
+                <input type="checkbox" id="persistCollapseToggle">
+                <span class="settings-toggle-track"></span>
+              </div>
+            </label>
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Auto-save dialogs by default</div>
+                <div class="settings-item-desc">Enables the auto-save checkbox by default when opening the card or note editor</div>
+              </div>
+              <div class="settings-toggle">
+                <input type="checkbox" id="autoSaveDialogsToggle">
+                <span class="settings-toggle-track"></span>
+              </div>
+            </label>
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Auto-save interval (minutes)</div>
+                <div class="settings-item-desc">How often an open dialog is saved automatically when auto-save is enabled</div>
+              </div>
+              <input type="number" id="autoSaveIntervalInput" class="settings-number-input" min="1" max="60" value="5">
+            </label>
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Edit dates (temporary)</div>
+                <div class="settings-item-desc">Allows manually editing created and done-at dates in the card info dialog. Resets when settings are closed.</div>
+              </div>
+              <div class="settings-toggle">
+                <input type="checkbox" id="dateEditToggle">
+                <span class="settings-toggle-track"></span>
+              </div>
+            </label>
+            <div class="settings-item settings-tracked-box">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Show in overview</div>
+                <div class="settings-item-desc">Card counts for these columns appear on the board button. Inbox, todo and doing/in progress are shown by default.</div>
+                <div id="trackedColsList" class="tracked-cols-list"></div>
+              </div>
+            </div>
+          </div>
         </div>
-      </label>
-      <label class="settings-item">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Remember collapsed columns</div>
-          <div class="settings-item-desc">Saves which columns are collapsed; inbox auto-collapse is unaffected</div>
+
+        <div class="settings-section" id="webdavSection" data-settings-label="WebDAV Sync">
+          <div class="settings-section-title">
+            <span>WebDAV Sync</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Enable WebDAV sync</div>
+                <div class="settings-item-desc">Sync notes with a WebDAV server (e.g. Nextcloud, Obsidian Sync-compatible). Credentials are stored on the server.</div>
+              </div>
+              <div class="settings-toggle">
+                <input type="checkbox" id="webdavEnabledToggle">
+                <span class="settings-toggle-track"></span>
+              </div>
+            </label>
+            <div id="webdavFields">
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="webdavUrl">Server URL</label>
+                <input id="webdavUrl" class="new-board-input" type="url" placeholder="https://dav.example.com/notes/" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="webdavUser">Username</label>
+                <input id="webdavUser" class="new-board-input" type="text" placeholder="username" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="webdavPass">Password</label>
+                <input id="webdavPass" class="new-board-input" type="password" placeholder="unchanged" autocomplete="new-password">
+              </div>
+              <div class="settings-webdav-actions">
+                <button class="btn btn-accent" id="webdavSaveBtn">Save</button>
+                <button class="btn" id="webdavTestBtn">Test connection</button>
+              </div>
+              <div id="webdavTestResult" class="settings-webdav-result" style="display:none"></div>
+            </div>
+          </div>
         </div>
-        <div class="settings-toggle">
-          <input type="checkbox" id="persistCollapseToggle">
-          <span class="settings-toggle-track"></span>
+
+        <div class="settings-section" id="apiKeySection" data-settings-label="API Access">
+          <div class="settings-section-title">
+            <span>API Access</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="settings-apikey-row">
+              <input id="apiKeyDisplay" class="new-board-input settings-apikey-input" type="text" readonly placeholder="not configured">
+              <button class="btn" id="apiKeyCopyBtn">Copy</button>
+            </div>
+            <p class="settings-item-desc" style="margin-top:8px">
+              Send the key in HTTP requests via <code>x-api-key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.
+              Set <code>API_KEY</code> in <code>.env</code> to enable external access.
+            </p>
+          </div>
         </div>
-      </label>
-      <label class="settings-item">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Auto-save dialogs by default</div>
-          <div class="settings-item-desc">Enables the auto-save checkbox by default when opening the card or note editor</div>
+
+        <div class="settings-section" id="iconLibrarySection" data-settings-label="Icon Library">
+          <div class="settings-section-title">
+            <span>Icon library</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div id="iconLibraryGrid" class="icon-lib-grid"></div>
+          </div>
         </div>
-        <div class="settings-toggle">
-          <input type="checkbox" id="autoSaveDialogsToggle">
-          <span class="settings-toggle-track"></span>
+
+        <div class="settings-section" id="promptsSection" data-settings-label="Prompts">
+          <div class="settings-section-title">
+            <span>Prompts</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="prompts-tabs">
+              <button class="prompts-tab active" data-tab="searchProfile">Search Profile</button>
+              <button class="prompts-tab" data-tab="criteriaInclude">Include</button>
+              <button class="prompts-tab" data-tab="criteriaExclude">Exclude</button>
+              <button class="prompts-tab" data-tab="searchRadius">Radius</button>
+            </div>
+            <div class="prompts-panels">
+              <div class="prompts-panel active" data-panel="searchProfile">
+                <textarea id="promptSearchProfile" class="prompt-textarea" placeholder="Describe the ideal candidate profile to search for…"></textarea>
+              </div>
+              <div class="prompts-panel" data-panel="criteriaInclude">
+                <textarea id="promptCriteriaInclude" class="prompt-textarea" placeholder="List criteria a job must meet to be included…"></textarea>
+              </div>
+              <div class="prompts-panel" data-panel="criteriaExclude">
+                <textarea id="promptCriteriaExclude" class="prompt-textarea" placeholder="List criteria that disqualify a job…"></textarea>
+              </div>
+              <div class="prompts-panel" data-panel="searchRadius">
+                <textarea id="promptSearchRadius" class="prompt-textarea" placeholder="Describe the geographic search radius…"></textarea>
+              </div>
+            </div>
+            <div class="settings-webdav-actions">
+              <button class="btn btn-accent" id="promptsSaveBtn">Save prompts</button>
+            </div>
+          </div>
         </div>
-      </label>
-      <label class="settings-item">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Auto-save interval (minutes)</div>
-          <div class="settings-item-desc">How often an open dialog is saved automatically when auto-save is enabled</div>
+
+        <div class="settings-section" id="boardExportSection" data-settings-label="Export & Import" style="display:none">
+          <div class="settings-section-title">
+            <span>Export &amp; Import</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body settings-export-body">
+            <button class="btn" id="boardExportBtn">Export JSON</button>
+            <button class="btn" id="boardImportBtn">Import JSON…</button>
+            <button class="btn" id="settingsNotesExportBtn">Export Notes ZIP</button>
+          </div>
         </div>
-        <input type="number" id="autoSaveIntervalInput" class="settings-number-input" min="1" max="60" value="5">
-      </label>
-      <label class="settings-item">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Edit dates (temporary)</div>
-          <div class="settings-item-desc">Allows manually editing created and done-at dates in the card info dialog. Resets when settings are closed.</div>
+
+        <div class="settings-section" id="archiveSection" data-settings-label="Visibility" style="display:none">
+          <div class="settings-section-title">
+            <span>Visibility</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <label class="settings-item">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Archived</div>
+                <div class="settings-item-desc">Moves this board to the archive section in the overview</div>
+              </div>
+              <div class="settings-toggle">
+                <input type="checkbox" id="boardArchivedToggle">
+                <span class="settings-toggle-track"></span>
+              </div>
+            </label>
+          </div>
         </div>
-        <div class="settings-toggle">
-          <input type="checkbox" id="dateEditToggle">
-          <span class="settings-toggle-track"></span>
+
+        <div class="settings-section" id="boardDeleteSection" data-settings-label="Danger zone" style="display:none">
+          <div class="settings-section-title">
+            <span>Danger zone</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete board…</button>
+          </div>
         </div>
-      </label>
-      <div class="settings-item settings-tracked-box">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Show in overview</div>
-          <div class="settings-item-desc">Card counts for these columns appear on the board button. Inbox, todo and doing/in progress are shown by default.</div>
-          <div id="trackedColsList" class="tracked-cols-list"></div>
-        </div>
-      </div>
-    </div>
-    <div class="settings-section" id="webdavSection">
-      <div class="settings-section-title">WebDAV Sync<span class="settings-save-indicator" id="webdavSaveIndicator"></span></div>
-      <label class="settings-item">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Enable WebDAV sync</div>
-          <div class="settings-item-desc">Sync notes with a WebDAV server (e.g. Nextcloud, Obsidian Sync-compatible). Credentials are stored on the server.</div>
-        </div>
-        <div class="settings-toggle">
-          <input type="checkbox" id="webdavEnabledToggle">
-          <span class="settings-toggle-track"></span>
-        </div>
-      </label>
-      <div id="webdavFields">
-        <div class="settings-field-row">
-          <label class="settings-field-label" for="webdavUrl">Server URL</label>
-          <input id="webdavUrl" class="new-board-input" type="url" placeholder="https://dav.example.com/notes/" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="settings-field-row">
-          <label class="settings-field-label" for="webdavUser">Username</label>
-          <input id="webdavUser" class="new-board-input" type="text" placeholder="username" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="settings-field-row">
-          <label class="settings-field-label" for="webdavPass">Password</label>
-          <input id="webdavPass" class="new-board-input" type="password" placeholder="unchanged" autocomplete="new-password">
-        </div>
-        <div class="settings-webdav-actions">
-          <button class="btn btn-accent" id="webdavSaveBtn">Save</button>
-          <button class="btn" id="webdavTestBtn">Test connection</button>
-        </div>
-        <div id="webdavTestResult" class="settings-webdav-result" style="display:none"></div>
-      </div>
-    </div>
-    <div class="settings-section" id="apiKeySection">
-      <div class="settings-section-title">API Access</div>
-      <div class="settings-apikey-row">
-        <input id="apiKeyDisplay" class="new-board-input settings-apikey-input" type="text" readonly placeholder="not configured">
-        <button class="btn" id="apiKeyCopyBtn">Copy</button>
-      </div>
-      <p class="settings-item-desc" style="margin-top:8px">
-        Send the key in HTTP requests via <code>x-api-key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.
-        Set <code>API_KEY</code> in <code>.env</code> to enable external access.
-      </p>
-    </div>
-    <div class="settings-section" id="promptsSection">
-      <div class="settings-section-title">Prompts<span class="settings-save-indicator" id="promptsSaveIndicator"></span></div>
-      <div class="prompts-tabs">
-        <button class="prompts-tab active" data-tab="searchProfile">Search Profile</button>
-        <button class="prompts-tab" data-tab="criteriaInclude">Include</button>
-        <button class="prompts-tab" data-tab="criteriaExclude">Exclude</button>
-        <button class="prompts-tab" data-tab="searchRadius">Radius</button>
-      </div>
-      <div class="prompts-panels">
-        <div class="prompts-panel active" data-panel="searchProfile">
-          <textarea id="promptSearchProfile" class="prompt-textarea" placeholder="Describe the ideal candidate profile to search for…"></textarea>
-        </div>
-        <div class="prompts-panel" data-panel="criteriaInclude">
-          <textarea id="promptCriteriaInclude" class="prompt-textarea" placeholder="List criteria a job must meet to be included…"></textarea>
-        </div>
-        <div class="prompts-panel" data-panel="criteriaExclude">
-          <textarea id="promptCriteriaExclude" class="prompt-textarea" placeholder="List criteria that disqualify a job…"></textarea>
-        </div>
-        <div class="prompts-panel" data-panel="searchRadius">
-          <textarea id="promptSearchRadius" class="prompt-textarea" placeholder="Describe the geographic search radius…"></textarea>
-        </div>
-      </div>
-      <div class="settings-webdav-actions">
-        <button class="btn btn-accent" id="promptsSaveBtn">Save prompts</button>
-      </div>
-    </div>
-    <div class="settings-section" id="boardExportSection" style="display:none">
-      <div class="settings-section-title">Export / Import</div>
-      <button class="btn" id="boardExportBtn">Export JSON</button>
-      <button class="btn" id="boardImportBtn">Import JSON…</button>
-      <button class="btn" id="settingsNotesExportBtn">Export Notes ZIP</button>
-    </div>
-    <div class="settings-section" id="archiveSection" style="display:none">
-      <div class="settings-section-title">Visibility<span class="settings-save-indicator" id="archiveSaveIndicator"></span></div>
-      <label class="settings-item">
-        <div class="settings-item-info">
-          <div class="settings-item-label">Archived</div>
-          <div class="settings-item-desc">Moves this board to the archive section in the overview</div>
-        </div>
-        <div class="settings-toggle">
-          <input type="checkbox" id="boardArchivedToggle">
-          <span class="settings-toggle-track"></span>
-        </div>
-      </label>
-    </div>
-    <div class="settings-section" id="boardDeleteSection" style="display:none">
-      <div class="settings-section-title">Danger zone</div>
-      <button class="btn btn-danger-outline" id="boardDeleteBtn">Delete board…</button>
-    </div>
+
+      </div><!-- /.settings-content -->
+    </div><!-- /.settings-layout -->
     <div class="modal-actions">
+      <span id="settingsSaveIndicator" class="settings-save-indicator" style="margin-right:auto"></span>
       <button class="btn btn-accent" id="settingsCloseBtn">Close</button>
     </div>
   </div>

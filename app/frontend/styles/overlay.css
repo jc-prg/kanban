@@ -520,14 +520,6 @@
   box-shadow: 0 0 20px rgba(240,79,106,0.3);
 }
 
-/* Prompts dialog */
-.prompts-modal {
-  width: 600px;
-  max-width: calc(100vw - 24px);
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
 
 .prompts-tabs {
   display: flex;
@@ -560,6 +552,7 @@
   font-family: 'DM Mono', monospace;
   font-size: 0.82rem;
   width: 100%;
+  box-sizing: border-box;
   min-height: 220px;
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -668,15 +661,124 @@
 
 /* Settings dialog */
 .settings-modal {
-  width: min(860px, 92vw);
+  width: min(900px, 94vw);
   max-height: 90vh;
   max-height: 90dvh;
   display: flex;
   flex-direction: column;
   gap: 0;
+  overflow: hidden;
 }
 
-.settings-section { margin-bottom: 24px; }
+/* Two-column layout container */
+.settings-layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* Left nav */
+.settings-nav {
+  width: 164px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding-right: 16px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.settings-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  padding: 6px 8px;
+  outline: none;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.settings-search:focus { border-color: var(--accent); }
+
+.settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-nav-item:hover { background: var(--surface2); color: var(--text); }
+.settings-nav-item--active { background: var(--accent-glow); color: var(--accent) !important; }
+
+/* Right content panel */
+.settings-content {
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-left: 24px;
+  min-width: 0;
+}
+
+/* Desktop: one section at a time */
+@media (min-width: 640px) {
+  .settings-layout { flex-direction: row; overflow: hidden; }
+  #settingsContent > .settings-section { display: none; margin-bottom: 0; }
+  #settingsContent > .settings-section.settings-section--active { display: block; }
+  .settings-section-toggle { display: none; }
+}
+
+/* Mobile: accordion, no nav */
+@media (max-width: 639px) {
+  .settings-modal { overflow-y: auto; }
+  .settings-layout { flex-direction: column; overflow-y: auto; }
+  .settings-content { padding-left: 0; }
+  .settings-nav { display: none; }
+  .settings-section-toggle {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 0.9rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+  }
+  .settings-section--collapsed .settings-section-toggle { transform: rotate(-90deg); }
+  .settings-section--collapsed .settings-section-body { display: none; }
+  .settings-section--collapsed { padding-bottom: 0; }
+}
+
+.settings-section { margin-bottom: 0; padding: 20px 0; border-bottom: 1px solid var(--border); }
+.settings-section:last-child { border-bottom: none; }
+
+.settings-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .settings-section-title {
   display: flex;
@@ -854,8 +956,7 @@
 
 .settings-danger-section { padding-top: 4px; }
 
-#boardExportSection { display: flex; flex-direction: row; gap: 8px; align-items: center; flex-wrap: wrap; }
-#boardExportSection .settings-section-title { width: 100%; }
+.settings-export-body { flex-direction: row; flex-wrap: wrap; }
 
 .btn-danger-outline {
   font-family: 'DM Mono', monospace;
@@ -1114,8 +1215,7 @@
     max-width: calc(100vw - 8px);
   }
   #modal .modal,
-  .settings-modal,
-  .prompts-modal {
+  .settings-modal {
     width: calc(100vw - 8px);
   }
 }
