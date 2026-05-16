@@ -472,12 +472,12 @@ Implement in this order to get coverage fastest:
 - [x] Unit: search logic, notes helpers (sections 2.3–2.4) — 31 tests
 - [x] Security tests (section 4) — 15 tests
 
-**Phase 2.5 — Notes v2 per-operation API**
-- [ ] WebDAV config endpoints (WC-1–5)
-- [ ] Page operations (NP-1–14)
-- [ ] Folder operations (NF-1–7)
-- [ ] Sync (NS-1–4)
-- [ ] Unit: `buildNotesPatch` structural vs. content changes (NT-5–6)
+**Phase 2.5 — Notes v2 per-operation API** ✓ complete
+- [x] WebDAV config endpoints (WC-1–5)
+- [x] Page operations (NP-1–14)
+- [x] Folder operations (NF-1–7)
+- [x] Sync (NS-1–4)
+- [x] Unit: `buildNotesPatch` structural vs. content changes (NT-5–6, covered as NT-4e/4f)
 
 **Phase 3 — E2E**
 - [ ] Auth, board CRUD, drag-drop, search E2E (sections 3.1–3.5)
