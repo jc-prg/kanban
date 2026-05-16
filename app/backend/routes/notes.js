@@ -388,6 +388,26 @@ router.get('/:board/notes/pages/:id/meta', withExistingBoard(async (req, res, db
   }
 }));
 
+function _sourceUrl(req, board, pageId) {
+  return `${req.protocol}://${req.get('host')}/${board}#note:${pageId}`;
+}
+
+/** Resolve card IDs to "title (id-xxx)" strings for WebDAV frontmatter. */
+async function _linkedCardEntries(db, linkedCards) {
+  if (!linkedCards?.length) return [];
+  try {
+    const { columns } = await db.get('board');
+    const cardMap = new Map();
+    for (const col of columns || [])
+      for (const card of col.cards || [])
+        cardMap.set(card.id, card.text);
+    return linkedCards.map(id => {
+      const text = cardMap.get(id);
+      return text ? `${text} (${id})` : id;
+    });
+  } catch { return linkedCards; }
+}
+
 // POST /:board/notes/pages  — create page (+ WebDAV PUT)
 router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db) => {
   const { board } = req.params;
@@ -404,7 +424,8 @@ router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db
       try {
         const dir = pagePath.includes('/') ? pagePath.substring(0, pagePath.lastIndexOf('/') + 1) : '';
         if (dir) await wdMkcol(cfg, dir).catch(() => {});
-        await wdPut(cfg, pagePath, renderMd(inserted, _getAttachmentFiles(board, inserted.id)));
+        const lcEntries = await _linkedCardEntries(db, inserted.linkedCards);
+        await wdPut(cfg, pagePath, renderMd(inserted, _getAttachmentFiles(board, inserted.id), _sourceUrl(req, board, inserted.id), lcEntries));
       } catch (err) {
         console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
       }
@@ -435,11 +456,13 @@ router.patch('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, re
     try {
       const newPath    = buildPath(page, notes.items);
       const attachFiles = _getAttachmentFiles(board, page.id);
+      const source    = _sourceUrl(req, board, page.id);
+      const lcEntries = await _linkedCardEntries(db, page.linkedCards);
       if (titleChanged && newPath && newPath !== oldPath) {
         await wdMove(cfg, oldPath, newPath);
-        await wdPut(cfg, newPath, renderMd(page, attachFiles));
+        await wdPut(cfg, newPath, renderMd(page, attachFiles, source, lcEntries));
       } else if (newPath) {
-        await wdPut(cfg, newPath, renderMd(page, attachFiles));
+        await wdPut(cfg, newPath, renderMd(page, attachFiles, source, lcEntries));
       }
     } catch (err) {
       console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);

@@ -161,19 +161,50 @@ function parseFm(text) {
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return { meta: {}, body: text };
   const meta = {};
+  let listKey = null;
   for (const line of m[1].split('\n')) {
+    if (listKey) {
+      const item = line.match(/^\s+-\s+(.*)/);
+      if (item) { meta[listKey].push(item[1].trim()); continue; }
+      listKey = null;
+    }
     const kv = line.match(/^(\w+):\s*(.*)/);
-    if (kv) meta[kv[1]] = kv[2].trim().replace(/^"(.*)"$/, '$1');
+    if (!kv) continue;
+    if (kv[2].trim() === '') {
+      meta[kv[1]] = [];
+      listKey = kv[1];
+    } else {
+      meta[kv[1]] = kv[2].trim().replace(/^"(.*)"$/, '$1');
+    }
   }
   return { meta, body: m[2] };
 }
 
-function renderMd(page, attachmentFiles = []) {
+/** Extract card IDs from linkedCards frontmatter value.
+ *  Handles both the new list format (array of "title (id-xxx)" strings)
+ *  and the legacy comma-separated string "id-a, id-b". */
+function _parseLinkedCards(value) {
+  if (!value) return [];
+  const entries = Array.isArray(value) ? value : value.split(',').map(s => s.trim());
+  return entries
+    .map(e => { const m = String(e).match(/\(([^)]+)\)$/); return m ? m[1] : e.trim(); })
+    .filter(Boolean);
+}
+
+function renderMd(page, attachmentFiles = [], source = '', linkedCardEntries = null) {
+  const lcEntries = linkedCardEntries ?? (page.linkedCards || []);
   const lines = ['---', `id: ${page.id}`, `title: ${yamlStr(page.title || '')}`];
-  if (page.link)                lines.push(`link: ${yamlStr(page.link)}`);
-  if (page.linkedCards?.length) lines.push(`linkedCards: ${page.linkedCards.join(', ')}`);
-  if (page.lastModified)        lines.push(`lastModified: ${page.lastModified}`);
-  if (attachmentFiles.length)   lines.push(`attachments: ${attachmentFiles.map(f => `[[${f}]]`).join(', ')}`);
+  if (source)              lines.push(`source: ${yamlStr(source)}`);
+  if (page.link)           lines.push(`link: ${yamlStr(page.link)}`);
+  if (lcEntries.length) {
+    lines.push('linkedCards:');
+    for (const e of lcEntries) lines.push(`  - ${e}`);
+  }
+  if (page.lastModified)   lines.push(`lastModified: ${page.lastModified}`);
+  if (attachmentFiles.length) {
+    lines.push('attachments:');
+    for (const f of attachmentFiles) lines.push(`  - ${f}`);
+  }
   lines.push('---', '', page.description || '');
   return lines.join('\n');
 }
@@ -219,6 +250,8 @@ async function syncFromWebdav(cfg, tree) {
   for (const e of wdEntries) {
     const h = e.href.replace(/^\//, '');
     if (!h || h === '' || h.startsWith('_attachments')) continue;
+    // Skip hidden files/folders (any path segment starting with '.')
+    if (h.split('/').some(seg => seg.startsWith('.'))) continue;
     // Only keep directories and .md files
     if (!e.isCollection && !h.endsWith('.md')) continue;
     wdMap.set(h, e);
@@ -259,10 +292,8 @@ async function syncFromWebdav(cfg, tree) {
           existing.lastModified   = wdEntry.lastModified || new Date().toISOString();
           if (meta.title)         existing.title        = meta.title;
           existing.link           = meta.link || '';
-          existing.linkedCards    = meta.linkedCards
-            ? meta.linkedCards.split(',').map(s => s.trim()).filter(Boolean)
-            : [];
-          existing.hasAttachments = !!meta.attachments;
+          existing.linkedCards    = _parseLinkedCards(meta.linkedCards);
+          existing.hasAttachments = Array.isArray(meta.attachments) ? meta.attachments.length > 0 : !!meta.attachments;
           changed = true;
         } catch { /* skip on error */ }
       }
@@ -279,9 +310,7 @@ async function syncFromWebdav(cfg, tree) {
           title:          meta.title || titleFromSlug,
           description:    body,
           link:           meta.link || '',
-          linkedCards:    meta.linkedCards
-            ? meta.linkedCards.split(',').map(s => s.trim()).filter(Boolean)
-            : [],
+          linkedCards:    _parseLinkedCards(meta.linkedCards),
           lastModified:   wdEntry.lastModified || new Date().toISOString(),
           hasAttachments: !!meta.attachments,
         };
