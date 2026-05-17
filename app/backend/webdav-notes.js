@@ -269,15 +269,15 @@ function renderMd(page, attachmentFiles = [], source = '', linkedCardEntries = n
   const idVal = source ? `[${page.id}](${source})` : page.id;
   const lines = ['---', `id: ${yamlStr(idVal)}`, `title: ${yamlStr(page.title || '')}`];
   if (page.link)           lines.push(`link: ${yamlStr(page.link)}`);
+  if (attachmentFiles.length) {
+    lines.push('attachments:');
+    for (const f of attachmentFiles) lines.push(`  - "[${f}](_attachments/${page.id}_${f})"`);
+  }
   if (lcEntries.length) {
     lines.push('linkedCards:');
     for (const e of lcEntries) lines.push(`  - ${yamlStr(e)}`);
   }
   if (page.lastModified)   lines.push(`lastModified: ${page.lastModified}`);
-  if (attachmentFiles.length) {
-    lines.push('attachments:');
-    for (const f of attachmentFiles) lines.push(`  - "[${f}](_attachments/${page.id}_${f})"`);
-  }
   lines.push('---', '', page.description || '');
   return lines.join('\n');
 }

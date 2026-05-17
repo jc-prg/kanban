@@ -309,11 +309,11 @@ Each note page is stored as a Markdown file with a YAML front-matter block. Fold
 id: "[n-abc123](https://host/board#note:n-abc123)"
 title: "My Note"
 link: "https://example.com" # optional
+attachments:                 # optional — Markdown links: "[filename](_attachments/pageId_filename)"
+  - "[document.pdf](_attachments/n-abc123_document.pdf)"
 linkedCards:                 # optional — Markdown links: "[title](url/board#card:id-xxx)"; any []() in the title are stripped
   - "[Some card](https://host/board#card:id-abc123)"
 lastModified: 2024-01-15T10:30:00.000Z
-attachments:                 # optional — Markdown links: "[filename](_attachments/pageId_filename)"
-  - "[document.pdf](_attachments/n-abc123_document.pdf)"
 ---
 
 Markdown body of the note…
