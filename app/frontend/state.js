@@ -13,17 +13,26 @@ const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
     document.getElementById('connectionBanner').style.display = val ? 'flex' : 'none';
   }
 
+  // 502/503/504 are returned by a reverse proxy when the backend is down.
+  const isGatewayError = r => r.status === 502 || r.status === 503 || r.status === 504;
+
   // Poll every 5 s while offline to detect restoration.
   setInterval(async () => {
     if (!_offline) return;
-    try { await _fetch('/api/auth/verify'); setOffline(false); } catch {}
+    try {
+      const r = await _fetch('/api/auth/verify');
+      if (!isGatewayError(r)) setOffline(false);
+    } catch {}
   }, 5000);
 
   window.fetch = async (url, opts = {}) => {
     const isApi = typeof url === 'string' && url.startsWith('/api/');
     try {
       const r = await _fetch(url, opts);
-      if (isApi) setOffline(false);
+      if (isApi) {
+        if (isGatewayError(r)) setOffline(true);
+        else setOffline(false);
+      }
       if (r.status === 401 && isApi && !url.startsWith('/api/auth')) {
         if (typeof handleSessionExpired === 'function') handleSessionExpired();
       }
