@@ -16,6 +16,9 @@
   /* Page break between items (column print) */
   .print-item + .print-item { break-before: page; }
 
+  /* Pull content away from the right page edge so borders are fully visible */
+  .print-item { margin-right: 12pt; }
+
   /* Header row: board name left, column/folder path right */
   .print-header {
     display: flex;
