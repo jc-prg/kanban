@@ -929,6 +929,11 @@ document.addEventListener('keydown', e => {
     saveCardInPlace();
     return;
   }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'p' && document.getElementById('modal').style.display !== 'none' && modalMode === 'edit') {
+    e.preventDefault();
+    printCardFromModal();
+    return;
+  }
   if (e.key === 'Enter' && document.getElementById('modal').style.display !== 'none' && !e.shiftKey) {
     if (document.activeElement.id === 'cardDesc') return;
     e.preventDefault();

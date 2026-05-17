@@ -1878,6 +1878,10 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       submitNote();
     }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'p' && document.getElementById('noteModal')?.style.display !== 'none') {
+      e.preventDefault();
+      printNote(noteModalPageId);
+    }
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && document.getElementById('noteModal')?.style.display !== 'none') {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
