@@ -1,0 +1,87 @@
+/* ---- Print root: hidden on screen ---- */
+#print-root { display: none; }
+
+/* ---- Print layout ---- */
+@media print {
+  body > *:not(#print-root) { display: none !important; }
+
+  #print-root {
+    display: block;
+    color: #000;
+    background: #fff;
+    font-size: 11pt;
+    line-height: 1.6;
+  }
+
+  /* Page break between items (column print) */
+  .print-item + .print-item { break-before: page; }
+
+  /* Header row: board name left, column/folder path right */
+  .print-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 8pt;
+    color: #666;
+    border-bottom: 1px solid #bbb;
+    padding-bottom: 4pt;
+    margin-bottom: 14pt;
+    letter-spacing: 0.02em;
+  }
+
+  .print-board { font-weight: 600; }
+  .print-context { color: #888; }
+
+  /* Title */
+  .print-title {
+    font-size: 20pt;
+    font-weight: 700;
+    margin: 0 0 14pt;
+    line-height: 1.25;
+  }
+
+  /* Markdown body — reuses .card-desc-preview styles from markdown.css */
+  .print-body {
+    margin-bottom: 18pt;
+    font-size: 11pt;
+  }
+
+  /* Suppress interactive/screen-only UI inside the print body */
+  .print-body.card-desc-preview:hover { background: transparent; }
+  .md-copy-btn,
+  .md-copy-all-btn { display: none !important; }
+
+  /* Resolve CSS variables that print media cannot inherit from :root */
+  .print-body code,
+  .print-body pre  { background: #f4f4f4; border-color: #ccc; }
+  .print-body blockquote { border-color: #888; color: #555; }
+  .print-body a    { color: #3b4cf0; }
+  .print-body mark { background: rgba(250, 204, 21, 0.4); }
+
+  /* Footer */
+  .print-footer {
+    border-top: 1px solid #bbb;
+    padding-top: 7pt;
+    margin-top: 16pt;
+  }
+
+  .print-footer-row {
+    display: flex;
+    gap: 6pt;
+    margin: 2.5pt 0;
+    font-size: 8.5pt;
+    line-height: 1.4;
+  }
+
+  .print-footer-label {
+    font-weight: 600;
+    min-width: 72pt;
+    color: #222;
+    flex-shrink: 0;
+  }
+
+  .print-footer-value {
+    color: #444;
+    word-break: break-all;
+  }
+}

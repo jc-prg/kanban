@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="/styles/overlay.css">
 <link rel="stylesheet" href="/styles/notes.css">
 <link rel="stylesheet" href="/styles/markdown.css">
+<link rel="stylesheet" href="/styles/print.css">
 </head>
 <body>
 
@@ -135,6 +136,7 @@
       <div class="ctx-color-row" id="colCtxDeleteColorRow" style="display:none"></div>
     </div>
   </div>
+  <button class="ctx-item" id="colCtxPrint"><span data-icon="print"></span>  Print column</button>
   <div class="ctx-item ctx-submenu-trigger" id="colCtxSettings">
     <span><span data-icon="moreOptions"></span>  Settings</span>
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
@@ -271,6 +273,7 @@
         <span id="modalSavedMsg" class="modal-saved-msg"></span>
       </div>
       <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
+      <button class="btn" id="modalPrintBtn" style="display:none" onclick="printCardFromModal()">Print</button>
       <button class="btn" onclick="tryCloseModal()">Close</button>
       <button class="btn btn-danger" id="modalDeleteBtn" style="display:none" onclick="deleteCardFromModal()">Delete</button>
       <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()">Add Card</button>
@@ -774,6 +777,7 @@
         <label class="modal-autosave-label" id="noteAutoSaveLabel"><input type="checkbox" id="noteAutoSave"> Auto-save</label>
         <span id="noteModalSavedMsg" class="modal-saved-msg"></span>
       </div>
+      <button class="btn" id="noteModalPrintBtn" onclick="printNote(noteModalPageId)">Print</button>
       <button class="btn" id="noteModalCancelBtn">Close</button>
       <button class="btn btn-danger" id="noteModalDeleteBtn">Delete</button>
       <button class="btn btn-accent" id="noteModalSaveBtn">Save</button>
@@ -792,6 +796,7 @@
   </div>
 </div>
 
+<div id="print-root"></div>
 <script src="/marked.min.js"></script>
 <script src="/purify.min.js"></script>
 <script src="/icons.js"></script>

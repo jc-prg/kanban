@@ -119,7 +119,7 @@ function showColContextMenu(x, y, colId) {
   toggleIcon.textContent = ICONS[toggleKey];
   document.getElementById('colCtxToggleLabel').textContent = `  ${collapsed ? 'Show content' : 'Hide content'}`;
 
-  const hideWhenCollapsed = display => ['colCtxSettings','colCtxFilterByColor','colCtxDeleteCards'].forEach(id =>
+  const hideWhenCollapsed = display => ['colCtxSettings','colCtxFilterByColor','colCtxDeleteCards','colCtxPrint'].forEach(id =>
     document.getElementById(id).style.display = display);
   document.querySelector('#colContextMenu .ctx-submenu-trigger').style.display = collapsed ? 'none' : '';
   hideWhenCollapsed(collapsed ? 'none' : '');
@@ -366,6 +366,12 @@ document.getElementById('colCtxDelete').addEventListener('click', async () => {
     ? `Delete column "${col.title}" and its ${col.cards.length} card(s)?`
     : `Delete column "${col.title}"?`;
   if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) deleteColumn(colId);
+});
+
+document.getElementById('colCtxPrint').addEventListener('click', () => {
+  const colId = ctxHeaderColId;
+  hideColContextMenu();
+  printColumn(colId);
 });
 
 document.addEventListener('click', () => { hideContextMenu(); hideColContextMenu(); });

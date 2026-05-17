@@ -1940,3 +1940,50 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') { createForm.style.display = 'none'; }
   });
 });
+
+// ---- Print note page ----
+
+async function printNote(pageId) {
+  if (!pageId) return;
+  const page = findNotePage(pageId, notesState.items);
+  if (!page) return;
+
+  const board   = BOARD_NAME || 'kanban';
+  const path    = getNotePath(pageId, notesState.items);
+  const context = path && path.length > 1
+    ? path.slice(0, -1).map(p => p.title).join(' \u203a ')
+    : '';
+
+  const rows = [];
+  if (page.lastModified) rows.push(['Last modified', new Date(page.lastModified).toLocaleDateString()]);
+  if (page.link)         rows.push(['Link', page.link]);
+
+  const linkedCards = page.linkedCards || [];
+  if (linkedCards.length) {
+    const titles = linkedCards.map(id => {
+      const card = state.columns.flatMap(c => c.cards).find(c => c.id === id);
+      return card ? card.text : `${id} (removed)`;
+    });
+    rows.push(['Linked cards', titles.join(', ')]);
+  }
+
+  if (page.hasAttachments && NOTES_ATTACH_API) {
+    try {
+      const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`);
+      const files = r.ok ? await r.json() : [];
+      if (files.length) rows.push(['Attachments', files.map(f => f.name).join(', ')]);
+    } catch { rows.push(['Attachments', '(unavailable)']); }
+  }
+
+  rows.push(['ID', page.id]);
+
+  const root = document.getElementById('print-root');
+  root.innerHTML = _buildPrintItem({
+    board,
+    context,
+    title:      page.title,
+    body:       page.description ? renderMarkdown(page.description) : '',
+    footerRows: rows,
+  });
+  _triggerPrint(root);
+}

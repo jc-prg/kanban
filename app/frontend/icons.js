@@ -17,6 +17,7 @@ const ICONS = {
   close:        '✕',
   openLink:     '↗',
   download:     '↓',
+  print:        '⎙',
   copyCode:     '⧉',
 
   // Properties

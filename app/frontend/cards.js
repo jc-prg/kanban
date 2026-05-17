@@ -698,6 +698,7 @@ function openModal(colId) {
   document.getElementById('cardEnd').value   = '';
   document.getElementById('cardDoneBtn').style.display = 'none';
   document.getElementById('cardInfoBtn').style.display  = 'none';
+  document.getElementById('modalPrintBtn').style.display = 'none';
   _updateLinkBtn();
   showDescEditor();
   document.getElementById('modalTitle').textContent      = 'Add Card';
@@ -728,6 +729,7 @@ function openEditModal(colId, card) {
   document.getElementById('cardEnd').value   = card.endDate     || '';
   document.getElementById('cardDoneBtn').style.display  = '';
   document.getElementById('cardInfoBtn').style.display  = '';
+  document.getElementById('modalPrintBtn').style.display = '';
   setModalDone(card.done || false);
   _updateLinkBtn();
   if (card.description) showDescPreview(); else showDescEditor();
@@ -1060,3 +1062,83 @@ document.getElementById('cardInfoBackdrop').addEventListener('mousedown', e => {
 document.getElementById('cardInfoBackdrop').addEventListener('click', e => {
   if (_backdropMousedown && e.target === document.getElementById('cardInfoBackdrop')) closeCardInfo();
 });
+
+// ---- Print ----
+
+function _buildPrintItem({ board, context, title, body, footerRows }) {
+  const header =
+    `<div class="print-header">` +
+      `<span class="print-board">${escHtml(board)}</span>` +
+      (context ? `<span class="print-context">${escHtml(context)}</span>` : '') +
+    `</div>`;
+  const bodyHtml = body
+    ? `<div class="print-body card-desc-preview">${body}</div>`
+    : '';
+  const footerHtml = footerRows.length
+    ? `<div class="print-footer">` +
+        footerRows.map(([label, value]) =>
+          `<div class="print-footer-row">` +
+            `<span class="print-footer-label">${escHtml(label)}</span>` +
+            `<span class="print-footer-value">${escHtml(value)}</span>` +
+          `</div>`
+        ).join('') +
+      `</div>`
+    : '';
+  return `<div class="print-item">${header}<h1 class="print-title">${escHtml(title)}</h1>${bodyHtml}${footerHtml}</div>`;
+}
+
+function _triggerPrint(root) {
+  window.onafterprint = () => { root.innerHTML = ''; };
+  window.print();
+}
+
+function _cardPrintFooter(card) {
+  const rows = [];
+  if (card.priority)  rows.push(['Priority', PRIORITY_LABELS[card.priority]]);
+  if (card.created)   rows.push(['Created', card.created]);
+  if (card.done && card.doneAt) rows.push(['Done', new Date(card.doneAt).toLocaleString()]);
+  else if (card.done) rows.push(['Done', 'yes']);
+  if (card.startDate || card.endDate) {
+    const val = card.startDate && card.endDate
+      ? `${card.startDate} \u2192 ${card.endDate}`
+      : card.startDate ? `${card.startDate} \u2192` : `\u2192 ${card.endDate}`;
+    rows.push(['Dates', val]);
+  }
+  if (card.link)  rows.push(['Link', card.link]);
+  rows.push(['ID', card.id]);
+  return rows;
+}
+
+function printCard(card) {
+  const col   = state.columns.find(c => c.cards.some(x => x.id === card.id));
+  const board = BOARD_NAME || 'kanban';
+  const root  = document.getElementById('print-root');
+  root.innerHTML = _buildPrintItem({
+    board,
+    context: col ? `Column: ${col.title}` : '',
+    title:   card.text,
+    body:    card.description ? renderMarkdown(card.description) : '',
+    footerRows: _cardPrintFooter(card),
+  });
+  _triggerPrint(root);
+}
+
+function printCardFromModal() {
+  const card = state.columns.flatMap(c => c.cards).find(c => c.id === editCardId);
+  if (card) printCard(card);
+}
+
+function printColumn(colId) {
+  const col = state.columns.find(c => c.id === colId);
+  if (!col || !col.cards.length) return;
+  const board = BOARD_NAME || 'kanban';
+  const root  = document.getElementById('print-root');
+  root.innerHTML = col.cards.map(card => _buildPrintItem({
+    board,
+    context: `Column: ${col.title}`,
+    title:   card.text,
+    body:    card.description ? renderMarkdown(card.description) : '',
+    footerRows: _cardPrintFooter(card),
+  })).join('');
+  _triggerPrint(root);
+}
