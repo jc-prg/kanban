@@ -28,7 +28,7 @@ function applyDescFormat(ta, action) {
   if (action === 'bold')      return _descWrap(ta, '**', '**');
   if (action === 'italic')    return _descWrap(ta, '*', '*');
   if (action === 'underline')     return _descWrap(ta, '<u>', '</u>');
-  if (action === 'mark')          return _descWrap(ta, '<mark>', '</mark>');
+  if (action === 'mark')          return _descWrap(ta, '==', '==');
   if (action === 'strikethrough') return _descWrap(ta, '~~', '~~');
   if (action === 'h1')        return _descLinePrefix(ta, '# ');
   if (action === 'h2')        return _descLinePrefix(ta, '## ');
@@ -92,6 +92,20 @@ function enhanceMarkdownPreview(container) {
 
 // Disable setext headings (text followed by --- or ===) so --- is always <hr>
 marked.use({ tokenizer: { lheading() { return undefined; } } });
+
+// ==text== → <mark>text</mark>
+marked.use({
+  extensions: [{
+    name: 'mark',
+    level: 'inline',
+    start(src) { return src.indexOf('=='); },
+    tokenizer(src) {
+      const match = src.match(/^==([^=\n]+)==/);
+      if (match) return { type: 'mark', raw: match[0], text: match[1] };
+    },
+    renderer(token) { return `<mark>${token.text}</mark>`; }
+  }]
+});
 
 // ---- Description markdown preview ----
 function renderMarkdown(text) {
