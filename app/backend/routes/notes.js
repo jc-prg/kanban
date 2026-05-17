@@ -12,7 +12,7 @@ const {
   buildPath, getAttachmentPrefix, parseFm, renderMd,
   syncFromWebdav, syncRootFromWebdav, syncFolderChildrenFromWebdav,
   deletePageWithAttachments, deleteFolderWithAttachments,
-  _updateChildWdPaths,
+  _titleToSlug, _updateChildWdPaths,
 } = require('../webdav-notes');
 
 // ---------------------------------------------------------------------------
@@ -263,7 +263,27 @@ router.get('/:board/notes/export', withExistingBoard(async (req, res, db) => {
   const { board } = req.params;
   const raw      = await loadNotesData(db);
   const notes    = normalizeNotes(raw);
-  const boardDir = path.join(ATTACHMENTS_DIR, board);
+  const boardDir = ATTACHMENTS_DIR ? path.join(ATTACHMENTS_DIR, board) : null;
+  const baseUrl  = `${req.protocol}://${req.get('host')}`;
+
+  // Pre-build card map for linkedCards resolution (same logic as _linkedCardEntries)
+  const cardMap = new Map();
+  try {
+    const { columns } = await db.get('board');
+    for (const col of columns || [])
+      for (const card of col.cards || [])
+        cardMap.set(card.id, card.text);
+  } catch { /* board doc absent */ }
+
+  function resolveLinkedCards(linkedCards) {
+    if (!linkedCards?.length) return [];
+    return linkedCards.map(id => {
+      const rawText = cardMap.get(id);
+      if (!rawText) return id;
+      const title = rawText.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim();
+      return `[${title}](${baseUrl}/${board}#card:${id})`;
+    });
+  }
 
   const archive = archiver('zip', { zlib: { level: 6 } });
   archive.on('error', err => console.error('ZIP error:', err.message));
@@ -273,34 +293,27 @@ router.get('/:board/notes/export', withExistingBoard(async (req, res, db) => {
 
   function addItems(items, zipPrefix) {
     for (const item of items) {
-      const safeName = (item.title || 'Untitled').replace(/[/\\<>:|*?"]/g, '_').trim();
+      const slug = _titleToSlug(item.title || 'Untitled');
       if (item.type === 'folder') {
-        addItems(item.children || [], zipPrefix + safeName + '/');
+        addItems(item.children || [], `${zipPrefix}${slug}/`);
       } else {
-        const dir         = zipPrefix + safeName + '/';
-        const attachPrefix = getAttachmentPrefix(item, notes.items);
-        const aDir         = path.join(boardDir, attachPrefix, '_attachments');
-        const storedFiles  = fs.existsSync(aDir)
-          ? fs.readdirSync(aDir).filter(n => !n.startsWith('.') && n.startsWith(item.id + '_'))
+        // Locate local attachment files using the stored tree prefix
+        const localAttachDir = boardDir
+          ? path.join(boardDir, getAttachmentPrefix(item, notes.items), '_attachments')
+          : null;
+        const storedFiles = localAttachDir && fs.existsSync(localAttachDir)
+          ? fs.readdirSync(localAttachDir).filter(n => !n.startsWith('.') && n.startsWith(`${item.id}_`))
           : [];
-        const originalNames = storedFiles.map(n => n.slice(item.id.length + 1));
+        const attachmentFiles = storedFiles.map(n => n.slice(item.id.length + 1));
 
-        // Build YAML frontmatter
-        const fmLines = ['---', `title: ${yamlStr(item.title || 'Untitled')}`];
-        if (item.link) fmLines.push(`link: ${yamlStr(item.link)}`);
-        if (item.linkedCards && item.linkedCards.length)
-          fmLines.push('linkedCards:', ...item.linkedCards.map(id => `  - ${id}`));
-        if (originalNames.length)
-          fmLines.push('attachments:', ...originalNames.map(f => `  - ${path.basename(f)}`));
-        fmLines.push('---', '');
+        const source    = `${baseUrl}/${board}#note:${item.id}`;
+        const lcEntries = resolveLinkedCards(item.linkedCards);
+        archive.append(renderMd(item, attachmentFiles, source, lcEntries), { name: `${zipPrefix}${slug}.md` });
 
-        const body = (item.description || '').replace(/_attachments\/n-[a-z0-9]+_([^)\s]+)/g, './attachments/$1');
-        archive.append(fmLines.join('\n') + body, { name: dir + 'page.md' });
-
-        originalNames.forEach(f => {
-          const entryName = dir + 'attachments/' + path.basename(f);
-          if (!entryName.includes('..')) archive.file(path.join(aDir, `${item.id}_${f}`), { name: entryName });
-        });
+        for (const stored of storedFiles) {
+          const zipPath = `${zipPrefix}_attachments/${stored}`;
+          if (!zipPath.includes('..')) archive.file(path.join(localAttachDir, stored), { name: zipPath });
+        }
       }
     }
   }
