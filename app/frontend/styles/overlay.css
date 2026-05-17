@@ -407,7 +407,7 @@
 #cardText:hover,
 #notePageTitle:hover {
   border-color: var(--text-muted);
-  background: var(--accent-glow);
+  background: var(--surface2);
 }
 
 #cardText:focus,

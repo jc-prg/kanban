@@ -7,7 +7,7 @@
 }
 
 .card-desc-preview:hover {
-  background: var(--accent-glow);
+  background: var(--surface2);
   border-color: var(--text-muted);
 }
 
