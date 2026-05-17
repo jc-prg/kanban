@@ -406,8 +406,8 @@ function _sourceUrl(req, board, pageId) {
   return `${req.protocol}://${req.get('host')}/${board}#note:${pageId}`;
 }
 
-/** Resolve card IDs to "title (id-xxx)" strings for WebDAV frontmatter. */
-async function _linkedCardEntries(db, linkedCards) {
+/** Resolve card IDs to "[title | id-xxx](url/board#card:id-xxx)" strings for WebDAV frontmatter. */
+async function _linkedCardEntries(db, linkedCards, baseUrl = '', board = '') {
   if (!linkedCards?.length) return [];
   try {
     const { columns } = await db.get('board');
@@ -416,8 +416,11 @@ async function _linkedCardEntries(db, linkedCards) {
       for (const card of col.cards || [])
         cardMap.set(card.id, card.text);
     return linkedCards.map(id => {
-      const text = cardMap.get(id);
-      return text ? `${text} (${id})` : id;
+      const rawText = cardMap.get(id);
+      if (!rawText) return id;
+      const title = rawText.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim();
+      if (baseUrl && board) return `[${title}](${baseUrl}/${board}#card:${id})`;
+      return `${title} (${id})`;
     });
   } catch { return linkedCards; }
 }
@@ -439,7 +442,7 @@ router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db
       try {
         const dir = pagePath.includes('/') ? pagePath.substring(0, pagePath.lastIndexOf('/') + 1) : '';
         if (dir) await wdMkcol(cfg, dir).catch(() => {});
-        const lcEntries = await _linkedCardEntries(db, inserted.linkedCards);
+        const lcEntries = await _linkedCardEntries(db, inserted.linkedCards, `${req.protocol}://${req.get('host')}`, board);
         await wdPut(cfg, pagePath, renderMd(inserted, _getAttachmentFiles(board, inserted.id, getAttachmentPrefix(inserted, notes.items)), _sourceUrl(req, board, inserted.id), lcEntries));
       } catch (err) {
         console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
@@ -477,7 +480,7 @@ router.patch('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, re
 
       const attachFiles = _getAttachmentFiles(board, page.id, getAttachmentPrefix(page, notes.items));
       const source      = _sourceUrl(req, board, page.id);
-      const lcEntries   = await _linkedCardEntries(db, page.linkedCards);
+      const lcEntries   = await _linkedCardEntries(db, page.linkedCards, `${req.protocol}://${req.get('host')}`, board);
       if (titleChanged && newPath && newPath !== oldPath) {
         await wdMove(cfg, oldPath, newPath);
         page.wdPath = newPath;
@@ -527,36 +530,62 @@ router.delete('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, r
 
 // POST /:board/notes/pages/:id/move  — move page to different folder (or root)
 router.post('/:board/notes/pages/:id/move', writeRateLimit, withBoard(async (req, res, db) => {
-  const { id } = req.params;
+  const { id, board } = req.params;
   const { folderId, targetId, position } = req.body; // null/undefined = move to root
   const notes = await _loadNotes(db);
   const page  = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
 
-  const cfg     = await getWebdavConfig(db);
-  const oldPath = cfg.enabled ? (page.wdPath || buildPath(page, notes.items)) : null;
+  const cfg       = await getWebdavConfig(db);
+  const oldPath   = page.wdPath || buildPath(page, notes.items);
+  const oldPrefix = getAttachmentPrefix(page, notes.items); // computed before tree mutation
 
   _removeItem(id, notes.items);
   _insertItem(page, folderId || null, notes.items, targetId || null, position || null);
 
-  if (cfg.enabled && oldPath) {
-    try {
-      // Compute new path without relying on stored wdPath (it's stale after the move).
-      const savedWdPath = page.wdPath;
-      delete page.wdPath;
-      const newPath = buildPath(page, notes.items);
-      page.wdPath   = savedWdPath;
+  // Compute new path without relying on stored wdPath (it's stale after the move).
+  const savedWdPath = page.wdPath;
+  delete page.wdPath;
+  const newPath   = buildPath(page, notes.items);
+  page.wdPath     = savedWdPath;
+  const newPrefix = newPath && newPath.includes('/') ? newPath.substring(0, newPath.lastIndexOf('/') + 1) : '';
 
-      if (newPath && newPath !== oldPath) {
-        const dir = newPath.includes('/') ? newPath.substring(0, newPath.lastIndexOf('/') + 1) : '';
-        if (dir) await wdMkcol(cfg, dir).catch(() => {});
-        await wdMove(cfg, oldPath, newPath);
-        page.wdPath = newPath;
+  const pathChanged = oldPath && newPath && newPath !== oldPath;
+
+  if (cfg.enabled && pathChanged) {
+    try {
+      if (newPrefix) await wdMkcol(cfg, newPrefix).catch(() => {});
+      await wdMove(cfg, oldPath, newPath);
+      page.wdPath = newPath;
+
+      // Move per-page attachments to the new _attachments directory on WebDAV
+      if (oldPrefix !== newPrefix) {
+        const attachFiles = _getAttachmentFiles(board, page.id, oldPrefix);
+        if (attachFiles.length) {
+          if (newPrefix) await wdMkcol(cfg, `${newPrefix}_attachments/`).catch(() => {});
+          for (const f of attachFiles)
+            await wdMove(cfg, `${oldPrefix}_attachments/${page.id}_${f}`, `${newPrefix}_attachments/${page.id}_${f}`).catch(() => {});
+        }
       }
     } catch (err) {
       console.warn('WebDAV write failed, saving to CouchDB cache:', err.message);
     }
   }
+
+  // Move local cached attachment files so download links remain valid after tree save.
+  // The download route resolves the prefix from CouchDB on every request, so files must
+  // be at the new prefix location before saveNotesData writes the updated tree.
+  if (ATTACHMENTS_DIR && pathChanged && oldPrefix !== newPrefix) {
+    const attachFiles = _getAttachmentFiles(board, page.id, oldPrefix);
+    if (attachFiles.length) {
+      const oldDir = path.join(ATTACHMENTS_DIR, board, oldPrefix, '_attachments');
+      const newDir = path.join(ATTACHMENTS_DIR, board, newPrefix, '_attachments');
+      fs.mkdirSync(newDir, { recursive: true });
+      for (const f of attachFiles)
+        try { fs.renameSync(path.join(oldDir, `${page.id}_${f}`), path.join(newDir, `${page.id}_${f}`)); } catch { /* ok */ }
+    }
+  }
+
   const result = await saveNotesData(db, notes);
   res.json({ ok: true, notes, rev: result.rev });
 }));

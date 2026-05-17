@@ -310,11 +310,11 @@ id: n-abc123
 title: "My Note"
 source: "kanban"             # optional — set when written by the app
 link: "https://example.com" # optional
-linkedCards:                 # optional — each entry is "Card title (id-xxx)"
-  - Some card (id-abc123)
+linkedCards:                 # optional — Markdown links: "[title](url/board#card:id-xxx)"; any []() in the title are stripped
+  - "[Some card](https://host/board#card:id-abc123)"
 lastModified: 2024-01-15T10:30:00.000Z
-attachments:                 # optional — filenames without the pageId prefix
-  - document.pdf
+attachments:                 # optional — Markdown links: "[filename](_attachments/pageId_filename)"
+  - "[document.pdf](_attachments/n-abc123_document.pdf)"
 ---
 
 Markdown body of the note…

@@ -251,7 +251,16 @@ function _parseLinkedCards(value) {
   if (!value) return [];
   const entries = Array.isArray(value) ? value : value.split(',').map(s => s.trim());
   return entries
-    .map(e => { const m = String(e).match(/\(([^)]+)\)$/); return m ? m[1] : e.trim(); })
+    .map(e => {
+      const s = String(e).replace(/^"(.*)"$/, '$1'); // strip YAML quotes
+      // New format: "[title](url#card:id-xxx)"
+      const newFmt = s.match(/#card:(id-[a-z0-9]+)\)/);
+      if (newFmt) return newFmt[1];
+      // Old format: "title (id-xxx)"
+      const oldFmt = s.match(/\(([^)]+)\)$/);
+      if (oldFmt) return oldFmt[1];
+      return s.trim();
+    })
     .filter(Boolean);
 }
 
@@ -262,12 +271,12 @@ function renderMd(page, attachmentFiles = [], source = '', linkedCardEntries = n
   if (page.link)           lines.push(`link: ${yamlStr(page.link)}`);
   if (lcEntries.length) {
     lines.push('linkedCards:');
-    for (const e of lcEntries) lines.push(`  - ${e}`);
+    for (const e of lcEntries) lines.push(`  - ${yamlStr(e)}`);
   }
   if (page.lastModified)   lines.push(`lastModified: ${page.lastModified}`);
   if (attachmentFiles.length) {
     lines.push('attachments:');
-    for (const f of attachmentFiles) lines.push(`  - ${f}`);
+    for (const f of attachmentFiles) lines.push(`  - "[${f}](_attachments/${page.id}_${f})"`);
   }
   lines.push('---', '', page.description || '');
   return lines.join('\n');
