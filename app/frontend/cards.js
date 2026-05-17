@@ -517,9 +517,9 @@ function _insertCardAttachMd(name, type) {
   ta.setRangeText(md, s, ta.selectionEnd ?? s, 'end');
 }
 
-async function resolveCardAttachments(container) {
-  if (!editCardId || !CARD_ATTACH_API) return;
-  const base = `${CARD_ATTACH_API}/${editCardId}`;
+async function resolveCardAttachments(container, cardId = editCardId) {
+  if (!cardId || !CARD_ATTACH_API) return;
+  const base = `${CARD_ATTACH_API}/${cardId}`;
   for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
     const fn = img.getAttribute('src').slice('attachment:'.length);
     try {
@@ -1114,7 +1114,7 @@ function _cardPrintFooter(card) {
   return rows;
 }
 
-function printCard(card) {
+async function printCard(card) {
   const col   = state.columns.find(c => c.cards.some(x => x.id === card.id));
   const board = BOARD_NAME || 'kanban';
   const root  = document.getElementById('print-root');
@@ -1125,6 +1125,7 @@ function printCard(card) {
     body:    card.description ? renderMarkdown(card.description) : '',
     footerRows: _cardPrintFooter(card),
   });
+  await resolveCardAttachments(root, card.id);
   _triggerPrint(root);
 }
 
@@ -1133,7 +1134,7 @@ function printCardFromModal() {
   if (card) printCard(card);
 }
 
-function printColumn(colId) {
+async function printColumn(colId) {
   const col = state.columns.find(c => c.id === colId);
   if (!col || !col.cards.length) return;
   const board = BOARD_NAME || 'kanban';
@@ -1145,5 +1146,9 @@ function printColumn(colId) {
     body:    card.description ? renderMarkdown(card.description) : '',
     footerRows: _cardPrintFooter(card),
   })).join('');
+  const items = root.querySelectorAll('.print-item');
+  for (let i = 0; i < col.cards.length; i++) {
+    await resolveCardAttachments(items[i], col.cards[i].id);
+  }
   _triggerPrint(root);
 }

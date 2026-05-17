@@ -1989,5 +1989,6 @@ async function printNote(pageId) {
     body:       page.description ? renderMarkdown(page.description) : '',
     footerRows: rows,
   });
+  await resolveAttachments(root);
   _triggerPrint(root);
 }
