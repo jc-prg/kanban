@@ -51,6 +51,13 @@
   .md-copy-btn,
   .md-copy-all-btn { display: none !important; }
 
+  /* Force browsers to print background colors and images */
+  .print-body,
+  .print-body * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   /* Resolve CSS variables that print media cannot inherit from :root */
   .print-body code,
   .print-body pre  { background: #f4f4f4; border-color: #ccc; }
