@@ -306,9 +306,8 @@ Each note page is stored as a Markdown file with a YAML front-matter block. Fold
 **File format:**
 ```markdown
 ---
-id: n-abc123
+id: "[n-abc123](https://host/board#note:n-abc123)"
 title: "My Note"
-source: "kanban"             # optional — set when written by the app
 link: "https://example.com" # optional
 linkedCards:                 # optional — Markdown links: "[title](url/board#card:id-xxx)"; any []() in the title are stripped
   - "[Some card](https://host/board#card:id-abc123)"

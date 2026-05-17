@@ -266,8 +266,8 @@ function _parseLinkedCards(value) {
 
 function renderMd(page, attachmentFiles = [], source = '', linkedCardEntries = null) {
   const lcEntries = linkedCardEntries ?? (page.linkedCards || []);
-  const lines = ['---', `id: ${page.id}`, `title: ${yamlStr(page.title || '')}`];
-  if (source)              lines.push(`source: ${yamlStr(source)}`);
+  const idVal = source ? `[${page.id}](${source})` : page.id;
+  const lines = ['---', `id: ${yamlStr(idVal)}`, `title: ${yamlStr(page.title || '')}`];
   if (page.link)           lines.push(`link: ${yamlStr(page.link)}`);
   if (lcEntries.length) {
     lines.push('linkedCards:');
@@ -337,7 +337,7 @@ function _applyWdContent(existing, relPath, meta, body, wdEntry) {
 function _newPageFromWd(relPath, meta, body, wdEntry) {
   return {
     type:           'page',
-    id:             meta.id || ('n-wd-' + _randomHex()),
+    id:             (meta.id?.replace(/^\[([^\]]+)\].*$/, '$1') || null) || ('n-wd-' + _randomHex()),
     wdPath:         relPath,
     title:          meta.title || relPath.split('/').pop().replace(/\.md$/, ''),
     description:    body,
