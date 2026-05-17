@@ -986,6 +986,7 @@ function openCardInfo(card) {
       let html = '';
       html += `<div class="card-info-title">${escHtml(card.text)}</div>`;
       html += '<table class="card-info-table">';
+      html += `<tr><th>ID</th><td>${escHtml(card.id)}</td></tr>`;
       if (dateEditMode) {
         html += `<tr><th>Created</th><td><input class="card-info-date-input" type="date" data-field="created" value="${escHtml(created || '')}"></td></tr>`;
       } else if (created) {
