@@ -96,7 +96,7 @@ marked.use({ tokenizer: { lheading() { return undefined; } } });
 // ---- Description markdown preview ----
 function renderMarkdown(text) {
   return DOMPurify.sanitize(marked.parse(text, { breaks: true }), {
-    ALLOWED_URI_REGEXP: /^(?:https?|ftp|mailto|_attachments\/)/i,
+    ALLOWED_URI_REGEXP: /^(?:https?|ftp|mailto|attachment:|_attachments\/)/i,
     ADD_URI_SAFE_ATTR: ['type']
   });
 }
