@@ -1980,6 +1980,7 @@ async function printNote(pageId) {
   }
 
   rows.push(['ID', page.id]);
+  rows.push(['URL', location.href.split('#')[0] + '#note:' + page.id]);
 
   const root = document.getElementById('print-root');
   root.innerHTML = _buildPrintItem({

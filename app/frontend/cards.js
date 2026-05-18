@@ -1111,6 +1111,7 @@ function _cardPrintFooter(card) {
   }
   if (card.link)  rows.push(['Link', card.link]);
   rows.push(['ID', card.id]);
+  rows.push(['URL', location.href.split('#')[0] + '#card:' + card.id]);
   return rows;
 }
 

@@ -59,6 +59,7 @@
   .print-title {
     font-size: 20pt;
     font-weight: 700;
+    color: #000;
     margin: 0 0 14pt;
     line-height: 1.25;
     string-set: doc-title content(text);
