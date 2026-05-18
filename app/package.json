@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "start": "node backend/server.js",
     "release:patch": "npm version patch",
     "release:minor": "npm version minor",
@@ -28,6 +29,7 @@
     "nano": "^11.0.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "jsdom": "^29.1.1",
     "supertest": "^7.2.2",
     "vitest": "^3.2.4"

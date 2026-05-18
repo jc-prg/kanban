@@ -1,4 +1,7 @@
 ./app/node_modules/
+app/tests/e2e/.auth-state.json
+app/test-results/
+app/playwright-report/
 
 .env
 

@@ -302,18 +302,6 @@ async function addNotePage(parentId = null) {
     lastModified: new Date().toISOString(),
   };
 
-  if (_webdavActive()) {
-    try {
-      const data = await _notesOp('POST', NOTES_PAGES_API, { page, parentId });
-      _applyNotesResult(data);
-      renderNotesTree();
-      openNoteModal(page.id, true);
-    } catch (e) {
-      await showConfirm(`Could not create page: ${e.message}`, { okLabel: 'OK' });
-    }
-    return;
-  }
-
   _pendingNewPage = { page, parentId };
   openNoteModal(page.id, true);
 }
@@ -801,8 +789,8 @@ async function openNoteModal(pageId, focusTitle = false) {
 
   const loadingEl = document.getElementById('noteModalLoading');
 
-  // WebDAV: fetch fresh content from server
-  if (_webdavActive()) {
+  // WebDAV: fetch fresh content from server (skip for pending pages not yet on server)
+  if (_webdavActive() && _pendingNewPage?.page.id !== pageId) {
     const descEl = document.getElementById('notePageDesc');
     if (loadingEl) loadingEl.style.display = 'flex';
     try {
@@ -853,64 +841,86 @@ async function submitNote() {
 }
 
 async function _submitNote(newTitle, newDesc, newLink, page) {
+  let _handledByPost = false;
 
-  // First save of a new (pending) page: insert it into state now
+  // First save of a new (pending) page
   if (_pendingNewPage && _pendingNewPage.page.id === page.id) {
     const { parentId } = _pendingNewPage;
-    if (!parentId) {
-      notesState.items.push(page);
-    } else {
-      const parent = findNoteItem(parentId, notesState.items);
-      if (parent && parent.type === 'folder') {
-        if (!parent.children) parent.children = [];
-        parent.children.push(page);
-      } else {
-        notesState.items.push(page);
+    if (_webdavActive()) {
+      // POST with the actual title the user typed — avoids creating 'New Page.md' then renaming
+      page.title = newTitle; page.description = newDesc; page.link = newLink;
+      page.lastModified = new Date().toISOString();
+      _pendingNewPage = null;
+      history.replaceState(null, '', '#note:' + page.id);
+      try {
+        const data = await _notesOp('POST', NOTES_PAGES_API, { page, parentId });
+        _applyNotesResult(data);
+        const savedPage = findNoteItem(noteModalPageId, notesState.items);
+        if (savedPage) _pageLoadedAt.set(noteModalPageId, savedPage.lastModified || null);
+        _handledByPost = true;
+      } catch (e) {
+        _pendingNewPage = { page, parentId };
+        await showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
+        return;
       }
+    } else {
+      if (!parentId) {
+        notesState.items.push(page);
+      } else {
+        const parent = findNoteItem(parentId, notesState.items);
+        if (parent && parent.type === 'folder') {
+          if (!parent.children) parent.children = [];
+          parent.children.push(page);
+        } else {
+          notesState.items.push(page);
+        }
+      }
+      _pendingNewPage = null;
+      renderNotesTree();
+      history.replaceState(null, '', '#note:' + page.id);
     }
-    _pendingNewPage = null;
-    if (!_webdavActive()) renderNotesTree();
-    history.replaceState(null, '', '#note:' + page.id);
   }
 
-  if (_webdavActive()) {
-    // Conflict check: re-read the MD file and compare frontmatter lastModified
-    const loadedAt = _pageLoadedAt.get(noteModalPageId);
-    if (loadedAt) {
-      try {
-        const r = await fetch(`${NOTES_PAGES_API}/${noteModalPageId}/content`);
-        if (r.ok) {
-          const { lastModified: serverLM } = await r.json();
-          const serverTime = serverLM ? new Date(serverLM).getTime() : 0;
-          const localTime  = new Date(loadedAt).getTime();
-          if (serverTime > localTime) {
-            const overwrite = await showConfirm(
-              'A newer version exists on the server. Overwrite it with your changes?',
-              { okLabel: 'Overwrite', cancelLabel: 'Cancel' }
-            );
-            if (!overwrite) return;
+  if (!_handledByPost) {
+    if (_webdavActive()) {
+      // Conflict check: re-read the MD file and compare frontmatter lastModified
+      const loadedAt = _pageLoadedAt.get(noteModalPageId);
+      if (loadedAt) {
+        try {
+          const r = await fetch(`${NOTES_PAGES_API}/${noteModalPageId}/content`);
+          if (r.ok) {
+            const { lastModified: serverLM } = await r.json();
+            const serverTime = serverLM ? new Date(serverLM).getTime() : 0;
+            const localTime  = new Date(loadedAt).getTime();
+            if (serverTime > localTime) {
+              const overwrite = await showConfirm(
+                'A newer version exists on the server. Overwrite it with your changes?',
+                { okLabel: 'Overwrite', cancelLabel: 'Cancel' }
+              );
+              if (!overwrite) return;
+            }
           }
-        }
-      } catch { /* network error — proceed */ }
-    }
+        } catch { /* network error — proceed */ }
+      }
 
-    try {
-      const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${noteModalPageId}`, {
-        title: newTitle, description: newDesc, link: newLink,
-        linkedCards: page.linkedCards || [],
-      });
-      _applyNotesResult(data);
-      // Update cache with new server time so subsequent saves don't trigger a false conflict
-      const savedPage = findNoteItem(noteModalPageId, notesState.items);
-      if (savedPage) _pageLoadedAt.set(noteModalPageId, savedPage.lastModified || null);
+      try {
+        const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${noteModalPageId}`, {
+          title: newTitle, description: newDesc, link: newLink,
+          linkedCards: page.linkedCards || [],
+        });
+        _applyNotesResult(data);
+        // Update cache with new server time so subsequent saves don't trigger a false conflict
+        const savedPage = findNoteItem(noteModalPageId, notesState.items);
+        if (savedPage) _pageLoadedAt.set(noteModalPageId, savedPage.lastModified || null);
 
-    } catch (e) {
-      await showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
-      return;
+      } catch (e) {
+        await showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
+        return;
+      }
+    } else {
+      page.lastModified = new Date().toISOString();
+      scheduleSaveNotes();
     }
-  } else {
-    page.lastModified = new Date().toISOString();
-    scheduleSaveNotes();
   }
 
   page.title       = newTitle;

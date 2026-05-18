@@ -15,7 +15,10 @@ function _authHeader(cfg) {
 
 function _resolveUrl(cfg, relPath) {
   const base = cfg.url.endsWith('/') ? cfg.url : cfg.url + '/';
-  return base + relPath.replace(/^\//, '');
+  const clean = relPath.replace(/^\//, '');
+  const trailingSlash = clean.endsWith('/') ? '/' : '';
+  const encoded = clean.replace(/\/$/, '').split('/').map(encodeURIComponent).join('/');
+  return base + encoded + trailingSlash;
 }
 
 function _titleToSlug(title) {
