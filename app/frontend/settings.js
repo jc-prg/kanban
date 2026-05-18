@@ -140,6 +140,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('menuSettings').textContent = 'Global settings';
     document.getElementById('webdavSection').style.display = 'none';
     document.getElementById('webhookSection').style.display = 'none';
+    document.getElementById('aboutSection').style.display = '';
   }
 
   // ---- Prompts tabs (overview only) ----
@@ -246,9 +247,10 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('apiKeyCopyBtn').style.display = 'none';
     try {
       const r = await fetch('/api/settings');
-      const { apiKeyConfigured } = await r.json();
+      const { apiKeyConfigured, version } = await r.json();
       input.value = '';
       input.placeholder = apiKeyConfigured ? 'configured — see .env' : 'not configured — set API_KEY in .env';
+      if (version) document.getElementById('appVersion').textContent = version;
     } catch {
       input.placeholder = 'failed to load';
     }

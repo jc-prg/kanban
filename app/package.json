@@ -6,7 +6,10 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "node backend/server.js"
+    "start": "node backend/server.js",
+    "release:patch": "npm version patch",
+    "release:minor": "npm version minor",
+    "release:major": "npm version major"
   },
   "keywords": [],
   "author": "",

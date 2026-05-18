@@ -3,6 +3,7 @@ const router  = express.Router();
 const { writeRateLimit } = require('../auth');
 const { getPromptsDb }   = require('../db');
 const { API_KEY }        = require('../config');
+const { version }        = require('../../package.json');
 
 const PROMPTS_DOC_ID  = 'prompts';
 const PROMPTS_DEFAULT = { searchProfile: '', criteriaInclude: '', criteriaExclude: '', searchRadius: '' };
@@ -24,7 +25,7 @@ async function savePrompts(data) {
 }
 
 router.get('/settings', (req, res) => {
-  res.json({ apiKeyConfigured: !!API_KEY });
+  res.json({ apiKeyConfigured: !!API_KEY, version });
 });
 
 router.get('/prompts', async (req, res) => {
