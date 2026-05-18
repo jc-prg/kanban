@@ -792,6 +792,7 @@ async function openNoteModal(pageId, focusTitle = false) {
     }
   }
 
+  if (BOARD_NAME) document.title = `${BOARD_NAME} - ${page.title} (note)`;
   document.getElementById('noteModal').style.display = 'flex';
   if (!_pendingNewPage) history.replaceState(null, '', '#note:' + pageId);
   const nt = document.getElementById('notePageTitle');
@@ -825,6 +826,7 @@ async function openNoteModal(pageId, focusTitle = false) {
 
 function closeNoteModal() {
   _stopNoteAutoSave();
+  if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;
   const _wdInfoPop = document.getElementById('noteWdInfoPopover');
   if (_wdInfoPop) _wdInfoPop.style.display = 'none';
   if (location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
@@ -898,7 +900,9 @@ async function _submitNote(newTitle, newDesc, newLink, page) {
         linkedCards: page.linkedCards || [],
       });
       _applyNotesResult(data);
-      // Update cache with new server time
+      // Update cache with new server time so subsequent saves don't trigger a false conflict
+      const savedPage = findNoteItem(noteModalPageId, notesState.items);
+      if (savedPage) _pageLoadedAt.set(noteModalPageId, savedPage.lastModified || null);
 
     } catch (e) {
       await showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });

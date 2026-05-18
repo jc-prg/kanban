@@ -710,6 +710,7 @@ function openModal(colId) {
   const autoSaveLbl = document.getElementById('cardAutoSaveLabel');
   if (autoSaveLbl) autoSaveLbl.style.display = 'none';
   _stopCardAutoSave();
+  if (BOARD_NAME) document.title = `${BOARD_NAME} - New Card (card)`;
   document.getElementById('modal').style.display = 'flex';
   const ct = document.getElementById('cardText');
   autoResizeTitle(ct);
@@ -749,6 +750,7 @@ function openEditModal(colId, card) {
     autoSaveEl.checked = state.settings?.autoSaveDialogs ?? false;
     if (autoSaveEl.checked) _startCardAutoSave(); else _stopCardAutoSave();
   }
+  if (BOARD_NAME) document.title = `${BOARD_NAME} - ${card.text} (card)`;
   document.getElementById('modal').style.display = 'flex';
   history.replaceState(null, '', '#card:' + card.id);
   const ct = document.getElementById('cardText');
@@ -757,6 +759,7 @@ function openEditModal(colId, card) {
 
 function closeModal() {
   _stopCardAutoSave();
+  if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;
   if (location.hash.startsWith('#card:')) history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('modal').style.display = 'none';
   document.getElementById('modalBoardField').style.display    = 'none';
