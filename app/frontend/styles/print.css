@@ -1,6 +1,26 @@
 /* ---- Print root: hidden on screen ---- */
 #print-root { display: none; }
 
+/* ---- @page margin boxes (CSS Paged Media spec) ----
+   Supported in Prince, WeasyPrint, PDFreactor.
+   Chrome/Firefox/Safari ignore these rules — disable "Headers and footers"
+   in the browser print dialog to avoid overlap with the browser's own footer. */
+@page {
+  @top-left   { content: ""; }
+  @top-center { content: ""; }
+  @top-right  { content: ""; }
+  @bottom-left  {
+    content: string(doc-title);
+    font-size: 8pt;
+    color: #555;
+  }
+  @bottom-right {
+    content: counter(page) " / " counter(pages);
+    font-size: 8pt;
+    color: #555;
+  }
+}
+
 /* ---- Print layout ---- */
 @media print {
   body > *:not(#print-root) { display: none !important; }
@@ -35,12 +55,13 @@
   .print-board { font-weight: 600; }
   .print-context { color: #888; }
 
-  /* Title */
+  /* Title — also registers its text for the @bottom-left margin box */
   .print-title {
     font-size: 20pt;
     font-weight: 700;
     margin: 0 0 14pt;
     line-height: 1.25;
+    string-set: doc-title content(text);
   }
 
   /* Markdown body — reuses .card-desc-preview styles from markdown.css */
