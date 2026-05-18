@@ -355,6 +355,22 @@ function _removeItem(id, items) {
   return null;
 }
 
+function _collectWdPaths(items, out = new Set()) {
+  for (const it of items) {
+    if (it.wdPath) out.add(it.wdPath);
+    if (it.type === 'folder') _collectWdPaths(it.children || [], out);
+  }
+  return out;
+}
+
+function _uniqueWdPath(basePath, occupied) {
+  if (!occupied.has(basePath)) return basePath;
+  const stem = basePath.replace(/\.md$/, '');
+  let i = 2;
+  while (occupied.has(`${stem}-${i}.md`)) i++;
+  return `${stem}-${i}.md`;
+}
+
 function _insertItem(item, parentId, items, targetId = null, position = null) {
   let targetArr;
   if (!parentId) {
@@ -449,8 +465,12 @@ router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db
   const cfg = await getWebdavConfig(db);
   if (cfg.enabled) {
     const inserted = _findItem(page.id, notes.items);
-    const pagePath = buildPath(inserted, notes.items);
-    if (pagePath) {
+    const basePath = buildPath(inserted, notes.items);
+    if (basePath) {
+      // Ensure the computed path doesn't collide with an existing page's wdPath
+      const occupied = _collectWdPaths(notes.items);
+      occupied.delete(inserted.wdPath); // inserted has no wdPath yet, but be safe
+      const pagePath = _uniqueWdPath(basePath, occupied);
       inserted.wdPath = pagePath;
       try {
         const dir = pagePath.includes('/') ? pagePath.substring(0, pagePath.lastIndexOf('/') + 1) : '';
