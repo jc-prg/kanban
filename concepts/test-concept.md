@@ -85,6 +85,9 @@ All tests use supertest against a running Express app wired to an in-memory or i
 | B-10 | Rename to "inbox" | 400 |
 | B-11 | `DELETE /api/boards/my-board` | 200, board and CouchDB database gone |
 | B-12 | `DELETE /api/boards/nonexistent` | 404 |
+| B-13 | `GET /api/achievements/today` (no `?date`) | 200 `{ created, moved, done, createdBoards, movedBoards, doneBoards, hasPast }` with correct counts |
+| B-14 | `GET /api/achievements/today?date=2024-01-01` — seeded cards with that date | Correct counts for the specified date |
+| B-15 | `GET /api/achievements/today` — archived boards excluded | Archived board's cards not counted |
 
 ### 1.3 Board Data — Load & Save (`board-data.test.js`)
 
@@ -105,7 +108,7 @@ All tests use supertest against a running Express app wired to an in-memory or i
 | D-13 | `GET /api/:board/card/:id` — card with move history | 200, `{ created, moves, column }` |
 | D-14 | `GET /api/:board/card/:id` — unknown id | 404 |
 
-### 1.4 Import & Move-to (`import.test.js`)
+### 1.4 Import, Move-to & Quick-add (`import.test.js`)
 
 | # | Test | Expected |
 |---|---|---|
@@ -119,6 +122,11 @@ All tests use supertest against a running Express app wired to an in-memory or i
 | I-8 | `POST /api/:board/move-to/nonexistent-column` | 404 |
 | I-9 | `POST /api/:board/move-to` — card not found | 404 |
 | I-10 | Move-to with `location: "test-city"` Easter egg | 200, `success: true`, card not actually moved |
+| I-11 | `POST /api/:board/inbox` — single card object | 200 `{ added: 1, added_items, duplicates: 0 }`, card in Inbox column |
+| I-12 | `POST /api/:board/inbox` — array of cards | All non-duplicate cards added |
+| I-13 | `POST /api/:board/inbox` — card with text already in any column | `duplicates: 1`, card still inserted but flagged `duplicate: true` |
+| I-14 | `POST /api/:board/inbox` — `inboxWithDate: true` | Inbox column title includes today's date |
+| I-15 | `POST /api/:board/inbox` — invalid body (missing `text`) | 400 |
 
 ### 1.5 Notes API (`notes.test.js`)
 
@@ -136,6 +144,11 @@ All tests use supertest against a running Express app wired to an in-memory or i
 | N-10 | Upload file > 50 MB | 413 |
 | N-11 | Upload to invalid pageId (path traversal attempt) | 400 |
 | N-12 | `GET /api/:board/notes/export` | 200, ZIP stream with markdown files |
+| N-13 | `PATCH /api/:board/notes` — `{ updatedPages: [{ id, description }] }` — page exists | 200 `{ ok: true }`, page description updated; response includes `ETag` header |
+| N-14 | `PATCH /api/:board/notes` — `If-Match` header matches current `_rev` | 200, update applied |
+| N-15 | `PATCH /api/:board/notes` — `If-Match` header stale (rev mismatch) | 409 conflict |
+| N-16 | `PATCH /api/:board/notes` — `updatedPages` references unknown page id | 200, no-op (unknown ids silently skipped) |
+| N-17 | `GET /api/db-size` | 200 `{ size }` in bytes |
 
 ### 1.7 Notes per-operation API — v2 endpoints (`notes-ops.test.js`)
 
@@ -193,6 +206,21 @@ the correct WebDAV primitive is called.
 | NS-3 | `POST /:board/notes/sync` — file absent from WD | Item marked `orphaned: true` |
 | NS-4 | `POST /:board/notes/sync` — WebDAV disabled | 200 `{ ok: true, changed: false }` |
 
+### 1.8 Webhook config (`webhook.test.js`)
+
+| # | Test | Expected |
+|---|---|---|
+| WH-1 | `GET /:board/webhook-config` — no doc yet | 200 `{ enabled: false, name: '', url: '', method: 'POST' }` |
+| WH-2 | `PUT /:board/webhook-config` — valid config | 200 `{ ok: true }`; re-GET returns saved values |
+| WH-3 | `PUT /:board/webhook-config` — URL without http/https scheme | 400 |
+| WH-4 | `PUT /:board/webhook-config` — invalid method (e.g. `DELETE`) | 200; method silently falls back to previous/default |
+| WH-5 | `POST /:board/webhook/trigger` — webhook not configured (no url) | 400 `{ ok: false, error: "…" }` |
+| WH-6 | `POST /:board/webhook/trigger` — webhook disabled (`enabled: false`) | 400 |
+| WH-7 | `POST /:board/webhook/trigger` — mock target returns 200 | 200 `{ ok: true, status: 200 }` |
+| WH-8 | `POST /:board/webhook/trigger` — mock target returns 500 | 200 `{ ok: false, error: "Webhook returned HTTP 500" }` |
+| WH-9 | `POST /:board/webhook/trigger` — mock target times out (>10 s) | 200 `{ ok: false, error: "Webhook timed out (10 s)" }` |
+| WH-10 | `POST /:board/webhook/trigger` with `method: 'GET'` — no body sent | Mock receives GET request with no Content-Type |
+
 ### 1.6 Card Attachments (`card-attachments.test.js`)
 
 | # | Test | Expected |
@@ -220,8 +248,9 @@ Pure-function tests using Vitest + jsdom. No network calls.
 | S-3 | `addCard(colId, text)` sets `created` to today (ISO), generates unique `id` | Card present with correct fields |
 | S-4 | `addCard` with priority=6 | Clamped or rejected (check boundary) |
 | S-5 | `moveCardToColumn(cardId, fromColId, toColId)` updates `moves` array | Move recorded `{ at, from, to }` |
-| S-6 | Column with `actions: ["markDone"]` applied on card drop | Card `done: true` after move |
-| S-7 | Column with `actions: ["setEndDate"]` | Card `endDate` set to today |
+| S-6 | Column with `actions: ["markDone"]` applied on card drop | Card `done: true` and `doneAt` set to ISO timestamp after move |
+| S-7 | Column with `actions: ["markUndone"]` applied on card drop | Card `done: false` and `doneAt` deleted |
+| S-7b | Column with `actions: ["setEndDate"]` | Card `endDate` set to today |
 | S-8 | `buildPatch(base, local, remote)` — remote structural change + local card edit | Both preserved in result |
 | S-9 | `buildPatch` — same card edited both locally and remotely | Remote wins (documented behaviour) |
 | S-10 | `uid()` returns unique value on repeated calls | No duplicates across 1000 calls |
@@ -263,6 +292,8 @@ Pure-function tests using Vitest + jsdom. No network calls.
 | NT-6 | `buildNotesPatch` — page moved between folders (structure change) | Returns `null` (caller falls back to PUT) |
 
 ### 2.5 Analytics computations (`analytics.test.js`)
+
+> **Status: not yet implemented.** `analytics.js` is a frontend-only IIFE that closes over the global `state`. Tests require a jsdom environment with a mock `state` injected, similar to `state.test.js`.
 
 The `run()` functions in `analytics.js` are pure computations over card/state data and should be tested in isolation by injecting a mock `state` object.
 
@@ -367,6 +398,9 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | E-ST-6 | Import board JSON → board state replaced |
 | E-ST-7 | Rename board → URL changes, redirected to new board |
 | E-ST-8 | Delete board → redirect to overview, board gone |
+| E-ST-9 | Enable `trackedColumns` for a column title → overview card shows that column's count |
+| E-ST-10 | Configure webhook (name + URL) → webhook button appears in board menu → click it → result dialog shown |
+| E-ST-11 | Enable `autoSaveDialogs` → open card modal → wait for auto-save interval → modal saves automatically |
 
 ### 3.8 Markdown rendering (`markdown.spec.js`)
 
@@ -479,13 +513,21 @@ Implement in this order to get coverage fastest:
 - [x] Sync (NS-1–4)
 - [x] Unit: `buildNotesPatch` structural vs. content changes (NT-5–6, covered as NT-4e/4f)
 
-**Phase 3 — E2E**
-- [ ] Auth, board CRUD, drag-drop, search E2E (sections 3.1–3.5)
-- [ ] Notes E2E (section 3.6)
+**Phase 3 — E2E** ✓ complete
+- [x] Auth, board CRUD, drag-drop, search E2E (sections 3.1–3.5)
+- [x] Notes E2E (section 3.6)
+
+**Phase 3.5 — Missing API coverage** (identified after Phase 3)
+- [ ] Webhook config tests (section 1.8, WH-1..WH-10) — new `webhook.test.js`
+- [ ] Quick-add inbox endpoint (I-11..I-15, add to `import.test.js`)
+- [ ] Achievements API (B-13..B-15, add to `boards.test.js`)
+- [ ] PATCH /notes + ETag (N-13..N-17, add to `notes.test.js`)
+- [ ] `doneAt` field on markDone/markUndone actions (S-6, S-7 — update `state.test.js`)
+- [ ] Analytics unit tests (section 2.5, AN-1..AN-12) — new `analytics.test.js`
 
 **Phase 4 — Reliability**
 - [ ] Concurrency and edge cases (section 5)
-- [ ] Settings and import E2E (sections 3.7–3.9)
+- [ ] Settings and import E2E (sections 3.7–3.9) including webhook trigger and trackedColumns
 - [ ] Visual regression snapshots
 
 ---
@@ -503,3 +545,27 @@ Create `tests/fixtures/` with:
 - `import-jobs.json` — job-application objects
 
 Each fixture should be self-contained and stable (no dynamic dates unless test injects them).
+
+---
+
+## 9. Keeping Coverage Current
+
+### 9.1 Update this doc before coding
+
+Treat `concepts/test-concept.md` as a spec, not a retrospective. When planning a new feature, add the test case rows here *first* — even as stubs. This makes gaps visible during review and forces thinking about the contract before the implementation.
+
+### 9.2 Write tests alongside the feature, not after
+
+Each feature commit should include both the implementation and its tests. The gaps found during Phase 3.5 (webhook config, achievements endpoint, `/inbox` endpoint) all share the same root cause: the code shipped in one phase and tests were deferred to a later one that never had the same priority. Treat tests as part of the definition of done.
+
+### 9.3 Run the full suite before every release
+
+Before cutting a version tag, always run `/test` to confirm the full suite (unit + E2E) passes. The `/release` skill asks this as a first step. If tests fail, fix them before bumping the version — a tagged release should be a known-good state.
+
+### 9.4 Use this doc as a release checklist
+
+Before tagging, scan the phasing section for any `[ ]` items related to the changes being released. If a feature is shipping, its corresponding test rows should be checked. A 30-second scan is enough; no automation required.
+
+### 9.5 Keep the test skill in sync
+
+When new spec files are added or selectors change, update `.claude/skills/test/SKILL.md` (the E2E file table and key selectors section) at the same time. The skill drives test failure diagnosis — stale docs cause unnecessary debugging time.

@@ -7,6 +7,14 @@ description: Commit all pending changes and cut a new versioned release for the 
 
 Commit the current changes and bump the app version in one guided flow.
 
+## Step 0 — Offer to run tests first
+
+Ask the user: "Run `/test` before releasing? (yes / no)"
+
+- If **yes**: run both test suites (`npm test` then `npm run test:e2e`) and show a compact pass/fail summary. If any tests fail, stop and report the failures — do not proceed to Step 1 until the user confirms they want to release anyway or the failures are fixed.
+- If **no** (or if the user already confirmed tests pass): proceed directly to Step 1.
+- If the user provided "just do it" or similar upfront, skip this question and proceed to Step 1.
+
 ## Step 1 — Determine the release type
 
 If the user specified `patch`, `minor`, or `major` (in the trigger phrase or as an argument), use that.
@@ -95,4 +103,4 @@ Report: "Released **vX.Y.Z** — commit and tag created. Run `git push && git pu
 
 - Never force-push or push automatically — leave that to the user
 - If the user says "just do it" or provides all info upfront (e.g. "release as minor"), skip the confirmation prompts and proceed directly
-- Do not run `npm test` as part of this skill — if the user wants tests first, they should run `/test` beforehand
+- Always ask about running tests first (Step 0) unless the user explicitly bypassed it
