@@ -217,6 +217,17 @@ header h1 span { color: var(--accent); }
   white-space: nowrap;
 }
 
+.btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.btn:disabled:hover {
+  border-color: var(--border);
+  background: var(--surface2);
+  color: var(--text);
+}
+
 .btn:hover {
   border-color: var(--accent);
   background: var(--accent-glow);

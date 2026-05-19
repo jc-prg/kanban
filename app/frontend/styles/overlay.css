@@ -1221,6 +1221,32 @@
   }
 }
 
+/* ---- Achievement history modal ---- */
+.ach-history-modal {
+  width: calc(2 * var(--col-width) + 18px);
+  display: flex;
+  flex-direction: column;
+}
+
+.ach-history-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.ach-history-range-label {
+  flex: 1;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.ach-history-chart {
+  height: 228px;
+  flex-shrink: 0;
+}
+
 /* ---- Analytics modal ---- */
 .analytics-modal {
   width: min(640px, 95vw);

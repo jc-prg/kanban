@@ -826,8 +826,9 @@ async function initOverview() {
   document.getElementById('menuFindCard').style.display = 'none';
   document.getElementById('overview').style.display = 'flex';
 
-  document.getElementById('achPrev').onclick = () => loadAchievements(achDayOffset - 1);
-  document.getElementById('achNext').onclick = () => loadAchievements(achDayOffset + 1);
+  document.getElementById('achPrev').onclick  = () => loadAchievements(achDayOffset - 1);
+  document.getElementById('achNext').onclick  = () => loadAchievements(achDayOffset + 1);
+  document.getElementById('achToday').onclick = () => loadAchievements(0);
 
   try {
     const boardsRes = await fetch('/api/boards');
@@ -855,7 +856,8 @@ function achDateLabel(offset) {
 async function loadAchievements(offset) {
   achDayOffset = offset;
   document.getElementById('achDateLabel').textContent = achDateLabel(offset);
-  document.getElementById('achNext').disabled = offset >= 0;
+  document.getElementById('achNext').disabled          = offset >= 0;
+  document.getElementById('achToday').style.display    = offset < 0 ? '' : 'none';
   document.getElementById('achPrev').disabled = true;
   const d = new Date();
   d.setDate(d.getDate() + offset);

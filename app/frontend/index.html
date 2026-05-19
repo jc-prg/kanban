@@ -62,15 +62,16 @@
         <p class="overview-label" id="achDateLabel">Today's Achievements</p>
         <button id="achPrev" class="ach-nav-btn">&#8249;</button>
         <button id="achNext" class="ach-nav-btn" disabled>&#8250;</button>
+        <button id="achToday" class="ach-nav-btn" style="display:none" title="Jump to today"><span data-icon="sync" data-icon-w="12" data-icon-h="12"></span></button>
       </div>
       <div class="achievements-row">
         <div class="achievement-item">
-          <span class="achievement-value" id="achCreated">0</span>
-          <span class="achievement-label">cards<br>created</span>
-        </div>
-        <div class="achievement-item">
           <span class="achievement-value" id="achInboxCreated">0</span>
           <span class="achievement-label">cards<br>inbox</span>
+        </div>
+        <div class="achievement-item">
+          <span class="achievement-value" id="achCreated">0</span>
+          <span class="achievement-label">cards<br>created</span>
         </div>
         <div class="achievement-item">
           <span class="achievement-value" id="achMoved">0</span>
@@ -382,6 +383,21 @@
       <span id="analyticsCardCount" class="search-count"></span>
       <button class="btn" onclick="closeAnalytics()">Close</button>
       <button class="btn btn-accent" id="analyticsRunBtn">Run</button>
+    </div>
+  </div>
+</div>
+
+<div id="achHistoryBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal ach-history-modal">
+    <h2>Achievement History</h2>
+    <div class="ach-history-nav">
+      <button id="achHistoryPrev" class="btn">&#8249; 4w</button>
+      <span id="achHistoryRange" class="ach-history-range-label"></span>
+      <button id="achHistoryNext" class="btn" disabled>4w ·</button>
+    </div>
+    <div id="achHistoryChart" class="ach-history-chart"></div>
+    <div class="modal-actions">
+      <button class="btn btn-accent" onclick="closeAchievementHistory()">Close</button>
     </div>
   </div>
 </div>

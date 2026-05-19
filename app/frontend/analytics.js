@@ -899,5 +899,160 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && document.getElementById('analyticsBackdrop').style.display !== 'none')
       closeAnalytics();
+    if (e.key === 'Escape' && document.getElementById('achHistoryBackdrop').style.display !== 'none')
+      closeAchievementHistory();
+  });
+
+  // ---- Achievement History ----
+  let _achOffset = 0; // days back from today to end of the 28-day window
+  const _hiddenAchLines = new Set();
+  let _achCurrentData = null;
+
+  function achRangeDates() {
+    const today = new Date();
+    const to = new Date(today);
+    to.setDate(to.getDate() - _achOffset);
+    const from = new Date(to);
+    from.setDate(from.getDate() - 27);
+    const fmt = d => d.toISOString().slice(0, 10);
+    return { from: fmt(from), to: fmt(to) };
+  }
+
+  function fmtAchDate(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+  }
+
+  const ACH_LINES = [
+    { key: 'inboxCreated', label: 'cards inbox',  color: '#f97316', dash: '4,3' },
+    { key: 'created',      label: 'cards created', color: '#fdba74' },
+    { key: 'moved',        label: 'cards moved',   color: '#eab308' },
+    { key: 'done',         label: 'cards done',    color: '#10b981' },
+  ];
+
+  function renderAchievementLineChart(days, el) {
+    if (!days.length) { el.innerHTML = '<p class="search-empty">No data found.</p>'; return; }
+
+    // net created = total created minus inbox-created (mirrors the tiles)
+    const data = days.map(d => ({ ...d, created: Math.max(0, d.created - d.inboxCreated) }));
+    _achCurrentData = data;
+
+    const W = 500, H = 200;
+    const ml = 28, mr = 12, mt = 12, mb = 36;
+    const plotW = W - ml - mr, plotH = H - mt - mb;
+    const n = data.length;
+
+    const visibleLines = ACH_LINES.filter(l => !_hiddenAchLines.has(l.key));
+    const maxVal = Math.max(1, ...data.flatMap(d => visibleLines.map(l => d[l.key] || 0)));
+    const nTicks = Math.min(maxVal, 5);
+
+    const yLines = Array.from({ length: nTicks + 1 }, (_, i) => {
+      const v  = Math.round((maxVal / nTicks) * i);
+      const y  = (mt + plotH - (v / maxVal) * plotH).toFixed(1);
+      const da = i === 0 ? '' : ' stroke-dasharray="3,3"';
+      return `<line x1="${ml}" y1="${y}" x2="${W - mr}" y2="${y}" style="stroke:var(--border)" stroke-width="0.5"${da}/>
+              <text x="${ml - 4}" y="${y}" text-anchor="end" dominant-baseline="middle">${v}</text>`;
+    }).join('');
+
+    const xLabels = data.map((d, i) => {
+      if (i % 7 !== 0 && i !== n - 1) return '';
+      const x    = (ml + (i / Math.max(1, n - 1)) * plotW).toFixed(1);
+      const date = new Date(d.date + 'T00:00:00');
+      const lbl  = `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}`;
+      return `<text x="${x}" y="${H - mb + 14}" text-anchor="middle">${lbl}</text>`;
+    }).join('');
+
+    const linesSvg = ACH_LINES.map(line => {
+      const hidden = _hiddenAchLines.has(line.key);
+      const pts = data.map((d, i) => {
+        const x = ml + (i / Math.max(1, n - 1)) * plotW;
+        const y = mt + plotH - ((d[line.key] || 0) / maxVal) * plotH;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      const dots = data.map((d, i) => {
+        const x = (ml + (i / Math.max(1, n - 1)) * plotW).toFixed(1);
+        const y = (mt + plotH - ((d[line.key] || 0) / maxVal) * plotH).toFixed(1);
+        return `<circle cx="${x}" cy="${y}" r="2.5" fill="${line.color}"><title>${d.date}: ${d[line.key] || 0}</title></circle>`;
+      }).join('');
+      const dashAttr = line.dash ? ` stroke-dasharray="${line.dash}"` : '';
+      return `<g id="achLine_${line.key}"${hidden ? ' visibility="hidden"' : ''}><polyline points="${pts}" fill="none" stroke="${line.color}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" opacity="0.9"${dashAttr}/>${dots}</g>`;
+    }).join('');
+
+    const legendHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px 16px;font-size:0.7rem;color:var(--text-muted);margin-top:8px">
+      ${ACH_LINES.map(l => {
+        const hidden = _hiddenAchLines.has(l.key);
+        const swatch = l.dash
+          ? `<svg width="16" height="3" style="flex-shrink:0"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="${l.color}" stroke-width="2" stroke-dasharray="${l.dash}"/></svg>`
+          : `<span style="display:inline-block;width:16px;height:3px;background:${l.color};border-radius:2px;flex-shrink:0"></span>`;
+        return `<span data-ach-key="${l.key}" style="display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none${hidden ? ';opacity:0.35;text-decoration:line-through' : ''}">${swatch}${l.label}</span>`;
+      }).join('')}
+    </div>`;
+
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
+        style="font-size:9px;font-family:'DM Mono',monospace;fill:var(--text-muted);display:block;max-width:100%;overflow:visible">
+      ${yLines}
+      <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt + plotH}" style="stroke:var(--border)" stroke-width="1"/>
+      ${linesSvg}
+      ${xLabels}
+    </svg>${legendHtml}`;
+
+    el.querySelectorAll('[data-ach-key]').forEach(item => {
+      item.addEventListener('click', () => {
+        const key = item.dataset.achKey;
+        if (_hiddenAchLines.has(key)) _hiddenAchLines.delete(key);
+        else _hiddenAchLines.add(key);
+        renderAchievementLineChart(_achCurrentData, el);
+      });
+    });
+  }
+
+  function setAchNavState(prevDisabled, nextDisabled) {
+    const prevBtn = document.getElementById('achHistoryPrev');
+    const nextBtn = document.getElementById('achHistoryNext');
+    prevBtn.disabled = prevDisabled;
+    nextBtn.disabled = nextDisabled;
+    prevBtn.textContent = prevDisabled ? '· 4w' : '‹ 4w';
+    nextBtn.textContent = nextDisabled ? '4w ·' : '4w ›';
+  }
+
+  async function loadAchievementHistory() {
+    const chartEl = document.getElementById('achHistoryChart');
+    chartEl.innerHTML = '<p class="search-empty">Loading…</p>';
+    setAchNavState(true, _achOffset === 0);
+    const { from, to } = achRangeDates();
+    document.getElementById('achHistoryRange').textContent = `${fmtAchDate(from)} – ${fmtAchDate(to)}`;
+    try {
+      const res = await fetch(`/api/achievements/range?from=${from}&to=${to}`);
+      if (!res.ok) throw new Error('request failed');
+      const { days, hasBefore } = await res.json();
+      setAchNavState(!hasBefore, _achOffset === 0);
+      renderAchievementLineChart(days, chartEl);
+    } catch (e) {
+      chartEl.innerHTML = '<p class="search-empty">Failed to load achievement data.</p>';
+    }
+  }
+
+  window.openAchievementHistory = function () {
+    _achOffset = 0;
+    document.getElementById('achHistoryBackdrop').style.display = 'flex';
+    loadAchievementHistory();
+  };
+
+  window.closeAchievementHistory = function () {
+    document.getElementById('achHistoryBackdrop').style.display = 'none';
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('achHistoryPrev').addEventListener('click', () => {
+      _achOffset += 28;
+      loadAchievementHistory();
+    });
+    document.getElementById('achHistoryNext').addEventListener('click', () => {
+      _achOffset = Math.max(0, _achOffset - 28);
+      loadAchievementHistory();
+    });
+    document.getElementById('achHistoryBackdrop').addEventListener('click', e => {
+      if (e.target === document.getElementById('achHistoryBackdrop')) closeAchievementHistory();
+    });
   });
 })();
