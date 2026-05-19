@@ -381,17 +381,22 @@ header h1 span { color: var(--accent); }
 }
 
 .achievements-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin-bottom: 32px;
-  flex-wrap: wrap;
+}
+
+@media (max-width: 500px) {
+  .achievements-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .achievement-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 150px;
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -412,13 +417,18 @@ header h1 span { color: var(--accent); }
   color: var(--text-muted);
 }
 
-#achievementsSection [id="achCreated"] ~ .achievement-label,
-#achievementsSection [id="achMoved"]   ~ .achievement-label,
-#achievementsSection [id="achDone"]    ~ .achievement-label { color: inherit; }
+#achievementsSection [id="achCreated"]      ~ .achievement-label,
+#achievementsSection [id="achInboxCreated"] ~ .achievement-label,
+#achievementsSection [id="achMoved"]        ~ .achievement-label,
+#achievementsSection [id="achDone"]         ~ .achievement-label { color: inherit; }
 
 #achCreated { color: #f97316; }
 #achCreated + .achievement-label { color: #f97316cc; }
 .achievement-item:has(#achCreated) { background: #f9731618; border-color: #f9731640; }
+
+#achInboxCreated { color: #f97316; }
+#achInboxCreated + .achievement-label { color: #f97316cc; }
+.achievement-item:has(#achInboxCreated) { background: #f9731618; border-color: #f9731640; }
 
 #achMoved { color: #eab308; }
 #achMoved + .achievement-label { color: #eab308cc; }

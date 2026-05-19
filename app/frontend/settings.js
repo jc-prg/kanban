@@ -862,7 +862,7 @@ async function loadAchievements(offset) {
   const date = d.toISOString().slice(0, 10);
   try {
     const res = await fetch(`/api/achievements/today?date=${date}`);
-    const ach = res.ok ? await res.json() : { created: 0, moved: 0, done: 0, hasPast: false };
+    const ach = res.ok ? await res.json() : { created: 0, inboxCreated: 0, moved: 0, done: 0, hasPast: false };
     document.getElementById('achPrev').disabled = !ach.hasPast;
     renderAchievements(ach, offset);
   } catch (e) { /* ignore */ }
@@ -872,18 +872,27 @@ function boardsTooltip(map) {
   return Object.entries(map).map(([b, n]) => `${b}: ${n}`).join('\n');
 }
 
-function renderAchievements({ created = 0, moved = 0, done = 0, createdBoards = {}, movedBoards = {}, doneBoards = {} }, offset = 0) {
+function renderAchievements({ created = 0, inboxCreated = 0, moved = 0, done = 0, createdBoards = {}, inboxCreatedBoards = {}, movedBoards = {}, doneBoards = {} }, offset = 0) {
   const section = document.getElementById('achievementsSection');
   if (created === 0 && moved === 0 && done === 0 && offset === 0) { section.style.display = 'none'; return; }
-  const achCreated = document.getElementById('achCreated');
-  const achMoved   = document.getElementById('achMoved');
-  const achDone    = document.getElementById('achDone');
-  achCreated.textContent = created;
-  achMoved.textContent   = moved;
-  achDone.textContent    = done;
-  if (created) achCreated.dataset.tooltip = boardsTooltip(createdBoards); else delete achCreated.dataset.tooltip;
-  if (moved)   achMoved.dataset.tooltip   = boardsTooltip(movedBoards);   else delete achMoved.dataset.tooltip;
-  if (done)    achDone.dataset.tooltip    = boardsTooltip(doneBoards);     else delete achDone.dataset.tooltip;
+  const achCreated      = document.getElementById('achCreated');
+  const achInboxCreated = document.getElementById('achInboxCreated');
+  const achMoved        = document.getElementById('achMoved');
+  const achDone         = document.getElementById('achDone');
+  const displayCreated  = created - inboxCreated;
+  const netCreatedBoards = {};
+  for (const [b, n] of Object.entries(createdBoards)) {
+    const net = n - (inboxCreatedBoards[b] || 0);
+    if (net > 0) netCreatedBoards[b] = net;
+  }
+  achCreated.textContent      = displayCreated;
+  achInboxCreated.textContent = inboxCreated;
+  achMoved.textContent        = moved;
+  achDone.textContent         = done;
+  if (displayCreated) achCreated.dataset.tooltip = boardsTooltip(netCreatedBoards); else delete achCreated.dataset.tooltip;
+  if (inboxCreated)   achInboxCreated.dataset.tooltip = boardsTooltip(inboxCreatedBoards); else delete achInboxCreated.dataset.tooltip;
+  if (moved)          achMoved.dataset.tooltip   = boardsTooltip(movedBoards);   else delete achMoved.dataset.tooltip;
+  if (done)           achDone.dataset.tooltip    = boardsTooltip(doneBoards);     else delete achDone.dataset.tooltip;
   section.style.display = '';
 }
 

@@ -58,15 +58,20 @@ router.get('/achievements/today', async (req, res) => {
     const couch = getCouch();
     const all   = await couch.db.list();
     const names = all.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
-    let created = 0, moved = 0, done = 0, hasPast = false;
-    const createdBoards = {}, movedBoards = {}, doneBoards = {};
+    let created = 0, moved = 0, done = 0, inboxCreated = 0, hasPast = false;
+    const createdBoards = {}, movedBoards = {}, doneBoards = {}, inboxCreatedBoards = {};
     await Promise.all(names.map(async name => {
       try {
         const data = await loadBoardData(couch.use(DB_PREFIX + name));
         if (data.settings?.archived) return;
         for (const col of data.columns) {
           for (const card of col.cards) {
-            if (card.created?.startsWith(today)) { created++; createdBoards[name] = (createdBoards[name] || 0) + 1; }
+            if (card.created?.startsWith(today)) {
+              created++;
+              createdBoards[name] = (createdBoards[name] || 0) + 1;
+              const isInbox = /^inbox/i.test(col.title) || card.moves?.some(m => /^inbox/i.test(m.from));
+              if (isInbox) { inboxCreated++; inboxCreatedBoards[name] = (inboxCreatedBoards[name] || 0) + 1; }
+            }
             if (card.moves?.some(m => m.at?.startsWith(today))) { moved++; movedBoards[name] = (movedBoards[name] || 0) + 1; }
             const donByFlag = card.doneAt?.startsWith(today);
             const doneByMove = !donByFlag && card.moves?.some(m => m.at?.startsWith(today) && /^done/i.test(m.to));
@@ -81,7 +86,7 @@ router.get('/achievements/today', async (req, res) => {
         }
       } catch (e) { /* skip broken boards */ }
     }));
-    res.json({ created, moved, done, createdBoards, movedBoards, doneBoards, hasPast });
+    res.json({ created, moved, done, inboxCreated, createdBoards, movedBoards, doneBoards, inboxCreatedBoards, hasPast });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
