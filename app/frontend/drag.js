@@ -1,3 +1,21 @@
+// ---- Scroll position helpers ----
+function saveColScrolls() {
+  const map = {};
+  document.querySelectorAll('[data-col-id]').forEach(col => {
+    const cards = col.querySelector('.cards');
+    if (cards) map[col.dataset.colId] = cards.scrollTop;
+  });
+  return map;
+}
+
+function restoreColScrolls(map) {
+  Object.entries(map).forEach(([colId, top]) => {
+    const col = document.querySelector(`[data-col-id="${colId}"]`);
+    const cards = col?.querySelector('.cards');
+    if (cards) cards.scrollTop = top;
+  });
+}
+
 // ---- Drag state ----
 let dragState    = null;
 let colDragState = null;
@@ -41,7 +59,9 @@ function onColDrop(e, toColId) {
   const newToIdx = state.columns.findIndex(c => c.id === toColId);
   state.columns.splice(insertBefore ? newToIdx : newToIdx + 1, 0, col);
 
+  const _scrolls = saveColScrolls();
   render();
+  restoreColScrolls(_scrolls);
   schedulesSave();
 }
 
@@ -116,7 +136,9 @@ function onDrop(e, toColId) {
     card.lastModified = new Date().toISOString();
   }
 
+  const _scrolls = saveColScrolls();
   render();
+  restoreColScrolls(_scrolls);
   schedulesSave();
 }
 
@@ -236,7 +258,9 @@ document.addEventListener('touchend', e => {
           applyColumnActions(card, toCol);
           card.lastModified = new Date().toISOString();
         }
+        const _scrolls = saveColScrolls();
         render();
+        restoreColScrolls(_scrolls);
         schedulesSave();
       }
     }
@@ -248,7 +272,9 @@ document.addEventListener('touchend', e => {
       const [col] = state.columns.splice(fromIdx, 1);
       const newIdx = state.columns.findIndex(c => c.id === colEl.dataset.colId);
       state.columns.splice(t.clientX < cr.left + cr.width / 2 ? newIdx : newIdx + 1, 0, col);
+      const _scrolls = saveColScrolls();
       render();
+      restoreColScrolls(_scrolls);
       schedulesSave();
     }
   }
@@ -267,3 +293,19 @@ document.addEventListener('touchcancel', () => {
 // outside of any registered drop target (e.g. board gaps, header, window edge).
 document.addEventListener('dragover', e => { if (dragState || colDragState) e.preventDefault(); });
 document.addEventListener('drop',     e => { if (dragState || colDragState) e.preventDefault(); });
+
+// ---- Arrow-key scrolling for hovered column ----
+let hoveredCardsEl = null;
+
+document.addEventListener('mouseover', e => {
+  const col = e.target.closest('[data-col-id]');
+  hoveredCardsEl = col ? col.querySelector('.cards') : null;
+});
+
+document.addEventListener('keydown', e => {
+  if (!hoveredCardsEl) return;
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  hoveredCardsEl.scrollBy({ top: e.key === 'ArrowDown' ? 80 : -80, behavior: 'smooth' });
+});
