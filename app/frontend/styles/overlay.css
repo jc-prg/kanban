@@ -184,6 +184,26 @@
   animation: scaleIn 0.2s ease;
 }
 
+/* File drag-and-drop upload overlay (card modal + note modal) */
+.modal-backdrop.modal--file-drag .modal {
+  position: relative;
+}
+.modal-backdrop.modal--file-drag .modal::after {
+  content: '⬆ Drop files to upload';
+  position: absolute;
+  inset: 0;
+  background: var(--accent-glow);
+  border: 2px dashed var(--accent);
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: var(--accent);
+  z-index: 10;
+  pointer-events: none;
+}
+
 #modal .modal {
   width: min(960px, 92vw);
   height: 95dvh;

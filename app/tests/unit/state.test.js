@@ -246,7 +246,21 @@ describe('moveCardToColumn()', () => {
     expect(ctx.__state().columns[1].cards[0].doneAt).toBeTruthy()
   })
 
-  it('S-7: column with setEndDate action sets endDate to today', () => {
+  it('S-7: column with markUndone action clears done:false and removes doneAt on moved card', () => {
+    // Pre-set the card as done before the move
+    const srcCard = ctx.__state().columns[0].cards.find(c => c.id === cardId)
+    srcCard.done  = true
+    srcCard.doneAt = '2025-01-01T00:00:00.000Z'
+
+    ctx.__state().columns[1].actions = ['markUndone']
+    ctx.moveCardToColumn(fromColId, cardId, toColId)
+
+    const moved = ctx.__state().columns[1].cards.find(c => c.id === cardId)
+    expect(moved.done).toBe(false)
+    expect(moved.doneAt).toBeUndefined()
+  })
+
+  it('S-7b: column with setEndDate action sets endDate to today', () => {
     const today = new Date().toISOString().slice(0, 10)
     ctx.__state().columns[1].actions = ['setEndDate']
     ctx.moveCardToColumn(fromColId, cardId, toColId)

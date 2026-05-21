@@ -353,3 +353,82 @@ describe('GET /:board/notes/export', () => {
     expect(res.headers['content-disposition']).toContain(`notes-${BOARD}.zip`)
   })
 })
+
+// ---------------------------------------------------------------------------
+// PATCH /:board/notes + ETag (N-13 … N-17)
+// ---------------------------------------------------------------------------
+describe('PATCH /:board/notes', () => {
+  const PAGE_ID = 'n-patch01'
+
+  beforeEach(() => {
+    mockDbCtx.db = makeMockDb({
+      notesDoc: {
+        items: [{ type: 'page', id: PAGE_ID, title: 'Original', description: 'old text' }],
+        schemaVersion: 2,
+      },
+    })
+  })
+
+  it('N-13: updatedPages with existing id → 200 { ok:true }, description updated, ETag header set', async () => {
+    const res = await request(app)
+      .patch(`/api/${BOARD}/notes`)
+      .set(AUTH)
+      .send({ updatedPages: [{ id: PAGE_ID, description: 'new text' }] })
+
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.headers['etag']).toBeTruthy()
+
+    const saved = mockDbCtx.db.getLastSavedNotes()
+    const page = saved.items.find(i => i.id === PAGE_ID)
+    expect(page.description).toBe('new text')
+  })
+
+  it('N-14: If-Match matches current _rev → 200, update applied', async () => {
+    const res = await request(app)
+      .patch(`/api/${BOARD}/notes`)
+      .set(AUTH)
+      .set('If-Match', '"1-abc"')
+      .send({ updatedPages: [{ id: PAGE_ID, description: 'patched' }] })
+
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+  })
+
+  it('N-15: If-Match stale (rev mismatch) → 409 conflict', async () => {
+    const res = await request(app)
+      .patch(`/api/${BOARD}/notes`)
+      .set(AUTH)
+      .set('If-Match', '"stale-rev"')
+      .send({ updatedPages: [{ id: PAGE_ID, description: 'should not apply' }] })
+
+    expect(res.status).toBe(409)
+  })
+
+  it('N-16: updatedPages references unknown page id → 200, no-op (silently skipped)', async () => {
+    const res = await request(app)
+      .patch(`/api/${BOARD}/notes`)
+      .set(AUTH)
+      .send({ updatedPages: [{ id: 'n-nonexistent', description: 'ghost' }] })
+
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    const saved = mockDbCtx.db.getLastSavedNotes()
+    const original = saved.items.find(i => i.id === PAGE_ID)
+    expect(original.description).toBe('old text')  // unchanged
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/db-size (N-17)
+// ---------------------------------------------------------------------------
+describe('GET /api/db-size', () => {
+  it('N-17: returns 200 { size } in bytes', async () => {
+    mockDbCtx.db = makeMockDb()
+
+    const res = await request(app).get('/api/db-size').set(AUTH)
+
+    expect(res.status).toBe(200)
+    expect(typeof res.body.size).toBe('number')
+  })
+})

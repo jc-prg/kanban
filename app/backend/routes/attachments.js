@@ -14,7 +14,7 @@ function safePageId(id) {
   return typeof id === 'string' && /^n-(?:wd-)?[a-z0-9]{1,20}$/.test(id);
 }
 function safeCardId(id) {
-  return typeof id === 'string' && /^id-[a-z0-9]{1,10}$/.test(id);
+  return typeof id === 'string' && /^id-[a-z0-9]{1,12}$/.test(id);
 }
 function safeFilename(name) {
   return typeof name === 'string' && name.length > 0 && name.length <= 255

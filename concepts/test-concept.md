@@ -386,7 +386,17 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | E-N-10 | Reorder pages by drag → new order persists |
 | E-N-11 | Export notes → ZIP downloaded |
 
-### 3.7 Settings & board management (`settings.spec.js`)
+### 3.7 Attachment uploads (`attachments.spec.js`)
+
+| # | Scenario |
+|---|---|
+| E-AT-1 | Open card edit modal → upload file → file listed in attachment panel |
+| E-AT-2 | Upload file to card → markdown reference (`attachment:filename`) auto-inserted in description |
+| E-AT-3 | Card upload indicator: label shows `Uploading…` while POST is in-flight; restores to `+ Upload` after |
+| E-AT-4 | Upload file to note page → markdown image reference (`![...](\_attachments/...)`) auto-inserted in description |
+| E-AT-5 | Note page upload indicator: label shows `Uploading…` while POST is in-flight; restores to `+ Upload` after |
+
+### 3.8 Settings & board management (`settings.spec.js`)
 
 | # | Scenario |
 |---|---|
@@ -402,7 +412,7 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | E-ST-10 | Configure webhook (name + URL) → webhook button appears in board menu → click it → result dialog shown |
 | E-ST-11 | Enable `autoSaveDialogs` → open card modal → wait for auto-save interval → modal saves automatically |
 
-### 3.8 Markdown rendering (`markdown.spec.js`)
+### 3.9 Markdown rendering (`markdown.spec.js`)
 
 | # | Scenario |
 |---|---|
@@ -413,7 +423,7 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | E-M-5 | `[toc]` in note description → table of contents rendered |
 | E-M-6 | ~~`[subpages]` in note → child page titles rendered~~ — **removed**: pages no longer have children in v2; only folders contain items |
 
-### 3.9 Import flow (`import.spec.js`)
+### 3.10 Import flow (`import.spec.js`)
 
 | # | Scenario |
 |---|---|
@@ -516,18 +526,19 @@ Implement in this order to get coverage fastest:
 **Phase 3 — E2E** ✓ complete
 - [x] Auth, board CRUD, drag-drop, search E2E (sections 3.1–3.5)
 - [x] Notes E2E (section 3.6)
+- [x] Attachment upload indicator + description auto-insert E2E (section 3.7, E-AT-1..E-AT-5)
 
 **Phase 3.5 — Missing API coverage** (identified after Phase 3)
-- [ ] Webhook config tests (section 1.8, WH-1..WH-10) — new `webhook.test.js`
-- [ ] Quick-add inbox endpoint (I-11..I-15, add to `import.test.js`)
-- [ ] Achievements API (B-13..B-15, add to `boards.test.js`)
-- [ ] PATCH /notes + ETag (N-13..N-17, add to `notes.test.js`)
-- [ ] `doneAt` field on markDone/markUndone actions (S-6, S-7 — update `state.test.js`)
-- [ ] Analytics unit tests (section 2.5, AN-1..AN-12) — new `analytics.test.js`
+- [x] Webhook config tests (section 1.8, WH-1..WH-10) — new `webhook.test.js`
+- [x] Quick-add inbox endpoint (I-11..I-15, add to `import.test.js`)
+- [x] Achievements API (B-13..B-15, add to `boards.test.js`)
+- [x] PATCH /notes + ETag (N-13..N-17, add to `notes.test.js`)
+- [x] `doneAt` field on markDone/markUndone actions (S-6, S-7 — update `state.test.js`)
+- [x] Analytics unit tests (section 2.5, AN-1..AN-12) — new `analytics.test.js`
 
 **Phase 4 — Reliability**
 - [ ] Concurrency and edge cases (section 5)
-- [ ] Settings and import E2E (sections 3.7–3.9) including webhook trigger and trackedColumns
+- [ ] Settings and import E2E (sections 3.8–3.10) including webhook trigger and trackedColumns
 - [ ] Visual regression snapshots
 
 ---

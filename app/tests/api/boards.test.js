@@ -18,13 +18,20 @@ const request              = require('supertest')
 const { createApp }        = require('../setup/createApp')
 
 // ---- Shared mock couch object (configured per test in beforeEach) ----------
+
+// boardDataCtx allows per-test control of what loadBoardData returns per board.
+// Keys are full db names (e.g. 'jc-kanban-alpha'). The use() return value
+// carries _name so loadBoardData can look up the right fixture.
+const boardDataCtx = { byName: new Map() }
+
 const mockCouch = {
   db: {
     list:    async () => [],
     create:  async () => ({ ok: true }),
     destroy: async () => ({ ok: true }),
   },
-  use: () => ({
+  use: (fullName) => ({
+    _name:  fullName,
     get:    async () => ({ _id: 'board', _rev: '1-abc', columns: [] }),
     insert: async () => ({ ok: true, rev: '2-abc' }),
   }),
@@ -40,7 +47,7 @@ const dbMock = {
     name.length <= 64 &&
     name !== 'inbox',
   getBoardDb:    async () => ({}),
-  loadBoardData: async () => ({ columns: [], settings: {} }),
+  loadBoardData: async (db) => boardDataCtx.byName.get(db._name) || { columns: [], settings: {} },
   saveBoardData: async () => ({ ok: true }),
   withBoard: (handler) => async (req, res) => {
     const name = req.params.board
@@ -67,6 +74,7 @@ beforeEach(() => {
   mockCouch.db.list    = async () => []
   mockCouch.db.create  = async () => ({ ok: true })
   mockCouch.db.destroy = async () => ({ ok: true })
+  boardDataCtx.byName.clear()
 })
 
 // ---------------------------------------------------------------------------
@@ -189,5 +197,70 @@ describe('DELETE /api/boards/:name', () => {
     }
     const res = await request(app).delete('/api/boards/ghost').set(AUTH)
     expect(res.status).toBe(404)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/achievements/today (B-13 … B-15)
+// ---------------------------------------------------------------------------
+describe('GET /api/achievements/today', () => {
+  it('B-13: counts created/moved/done for today across boards', async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    mockCouch.db.list = async () => ['jc-kanban-alpha']
+    boardDataCtx.byName.set('jc-kanban-alpha', {
+      columns: [{
+        id: 'c1', title: 'Done',
+        cards: [
+          { id: 'card1', text: 'Task A', created: today },
+          {
+            id: 'card2', text: 'Task B', created: today,
+            moves: [{ at: today + 'T10:00:00Z', from: 'Inbox', to: 'Done' }],
+          },
+        ],
+      }],
+    })
+
+    const res = await request(app).get('/api/achievements/today').set(AUTH)
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ created: 2, moved: 1, hasPast: false })
+    expect(res.body.createdBoards).toMatchObject({ alpha: 2 })
+  })
+
+  it('B-14: ?date=2024-01-01 → counts only cards matching that date', async () => {
+    mockCouch.db.list = async () => ['jc-kanban-alpha']
+    boardDataCtx.byName.set('jc-kanban-alpha', {
+      columns: [{
+        id: 'c1', title: 'Done',
+        cards: [
+          { id: 'card1', text: 'Old Task',    created: '2024-01-01' },
+          { id: 'card2', text: 'Recent Task', created: '2024-03-15' },
+        ],
+      }],
+    })
+
+    const res = await request(app).get('/api/achievements/today?date=2024-01-01').set(AUTH)
+
+    expect(res.status).toBe(200)
+    expect(res.body.created).toBe(1)
+    expect(res.body.hasPast).toBe(false)
+  })
+
+  it('B-15: archived board cards are excluded from counts', async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    mockCouch.db.list = async () => ['jc-kanban-active', 'jc-kanban-archived']
+    boardDataCtx.byName.set('jc-kanban-active', {
+      columns: [{ id: 'c1', title: 'Inbox', cards: [{ id: 'card1', text: 'Live task', created: today }] }],
+    })
+    boardDataCtx.byName.set('jc-kanban-archived', {
+      settings: { archived: true },
+      columns: [{ id: 'c2', title: 'Inbox', cards: [{ id: 'card2', text: 'Dead task', created: today }] }],
+    })
+
+    const res = await request(app).get('/api/achievements/today').set(AUTH)
+
+    expect(res.status).toBe(200)
+    expect(res.body.created).toBe(1)
+    expect(res.body.createdBoards).not.toHaveProperty('archived')
   })
 })

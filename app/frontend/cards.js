@@ -332,6 +332,37 @@ document.addEventListener('DOMContentLoaded', () => {
     e.target.value = '';
   });
 
+  // File drag-and-drop upload: drag files from OS file manager onto the card modal
+  let _cardFileDragDepth = 0;
+  const _cardModalEl = document.getElementById('modal');
+  _cardModalEl.addEventListener('dragenter', e => {
+    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    if (++_cardFileDragDepth === 1) _cardModalEl.classList.add('modal--file-drag');
+  });
+  _cardModalEl.addEventListener('dragleave', () => {
+    if (--_cardFileDragDepth <= 0) {
+      _cardFileDragDepth = 0;
+      _cardModalEl.classList.remove('modal--file-drag');
+    }
+  });
+  _cardModalEl.addEventListener('dragover', e => {
+    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+  });
+  _cardModalEl.addEventListener('drop', e => {
+    _cardFileDragDepth = 0;
+    _cardModalEl.classList.remove('modal--file-drag');
+    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    _handleCardAttachUpload(editCardId, files);
+  });
+
   document.getElementById('cardDescPreview').addEventListener('click', e => {
     clickPreviewToEditor(document.getElementById('cardDescPreview'), 'cardDesc', showDescEditor, e);
   });
@@ -493,18 +524,27 @@ function _appendAttachMd(taId, name, prefix = 'attachment:') {
 
 async function _handleCardAttachUpload(cardId, fileList) {
   if (!CARD_ATTACH_API || !fileList.length) return;
-  for (const file of Array.from(fileList)) {
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await fetch(`${CARD_ATTACH_API}/${cardId}`, { method: 'POST', body: fd });
-    if (r.ok) {
-      _appendAttachMd('cardDesc', (await r.json()).name);
-    } else {
-      const data = await r.json().catch(() => ({}));
-      await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+  const label = document.querySelector('label[for="cardAttachInput"]');
+  const input = document.getElementById('cardAttachInput');
+  if (label) label.textContent = 'Uploading…';
+  if (input) input.disabled = true;
+  try {
+    for (const file of Array.from(fileList)) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`${CARD_ATTACH_API}/${cardId}`, { method: 'POST', body: fd });
+      if (r.ok) {
+        _appendAttachMd('cardDesc', (await r.json()).name);
+      } else {
+        const data = await r.json().catch(() => ({}));
+        await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+      }
     }
+  } finally {
+    if (label) label.textContent = '+ Upload';
+    if (input) input.disabled = false;
+    loadCardAttachments(cardId);
   }
-  loadCardAttachments(cardId);
 }
 
 function _insertCardAttachMd(name, type) {

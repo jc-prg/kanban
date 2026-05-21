@@ -299,3 +299,107 @@ describe('POST /:board/import — invalid body', () => {
     expect(res.status).toBe(400)
   })
 })
+
+// ---------------------------------------------------------------------------
+// POST /:board/inbox — quick-add (I-11 … I-15)
+// ---------------------------------------------------------------------------
+describe('POST /:board/inbox — single card object', () => {
+  beforeEach(() => {
+    mockDbCtx.db = makeMockDb({ columns: [] })
+  })
+
+  it('I-11: single card object → added:1, card appears in Inbox', async () => {
+    const res = await request(app)
+      .post(`/api/${BOARD}/inbox`)
+      .set(AUTH)
+      .send({ text: 'Quick task' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.added).toBe(1)
+    expect(res.body.added_items).toHaveLength(1)
+    expect(res.body.added_items[0].text).toBe('Quick task')
+    expect(res.body.duplicates).toBe(0)
+
+    const saved = mockDbCtx.db.getLastSaved()
+    const inbox = saved.columns.find(c => c.title === 'Inbox')
+    expect(inbox).toBeDefined()
+    expect(inbox.cards.some(c => c.text === 'Quick task')).toBe(true)
+  })
+})
+
+describe('POST /:board/inbox — array of cards', () => {
+  beforeEach(() => {
+    mockDbCtx.db = makeMockDb({ columns: [] })
+  })
+
+  it('I-12: array of cards → all non-duplicate cards added', async () => {
+    const res = await request(app)
+      .post(`/api/${BOARD}/inbox`)
+      .set(AUTH)
+      .send([{ text: 'Card One' }, { text: 'Card Two' }])
+
+    expect(res.status).toBe(200)
+    expect(res.body.added).toBe(2)
+    expect(res.body.duplicates).toBe(0)
+  })
+})
+
+describe('POST /:board/inbox — duplicate detection', () => {
+  beforeEach(() => {
+    mockDbCtx.db = makeMockDb({
+      columns: [{ id: 'col-1', title: 'Backlog', cards: [{ id: 'c1', text: 'Existing task' }] }],
+    })
+  })
+
+  it('I-13: card with text already in a column → duplicates:1, card inserted with duplicate:true', async () => {
+    const res = await request(app)
+      .post(`/api/${BOARD}/inbox`)
+      .set(AUTH)
+      .send({ text: 'Existing task' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.duplicates).toBe(1)
+    expect(res.body.duplicate_items[0].text).toBe('Existing task')
+    expect(res.body.duplicate_items[0].duplicate).toBe(true)
+    // Card is still inserted into inbox
+    const saved = mockDbCtx.db.getLastSaved()
+    const inbox = saved.columns.find(c => c.title === 'Inbox')
+    expect(inbox).toBeDefined()
+    expect(inbox.cards.some(c => c.text === 'Existing task')).toBe(true)
+  })
+})
+
+describe('POST /:board/inbox — inboxWithDate', () => {
+  beforeEach(() => {
+    mockDbCtx.db = makeMockDb({ columns: [], settings: { inboxWithDate: true } })
+  })
+
+  it('I-14: inboxWithDate:true → Inbox column title includes today\'s date', async () => {
+    const res = await request(app)
+      .post(`/api/${BOARD}/inbox`)
+      .set(AUTH)
+      .send({ text: 'Dated card' })
+
+    expect(res.status).toBe(200)
+    const saved = mockDbCtx.db.getLastSaved()
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    expect(saved.columns[0].title).toMatch(new RegExp(`Inbox.*${dd}\\.${mm}\\.`))
+  })
+})
+
+describe('POST /:board/inbox — invalid body', () => {
+  beforeEach(() => {
+    mockDbCtx.db = makeMockDb({ columns: [] })
+  })
+
+  it('I-15: missing required "text" field → 400', async () => {
+    const res = await request(app)
+      .post(`/api/${BOARD}/inbox`)
+      .set(AUTH)
+      .send({ priority: 1 })
+
+    expect(res.status).toBe(400)
+  })
+})

@@ -1804,6 +1804,39 @@ document.addEventListener('DOMContentLoaded', () => {
     e.target.value = '';
   });
 
+  // File drag-and-drop upload: drag files from OS file manager onto the note modal
+  let _noteFileDragDepth = 0;
+  const _noteModalEl = document.getElementById('noteModal');
+  if (_noteModalEl) {
+    _noteModalEl.addEventListener('dragenter', e => {
+      if (!noteModalPageId || !NOTES_ATTACH_API) return;
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      if (++_noteFileDragDepth === 1) _noteModalEl.classList.add('modal--file-drag');
+    });
+    _noteModalEl.addEventListener('dragleave', () => {
+      if (--_noteFileDragDepth <= 0) {
+        _noteFileDragDepth = 0;
+        _noteModalEl.classList.remove('modal--file-drag');
+      }
+    });
+    _noteModalEl.addEventListener('dragover', e => {
+      if (!noteModalPageId || !NOTES_ATTACH_API) return;
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+    });
+    _noteModalEl.addEventListener('drop', e => {
+      _noteFileDragDepth = 0;
+      _noteModalEl.classList.remove('modal--file-drag');
+      if (!noteModalPageId || !NOTES_ATTACH_API) return;
+      const files = e.dataTransfer?.files;
+      if (!files?.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      _handleAttachUpload(noteModalPageId, files);
+    });
+  }
+
   // Attachment viewer
   document.getElementById('attachViewerClose')?.addEventListener('click', closeAttachmentViewer);
   document.getElementById('attachViewer')?.addEventListener('click', e => {
