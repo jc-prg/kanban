@@ -246,8 +246,10 @@ function render() {
       if (card.done) {
         metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
       }
-      if (card.duplicate) {
-        const originalCol = state.columns.find(c => c.cards.some(c2 => c2.id !== card.id && c2.text === card.text && !c2.duplicate));
+      if (card.duplicate || card.text.startsWith('(copy) ')) {
+        const originalCol = card.duplicate
+          ? state.columns.find(c => c.cards.some(c2 => c2.id !== card.id && c2.text === card.text && !c2.duplicate))
+          : null;
         const tip = originalCol ? `Also in: &quot;${escHtml(originalCol.title)}&quot;` : 'Duplicate card';
         metaParts.push(`<span class="card-duplicate-badge" title="${tip}">duplicate</span>`);
       }
