@@ -232,4 +232,57 @@ test.describe('3.7 Attachment uploads', () => {
     resolveUpload();
     await expect(page.locator('label[for="noteAttachInput"]')).toHaveText('+ Upload');
   });
+
+  // E-AT-6 -----------------------------------------------------------------
+  test('E-AT-6: card modal paste image → uploaded and markdown inserted in description', async ({ page }) => {
+    await openCardEditModal(page, 'Upload Test Card');
+
+    // Dispatch a synthetic paste event carrying a 1×1 PNG onto the card modal
+    await page.evaluate(() => {
+      const png = new Uint8Array([
+        137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+        8,2,0,0,0,144,119,83,222,0,0,0,12,73,68,65,84,8,215,99,248,207,
+        192,0,0,0,2,0,1,226,33,188,51,0,0,0,0,73,69,78,68,174,66,96,130,
+      ]);
+      const file = new File([png], 'pasted.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+      document.getElementById('modal').dispatchEvent(event);
+    });
+
+    // File should appear in the attachment list with a pasted-<timestamp>.png name
+    await expect(page.locator('#cardAttachList')).toContainText(/pasted-\d+\.png/, { timeout: 8000 });
+    // An image markdown reference should be auto-inserted in the description
+    const desc = await page.locator('#cardDesc').inputValue();
+    expect(desc).toMatch(/!\[pasted-\d+\.png\]\(attachment:pasted-\d+\.png\)/);
+  });
+
+  // E-AT-7 -----------------------------------------------------------------
+  test('E-AT-7: note page modal paste image → uploaded and markdown inserted in description', async ({ page }) => {
+    await openSidebar(page);
+    await openNotePage(page, 'Upload Test Page');
+
+    // Dispatch a synthetic paste event carrying a 1×1 PNG onto the note modal
+    await page.evaluate(() => {
+      const png = new Uint8Array([
+        137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,
+        8,2,0,0,0,144,119,83,222,0,0,0,12,73,68,65,84,8,215,99,248,207,
+        192,0,0,0,2,0,1,226,33,188,51,0,0,0,0,73,69,78,68,174,66,96,130,
+      ]);
+      const file = new File([png], 'pasted.png', { type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+      document.getElementById('noteModal').dispatchEvent(event);
+    });
+
+    // File should appear in the attachment list with a pasted-<timestamp>.png name
+    await expect(page.locator('#noteAttachList')).toContainText(/pasted-\d+\.png/, { timeout: 8000 });
+    // An image markdown reference should be auto-inserted in the description
+    await expect(page.locator('#notePageDesc')).toHaveValue(
+      /!\[pasted-\d+\.png\]\(_attachments\/n-atpg1_pasted-\d+\.png\)/,
+      { timeout: 8000 }
+    );
+  });
 });

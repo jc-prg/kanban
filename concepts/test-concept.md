@@ -395,6 +395,8 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | E-AT-3 | Card upload indicator: label shows `Uploading…` while POST is in-flight; restores to `+ Upload` after |
 | E-AT-4 | Upload file to note page → markdown image reference (`![...](\_attachments/...)`) auto-inserted in description |
 | E-AT-5 | Note page upload indicator: label shows `Uploading…` while POST is in-flight; restores to `+ Upload` after |
+| E-AT-6 | Card modal paste image from clipboard → uploaded as `pasted-<ts>.png`, image markdown auto-inserted in description |
+| E-AT-7 | Note page modal paste image from clipboard → uploaded as `pasted-<ts>.png`, image markdown auto-inserted in description |
 
 ### 3.8 Settings & board management (`settings.spec.js`)
 
@@ -527,6 +529,7 @@ Implement in this order to get coverage fastest:
 - [x] Auth, board CRUD, drag-drop, search E2E (sections 3.1–3.5)
 - [x] Notes E2E (section 3.6)
 - [x] Attachment upload indicator + description auto-insert E2E (section 3.7, E-AT-1..E-AT-5)
+- [x] Clipboard paste image upload E2E (section 3.7, E-AT-6..E-AT-7)
 
 **Phase 3.5 — Missing API coverage** (identified after Phase 3)
 - [x] Webhook config tests (section 1.8, WH-1..WH-10) — new `webhook.test.js`
