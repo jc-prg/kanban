@@ -73,6 +73,7 @@
   .print-body {
     margin-bottom: 18pt;
     font-size: 11pt;
+    font-family: Helvetica, sans-serif;
   }
 
   /* Suppress interactive/screen-only UI inside the print body */

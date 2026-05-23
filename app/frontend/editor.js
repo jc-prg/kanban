@@ -29,7 +29,7 @@ const _darkStyle = HighlightStyle.define([
   { tag: tags.strikethrough,  color: '#9090b0', textDecoration: 'line-through' },
   { tag: tags.link,           color: '#7c6af7', textDecoration: 'underline' },
   { tag: tags.url,            color: '#7c6af7' },
-  { tag: tags.monospace,      color: '#a8d8a8' },
+  { tag: tags.monospace,      color: '#a8d8a8', fontFamily: "'DM Mono', monospace" },
   { tag: tags.meta,           color: '#9090b0' },
   { tag: tags.processingInstruction, color: '#9090b0' },
   { tag: tags.punctuation,    color: '#6060a0' },
@@ -46,7 +46,7 @@ const _lightStyle = HighlightStyle.define([
   { tag: tags.strikethrough,  color: '#707088', textDecoration: 'line-through' },
   { tag: tags.link,           color: '#5b4de0', textDecoration: 'underline' },
   { tag: tags.url,            color: '#5b4de0' },
-  { tag: tags.monospace,      color: '#1a6b1a' },
+  { tag: tags.monospace,      color: '#1a6b1a', fontFamily: "'DM Mono', monospace" },
   { tag: tags.meta,           color: '#707088' },
   { tag: tags.processingInstruction, color: '#707088' },
   { tag: tags.punctuation,    color: '#9090b0' },
@@ -275,7 +275,11 @@ function applyEditorFormat(id, action) {
   if (action === 'h2')            return _linePrefix(view, '## ');
   if (action === 'h3')            return _linePrefix(view, '### ');
   if (action === 'checkbox')      return _linePrefix(view, '- [ ] ');
-  if (action === 'code')          return _insertBlock(view, '```\n\n```', 4);
+  if (action === 'code') {
+    const { from, to } = view.state.selection.main;
+    if (from !== to) return _wrapSel(view, '```\n', '\n```');
+    return _insertBlock(view, '```\n\n```', 4);
+  }
   if (action === 'toc')           return _insertBlock(view, '[toc]', 5);
   if (action === 'subpages')      return _insertBlock(view, '[subpages]', 10);
 }

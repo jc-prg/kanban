@@ -245,6 +245,7 @@
   transition: background 0.15s, border-color 0.15s;
   line-height: 1.6;
   font-size: 0.85rem;
+  font-family: Helvetica, sans-serif;
 }
 
 .cm-preview:hover {
@@ -270,7 +271,7 @@
   border-radius: 8px;
   background: var(--surface2);
   color: var(--text);
-  font-family: 'DM Mono', monospace;
+  font-family: Helvetica, sans-serif;
   font-size: 0.85rem;
   min-height: 60px;
   transition: border-color 0.15s;
@@ -289,7 +290,7 @@
 
 .cm-mount .cm-content {
   padding: 0;
-  font-family: inherit;
+  font-family: Helvetica, sans-serif;
   font-size: inherit;
   color: inherit;
   caret-color: var(--text);
