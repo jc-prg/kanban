@@ -1,0 +1,302 @@
+import {
+  EditorView,
+  EditorState,
+  Decoration,
+  ViewPlugin,
+  RangeSetBuilder,
+  keymap,
+  drawSelection,
+  highlightActiveLine,
+  syntaxHighlighting,
+  HighlightStyle,
+  indentOnInput,
+  bracketMatching,
+  history,
+  historyKeymap,
+  defaultKeymap,
+  markdown,
+  tags,
+  GFM,
+} from '/vendor-libs/codemirror-bundle.js';
+
+// ---- syntax highlight style (adapts to app dark/light theme) ----
+const _darkStyle = HighlightStyle.define([
+  { tag: tags.heading1, color: '#ffffff', fontWeight: 'bold', fontSize: '1.3em',  fontFamily: "'Syne', sans-serif" },
+  { tag: tags.heading2, color: '#ffffff', fontWeight: 'bold', fontSize: '1.15em', fontFamily: "'Syne', sans-serif" },
+  { tag: tags.heading3, color: '#ffffff', fontWeight: 'bold',                     fontFamily: "'Syne', sans-serif" },
+  { tag: tags.strong,         color: '#f2f2fa', fontWeight: 'bold' },
+  { tag: tags.emphasis,       color: '#d4cfff', fontStyle: 'italic' },
+  { tag: tags.strikethrough,  color: '#9090b0', textDecoration: 'line-through' },
+  { tag: tags.link,           color: '#7c6af7', textDecoration: 'underline' },
+  { tag: tags.url,            color: '#7c6af7' },
+  { tag: tags.monospace,      color: '#a8d8a8' },
+  { tag: tags.meta,           color: '#9090b0' },
+  { tag: tags.processingInstruction, color: '#9090b0' },
+  { tag: tags.punctuation,    color: '#6060a0' },
+  { tag: tags.quote,          color: '#c4b5fd', fontStyle: 'italic' },
+  { tag: tags.list,           color: '#9090b0' },
+]);
+
+const _lightStyle = HighlightStyle.define([
+  { tag: tags.heading1, color: '#1a1a2e', fontWeight: 'bold', fontSize: '1.3em',  fontFamily: "'Syne', sans-serif" },
+  { tag: tags.heading2, color: '#1a1a2e', fontWeight: 'bold', fontSize: '1.15em', fontFamily: "'Syne', sans-serif" },
+  { tag: tags.heading3, color: '#1a1a2e', fontWeight: 'bold',                     fontFamily: "'Syne', sans-serif" },
+  { tag: tags.strong,         color: '#1a1a2e', fontWeight: 'bold' },
+  { tag: tags.emphasis,       color: '#2a1a6e', fontStyle: 'italic' },
+  { tag: tags.strikethrough,  color: '#707088', textDecoration: 'line-through' },
+  { tag: tags.link,           color: '#5b4de0', textDecoration: 'underline' },
+  { tag: tags.url,            color: '#5b4de0' },
+  { tag: tags.monospace,      color: '#1a6b1a' },
+  { tag: tags.meta,           color: '#707088' },
+  { tag: tags.processingInstruction, color: '#707088' },
+  { tag: tags.punctuation,    color: '#9090b0' },
+  { tag: tags.quote,          color: '#4a3ddb', fontStyle: 'italic' },
+  { tag: tags.list,           color: '#707088' },
+]);
+
+function _highlightExtension() {
+  const dark  = window.matchMedia('(prefers-color-scheme: dark)');
+  // App default is dark; light only when media query explicitly matches light
+  const light = window.matchMedia('(prefers-color-scheme: light)');
+  return syntaxHighlighting(light.matches ? _lightStyle : _darkStyle, { fallback: true });
+}
+
+// ---- registry ----
+const _editors = new Map(); // id → { view, preview, editorWrap }
+
+// ---- ==highlight== ViewPlugin ----
+const _hlMark = Decoration.mark({ class: 'cm-highlight' });
+
+function _buildHlDecorations(view) {
+  const builder = new RangeSetBuilder();
+  const re = /==([^=\n]+)==/g;
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to);
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) {
+      builder.add(from + m.index, from + m.index + m[0].length, _hlMark);
+    }
+  }
+  return builder.finish();
+}
+
+const _hlPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) { this.decorations = _buildHlDecorations(view); }
+    update(u) {
+      if (u.docChanged || u.viewportChanged) this.decorations = _buildHlDecorations(u.view);
+    }
+  },
+  { decorations: v => v.decorations }
+);
+
+// ---- preview helpers ----
+function _renderPreview(entry, text) {
+  const el = entry.preview;
+  if (!text || !text.trim()) {
+    el.innerHTML = '';
+    el.classList.add('cm-preview--empty');
+    return;
+  }
+  el.classList.remove('cm-preview--empty');
+  const raw = window.marked ? window.marked.parse(text) : text.replace(/\n/g, '<br>');
+  const opts = Object.assign({ ADD_ATTR: ['target'] }, entry.sanitizeOpts);
+  el.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(raw, opts) : raw;
+  if (window.buildToc) window.buildToc(el);
+  if (entry.onPreview) entry.onPreview(el);
+}
+
+function _activateEditor(id) {
+  const entry = _editors.get(id);
+  if (!entry) return;
+  entry.preview.style.display = 'none';
+  entry.editorWrap.style.display = '';
+  entry.view.focus();
+}
+
+function _deactivateEditor(id) {
+  const entry = _editors.get(id);
+  if (!entry) return;
+  _renderPreview(entry, entry.view.state.doc.toString());
+  entry.editorWrap.style.display = 'none';
+  entry.preview.style.display = '';
+}
+
+// ---- internal helpers ----
+function _wrapSel(view, open, close) {
+  const { from, to } = view.state.selection.main;
+  const selected = view.state.doc.sliceString(from, to);
+  const insert = open + selected + close;
+  view.dispatch({
+    changes: { from, to, insert },
+    selection: selected ? { anchor: from, head: from + insert.length }
+                        : { anchor: from + open.length },
+  });
+  view.focus();
+}
+
+function _linePrefix(view, prefix) {
+  const { from } = view.state.selection.main;
+  const line = view.state.doc.lineAt(from);
+  view.dispatch({ changes: { from: line.from, to: line.from, insert: prefix } });
+  view.focus();
+}
+
+function _insertBlock(view, text, cursorOffset) {
+  const { from } = view.state.selection.main;
+  const doc = view.state.doc.toString();
+  const needNl = from > 0 && doc[from - 1] !== '\n';
+  const insert = (needNl ? '\n' : '') + text;
+  const anchor = from + (needNl ? 1 : 0) + cursorOffset;
+  view.dispatch({
+    changes: { from, to: from, insert },
+    selection: { anchor },
+  });
+  view.focus();
+}
+
+// ---- public API ----
+
+function createMarkdownEditor(id, { onChange, onPreview, sanitizeOpts } = {}) {
+  if (_editors.has(id)) return _editors.get(id).view;
+  const mount  = document.getElementById(id + '-mount');
+  const mirror = document.getElementById(id); // hidden textarea
+  if (!mount) return null;
+
+  // Preview pane — shown by default, click to edit
+  const preview = document.createElement('div');
+  preview.className = 'cm-preview card-desc-preview';
+  mount.appendChild(preview);
+
+  // Editor wrapper — hidden until activated
+  const editorWrap = document.createElement('div');
+  editorWrap.className = 'cm-editor-wrap';
+  editorWrap.style.display = 'none';
+  mount.appendChild(editorWrap);
+
+  const view = new EditorView({
+    state: EditorState.create({
+      doc: mirror?.value || '',
+      extensions: [
+        history(),
+        drawSelection(),
+        highlightActiveLine(),
+        _highlightExtension(),
+        indentOnInput(),
+        bracketMatching(),
+        markdown({ extensions: GFM }),
+        EditorView.lineWrapping,
+        _hlPlugin,
+        keymap.of([
+          ...historyKeymap,
+          ...defaultKeymap,
+          { key: 'Ctrl-b', run: v => { _wrapSel(v, '**', '**');     return true; } },
+          { key: 'Ctrl-i', run: v => { _wrapSel(v, '*', '*');       return true; } },
+          { key: 'Ctrl-u', run: v => { _wrapSel(v, '<u>', '</u>');  return true; } },
+          { key: 'Ctrl-m', run: v => { _wrapSel(v, '==', '==');     return true; } },
+        ]),
+        EditorView.updateListener.of(update => {
+          if (!update.docChanged) return;
+          const val = update.state.doc.toString();
+          if (mirror) mirror.value = val;
+          if (onChange) onChange(val);
+        }),
+      ],
+    }),
+    parent: editorWrap,
+  });
+
+  const entry = { view, preview, editorWrap, onPreview, sanitizeOpts };
+  _editors.set(id, entry);
+
+  // Render initial preview
+  _renderPreview(entry, mirror?.value || '');
+
+  // Click preview → switch to editor
+  preview.addEventListener('click', () => _activateEditor(id));
+
+  // Focus leaves editorWrap → switch back to preview
+  editorWrap.addEventListener('focusout', e => {
+    if (!editorWrap.contains(e.relatedTarget)) _deactivateEditor(id);
+  });
+
+  return view;
+}
+
+function getEditorValue(id) {
+  const entry = _editors.get(id);
+  if (entry) return entry.view.state.doc.toString();
+  return document.getElementById(id)?.value ?? '';
+}
+
+function setEditorValue(id, text) {
+  const entry = _editors.get(id);
+  if (entry) {
+    entry.view.dispatch({ changes: { from: 0, to: entry.view.state.doc.length, insert: text } });
+    _renderPreview(entry, text);
+    // Return to preview mode when value is set programmatically
+    entry.editorWrap.style.display = 'none';
+    entry.preview.style.display = '';
+    return;
+  }
+  const el = document.getElementById(id);
+  if (el) el.value = text;
+}
+
+function insertAtCursor(id, text) {
+  const entry = _editors.get(id);
+  if (!entry) return;
+  _activateEditor(id);
+  const { from, to } = entry.view.state.selection.main;
+  entry.view.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + text.length },
+  });
+  entry.view.focus();
+}
+
+function focusEditor(id) {
+  _activateEditor(id);
+}
+
+function applyEditorFormat(id, action) {
+  const entry = _editors.get(id);
+  if (!entry) return;
+  _activateEditor(id);
+  const view = entry.view;
+
+  if (action === 'bold')          return _wrapSel(view, '**', '**');
+  if (action === 'italic')        return _wrapSel(view, '*', '*');
+  if (action === 'underline')     return _wrapSel(view, '<u>', '</u>');
+  if (action === 'mark')          return _wrapSel(view, '==', '==');
+  if (action === 'strikethrough') return _wrapSel(view, '~~', '~~');
+  if (action === 'h1')            return _linePrefix(view, '# ');
+  if (action === 'h2')            return _linePrefix(view, '## ');
+  if (action === 'h3')            return _linePrefix(view, '### ');
+  if (action === 'checkbox')      return _linePrefix(view, '- [ ] ');
+  if (action === 'code')          return _insertBlock(view, '```\n\n```', 4);
+  if (action === 'toc')           return _insertBlock(view, '[toc]', 5);
+  if (action === 'subpages')      return _insertBlock(view, '[subpages]', 10);
+}
+
+// Arrow-key scrolling for the preview pane when the editor is not active
+document.addEventListener('keydown', e => {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  for (const entry of _editors.values()) {
+    if (entry.editorWrap.style.display !== 'none') continue;       // editor active — CM handles it
+    if (entry.preview.style.display === 'none') continue;          // preview hidden
+    const backdrop = entry.preview.closest('.modal-backdrop');
+    if (!backdrop || backdrop.style.display === 'none') continue;  // modal not open
+    e.preventDefault();
+    entry.preview.scrollBy({ top: e.key === 'ArrowDown' ? 60 : -60, behavior: 'smooth' });
+  }
+});
+
+// Expose on window so non-module scripts (cards.js, notes.js) can call these
+window.createMarkdownEditor = createMarkdownEditor;
+window.getEditorValue       = getEditorValue;
+window.setEditorValue       = setEditorValue;
+window.insertAtCursor       = insertAtCursor;
+window.focusEditor          = focusEditor;
+window.applyEditorFormat    = applyEditorFormat;

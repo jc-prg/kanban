@@ -191,7 +191,7 @@
         <div class="modal-field modal-field-desc">
           <div class="modal-field-label-row">
             <label>Description</label>
-            <div id="cardDescToolbar" class="note-desc-toolbar" style="display:none">
+            <div id="cardDescToolbar" class="note-desc-toolbar">
               <button class="note-tb-btn" data-fmt="bold"      title="Bold (Ctrl+B)"><b>B</b></button>
               <button class="note-tb-btn" data-fmt="italic"    title="Italic (Ctrl+I)"><i>I</i></button>
               <button class="note-tb-btn" data-fmt="underline" title="Underline (Ctrl+U)"><u>U</u></button>
@@ -208,8 +208,8 @@
               <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
             </div>
           </div>
-          <div id="cardDescPreview" class="card-desc-preview" style="display:none"></div>
-          <textarea id="cardDesc" placeholder="Optional details…"></textarea>
+          <div id="cardDesc-mount" class="cm-mount"></div>
+          <textarea id="cardDesc" style="display:none" placeholder="Optional details…"></textarea>
         </div>
       </div>
       <div class="modal-col-side">
@@ -728,7 +728,7 @@
         <div class="modal-field modal-field-desc">
           <div class="modal-field-label-row">
             <label>Description</label>
-            <div id="noteDescToolbar" class="note-desc-toolbar" style="display:none">
+            <div id="noteDescToolbar" class="note-desc-toolbar">
               <button class="note-tb-btn" data-fmt="bold"      title="Bold (Ctrl+B)"><b>B</b></button>
               <button class="note-tb-btn" data-fmt="italic"    title="Italic (Ctrl+I)"><i>I</i></button>
               <button class="note-tb-btn" data-fmt="underline" title="Underline (Ctrl+U)"><u>U</u></button>
@@ -745,8 +745,8 @@
               <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
             </div>
           </div>
-          <div id="notePageDescPreview" class="card-desc-preview" style="display:none"></div>
-          <textarea id="notePageDesc" placeholder="Write notes in markdown…"></textarea>
+          <div id="notePageDesc-mount" class="cm-mount"></div>
+          <textarea id="notePageDesc" style="display:none" placeholder="Write notes in markdown…"></textarea>
         </div>
       </div>
       <div class="modal-col-side">
@@ -829,6 +829,7 @@
 <div id="print-root"></div>
 <script src="/vendor-libs/marked.min.js"></script>
 <script src="/vendor-libs/purify.min.js"></script>
+<script type="module" src="/editor.js"></script>
 <script src="/icons.js"></script>
 <script src="/state.js"></script>
 <script src="/drag.js"></script>

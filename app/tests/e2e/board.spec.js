@@ -126,7 +126,7 @@ test.describe('3.3 Column & card CRUD', () => {
     await card.click();
     await expect(page.locator('#modal')).toBeVisible();
     await page.fill('#cardText', 'Edited Card');
-    await page.fill('#cardDesc', '**bold text**');
+    await page.evaluate(() => window.setEditorValue('cardDesc', '**bold text**'));
     await page.click('#modalSubmitBtn');
     await expect(page.locator('#modal')).toBeHidden();
     await expect(page.locator('.card').filter({ hasText: 'Edited Card' })).toBeVisible();

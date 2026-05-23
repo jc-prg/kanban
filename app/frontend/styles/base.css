@@ -49,6 +49,7 @@
   --danger: #f04f6a;
   --radius: 12px;
   --col-width: 300px;
+  --mark-bg: rgba(161, 118, 0, 0.7);
 }
 
 @media (prefers-color-scheme: light) {
@@ -62,6 +63,7 @@
     --accent: #5b4de0;
     --accent-glow: rgba(91,77,224,0.18);
     --danger: #d93a55;
+    --mark-bg: rgba(250, 204, 21, 0.45);
   }
 }
 

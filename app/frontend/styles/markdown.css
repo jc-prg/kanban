@@ -173,7 +173,7 @@
 
 /* Highlight mark (Ctrl+M) */
 .card-desc-preview mark {
-  background: rgba(250, 204, 21, 0.35);
+  background: var(--mark-bg);
   color: inherit;
   border-radius: 2px;
   padding: 0 2px;

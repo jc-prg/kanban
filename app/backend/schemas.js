@@ -93,12 +93,14 @@ const _notePagePatchSchema = {
   type: 'object', required: ['id'], additionalProperties: false,
   properties: {
     id:             { type: 'string', minLength: 1 },
+    type:           { type: 'string' },
     title:          { type: 'string' },
     description:    { type: 'string' },
     link:           { type: 'string' },
     linkedCards:    { type: 'array', items: { type: 'string' } },
     hasAttachments: { type: 'boolean' },
-    lastModified:   { type: 'string' }
+    lastModified:   { type: 'string' },
+    wdPath:         { type: 'string' }
   }
 };
 const validateNotesPatch = ajv.compile({

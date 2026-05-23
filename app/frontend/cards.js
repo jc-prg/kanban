@@ -1,65 +1,5 @@
-// ---- Shared description formatting helpers ----
-function _descWrap(ta, open, close) {
-  const s = ta.selectionStart, e = ta.selectionEnd;
-  ta.setRangeText(open + ta.value.slice(s, e) + close, s, e, 'select');
-  if (s === e) { const mid = s + open.length; ta.setSelectionRange(mid, mid); }
-  ta.focus();
-}
-
-function _descLinePrefix(ta, prefix) {
-  const s = ta.selectionStart;
-  const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
-  ta.setRangeText(prefix, lineStart, lineStart, 'end');
-  ta.focus();
-}
-
-function _descInsertBlock(ta, text, cursorOffset) {
-  const s = ta.selectionStart;
-  const needsNewline = s > 0 && ta.value[s - 1] !== '\n';
-  const insert = (needsNewline ? '\n' : '') + text;
-  ta.setRangeText(insert, s, s, 'end');
-  const pos = s + (needsNewline ? 1 : 0) + cursorOffset;
-  ta.setSelectionRange(pos, pos);
-  ta.focus();
-}
-
-function applyDescFormat(ta, action) {
-  if (!ta) return;
-  if (action === 'bold')      return _descWrap(ta, '**', '**');
-  if (action === 'italic')    return _descWrap(ta, '*', '*');
-  if (action === 'underline')     return _descWrap(ta, '<u>', '</u>');
-  if (action === 'mark')          return _descWrap(ta, '==', '==');
-  if (action === 'strikethrough') return _descWrap(ta, '~~', '~~');
-  if (action === 'h1')        return _descLinePrefix(ta, '# ');
-  if (action === 'h2')        return _descLinePrefix(ta, '## ');
-  if (action === 'h3')        return _descLinePrefix(ta, '### ');
-  if (action === 'checkbox')  return _descLinePrefix(ta, '- [ ] ');
-  if (action === 'code')      return _descInsertBlock(ta, '```\n\n```', 4);
-  if (action === 'toc')       return _descInsertBlock(ta, '[toc]', 5);
-  if (action === 'subpages')  return _descInsertBlock(ta, '[subpages]', 10);
-}
-
-// ---- Markdown preview enhancement (copy buttons + task checkboxes) ----
+// ---- Markdown preview enhancement (copy buttons) — used by print/card-info ----
 function enhanceMarkdownPreview(container) {
-  // Interactive task-list checkboxes
-  // marked renders "- [ ]" / "- [x]" as <input type="checkbox" disabled>
-  container.querySelectorAll('input[type="checkbox"]').forEach((cb, idx) => {
-    cb.removeAttribute('disabled');
-    cb.addEventListener('click', e => {
-      e.stopPropagation();
-      let count = 0;
-      const raw = container.dataset.rawText || '';
-      const updated = raw.replace(/^(\s*[-*+] \[)([ x])(\])/gim, (match, before, _state, after) => {
-        const hit = count++ === idx;
-        return hit ? before + (cb.checked ? 'x' : ' ') + after : match;
-      });
-      container.dataset.rawText = updated;
-      const taId = container.id === 'cardDescPreview' ? 'cardDesc' : 'notePageDesc';
-      const ta = document.getElementById(taId);
-      if (ta) ta.value = updated;
-    });
-  });
-
   container.querySelectorAll('pre').forEach(pre => {
     const btn = document.createElement('button');
     btn.className = 'md-copy-btn';
@@ -75,19 +15,6 @@ function enhanceMarkdownPreview(container) {
     });
     pre.appendChild(btn);
   });
-
-  const allBtn = document.createElement('button');
-  allBtn.className = 'md-copy-all-btn';
-  allBtn.textContent = ICONS.copyCode;
-  allBtn.title = 'Copy full description';
-  allBtn.addEventListener('click', e => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(container.dataset.rawText || container.innerText).then(() => {
-      allBtn.textContent = ICONS.done;
-      setTimeout(() => { allBtn.textContent = ICONS.copyCode; }, 1500);
-    });
-  });
-  container.appendChild(allBtn);
 }
 
 // Disable setext headings (text followed by --- or ===) so --- is always <hr>
@@ -115,198 +42,6 @@ function renderMarkdown(text) {
   });
 }
 
-function showMarkdownPreview(taId, previewId, toolbarId, editorFn, postFn) {
-  const text = document.getElementById(taId).value.trim();
-  if (!text) { editorFn(); return; }
-  const el = document.getElementById(previewId);
-  el.dataset.rawText = text;
-  el.innerHTML = renderMarkdown(text);
-  enhanceMarkdownPreview(el);
-  if (postFn) postFn(el);
-  el.style.display = '';
-  document.getElementById(taId).style.display = 'none';
-  if (toolbarId) document.getElementById(toolbarId).style.display = 'none';
-}
-
-function showDescPreview() {
-  showMarkdownPreview('cardDesc', 'cardDescPreview', 'cardDescToolbar', showDescEditor,
-    el => { buildToc(el); if (editCardId && CARD_ATTACH_API) resolveCardAttachments(el); });
-}
-
-function previewScrollFrac(el, e) {
-  const rect = el.getBoundingClientRect();
-  const relY = e.clientY - rect.top + el.scrollTop;
-  return Math.min(1, Math.max(0, relY / Math.max(1, el.scrollHeight)));
-}
-
-// ---- Click-on-preview → cursor placement in editor ----
-
-// Handles leading whitespace so nested list items (e.g. "  - sub") are stripped correctly
-function _mdBlockPrefixLen(line) {
-  const m = line.match(/^(\s*(?:#{1,6} |(?:[-*+]|\d+\.) (?:\[[ x]\] )?|> ))/);
-  return m ? m[1].length : 0;
-}
-
-function _mdLineToVisible(line) {
-  return line.slice(_mdBlockPrefixLen(line))
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/~~(.*?)~~/g, '$1')
-    .replace(/`(.*?)`/g, '$1')
-    .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]+>/g, '');
-}
-
-function clickPreviewToEditor(previewEl, taId, editorFn, e) {
-  if (window.getSelection()?.toString()) return;
-  if (e.target.closest('a, button, input')) return;
-
-  const ta = document.getElementById(taId);
-  const md = ta.value;
-  if (!md.trim()) { editorFn(); ta.focus(); return; }
-
-  // DOM caret position from click coordinates
-  let caretNode = null, caretOff = 0;
-  if (document.caretRangeFromPoint) {
-    const r = document.caretRangeFromPoint(e.clientX, e.clientY);
-    if (r) { caretNode = r.startContainer; caretOff = r.startOffset; }
-  } else if (document.caretPositionFromPoint) {
-    const p = document.caretPositionFromPoint(e.clientX, e.clientY);
-    if (p) { caretNode = p.offsetNode; caretOff = p.offset; }
-  }
-
-  // Nearest block-level element inside the preview
-  const BLOCK = new Set(['P','H1','H2','H3','H4','H5','H6','LI','PRE','BLOCKQUOTE','TD','TH']);
-  let blockEl = e.target;
-  while (blockEl && blockEl !== previewEl && !BLOCK.has(blockEl.tagName))
-    blockEl = blockEl.parentElement;
-  if (blockEl === previewEl) blockEl = null;
-
-  // Character offset from start of block element to caret
-  let intraChars = 0;
-  if (caretNode && blockEl) {
-    try {
-      const r = document.createRange();
-      r.setStart(blockEl, 0);
-      r.setEnd(caretNode, caretOff);
-      intraChars = r.toString().length;
-    } catch (_) {}
-  }
-
-  const mdLines = md.split('\n');
-
-  // Convert a markdown line index + intra-visible-char offset to an absolute char offset
-  function lineOffset(li, intra) {
-    const lineStart = mdLines.slice(0, li).reduce((s, l) => s + l.length + 1, 0);
-    const cur = mdLines[li] || '';
-    const pre = _mdBlockPrefixLen(cur);
-    const col = pre + Math.round((intra / Math.max(1, _mdLineToVisible(cur).length)) * Math.max(1, cur.length - pre));
-    return lineStart + Math.min(col, cur.length);
-  }
-
-  let mdOffset = null;
-  const tag = blockEl?.tagName;
-
-  if (tag === 'LI') {
-    // Count-based: use the LI's index in its parent list to avoid false text matches
-    const parent = blockEl.parentElement;
-    const liIdx  = Array.from(parent.children).indexOf(blockEl);
-    const firstText = parent.children[0].textContent.trim().slice(0, 20);
-    const LIST_RE = /^\s*([-*+]|\d+\.) /;
-    outer: for (let i = 0; i < mdLines.length; i++) {
-      if (!LIST_RE.test(mdLines[i])) continue;
-      if (firstText && !_mdLineToVisible(mdLines[i]).trim().startsWith(firstText.slice(0, 15))) continue;
-      let count = 0;
-      for (let j = i; j < mdLines.length; j++) {
-        if (LIST_RE.test(mdLines[j])) {
-          if (count++ === liIdx) { mdOffset = lineOffset(j, intraChars); break outer; }
-        } else if (!mdLines[j].trim()) break;
-      }
-    }
-
-  } else if (tag === 'TD' || tag === 'TH') {
-    // Row+column indexing: avoids short/repeated cell text causing wrong matches
-    const tr       = blockEl.closest('tr');
-    const table    = blockEl.closest('table');
-    const allRows  = Array.from(table.querySelectorAll('tr'));
-    const rowIdx   = allRows.indexOf(tr);
-    const colIdx   = Array.from(tr.cells).indexOf(blockEl);
-    const firstCellText = (allRows[0]?.cells[0]?.textContent.trim() || '').slice(0, 15);
-
-    for (let i = 0; i < mdLines.length; i++) {
-      if (!mdLines[i].trim().startsWith('|')) continue;
-      if (firstCellText && !mdLines[i].includes(firstCellText.slice(0, 10))) continue;
-      // rowIdx 0 = header row at i; separator at i+1; body rows at i+2, i+3, …
-      const target = rowIdx === 0 ? i : i + 1 + rowIdx;
-      if (target >= mdLines.length || !mdLines[target].trim().startsWith('|')) break;
-
-      const mdRow = mdLines[target];
-      const cells = mdRow.split('|'); // ["", " cell1 ", " cell2 ", ""]
-      // Advance rawPos past all columns before colIdx
-      let rawPos = 0;
-      for (let c = 0; c <= colIdx; c++) rawPos += cells[c].length + 1;
-      const cellContent = cells[colIdx + 1] || '';
-      const leadSpace   = cellContent.length - cellContent.trimStart().length;
-      const cellOff     = Math.round((intraChars / Math.max(1, blockEl.textContent.trim().length)) * cellContent.trim().length);
-      const lineStart   = mdLines.slice(0, target).reduce((s, l) => s + l.length + 1, 0);
-      mdOffset = Math.min(lineStart + rawPos + leadSpace + cellOff, lineStart + mdRow.length);
-      break;
-    }
-
-  } else if (tag === 'PRE') {
-    // Code block: locate by first content line inside the fence
-    const codeEl = blockEl.querySelector('code') || blockEl;
-    const firstCodeLine = codeEl.textContent.split('\n')[0].trim();
-    for (let i = 0; i < mdLines.length; i++) {
-      if (!mdLines[i].startsWith('```')) continue;
-      if (firstCodeLine && (mdLines[i + 1] || '').trim() !== firstCodeLine) continue;
-      mdOffset = lineOffset(i + 1, intraChars);
-      break;
-    }
-
-  } else if (blockEl) {
-    // P, H1–H6, BLOCKQUOTE: text-matching with multi-line paragraph support
-    const anchor = blockEl.textContent.trim().slice(0, 40);
-    for (let i = 0; i < mdLines.length; i++) {
-      const lv = _mdLineToVisible(mdLines[i]).trim();
-      if (!lv || !anchor) continue;
-      const ml = Math.min(anchor.length, lv.length);
-      if (lv.slice(0, ml) !== anchor.slice(0, ml)) continue;
-      // Consume continuation lines of multi-line paragraphs
-      let li = i, rem = intraChars;
-      while (rem > 0 && li < mdLines.length) {
-        const cv = _mdLineToVisible(mdLines[li]);
-        if (rem <= cv.length) break;
-        rem -= cv.length + 1;
-        if (!mdLines[li + 1]?.trim()) break;
-        li++;
-      }
-      mdOffset = lineOffset(li, rem);
-      break;
-    }
-  }
-
-  // Fallback: Y-position fraction
-  if (mdOffset === null)
-    mdOffset = Math.round(previewScrollFrac(previewEl, e) * md.length);
-
-  editorFn();
-  requestAnimationFrame(() => {
-    mdOffset = Math.max(0, Math.min(mdOffset, md.length));
-    ta.setSelectionRange(mdOffset, mdOffset);
-    const linesAbove = md.slice(0, mdOffset).split('\n').length - 1;
-    ta.scrollTop = (linesAbove / Math.max(1, mdLines.length - 1)) * Math.max(0, ta.scrollHeight - ta.clientHeight);
-    ta.focus();
-  });
-}
-
-function showDescEditor() {
-  document.getElementById('cardDescPreview').style.display = 'none';
-  const ta = document.getElementById('cardDesc');
-  ta.style.display = '';
-  ta.scrollTop = 0;
-  ta.setSelectionRange(0, 0);
-}
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cardAutoSave')?.addEventListener('change', e => {
@@ -376,36 +111,18 @@ document.addEventListener('DOMContentLoaded', () => {
     _handleCardAttachUpload(editCardId, files);
   });
 
-  document.getElementById('cardDescPreview').addEventListener('click', e => {
-    clickPreviewToEditor(document.getElementById('cardDescPreview'), 'cardDesc', showDescEditor, e);
-  });
-  document.getElementById('cardDesc').addEventListener('focus', () => {
-    document.getElementById('cardDescToolbar').style.display = 'flex';
-  });
-  document.getElementById('cardDesc').addEventListener('blur', () => {
-    document.getElementById('cardDescToolbar').style.display = 'none';
-    if (document.getElementById('cardDesc').value.trim()) showDescPreview();
+  createMarkdownEditor('cardDesc', {
+    onPreview: el => resolveCardAttachments(el),
+    sanitizeOpts: {
+      ALLOWED_URI_REGEXP: /^(?:https?|ftp|mailto|attachment:|_attachments\/)/i,
+      ADD_URI_SAFE_ATTR: ['type'],
+    },
   });
 
   const _cardToolbar = document.getElementById('cardDescToolbar');
   _cardToolbar?.querySelectorAll('.note-tb-btn').forEach(btn => {
     btn.addEventListener('pointerdown', e => e.preventDefault());
-    btn.addEventListener('click', () => applyDescFormat(document.getElementById('cardDesc'), btn.dataset.fmt));
-  });
-  document.getElementById('cardDesc').addEventListener('keydown', e => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    const markers = e.key === 'b' ? ['**','**'] : e.key === 'i' ? ['*','*'] : e.key === 'u' ? ['<u>','</u>'] : e.key === 'm' ? ['<mark>','</mark>'] : null;
-    if (!markers) return;
-    e.preventDefault();
-    const ta = e.target;
-    const [start, end] = [ta.selectionStart, ta.selectionEnd];
-    const selected = ta.value.slice(start, end);
-    const wrapped = markers[0] + selected + markers[1];
-    ta.setRangeText(wrapped, start, end, 'select');
-    if (!selected) {
-      const mid = start + markers[0].length;
-      ta.setSelectionRange(mid, mid);
-    }
+    btn.addEventListener('click', () => applyEditorFormat('cardDesc', btn.dataset.fmt));
   });
 });
 
@@ -519,20 +236,7 @@ function renderCardAttachments(cardId, files) {
 function _appendAttachMd(taId, name, prefix = 'attachment:') {
   const ft = _attachType(name);
   const md = (ft === 'image' || ft === 'svg') ? `![${name}](${prefix}${name})` : `[${name}](${prefix}${name})`;
-  const ta = document.getElementById(taId);
-  if (!ta) return;
-  if (ta.value) {
-    const sep = ta.value.endsWith('\n\n') ? '' : ta.value.endsWith('\n') ? '\n' : '\n\n';
-    ta.value += sep + md;
-  } else {
-    ta.value = md;
-  }
-  const previewId = taId === 'cardDesc' ? 'cardDescPreview' : 'notePageDescPreview';
-  const preview = document.getElementById(previewId);
-  if (preview && preview.style.display !== 'none') {
-    if (taId === 'cardDesc') showDescPreview();
-    else if (typeof showNoteDescPreview === 'function') showNoteDescPreview();
-  }
+  insertAtCursor(taId, md);
 }
 
 async function _handleCardAttachUpload(cardId, fileList) {
@@ -561,13 +265,8 @@ async function _handleCardAttachUpload(cardId, fileList) {
 }
 
 function _insertCardAttachMd(name, type) {
-  const ta = document.getElementById('cardDesc');
-  if (!ta) return;
-  showDescEditor();
-  ta.focus();
   const md = type === 'image' ? `![${name}](attachment:${name})` : `[${name}](attachment:${name})`;
-  const s = ta.selectionStart ?? ta.value.length;
-  ta.setRangeText(md, s, ta.selectionEnd ?? s, 'end');
+  insertAtCursor('cardDesc', md);
 }
 
 async function resolveCardAttachments(container, cardId = editCardId) {
@@ -633,7 +332,7 @@ let modalOriginalData = null;
 function captureModalOriginal() {
   modalOriginalData = {
     text:     document.getElementById('cardText').value,
-    desc:     document.getElementById('cardDesc').value,
+    desc:     getEditorValue('cardDesc'),
     link:     document.getElementById('cardLink').value,
     start:    document.getElementById('cardStart').value,
     end:      document.getElementById('cardEnd').value,
@@ -647,7 +346,7 @@ function hasModalChanges() {
   if (!modalOriginalData) return false;
   const o = modalOriginalData;
   return document.getElementById('cardText').value  !== o.text  ||
-         document.getElementById('cardDesc').value  !== o.desc  ||
+         getEditorValue('cardDesc')                  !== o.desc  ||
          document.getElementById('cardLink').value  !== o.link  ||
          document.getElementById('cardStart').value !== o.start ||
          document.getElementById('cardEnd').value   !== o.end   ||
@@ -745,7 +444,7 @@ function openModal(colId) {
   selectedColor = COLORS[0];
   selectedPriority = 0;
   document.getElementById('cardText').value  = '';
-  document.getElementById('cardDesc').value  = '';
+  setEditorValue('cardDesc', '');
   document.getElementById('cardLink').value  = '';
   document.getElementById('cardStart').value = '';
   document.getElementById('cardEnd').value   = '';
@@ -753,7 +452,6 @@ function openModal(colId) {
   document.getElementById('cardInfoBtn').style.display  = 'none';
   document.getElementById('modalPrintBtn').style.display = 'none';
   _updateLinkBtn();
-  showDescEditor();
   document.getElementById('modalTitle').textContent      = 'Add Card';
   document.getElementById('modalSubmitBtn').textContent  = 'Add Card';
   resetCardSections();
@@ -777,7 +475,7 @@ function openEditModal(colId, card) {
   selectedColor    = card.color    || COLORS[0];
   selectedPriority = card.priority || 0;
   document.getElementById('cardText').value  = card.text        || '';
-  document.getElementById('cardDesc').value  = card.description || '';
+  setEditorValue('cardDesc', card.description || '');
   document.getElementById('cardLink').value  = card.link        || '';
   document.getElementById('cardStart').value = card.startDate   || '';
   document.getElementById('cardEnd').value   = card.endDate     || '';
@@ -786,7 +484,6 @@ function openEditModal(colId, card) {
   document.getElementById('modalPrintBtn').style.display = '';
   setModalDone(card.done || false);
   _updateLinkBtn();
-  if (card.description) showDescPreview(); else showDescEditor();
   document.getElementById('modalTitle').textContent     = 'Edit Card';
   document.getElementById('modalSubmitBtn').textContent = 'Save';
   document.getElementById('modalDeleteBtn').style.display = '';
@@ -823,7 +520,6 @@ function closeModal() {
   const noteToggle = document.getElementById('cardToggleNotePages');
   if (noteToggle) noteToggle.style.display = 'none';
   resetCardSections();
-  showDescEditor();
 }
 
 function submitCard() {
@@ -834,7 +530,7 @@ function submitCard() {
     text,
     color:       selectedColor,
     priority:    selectedPriority || undefined,
-    description: document.getElementById('cardDesc').value.trim()  || undefined,
+    description: getEditorValue('cardDesc').trim()                  || undefined,
     link:        document.getElementById('cardLink').value.trim()   || undefined,
     startDate:   document.getElementById('cardStart').value         || undefined,
     endDate:     document.getElementById('cardEnd').value           || undefined,
@@ -854,7 +550,7 @@ async function openInboxModal(preselectedBoard) {
   selectedColor    = COLORS[0];
   selectedPriority = 0;
   document.getElementById('cardText').value  = '';
-  document.getElementById('cardDesc').value  = '';
+  setEditorValue('cardDesc', '');
   document.getElementById('cardLink').value  = '';
   document.getElementById('cardStart').value = '';
   document.getElementById('cardEnd').value   = '';
@@ -894,7 +590,7 @@ async function submitInboxCard() {
     text,
     color:       selectedColor,
     priority:    selectedPriority || null,
-    description: document.getElementById('cardDesc').value.trim()  || null,
+    description: getEditorValue('cardDesc').trim()                  || null,
     link:        document.getElementById('cardLink').value.trim()   || null,
     startDate:   document.getElementById('cardStart').value         || null,
     endDate:     document.getElementById('cardEnd').value           || null,
@@ -908,7 +604,7 @@ async function submitInboxCard() {
     if (data.relevant > 0) {
       showModalStatus('Card added.', false);
       document.getElementById('cardText').value  = '';
-      document.getElementById('cardDesc').value  = '';
+      setEditorValue('cardDesc', '');
       document.getElementById('cardLink').value  = '';
       document.getElementById('cardStart').value = '';
       document.getElementById('cardEnd').value   = '';
@@ -991,18 +687,9 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Enter' && document.getElementById('modal').style.display !== 'none' && !e.shiftKey) {
-    if (document.activeElement.id === 'cardDesc') return;
+    if (document.getElementById('cardDesc-mount')?.contains(document.activeElement)) return;
     e.preventDefault();
     submitCard();
-  }
-  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && document.getElementById('modal').style.display !== 'none') {
-    const tag = document.activeElement?.tagName?.toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-    const preview = document.getElementById('cardDescPreview');
-    const target = preview?.style.display !== 'none' ? preview : null;
-    if (!target) return;
-    e.preventDefault();
-    target.scrollTop += e.key === 'ArrowDown' ? 80 : -80;
   }
 });
 
@@ -1020,7 +707,7 @@ function saveCardInPlace() {
     text,
     color:       selectedColor,
     priority:    selectedPriority || undefined,
-    description: document.getElementById('cardDesc').value.trim()  || undefined,
+    description: getEditorValue('cardDesc').trim()                  || undefined,
     link:        document.getElementById('cardLink').value.trim()   || undefined,
     startDate:   document.getElementById('cardStart').value         || undefined,
     endDate:     document.getElementById('cardEnd').value           || undefined,

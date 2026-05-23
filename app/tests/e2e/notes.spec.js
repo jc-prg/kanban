@@ -203,13 +203,12 @@ test.describe('3.6 Notes sidebar', () => {
     await expect(page.locator('#noteModal')).toBeVisible();
     await page.fill('#notePageTitle', 'Preview Page');
 
-    // Type markdown in description, then blur to trigger preview
-    await page.fill('#notePageDesc', '**bold text**');
-    await page.locator('#notePageDesc').blur();
+    // Set markdown description via editor API → preview renders immediately
+    await page.evaluate(() => window.setEditorValue('notePageDesc', '**bold text**'));
 
-    // Preview pane should appear with rendered HTML
-    await expect(page.locator('#notePageDescPreview')).toBeVisible();
-    await expect(page.locator('#notePageDescPreview strong')).toBeVisible();
+    // Preview pane should show rendered HTML
+    await expect(page.locator('#notePageDesc-mount .cm-preview')).toBeVisible();
+    await expect(page.locator('#notePageDesc-mount .cm-preview strong')).toBeVisible();
   });
 
   // E-N-6 ------------------------------------------------------------------

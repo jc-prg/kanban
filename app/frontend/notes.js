@@ -746,7 +746,7 @@ async function openNoteModal(pageId, focusTitle = false) {
   noteModalPageId = pageId;
 
   document.getElementById('notePageTitle').value = page.title;
-  document.getElementById('notePageDesc').value = page.description || '';
+  setEditorValue('notePageDesc', page.description || '');
   document.getElementById('notePageLink').value = page.link || '';
 
   noteModalOrig = { title: page.title, desc: page.description || '', link: page.link || '' };
@@ -756,8 +756,6 @@ async function openNoteModal(pageId, focusTitle = false) {
   const notePath = getNotePath(pageId, notesState.items);
   _renderCrumb(notePath);
 
-  if ((page.description || '').trim()) showNoteDescPreview();
-  else showNoteDescEditor();
 
   _updateNoteLinkBtn();
   resetNoteSections();
@@ -791,12 +789,11 @@ async function openNoteModal(pageId, focusTitle = false) {
 
   // WebDAV: fetch fresh content from server (skip for pending pages not yet on server)
   if (_webdavActive() && _pendingNewPage?.page.id !== pageId) {
-    const descEl = document.getElementById('notePageDesc');
     if (loadingEl) loadingEl.style.display = 'flex';
     try {
       const data = await fetch(`${NOTES_PAGES_API}/${pageId}/content`).then(r => r.ok ? r.json() : null);
       if (data) {
-        descEl.value = data.content || '';
+        setEditorValue('notePageDesc', data.content || '');
         noteModalOrig.desc = data.content || '';
         page.description   = data.content || '';
         _pageLoadedAt.set(pageId, data.lastModified || null);
@@ -805,8 +802,6 @@ async function openNoteModal(pageId, focusTitle = false) {
     finally {
       if (loadingEl) loadingEl.style.display = 'none';
     }
-    if (descEl.value.trim()) showNoteDescPreview();
-    else showNoteDescEditor();
   } else {
     if (loadingEl) loadingEl.style.display = 'none';
   }
@@ -831,7 +826,7 @@ async function submitNote() {
   if (!page) return;
 
   const newTitle = document.getElementById('notePageTitle').value.trim() || 'Untitled';
-  const newDesc  = document.getElementById('notePageDesc').value;
+  const newDesc  = getEditorValue('notePageDesc');
   const newLink  = document.getElementById('notePageLink').value.trim();
 
   const saveBtn = document.getElementById('noteModalSaveBtn');
@@ -940,7 +935,7 @@ async function _submitNote(newTitle, newDesc, newLink, page) {
 function noteModalHasChanges() {
   if (!noteModalPageId) return false;
   return document.getElementById('notePageTitle').value        !== noteModalOrig.title ||
-         document.getElementById('notePageDesc').value         !== noteModalOrig.desc  ||
+         getEditorValue('notePageDesc')                         !== noteModalOrig.desc  ||
          document.getElementById('notePageLink').value.trim()  !== noteModalOrig.link;
 }
 
@@ -1005,19 +1000,6 @@ function buildToc(el) {
 }
 
 
-function _applyNoteFormat(action) {
-  applyDescFormat(document.getElementById('notePageDesc'), action);
-}
-
-function showNoteDescPreview() {
-  showMarkdownPreview('notePageDesc', 'notePageDescPreview', 'noteDescToolbar', showNoteDescEditor,
-    el => { buildToc(el); resolveAttachments(el); });
-}
-
-function showNoteDescEditor() {
-  document.getElementById('notePageDescPreview').style.display = 'none';
-  document.getElementById('notePageDesc').style.display = '';
-}
 
 // Save a linkedCards change: PATCH via WebDAV if active, otherwise schedule CouchDB save.
 async function _saveLinkedCards(page) {
@@ -1392,14 +1374,9 @@ async function _handleAttachUpload(pageId, fileList) {
 }
 
 function _insertAttachmentMd(name, type) {
-  const ta = document.getElementById('notePageDesc');
-  if (!ta) return;
-  showNoteDescEditor();
-  ta.focus();
   const pfx = `_attachments/${noteModalPageId}_`;
   const md = (type === 'image' || type === 'svg') ? `![${name}](${pfx}${name})` : `[${name}](${pfx}${name})`;
-  const s = ta.selectionStart ?? ta.value.length;
-  ta.setRangeText(md, s, ta.selectionEnd ?? s, 'end');
+  insertAtCursor('notePageDesc', md);
 }
 
 async function _downloadAttachment(url, name) {
@@ -1779,6 +1756,9 @@ function _initTreeDragDrop() {
   });
 }
 
+// Expose buildToc for editor.js (ES module) preview rendering
+window.buildToc = buildToc;
+
 // ---- DOMContentLoaded wiring ----
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('noteAutoSave')?.addEventListener('change', e => {
@@ -1883,24 +1863,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Description preview / editor
-  document.getElementById('notePageDescPreview')?.addEventListener('click', e => {
-    clickPreviewToEditor(document.getElementById('notePageDescPreview'), 'notePageDesc', showNoteDescEditor, e);
-  });
-  document.getElementById('notePageDesc')?.addEventListener('blur', () => {
-    if (document.getElementById('notePageDesc').value.trim()) showNoteDescPreview();
-  });
-
-  // Markdown shortcuts in description
-  document.getElementById('notePageDesc')?.addEventListener('keydown', e => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    const markers = e.key === 'b' ? ['**','**'] : e.key === 'i' ? ['*','*'] : e.key === 'u' ? ['<u>','</u>'] : e.key === 'm' ? ['<mark>','</mark>'] : null;
-    if (!markers) return;
-    e.preventDefault();
-    const ta = e.target, s = ta.selectionStart, en = ta.selectionEnd;
-    ta.setRangeText(markers[0] + ta.value.slice(s, en) + markers[1], s, en, 'select');
-    if (s === en) { const mid = s + markers[0].length; ta.setSelectionRange(mid, mid); }
-  });
+  createMarkdownEditor('notePageDesc', { onPreview: el => resolveAttachments(el) });
 
   // Title key handling
   document.getElementById('notePageTitle')?.addEventListener('focus', e => {
@@ -1919,7 +1882,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   document.getElementById('notePageTitle')?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); submitNote(); document.getElementById('notePageDesc').focus(); }
+    if (e.key === 'Enter') { e.preventDefault(); submitNote(); focusEditor('notePageDesc'); }
     if (e.key === 'Escape') tryCloseNoteModal();
   });
 
@@ -1942,15 +1905,6 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       printNote(noteModalPageId);
     }
-    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && document.getElementById('noteModal')?.style.display !== 'none') {
-      const tag = document.activeElement?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-      const preview = document.getElementById('notePageDescPreview');
-      const target = preview?.style.display !== 'none' ? preview : null;
-      if (!target) return;
-      e.preventDefault();
-      target.scrollTop += e.key === 'ArrowDown' ? 80 : -80;
-    }
   });
 
   // Link open button
@@ -1962,12 +1916,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Description toolbar
   const _toolbar = document.getElementById('noteDescToolbar');
-  const _descTa  = document.getElementById('notePageDesc');
-  _descTa?.addEventListener('focus', () => { if (_toolbar) _toolbar.style.display = 'flex'; });
-  _descTa?.addEventListener('blur',  () => { if (_toolbar) _toolbar.style.display = 'none'; });
   _toolbar?.querySelectorAll('.note-tb-btn').forEach(btn => {
-    btn.addEventListener('pointerdown', e => e.preventDefault()); // keep focus on textarea
-    btn.addEventListener('click', () => _applyNoteFormat(btn.dataset.fmt));
+    btn.addEventListener('pointerdown', e => e.preventDefault());
+    btn.addEventListener('click', () => applyEditorFormat('notePageDesc', btn.dataset.fmt));
   });
 
   initNoteCardSearch();
