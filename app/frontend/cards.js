@@ -362,6 +362,19 @@ document.addEventListener('DOMContentLoaded', () => {
     e.stopPropagation();
     _handleCardAttachUpload(editCardId, files);
   });
+  // Paste image upload: paste an image from clipboard into the card modal
+  _cardModalEl.addEventListener('paste', e => {
+    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItems = items.filter(it => it.kind === 'file' && it.type.startsWith('image/'));
+    if (!imageItems.length) return;
+    e.preventDefault();
+    const files = imageItems.map(it => {
+      const ext = it.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+      return new File([it.getAsFile()], `pasted-${Date.now()}.${ext}`, { type: it.type });
+    });
+    _handleCardAttachUpload(editCardId, files);
+  });
 
   document.getElementById('cardDescPreview').addEventListener('click', e => {
     clickPreviewToEditor(document.getElementById('cardDescPreview'), 'cardDesc', showDescEditor, e);
