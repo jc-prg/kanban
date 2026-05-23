@@ -119,6 +119,55 @@ const _hlPlugin = ViewPlugin.fromClass(
 );
 
 // ---- preview helpers ----
+
+// Walk src and rendered in parallel, advancing src for markdown-syntax chars that have
+// no counterpart in rendered text. Returns the src index corresponding to renderedPrefix.length.
+function _alignToSource(src, renderedPrefix) {
+  let si = 0, ri = 0;
+  while (ri < renderedPrefix.length && si < src.length) {
+    if (src[si] === renderedPrefix[ri]) { si++; ri++; }
+    else si++;
+  }
+  return si;
+}
+
+// After rendering, stamp data-sc (source char offset) and data-sc-len on each direct-child
+// block element and on direct <li> children of lists.
+function _annotateBlocks(el, text) {
+  if (!window.marked) return;
+  const tokens = marked.lexer(text);
+  const infos = [];
+  let pos = 0;
+  for (const token of tokens) {
+    if (token.type !== 'space') {
+      infos.push({ pos, len: token.raw.length });
+      if (token.items) {
+        let iPos = pos;
+        for (const item of token.items) {
+          infos.push({ pos: iPos, len: item.raw.length });
+          iPos += item.raw.length;
+        }
+      }
+    }
+    pos += token.raw.length;
+  }
+  let idx = 0;
+  for (const child of el.children) {
+    if (idx >= infos.length) break;
+    const info = infos[idx++];
+    child.dataset.sc = info.pos;
+    child.dataset.scLen = info.len;
+    if (child.tagName === 'UL' || child.tagName === 'OL') {
+      for (const li of child.querySelectorAll(':scope > li')) {
+        if (idx >= infos.length) break;
+        const linfo = infos[idx++];
+        li.dataset.sc = linfo.pos;
+        li.dataset.scLen = linfo.len;
+      }
+    }
+  }
+}
+
 function _enhanceCheckboxes(entry) {
   entry.preview.querySelectorAll('input[type="checkbox"]').forEach((cb, i) => {
     cb.removeAttribute('disabled');
@@ -148,14 +197,32 @@ function _renderPreview(entry, text) {
   el.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(raw, opts) : raw;
   if (window.buildToc) window.buildToc(el);
   if (entry.onPreview) entry.onPreview(el);
+  _annotateBlocks(el, text);
   _enhanceCheckboxes(entry);
 }
 
-function _activateEditor(id) {
+// srcPos: char offset in source to place cursor (optional).
+// viewFraction: 0–1 — where in the editor viewport the cursor should appear (optional).
+function _activateEditor(id, srcPos, viewFraction) {
   const entry = _editors.get(id);
   if (!entry) return;
   entry.preview.style.display = 'none';
   entry.editorWrap.style.display = '';
+
+  if (srcPos !== undefined) {
+    const clampedPos = Math.max(0, Math.min(entry.view.state.doc.length, srcPos));
+    entry.view.dispatch({ selection: { anchor: clampedPos } });
+    requestAnimationFrame(() => {
+      const scroller = entry.view.scrollDOM;
+      const cursorCoords = entry.view.coordsAtPos(clampedPos);
+      if (cursorCoords && viewFraction !== undefined) {
+        const editorRect = scroller.getBoundingClientRect();
+        const targetY = editorRect.top + viewFraction * scroller.clientHeight;
+        scroller.scrollTop += cursorCoords.top - targetY;
+      }
+    });
+  }
+
   entry.view.focus();
 }
 
@@ -258,8 +325,43 @@ function createMarkdownEditor(id, { onChange, onPreview, sanitizeOpts } = {}) {
   // Render initial preview
   _renderPreview(entry, mirror?.value || '');
 
-  // Click preview → switch to editor
-  preview.addEventListener('click', () => _activateEditor(id));
+  // Click preview → switch to editor, placing cursor at the clicked position
+  preview.addEventListener('click', e => {
+    const previewRect = preview.getBoundingClientRect();
+    const viewFraction = Math.max(0, Math.min(1, (e.clientY - previewRect.top) / preview.clientHeight));
+
+    // Resolve exact caret position (Chrome/Safari vs Firefox API)
+    const caret = document.caretRangeFromPoint?.(e.clientX, e.clientY) ?? (() => {
+      if (!document.caretPositionFromPoint) return null;
+      const p = document.caretPositionFromPoint(e.clientX, e.clientY);
+      return p ? { startContainer: p.offsetNode, startOffset: p.offset } : null;
+    })();
+
+    let srcPos;
+    if (caret) {
+      const { startContainer: node, startOffset: offset } = caret;
+      // Walk up DOM to nearest block annotated with data-sc
+      let blockEl = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+      while (blockEl && blockEl !== preview && blockEl.dataset.sc === undefined) {
+        blockEl = blockEl.parentElement;
+      }
+      if (blockEl && blockEl !== preview && blockEl.dataset.sc !== undefined) {
+        const srcStart = +blockEl.dataset.sc;
+        const src = entry.view.state.doc.sliceString(srcStart, srcStart + +blockEl.dataset.scLen);
+        // Collect rendered text from block start up to the click point
+        let renderedPrefix = '';
+        const tw = document.createTreeWalker(blockEl, NodeFilter.SHOW_TEXT);
+        let tNode;
+        while ((tNode = tw.nextNode())) {
+          if (tNode === node) { renderedPrefix += tNode.textContent.slice(0, offset); break; }
+          renderedPrefix += tNode.textContent;
+        }
+        srcPos = srcStart + _alignToSource(src, renderedPrefix);
+      }
+    }
+
+    _activateEditor(id, srcPos, viewFraction);
+  });
 
   // Focus leaves editorWrap → switch back to preview
   editorWrap.addEventListener('focusout', e => {
