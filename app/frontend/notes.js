@@ -2051,6 +2051,7 @@ async function printNote(pageId) {
     body:       page.description ? renderMarkdown(page.description) : '',
     footerRows: rows,
   });
+  buildToc(root);
   await resolveAttachments(root);
   await _triggerPrint(root);
 }

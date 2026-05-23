@@ -130,7 +130,7 @@ function showMarkdownPreview(taId, previewId, toolbarId, editorFn, postFn) {
 
 function showDescPreview() {
   showMarkdownPreview('cardDesc', 'cardDescPreview', 'cardDescToolbar', showDescEditor,
-    el => { if (editCardId && CARD_ATTACH_API) resolveCardAttachments(el); });
+    el => { buildToc(el); if (editCardId && CARD_ATTACH_API) resolveCardAttachments(el); });
 }
 
 function previewScrollFrac(el, e) {
@@ -1196,6 +1196,7 @@ async function printCard(card) {
     body:    card.description ? renderMarkdown(card.description) : '',
     footerRows: _cardPrintFooter(card),
   });
+  buildToc(root);
   await resolveCardAttachments(root, card.id);
   await _triggerPrint(root);
 }
@@ -1219,6 +1220,7 @@ async function printColumn(colId) {
   })).join('');
   const items = root.querySelectorAll('.print-item');
   for (let i = 0; i < col.cards.length; i++) {
+    buildToc(items[i]);
     await resolveCardAttachments(items[i], col.cards[i].id);
   }
   await _triggerPrint(root);
