@@ -119,6 +119,22 @@ const _hlPlugin = ViewPlugin.fromClass(
 );
 
 // ---- preview helpers ----
+function _enhanceCheckboxes(entry) {
+  entry.preview.querySelectorAll('input[type="checkbox"]').forEach((cb, i) => {
+    cb.removeAttribute('disabled');
+    cb.addEventListener('click', e => {
+      e.stopPropagation();
+      const text = entry.view.state.doc.toString();
+      const matches = [...text.matchAll(/^(\s*[-*+]\s+)\[([ x])\]/gim)];
+      if (i >= matches.length) return;
+      const match = matches[i];
+      const pos = match.index + match[1].length + 1; // position of ' ' or 'x'
+      entry.view.dispatch({ changes: { from: pos, to: pos + 1, insert: match[2] === 'x' ? ' ' : 'x' } });
+      _renderPreview(entry, entry.view.state.doc.toString());
+    });
+  });
+}
+
 function _renderPreview(entry, text) {
   const el = entry.preview;
   if (!text || !text.trim()) {
@@ -132,6 +148,7 @@ function _renderPreview(entry, text) {
   el.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(raw, opts) : raw;
   if (window.buildToc) window.buildToc(el);
   if (entry.onPreview) entry.onPreview(el);
+  _enhanceCheckboxes(entry);
 }
 
 function _activateEditor(id) {
