@@ -223,7 +223,7 @@
 .modal-field-desc .cm-mount {
   flex: 1;
   min-height: 80px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* ---- CodeMirror editor container ---- */
@@ -261,6 +261,7 @@
 /* Editor wrapper */
 .cm-editor-wrap {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -304,6 +305,9 @@
 .cm-mount .cm-activeLine {
   background: transparent;
 }
+
+/* <u>underline</u> decoration */
+.cm-underline { text-decoration: underline; }
 
 /* ==highlight== decoration */
 .cm-highlight {

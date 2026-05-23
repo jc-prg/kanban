@@ -34,7 +34,7 @@ const _darkStyle = HighlightStyle.define([
   { tag: tags.processingInstruction, color: '#9090b0' },
   { tag: tags.punctuation,    color: '#6060a0' },
   { tag: tags.quote,          color: '#c4b5fd', fontStyle: 'italic' },
-  { tag: tags.list,           color: '#9090b0' },
+  { tag: tags.list,           color: 'inherit' },
 ]);
 
 const _lightStyle = HighlightStyle.define([
@@ -51,7 +51,7 @@ const _lightStyle = HighlightStyle.define([
   { tag: tags.processingInstruction, color: '#707088' },
   { tag: tags.punctuation,    color: '#9090b0' },
   { tag: tags.quote,          color: '#4a3ddb', fontStyle: 'italic' },
-  { tag: tags.list,           color: '#707088' },
+  { tag: tags.list,           color: 'inherit' },
 ]);
 
 function _highlightExtension() {
@@ -63,6 +63,33 @@ function _highlightExtension() {
 
 // ---- registry ----
 const _editors = new Map(); // id → { view, preview, editorWrap }
+
+// ---- <u>underline</u> ViewPlugin ----
+const _ulMark = Decoration.mark({ class: 'cm-underline' });
+
+function _buildUlDecorations(view) {
+  const builder = new RangeSetBuilder();
+  const re = /<u>([^<\n]*)<\/u>/g;
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.doc.sliceString(from, to);
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) {
+      builder.add(from + m.index, from + m.index + m[0].length, _ulMark);
+    }
+  }
+  return builder.finish();
+}
+
+const _ulPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) { this.decorations = _buildUlDecorations(view); }
+    update(u) {
+      if (u.docChanged || u.viewportChanged) this.decorations = _buildUlDecorations(u.view);
+    }
+  },
+  { decorations: v => v.decorations }
+);
 
 // ---- ==highlight== ViewPlugin ----
 const _hlMark = Decoration.mark({ class: 'cm-highlight' });
@@ -187,6 +214,7 @@ function createMarkdownEditor(id, { onChange, onPreview, sanitizeOpts } = {}) {
         bracketMatching(),
         markdown({ extensions: GFM }),
         EditorView.lineWrapping,
+        _ulPlugin,
         _hlPlugin,
         keymap.of([
           ...historyKeymap,
@@ -274,7 +302,17 @@ function applyEditorFormat(id, action) {
   if (action === 'h1')            return _linePrefix(view, '# ');
   if (action === 'h2')            return _linePrefix(view, '## ');
   if (action === 'h3')            return _linePrefix(view, '### ');
-  if (action === 'checkbox')      return _linePrefix(view, '- [ ] ');
+  if (action === 'checkbox') {
+    const { from } = view.state.selection.main;
+    const line = view.state.doc.lineAt(from);
+    const prefix = '- [ ] ';
+    view.dispatch({
+      changes: { from: line.from, to: line.from, insert: prefix },
+      selection: { anchor: line.from + prefix.length },
+    });
+    view.focus();
+    return;
+  }
   if (action === 'code') {
     const { from, to } = view.state.selection.main;
     if (from !== to) return _wrapSel(view, '```\n', '\n```');
