@@ -2041,6 +2041,7 @@ async function printNote(pageId) {
 
   rows.push(['ID', page.id]);
   rows.push(['URL', location.href.split('#')[0] + '#note:' + page.id]);
+  rows.push(['Status', _fmtPrintDate(new Date())]);
 
   const root = document.getElementById('print-root');
   root.innerHTML = _buildPrintItem({
@@ -2051,5 +2052,5 @@ async function printNote(pageId) {
     footerRows: rows,
   });
   await resolveAttachments(root);
-  _triggerPrint(root);
+  await _triggerPrint(root);
 }

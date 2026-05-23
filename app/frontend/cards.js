@@ -1126,6 +1126,10 @@ document.getElementById('cardInfoBackdrop').addEventListener('click', e => {
 
 // ---- Print ----
 
+function _fmtPrintDate(d) {
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
 function _buildPrintItem({ board, context, title, body, footerRows }) {
   const header =
     `<div class="print-header">` +
@@ -1148,7 +1152,16 @@ function _buildPrintItem({ board, context, title, body, footerRows }) {
   return `<div class="print-item">${header}<h1 class="print-title">${escHtml(title)}</h1>${bodyHtml}${footerHtml}</div>`;
 }
 
-function _triggerPrint(root) {
+function _waitForImages(container) {
+  const pending = [...container.querySelectorAll('img')].filter(img => !img.complete);
+  if (!pending.length) return Promise.resolve();
+  return Promise.all(pending.map(img => new Promise(resolve => {
+    img.onload = img.onerror = resolve;
+  })));
+}
+
+async function _triggerPrint(root) {
+  await _waitForImages(root);
   window.onafterprint = () => { root.innerHTML = ''; };
   window.print();
 }
@@ -1168,6 +1181,7 @@ function _cardPrintFooter(card) {
   if (card.link)  rows.push(['Link', card.link]);
   rows.push(['ID', card.id]);
   rows.push(['URL', location.href.split('#')[0] + '#card:' + card.id]);
+  rows.push(['Status', _fmtPrintDate(new Date())]);
   return rows;
 }
 
@@ -1183,7 +1197,7 @@ async function printCard(card) {
     footerRows: _cardPrintFooter(card),
   });
   await resolveCardAttachments(root, card.id);
-  _triggerPrint(root);
+  await _triggerPrint(root);
 }
 
 function printCardFromModal() {
@@ -1207,5 +1221,5 @@ async function printColumn(colId) {
   for (let i = 0; i < col.cards.length; i++) {
     await resolveCardAttachments(items[i], col.cards[i].id);
   }
-  _triggerPrint(root);
+  await _triggerPrint(root);
 }
