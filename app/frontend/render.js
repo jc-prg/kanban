@@ -221,37 +221,39 @@ function render() {
       cardEl.style.setProperty('--card-color', card.color || color);
 
       const metaParts = [];
-      if (card.description) {
-        metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">${SVGICONS.description()}</span>`);
-      }
-      if (cardAttachSet.has(card.id)) {
-        metaParts.push(`<span class="card-attach-badge" title="Has attachments">${SVGICONS.attachment(10, 10)}</span>`);
-      }
-      if (noteLinkedCards.has(card.id)) {
-        metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
-      }
-      if (card.priority) {
-        const pc = PRIORITY_COLORS[card.priority];
-        metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);
-      }
-      if (card.startDate || card.endDate) {
-        const cls = isOverdue ? 'card-date card-date--overdue' : 'card-date';
-        if (card.startDate && card.endDate)
-          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} → ${fmtDate(card.endDate)}</span>`);
-        else if (card.startDate)
-          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} →</span>`);
-        else
-          metaParts.push(`<span class="${cls}">→ ${fmtDate(card.endDate)}</span>`);
-      }
-      if (card.done) {
-        metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
-      }
-      if (card.duplicate || card.text.startsWith('(copy) ')) {
-        const originalCol = card.duplicate
-          ? state.columns.find(c => c.cards.some(c2 => c2.id !== card.id && c2.text === card.text && !c2.duplicate))
-          : null;
-        const tip = originalCol ? `Also in: &quot;${escHtml(originalCol.title)}&quot;` : 'Duplicate card';
-        metaParts.push(`<span class="card-duplicate-badge" title="${tip}">duplicate</span>`);
+      if (!isLabel) {
+        if (card.description) {
+          metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">${SVGICONS.description()}</span>`);
+        }
+        if (cardAttachSet.has(card.id)) {
+          metaParts.push(`<span class="card-attach-badge" title="Has attachments">${SVGICONS.attachment(10, 10)}</span>`);
+        }
+        if (noteLinkedCards.has(card.id)) {
+          metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
+        }
+        if (card.priority) {
+          const pc = PRIORITY_COLORS[card.priority];
+          metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);
+        }
+        if (card.startDate || card.endDate) {
+          const cls = isOverdue ? 'card-date card-date--overdue' : 'card-date';
+          if (card.startDate && card.endDate)
+            metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} → ${fmtDate(card.endDate)}</span>`);
+          else if (card.startDate)
+            metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} →</span>`);
+          else
+            metaParts.push(`<span class="${cls}">→ ${fmtDate(card.endDate)}</span>`);
+        }
+        if (card.done) {
+          metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
+        }
+        if (card.duplicate || card.text.startsWith('(copy) ')) {
+          const originalCol = card.duplicate
+            ? state.columns.find(c => c.cards.some(c2 => c2.id !== card.id && c2.text === card.text && !c2.duplicate))
+            : null;
+          const tip = originalCol ? `Also in: &quot;${escHtml(originalCol.title)}&quot;` : 'Duplicate card';
+          metaParts.push(`<span class="card-duplicate-badge" title="${tip}">duplicate</span>`);
+        }
       }
 
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';

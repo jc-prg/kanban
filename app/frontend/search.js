@@ -184,6 +184,7 @@
       el.innerHTML = `<div class="search-result-col-label">${escHtml(col.title)}</div>
         <div class="search-result-text">${escHtml(card.text)}</div>${metaHtml}`;
       el.addEventListener('click', () => { closeSearch(); openEditModal(col.id, card); });
+      el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showContextMenu(e.clientX, e.clientY, col.id, card); });
       box.appendChild(el);
     });
   }
