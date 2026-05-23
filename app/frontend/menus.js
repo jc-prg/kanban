@@ -42,6 +42,7 @@ function showContextMenu(x, y, colId, card) {
 function hideContextMenu() {
   document.getElementById('contextMenu').style.display = 'none';
   document.getElementById('ctxColorRow').style.display = 'none';
+  document.getElementById('ctxPriorityRow').style.display = 'none';
   ctxColId = null;
   ctxCard  = null;
 }
@@ -82,6 +83,7 @@ document.getElementById('ctxColor').addEventListener('click', e => {
   e.stopPropagation();
   const row = document.getElementById('ctxColorRow');
   if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+  document.getElementById('ctxPriorityRow').style.display = 'none';
   const card = ctxCard;
   row.innerHTML = COLORS.map(c =>
     `<div class="color-swatch ctx-color-swatch${card?.color === c ? ' selected' : ''}"
@@ -93,6 +95,37 @@ document.getElementById('ctxColor').addEventListener('click', e => {
       const col = state.columns.find(c => c.id === ctxColId);
       const target = col?.cards.find(c => c.id === ctxCard?.id);
       if (target) { target.color = s.dataset.color; target.lastModified = new Date().toISOString(); render(); schedulesSave(); }
+      hideContextMenu();
+    });
+  });
+  row.style.display = 'flex';
+});
+
+document.getElementById('ctxPriority').addEventListener('click', e => {
+  e.stopPropagation();
+  const row = document.getElementById('ctxPriorityRow');
+  if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+  document.getElementById('ctxColorRow').style.display = 'none';
+  const card = ctxCard;
+  row.innerHTML = PRIORITY_LABELS.map((label, i) => {
+    const color = PRIORITY_COLORS[i];
+    const selected = (card?.priority ?? 0) === i;
+    const style = color ? `background:${color};border-color:${color};color:#fff` : '';
+    return `<button class="priority-btn${selected ? ' selected' : ''}" data-priority="${i}"
+      style="${selected && color ? style : color ? `color:${color};border-color:${color}` : ''}">${escHtml(label)}</button>`;
+  }).join('');
+  row.querySelectorAll('.priority-btn').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const col = state.columns.find(c => c.id === ctxColId);
+      const target = col?.cards.find(c => c.id === ctxCard?.id);
+      if (target) {
+        const p = parseInt(btn.dataset.priority, 10);
+        if (p === 0) delete target.priority; else target.priority = p;
+        target.lastModified = new Date().toISOString();
+        render();
+        schedulesSave();
+      }
       hideContextMenu();
     });
   });

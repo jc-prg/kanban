@@ -408,6 +408,8 @@
 
 .priority-btn.selected { color: #fff; }
 
+.ctx-priority-row .priority-btn { min-width: 34px; padding: 4px 7px; font-size: 0.7rem; }
+
 /* Color swatches */
 .color-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
