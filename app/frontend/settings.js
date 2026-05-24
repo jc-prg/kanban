@@ -179,7 +179,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (r.ok) flashIndicator(' ✓');
+      if (r.ok) flashIndicator(`${ICONS.done} saved`);
     } catch {}
   });
 
@@ -446,7 +446,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       });
       if (!r.ok) { flashIndicator(' error'); return; }
       await loadWebdavSettings();
-      flashIndicator(' ✓');
+      flashIndicator(`${ICONS.done} saved`);
     } catch (_) { flashIndicator(' error'); }
   });
 
@@ -502,7 +502,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
         return;
       }
       _updateWebhookMenuItem({ enabled, name, url });
-      flashIndicator(' ✓');
+      flashIndicator(`${ICONS.done} saved`);
     } catch (_) { flashIndicator(' error'); }
   });
 

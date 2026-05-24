@@ -1028,6 +1028,19 @@
   margin-top: 10px;
 }
 
+.settings-hint {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.settings-hint code {
+  font-family: monospace;
+  background: var(--bg-inset, rgba(0,0,0,0.15));
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
 #webdavFields {
   margin-top: 10px;
 }
