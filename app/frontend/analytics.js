@@ -933,9 +933,10 @@
   function renderAchievementLineChart(days, el) {
     if (!days.length) { el.innerHTML = '<p class="search-empty">No data found.</p>'; return; }
 
+    // store raw days so legend toggles always re-process from original values
+    _achCurrentData = days;
     // net created = total created minus inbox-created (mirrors the tiles)
     const data = days.map(d => ({ ...d, created: Math.max(0, d.created - d.inboxCreated) }));
-    _achCurrentData = data;
 
     const W = 500, H = 200;
     const ml = 28, mr = 12, mt = 12, mb = 36;
