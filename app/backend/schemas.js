@@ -48,7 +48,8 @@ const _settingsSchema = {
     notesSidebarWidth:     { type: 'number' },
     notesFontSize:         { type: 'number' },
     autoSaveDialogs:       { type: 'boolean' },
-    autoSaveIntervalMin:   { type: 'number' }
+    autoSaveIntervalMin:   { type: 'number' },
+    hideDoneInOverview:    { type: 'boolean' }
   }
 };
 

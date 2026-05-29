@@ -346,8 +346,9 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       document.getElementById('inboxDateToggle').checked       = state.settings?.inboxWithDate     ?? false;
       document.getElementById('persistCollapseToggle').checked  = state.settings?.persistCollapse   ?? false;
       document.getElementById('boardArchivedToggle').checked    = state.settings?.archived           ?? false;
-      document.getElementById('autoSaveDialogsToggle').checked  = state.settings?.autoSaveDialogs   ?? false;
-      document.getElementById('autoSaveIntervalInput').value    = state.settings?.autoSaveIntervalMin ?? 5;
+      document.getElementById('autoSaveDialogsToggle').checked    = state.settings?.autoSaveDialogs     ?? false;
+      document.getElementById('autoSaveIntervalInput').value      = state.settings?.autoSaveIntervalMin  ?? 5;
+      document.getElementById('hideDoneInOverviewToggle').checked = state.settings?.hideDoneInOverview   ?? true;
       renderTrackedCols();
     }
     loadApiKey();
@@ -607,6 +608,13 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
     document.getElementById('autoSaveDialogsToggle').addEventListener('change', e => {
       (state.settings ??= {}).autoSaveDialogs = e.target.checked || undefined;
+      schedulesSave();
+      flashSaved();
+    });
+
+    document.getElementById('hideDoneInOverviewToggle').addEventListener('change', e => {
+      // default is true — only store explicitly when false
+      (state.settings ??= {}).hideDoneInOverview = e.target.checked ? undefined : false;
       schedulesSave();
       flashSaved();
     });

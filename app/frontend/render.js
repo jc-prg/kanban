@@ -252,10 +252,14 @@ function render() {
           metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
         }
         if (card.duplicate || card.text.startsWith('(copy) ')) {
-          const originalCol = card.duplicate
-            ? state.columns.find(c => c.cards.some(c2 => c2.id !== card.id && c2.text === card.text && !c2.duplicate))
-            : null;
-          const tip = originalCol ? `Also in: &quot;${escHtml(originalCol.title)}&quot;` : 'Duplicate card';
+          const origText = card.duplicate ? card.text : card.text.slice('(copy) '.length);
+          let origCol = null, origCard = null;
+          for (const c of state.columns) {
+            const found = c.cards.find(c2 => c2.id !== card.id && c2.text === origText && !c2.text.startsWith('(copy) ') && !c2.duplicate);
+            if (found) { origCol = c; origCard = found; break; }
+          }
+          const datePart = origCard?.created ? ` (${origCard.created.slice(8,10)}.${origCard.created.slice(5,7)}.${origCard.created.slice(2,4)})` : '';
+          const tip = origCol ? `Also in: &quot;${escHtml(origCol.title)}&quot;${datePart}` : 'Duplicate card';
           metaParts.push(`<span class="card-duplicate-badge" title="${tip}">duplicate</span>`);
         }
       }

@@ -31,14 +31,16 @@ router.get('/boards', async (req, res) => {
     const boards = await Promise.all(names.map(async name => {
       try {
         const data = await loadBoardData(couch.use(DB_PREFIX + name));
+        const hideDone        = data.settings?.hideDoneInOverview !== false;
         const visibleCards    = col => col.cards.filter(c => !c.text?.startsWith('#'));
+        const trackedCards    = col => col.cards.filter(c => !c.text?.startsWith('#') && !(hideDone && c.done));
         const totalCards      = data.columns.reduce((s, c) => s + visibleCards(c).length, 0);
-        const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + visibleCards(c).length, 0);
-        const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + visibleCards(c).length, 0);
-        const inProgressCount = data.columns.filter(c => /^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)).reduce((s, c) => s + visibleCards(c).length, 0);
+        const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)).reduce((s, c) => s + trackedCards(c).length, 0);
+        const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)).reduce((s, c) => s + trackedCards(c).length, 0);
+        const inProgressCount = data.columns.filter(c => /^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)).reduce((s, c) => s + trackedCards(c).length, 0);
         const trackedCounts   = (data.settings?.trackedColumns || []).map(title => {
           const col = data.columns.find(c => c.title === title);
-          return col ? { title, count: visibleCards(col).length, color: col.color || null } : null;
+          return col ? { title, count: trackedCards(col).length, color: col.color || null } : null;
         }).filter(Boolean);
         const { count: attachCount, size: attachSize } = getBoardAttachStats(name);
         return { name, description: data.settings?.description || '', archived: data.settings?.archived || false, totalCards, inboxCount, todoCount, inProgressCount, trackedCounts, attachCount, attachSize };
