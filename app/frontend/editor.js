@@ -302,11 +302,11 @@ function createMarkdownEditor(id, { onChange, onPreview, sanitizeOpts } = {}) {
         _hlPlugin,
         keymap.of([
           ...historyKeymap,
-          ...defaultKeymap,
           { key: 'Ctrl-b', run: v => { _wrapSel(v, '**', '**');     return true; } },
           { key: 'Ctrl-i', run: v => { _wrapSel(v, '*', '*');       return true; } },
           { key: 'Ctrl-u', run: v => { _wrapSel(v, '<u>', '</u>');  return true; } },
           { key: 'Ctrl-m', run: v => { _wrapSel(v, '==', '==');     return true; } },
+          ...defaultKeymap,
         ]),
         EditorView.updateListener.of(update => {
           if (!update.docChanged) return;

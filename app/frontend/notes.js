@@ -704,6 +704,24 @@ function resetNoteSections() {
 let noteModalPageId = null;
 let noteModalOrig = { title: '', desc: '', link: '' };
 let _pendingNewPage = null; // { page, parentId } — set when "+" is clicked, inserted on first save
+let _noteFullscreen = false;
+
+function toggleNoteFullscreen() {
+  const modalEl = document.querySelector('#noteModal .modal');
+  const btn = document.getElementById('noteFullscreenBtn');
+  if (!modalEl) return;
+  _noteFullscreen = !_noteFullscreen;
+  modalEl.classList.toggle('modal--fullscreen', _noteFullscreen);
+  if (btn) btn.title = _noteFullscreen ? 'Exit full screen (Esc)' : 'Enter full screen';
+}
+
+function _exitNoteFullscreen() {
+  if (!_noteFullscreen) return;
+  _noteFullscreen = false;
+  document.querySelector('#noteModal .modal')?.classList.remove('modal--fullscreen');
+  const btn = document.getElementById('noteFullscreenBtn');
+  if (btn) btn.title = 'Enter full screen';
+}
 
 async function _crumbNavigate(pageId) {
   if (noteModalHasChanges()) {
@@ -808,6 +826,7 @@ async function openNoteModal(pageId, focusTitle = false) {
 }
 
 function closeNoteModal() {
+  _exitNoteFullscreen();
   _stopNoteAutoSave();
   if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;
   const _wdInfoPop = document.getElementById('noteWdInfoPopover');
@@ -1883,7 +1902,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('notePageTitle')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); submitNote(); focusEditor('notePageDesc'); }
-    if (e.key === 'Escape') tryCloseNoteModal();
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      if (_noteFullscreen) { _exitNoteFullscreen(); return; }
+      tryCloseNoteModal();
+    }
   });
 
   // Global Escape closes note modal (or viewer if open)
@@ -1895,7 +1918,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // Only close if no other modal is on top
       const otherOpen = ['modal','settingsBackdrop','promptsBackdrop','searchBackdrop','cardInfoBackdrop','dialogBackdrop']
         .some(id => document.getElementById(id)?.style.display !== 'none');
-      if (!otherOpen) tryCloseNoteModal();
+      if (!otherOpen) {
+        if (_noteFullscreen) { _exitNoteFullscreen(); return; }
+        tryCloseNoteModal();
+      }
+    }
+    if (e.key === 'F11' && document.getElementById('noteModal')?.style.display !== 'none') {
+      e.preventDefault();
+      toggleNoteFullscreen();
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 's' && document.getElementById('noteModal')?.style.display !== 'none') {
       e.preventDefault();

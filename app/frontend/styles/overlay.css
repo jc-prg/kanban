@@ -1289,6 +1289,86 @@
   display: contents;
 }
 
+/* ---- Fullscreen (distraction-free) mode ---- */
+.modal {
+  position: relative;
+}
+
+.modal-fs-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 7px;
+  font-size: 1rem;
+  line-height: 1;
+  font-family: inherit;
+  opacity: 0.45;
+  transition: color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.modal-fs-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+  opacity: 1;
+}
+
+.modal--fullscreen {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  border-radius: 0 !important;
+  border: none !important;
+}
+
+.modal--fullscreen .modal-col-side,
+.modal--fullscreen h2 {
+  display: none !important;
+}
+
+.modal--fullscreen .modal-actions > *:not(.modal-autosave-wrap) {
+  display: none !important;
+}
+
+.modal--fullscreen .modal-actions {
+  margin-top: 10px;
+}
+
+.modal--fullscreen .modal-field > label,
+.modal--fullscreen .modal-field-label-row > label {
+  display: none !important;
+}
+
+.modal--fullscreen .note-modal-crumb {
+  display: none !important;
+}
+
+.modal--fullscreen .modal-columns {
+  display: flex !important;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal--fullscreen .modal-col-main {
+  display: flex !important;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding-right: 0 !important;
+}
+
+.modal--fullscreen .modal-fs-btn {
+  opacity: 0.6;
+}
+
 @media (min-width: 1200px) {
   #modal .modal {
     width: min(1140px, 92vw);

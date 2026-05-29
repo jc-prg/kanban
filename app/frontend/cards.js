@@ -328,6 +328,24 @@ let selectedColor    = COLORS[0];
 let selectedPriority = 0;
 let modalDone        = false;
 let modalOriginalData = null;
+let _cardFullscreen  = false;
+
+function toggleCardFullscreen() {
+  const modalEl = document.querySelector('#modal .modal');
+  const btn = document.getElementById('cardFullscreenBtn');
+  if (!modalEl) return;
+  _cardFullscreen = !_cardFullscreen;
+  modalEl.classList.toggle('modal--fullscreen', _cardFullscreen);
+  if (btn) btn.title = _cardFullscreen ? 'Exit full screen (Esc)' : 'Enter full screen';
+}
+
+function _exitCardFullscreen() {
+  if (!_cardFullscreen) return;
+  _cardFullscreen = false;
+  document.querySelector('#modal .modal')?.classList.remove('modal--fullscreen');
+  const btn = document.getElementById('cardFullscreenBtn');
+  if (btn) btn.title = 'Enter full screen';
+}
 
 function captureModalOriginal() {
   modalOriginalData = {
@@ -508,6 +526,7 @@ function openEditModal(colId, card) {
 }
 
 function closeModal() {
+  _exitCardFullscreen();
   _stopCardAutoSave();
   if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;
   if (location.hash.startsWith('#card:')) history.replaceState(null, '', location.pathname + location.search);
@@ -675,7 +694,15 @@ document.getElementById('modal').addEventListener('click', e => {
 });
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && document.getElementById('modal').style.display !== 'none') tryCloseModal();
+  if (e.key === 'Escape' && document.getElementById('modal').style.display !== 'none') {
+    if (_cardFullscreen) { _exitCardFullscreen(); return; }
+    tryCloseModal();
+  }
+  if (e.key === 'F11' && document.getElementById('modal').style.display !== 'none') {
+    e.preventDefault();
+    toggleCardFullscreen();
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === 's' && document.getElementById('modal').style.display !== 'none') {
     e.preventDefault();
     saveCardInPlace();

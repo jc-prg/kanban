@@ -127,6 +127,7 @@ router.get('/achievements/today', async (req, res) => {
     const names = all.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
     let created = 0, moved = 0, done = 0, inboxCreated = 0, hasPast = false;
     const createdBoards = {}, movedBoards = {}, doneBoards = {}, inboxCreatedBoards = {};
+    const createdCards = [], movedCards = [], doneCards = [], inboxCreatedCards = [];
     await Promise.all(names.map(async name => {
       try {
         const data = await loadBoardData(couch.use(DB_PREFIX + name));
@@ -137,12 +138,26 @@ router.get('/achievements/today', async (req, res) => {
               created++;
               createdBoards[name] = (createdBoards[name] || 0) + 1;
               const isInbox = /^inbox/i.test(col.title) || card.moves?.some(m => /^inbox/i.test(m.from));
-              if (isInbox) { inboxCreated++; inboxCreatedBoards[name] = (inboxCreatedBoards[name] || 0) + 1; }
+              if (isInbox) {
+                inboxCreated++;
+                inboxCreatedBoards[name] = (inboxCreatedBoards[name] || 0) + 1;
+                inboxCreatedCards.push({ board: name, text: card.text || '' });
+              } else {
+                createdCards.push({ board: name, text: card.text || '' });
+              }
             }
-            if (card.moves?.some(m => m.at?.startsWith(today))) { moved++; movedBoards[name] = (movedBoards[name] || 0) + 1; }
+            if (card.moves?.some(m => m.at?.startsWith(today))) {
+              moved++;
+              movedBoards[name] = (movedBoards[name] || 0) + 1;
+              movedCards.push({ board: name, text: card.text || '' });
+            }
             const donByFlag = card.doneAt?.startsWith(today);
-            const doneByMove = !donByFlag && card.moves?.some(m => m.at?.startsWith(today) && /^done/i.test(m.to));
-            if (donByFlag || doneByMove) { done++; doneBoards[name] = (doneBoards[name] || 0) + 1; }
+            const doneByMove = !card.doneAt && card.moves?.some(m => m.at?.startsWith(today) && /^done/i.test(m.to));
+            if (donByFlag || doneByMove) {
+              done++;
+              doneBoards[name] = (doneBoards[name] || 0) + 1;
+              doneCards.push({ board: name, text: card.text || '' });
+            }
             if (!hasPast) {
               if (card.created && card.created < today) hasPast = true;
               else if (card.moves?.some(m => m.at?.slice(0, 10) < today)) hasPast = true;
@@ -153,7 +168,7 @@ router.get('/achievements/today', async (req, res) => {
         }
       } catch (e) { /* skip broken boards */ }
     }));
-    res.json({ created, moved, done, inboxCreated, createdBoards, movedBoards, doneBoards, inboxCreatedBoards, hasPast });
+    res.json({ created, moved, done, inboxCreated, createdBoards, movedBoards, doneBoards, inboxCreatedBoards, createdCards, movedCards, doneCards, inboxCreatedCards, hasPast });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

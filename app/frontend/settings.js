@@ -870,11 +870,16 @@ async function loadAchievements(offset) {
   } catch (e) { /* ignore */ }
 }
 
-function boardsTooltip(map) {
-  return Object.entries(map).map(([b, n]) => `${b}: ${n}`).join('\n');
+function cardsTooltip(cards) {
+  const lines = cards.slice(0, 8).map(({ board, text }) => {
+    const short = text.length > 35 ? text.slice(0, 35) + '…' : text;
+    return `${board}: ${short}`;
+  });
+  if (cards.length > 8) lines.push(`${cards.length - 8} further cards …`);
+  return lines.join('\n');
 }
 
-function renderAchievements({ created = 0, inboxCreated = 0, moved = 0, done = 0, createdBoards = {}, inboxCreatedBoards = {}, movedBoards = {}, doneBoards = {} }, offset = 0) {
+function renderAchievements({ created = 0, inboxCreated = 0, moved = 0, done = 0, createdBoards = {}, inboxCreatedBoards = {}, movedBoards = {}, doneBoards = {}, createdCards = [], inboxCreatedCards = [], movedCards = [], doneCards = [] }, offset = 0) {
   const section = document.getElementById('achievementsSection');
   if (created === 0 && moved === 0 && done === 0 && offset === 0) { section.style.display = 'none'; return; }
   const achCreated      = document.getElementById('achCreated');
@@ -882,19 +887,18 @@ function renderAchievements({ created = 0, inboxCreated = 0, moved = 0, done = 0
   const achMoved        = document.getElementById('achMoved');
   const achDone         = document.getElementById('achDone');
   const displayCreated  = created - inboxCreated;
-  const netCreatedBoards = {};
-  for (const [b, n] of Object.entries(createdBoards)) {
-    const net = n - (inboxCreatedBoards[b] || 0);
-    if (net > 0) netCreatedBoards[b] = net;
-  }
   achCreated.textContent      = displayCreated;
   achInboxCreated.textContent = inboxCreated;
   achMoved.textContent        = moved;
   achDone.textContent         = done;
-  if (displayCreated) achCreated.dataset.tooltip = boardsTooltip(netCreatedBoards); else delete achCreated.dataset.tooltip;
-  if (inboxCreated)   achInboxCreated.dataset.tooltip = boardsTooltip(inboxCreatedBoards); else delete achInboxCreated.dataset.tooltip;
-  if (moved)          achMoved.dataset.tooltip   = boardsTooltip(movedBoards);   else delete achMoved.dataset.tooltip;
-  if (done)           achDone.dataset.tooltip    = boardsTooltip(doneBoards);     else delete achDone.dataset.tooltip;
+  const setTileTooltip = (el, cards) => {
+    const tile = el.closest('.achievement-item');
+    if (cards.length) tile.dataset.tooltip = cardsTooltip(cards); else delete tile.dataset.tooltip;
+  };
+  setTileTooltip(achCreated,      createdCards);
+  setTileTooltip(achInboxCreated, inboxCreatedCards);
+  setTileTooltip(achMoved,        movedCards);
+  setTileTooltip(achDone,         doneCards);
   section.style.display = '';
 }
 

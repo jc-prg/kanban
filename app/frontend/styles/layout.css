@@ -412,6 +412,7 @@ header h1 span { color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px 22px;
+  position: relative;
 }
 
 .achievement-value {
@@ -449,17 +450,15 @@ header h1 span { color: var(--accent); }
 #achDone + .achievement-label { color: #10b981cc; }
 .achievement-item:has(#achDone) { background: #10b98118; border-color: #10b98140; }
 
-.achievement-value[data-tooltip] {
-  position: relative;
+.achievement-item[data-tooltip] {
   cursor: default;
 }
 
-.achievement-value[data-tooltip]::after {
+.achievement-item[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+  top: calc(100% + 8px);
+  left: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -476,7 +475,7 @@ header h1 span { color: var(--accent); }
   z-index: 100;
 }
 
-.achievement-value[data-tooltip]:hover::after {
+.achievement-item[data-tooltip]:hover::after {
   opacity: 1;
 }
 

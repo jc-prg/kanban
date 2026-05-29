@@ -19,6 +19,7 @@ const ICONS = {
   download:     '↓',
   print:        '⎙',
   copyCode:     '⧉',
+  fullscreen:   '⛶',
 
   // Properties
   color:        '◉',
@@ -156,6 +157,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgDuplicate(16, 16),   name: 'Duplicate',      usage: 'Create a copy of a card' },
   { type: 'char', char: ICONS.openLink,     name: 'Open link',      usage: 'Open URL in a new browser tab' },
   { type: 'char', char: ICONS.download,     name: 'Download',       usage: 'Download an attachment file' },
+  { type: 'char', char: ICONS.fullscreen,   name: 'Full screen',    usage: 'Toggle distraction-free full screen mode in card/note modal' },
   { type: 'svg', svg: _svgMoveTo(16, 16),      name: 'Move to',        usage: 'Move card(s) to another column' },
   { type: 'char', char: ICONS.menu,         name: 'Menu',           usage: 'Open the header dropdown menu' },
   { type: 'svg', svg: _svgDescription(16, 16), name: 'Description',    usage: 'Card has a text description' },
