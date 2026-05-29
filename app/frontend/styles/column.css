@@ -62,16 +62,15 @@
 
 .column-title:focus { color: var(--accent); }
 
-.col-filter-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.col-filter-icon {
   flex-shrink: 0;
   cursor: pointer;
-  box-shadow: 0 0 0 2px var(--surface);
-  transition: box-shadow 0.15s;
+  color: #ddd;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+  line-height: 0;
 }
-.col-filter-dot:hover { box-shadow: 0 0 0 2px var(--accent); }
+.col-filter-icon:hover { opacity: 1; }
 
 .column-count {
   font-size: 0.7rem;

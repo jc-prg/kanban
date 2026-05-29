@@ -111,6 +111,11 @@ function _svgNotePages(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="0.7" width="9" height="10.6" rx="1.3"/><line x1="3.5" y1="4" x2="8.5" y2="4"/><line x1="3.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="3.5" y1="9" x2="6.5" y2="9"/></svg>`;
 }
 
+// Funnel — filter / narrow down a list
+function _svgFilter(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 2h9L7 6.5V10L5 10V6.5Z"/></svg>`;
+}
+
 // Single circular arrow — sync / refresh
 function _svgSync(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 6a4.5 4.5 0 1 1-1.4-3.2"/><path d="M8.7 1.4L9.1 2.8L7.6 2.4"/></svg>`;
@@ -145,6 +150,7 @@ const SVGICONS = {
   sync:           _svgSync,
   folder:         _svgFolder,
   networkFolder:  _svgNetworkFolder,
+  filter:         _svgFilter,
 };
 
 // ---- Icon registry (used to render the icon library in settings) ----
@@ -187,6 +193,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgSync(16, 16),          name: 'Sync',             usage: 'WebDAV sync status and trigger' },
   { type: 'svg', svg: _svgFolder(16, 16),        name: 'Folder',           usage: 'Folder in the notes tree or file system' },
   { type: 'svg', svg: _svgNetworkFolder(16, 16), name: 'Network folder',   usage: 'Remote folder (WebDAV / shared network location)' },
+  { type: 'svg', svg: _svgFilter(16, 16),        name: 'Filter',           usage: 'Filter duplicates in a column' },
 ];
 
 // ---- Render icon library grid ----

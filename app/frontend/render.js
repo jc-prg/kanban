@@ -128,8 +128,8 @@ function render() {
         <div class="column-dot" style="background:${color}"></div>
         <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
         <button class="col-btn" title="Column options" style="margin-left:auto">${ICONS.moreOptions}</button>
-        ${colColorFilter[col.id] ? `<span class="col-filter-dot" style="background:${colColorFilter[col.id]}" title="Color filter active — click to clear" data-col-id="${escHtml(col.id)}"></span>` : ''}
-        <span class="column-count">${col.cards.filter(c => !c.text.startsWith('#')).length}</span>
+        ${(colColorFilter[col.id] || colDupFilter.has(col.id)) ? `<span class="col-filter-icon" title="Filter active — click to clear">${SVGICONS.filter(15, 15)}</span>` : ''}
+        <span class="column-count">${(() => { const filterColor = colColorFilter[col.id]; const filterDup = colDupFilter.has(col.id); const total = col.cards.filter(c => !c.text.startsWith('#')).length; if (!filterColor && !filterDup) return total; const filtered = col.cards.filter(c => !c.text.startsWith('#') && (!filterColor || c.color === filterColor) && (!filterDup || c.duplicate || c.text.startsWith('(copy) '))).length; return `${filtered}/${total}`; })()}</span>
       </div>
       <div class="cards"></div>
       <button class="add-card-btn">+ add card</button>
@@ -194,16 +194,20 @@ function render() {
 
     const cardsEl = colEl.querySelector('.cards');
     const filterColor = colColorFilter[col.id];
-    const filteredCards = filterColor ? col.cards.filter(c => c.color === filterColor) : col.cards;
+    const filterDup   = colDupFilter.has(col.id);
+    const filteredCards = col.cards
+      .filter(c => !filterColor || c.color === filterColor)
+      .filter(c => !filterDup   || c.duplicate || c.text.startsWith('(copy) '));
     const isInbox  = col.title.toLowerCase().startsWith('inbox');
     const limit    = isInbox ? filteredCards.length : (colVisible[col.id] || CARDS_PER_PAGE);
     const visible  = filteredCards.slice(0, limit);
     const remaining = filteredCards.length - limit;
 
-    if (filterColor) {
-      colEl.querySelector('.col-filter-dot').addEventListener('click', e => {
+    if (filterColor || filterDup) {
+      colEl.querySelector('.col-filter-icon').addEventListener('click', e => {
         e.stopPropagation();
         delete colColorFilter[col.id];
+        colDupFilter.delete(col.id);
         render();
       });
     }

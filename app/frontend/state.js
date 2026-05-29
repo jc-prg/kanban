@@ -114,6 +114,7 @@ const CARDS_PER_PAGE = 30;
 const colVisible      = {}; // colId → number of cards currently shown
 const colCollapsed    = new Set(); // colIds whose content is hidden
 const colColorFilter  = {}; // colId → color string (active filter) or undefined
+const colDupFilter    = new Set(); // colIds with duplicate filter active
 
 // ---- State ----
 let state        = { columns: [] };

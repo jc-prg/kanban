@@ -152,14 +152,21 @@ function showColContextMenu(x, y, colId) {
   toggleIcon.textContent = ICONS[toggleKey];
   document.getElementById('colCtxToggleLabel').textContent = `  ${collapsed ? 'Show content' : 'Hide content'}`;
 
-  const hideWhenCollapsed = display => ['colCtxSettings','colCtxFilterByColor','colCtxDeleteCards','colCtxPrint'].forEach(id =>
+  const hideWhenCollapsed = display => ['colCtxSettings','colCtxFilterBy','colCtxDeleteCards','colCtxPrint'].forEach(id =>
     document.getElementById(id).style.display = display);
   document.querySelector('#colContextMenu .ctx-submenu-trigger').style.display = collapsed ? 'none' : '';
   hideWhenCollapsed(collapsed ? 'none' : '');
 
   const col = state.columns.find(c => c.id === colId);
-  const hasDuplicates = col?.cards.some(c => c.duplicate);
+  const hasDuplicates = col?.cards.some(c => c.duplicate || c.text?.startsWith('(copy) '));
   document.getElementById('colCtxDeleteDuplicates').style.display = hasDuplicates ? '' : 'none';
+
+  const dupFilterBtn = document.getElementById('colCtxFilterDuplicates');
+  dupFilterBtn.style.display = hasDuplicates ? '' : 'none';
+  if (hasDuplicates) {
+    const isActive = colDupFilter.has(colId);
+    dupFilterBtn.querySelector('[data-icon]').nextSibling.textContent = isActive ? '  ✓ Duplicates' : '  Duplicates';
+  }
 
   const submenu = document.getElementById('colCtxMoveSubmenu');
   submenu.innerHTML = state.columns
@@ -333,6 +340,14 @@ document.getElementById('colCtxFilterByColor').addEventListener('click', e => {
     });
   }
   colorRow.style.display = 'flex';
+});
+
+document.getElementById('colCtxFilterDuplicates').addEventListener('click', () => {
+  const colId = ctxHeaderColId;
+  hideColContextMenu();
+  if (colDupFilter.has(colId)) colDupFilter.delete(colId);
+  else colDupFilter.add(colId);
+  render();
 });
 
 document.getElementById('colCtxDeleteDuplicates').addEventListener('click', async e => {

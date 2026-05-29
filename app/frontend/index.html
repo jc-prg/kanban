@@ -129,8 +129,15 @@
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxMoveSubmenu"></div>
   </div>
-  <button class="ctx-item" id="colCtxFilterByColor"><span data-icon="color"></span>  Filter by color</button>
-  <div class="ctx-color-row" id="colCtxFilterColorRow" style="display:none"></div>
+  <div class="ctx-item ctx-submenu-trigger" id="colCtxFilterBy">
+    <span><span data-icon="filter"></span>  Filter by</span>
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
+    <div class="ctx-submenu" id="colCtxFilterBySubmenu">
+      <button class="ctx-item" id="colCtxFilterByColor"><span data-icon="color"></span>  Color</button>
+      <div class="ctx-color-row" id="colCtxFilterColorRow" style="display:none"></div>
+      <button class="ctx-item" id="colCtxFilterDuplicates"><span data-icon="filter"></span>  Duplicates</button>
+    </div>
+  </div>
   <div class="ctx-item ctx-submenu-trigger" id="colCtxDeleteCards">
     <span><span data-icon="close"></span>  Delete cards</span>
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
