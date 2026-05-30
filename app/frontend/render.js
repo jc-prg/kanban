@@ -128,8 +128,8 @@ function render() {
         <div class="column-dot" style="background:${color}"></div>
         <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
         <button class="col-btn" title="Column options" style="margin-left:auto">${ICONS.moreOptions}</button>
-        ${(colColorFilter[col.id] || colDupFilter.has(col.id)) ? `<span class="col-filter-icon" title="Filter active — click to clear">${SVGICONS.filter(15, 15)}</span>` : ''}
-        <span class="column-count">${(() => { const filterColor = colColorFilter[col.id]; const filterDup = colDupFilter.has(col.id); const total = col.cards.filter(c => !c.text.startsWith('#')).length; if (!filterColor && !filterDup) return total; const filtered = col.cards.filter(c => !c.text.startsWith('#') && (!filterColor || c.color === filterColor) && (!filterDup || c.duplicate || c.text.startsWith('(copy) '))).length; return `${filtered}/${total}`; })()}</span>
+        ${(colColorFilter[col.id] || colDupFilter.has(col.id) || colPriorityFilter[col.id]) ? `<span class="col-filter-icon" title="Filter active — click to clear">${SVGICONS.filter(15, 15)}</span>` : ''}
+        <span class="column-count">${(() => { const filterColor = colColorFilter[col.id]; const filterDup = colDupFilter.has(col.id); const filterPriority = colPriorityFilter[col.id]; const total = col.cards.filter(c => !c.text.startsWith('#')).length; if (!filterColor && !filterDup && !filterPriority) return total; const filtered = col.cards.filter(c => !c.text.startsWith('#') && (!filterColor || c.color === filterColor) && (!filterDup || c.duplicate || c.text.startsWith('(copy) ')) && (!filterPriority || c.priority === filterPriority)).length; return `${filtered}/${total}`; })()}</span>
       </div>
       <div class="cards"></div>
       <button class="add-card-btn">+ add card</button>
@@ -193,20 +193,23 @@ function render() {
     colEl.querySelector('.add-card-btn').addEventListener('click', () => openModal(col.id));
 
     const cardsEl = colEl.querySelector('.cards');
-    const filterColor = colColorFilter[col.id];
-    const filterDup   = colDupFilter.has(col.id);
+    const filterColor    = colColorFilter[col.id];
+    const filterDup      = colDupFilter.has(col.id);
+    const filterPriority = colPriorityFilter[col.id];
     const filteredCards = col.cards
-      .filter(c => !filterColor || c.color === filterColor)
-      .filter(c => !filterDup   || c.duplicate || c.text.startsWith('(copy) '));
+      .filter(c => !filterColor    || c.color === filterColor)
+      .filter(c => !filterDup      || c.duplicate || c.text.startsWith('(copy) '))
+      .filter(c => !filterPriority || c.priority === filterPriority);
     const isInbox  = col.title.toLowerCase().startsWith('inbox');
     const limit    = isInbox ? filteredCards.length : (colVisible[col.id] || CARDS_PER_PAGE);
     const visible  = filteredCards.slice(0, limit);
     const remaining = filteredCards.length - limit;
 
-    if (filterColor || filterDup) {
+    if (filterColor || filterDup || filterPriority) {
       colEl.querySelector('.col-filter-icon').addEventListener('click', e => {
         e.stopPropagation();
         delete colColorFilter[col.id];
+        delete colPriorityFilter[col.id];
         colDupFilter.delete(col.id);
         render();
       });

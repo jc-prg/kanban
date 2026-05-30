@@ -204,6 +204,7 @@ function hideColContextMenu() {
   document.getElementById('colCtxActionsRow').style.display = 'none';
   document.getElementById('colCtxDeleteColorRow').style.display = 'none';
   document.getElementById('colCtxFilterColorRow').style.display = 'none';
+  document.getElementById('colCtxFilterPriorityRow').style.display = 'none';
   ctxHeaderColId = null;
 }
 
@@ -348,6 +349,42 @@ document.getElementById('colCtxFilterDuplicates').addEventListener('click', () =
   if (colDupFilter.has(colId)) colDupFilter.delete(colId);
   else colDupFilter.add(colId);
   render();
+});
+
+document.getElementById('colCtxFilterByPriority').addEventListener('click', e => {
+  e.stopPropagation();
+  const priorityRow = document.getElementById('colCtxFilterPriorityRow');
+  if (priorityRow.style.display !== 'none') { priorityRow.style.display = 'none'; return; }
+  const col = state.columns.find(c => c.id === ctxHeaderColId);
+  if (!col) return;
+  const active = colPriorityFilter[col.id];
+  let html = [1, 2, 3, 4, 5].map(p =>
+    `<div class="ctx-priority-swatch${active === p ? ' selected' : ''}"
+          style="background:${PRIORITY_COLORS[p]}" data-priority="${p}"
+          title="${col.cards.filter(c => c.priority === p).length} card(s)">${PRIORITY_LABELS[p]}</div>`
+  ).join('');
+  if (active) html += `<button class="ctx-item" id="colCtxFilterPriorityClear" style="font-size:0.72rem;padding:4px 6px;width:auto">clear</button>`;
+  priorityRow.innerHTML = html;
+  priorityRow.querySelectorAll('.ctx-priority-swatch').forEach(s => {
+    s.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const colId = ctxHeaderColId;
+      hideColContextMenu();
+      colPriorityFilter[colId] = Number(s.dataset.priority);
+      render();
+    });
+  });
+  const clearBtn = priorityRow.querySelector('#colCtxFilterPriorityClear');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const colId = ctxHeaderColId;
+      hideColContextMenu();
+      delete colPriorityFilter[colId];
+      render();
+    });
+  }
+  priorityRow.style.display = 'flex';
 });
 
 document.getElementById('colCtxDeleteDuplicates').addEventListener('click', async e => {

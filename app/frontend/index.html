@@ -125,32 +125,34 @@
 <div id="colContextMenu" class="context-menu" style="display:none">
   <button class="ctx-item" id="colCtxToggleContent"><span data-icon="collapse"></span><span id="colCtxToggleLabel">  Hide content</span></button>
   <div class="ctx-item ctx-submenu-trigger">
-    <span><span data-icon="moveTo"></span>  Move all to</span>
+    <span data-icon="moveTo"></span>  Move all to
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxMoveSubmenu"></div>
   </div>
   <div class="ctx-item ctx-submenu-trigger" id="colCtxFilterBy">
-    <span><span data-icon="filter"></span>  Filter by</span>
+    <span data-icon="filter"></span>  Filter by
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxFilterBySubmenu">
       <button class="ctx-item" id="colCtxFilterByColor"><span data-icon="color"></span>  Color</button>
       <div class="ctx-color-row" id="colCtxFilterColorRow" style="display:none"></div>
       <button class="ctx-item" id="colCtxFilterDuplicates"><span data-icon="filter"></span>  Duplicates</button>
+      <button class="ctx-item" id="colCtxFilterByPriority"><span data-icon="priority"></span>  Priority</button>
+      <div class="ctx-priority-row" id="colCtxFilterPriorityRow" style="display:none"></div>
     </div>
   </div>
   <div class="ctx-item ctx-submenu-trigger" id="colCtxDeleteCards">
-    <span><span data-icon="close"></span>  Delete cards</span>
+    <span data-icon="close"></span>  Delete cards
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxDeleteCardsSubmenu">
-      <button class="ctx-item ctx-danger" id="colCtxDeleteDuplicates">Delete duplicates</button>
-      <button class="ctx-item ctx-danger" id="colCtxDeleteAll">Delete all cards</button>
-      <button class="ctx-item ctx-danger" id="colCtxDeleteByColor">By color</button>
+      <button class="ctx-item ctx-danger" id="colCtxDeleteDuplicates"><span data-icon="duplicate"></span>  Delete duplicates</button>
+      <button class="ctx-item ctx-danger" id="colCtxDeleteAll"><span data-icon="close"></span>  Delete all cards</button>
+      <button class="ctx-item ctx-danger" id="colCtxDeleteByColor"><span data-icon="color"></span>  By color</button>
       <div class="ctx-color-row" id="colCtxDeleteColorRow" style="display:none"></div>
     </div>
   </div>
   <button class="ctx-item" id="colCtxPrint"><span data-icon="print"></span>  Print column</button>
   <div class="ctx-item ctx-submenu-trigger" id="colCtxSettings">
-    <span><span data-icon="moreOptions"></span>  Settings</span>
+    <span data-icon="moreOptions"></span>  Settings
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxSettingsSubmenu">
       <button class="ctx-item" id="colCtxColor"><span data-icon="color"></span>  Change color</button>
@@ -172,7 +174,7 @@
   <button class="ctx-item" id="ctxPriority"><span data-icon="priority"></span>  Set priority</button>
   <div class="ctx-color-row ctx-priority-row" id="ctxPriorityRow" style="display:none"></div>
   <div class="ctx-item ctx-submenu-trigger">
-    <span><span data-icon="moveTo"></span>  Move to</span>
+    <span data-icon="moveTo"></span>  Move to
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="ctxMoveSubmenu"></div>
   </div>
