@@ -395,6 +395,16 @@ function render() {
   addColBtn.className = 'add-column-btn';
   addColBtn.textContent = '+ add column';
   addColBtn.addEventListener('click', addColumn);
-  board.appendChild(addColBtn);
+  const lastChild = board.lastElementChild;
+  if (lastChild && lastChild.classList.contains('collapsed-group')) {
+    lastChild.appendChild(addColBtn);
+    // If the group overflows vertically the button won't be visible without
+    // scrolling — move it to the right of the group instead.
+    if (lastChild.scrollHeight > lastChild.clientHeight) {
+      board.appendChild(addColBtn);
+    }
+  } else {
+    board.appendChild(addColBtn);
+  }
 
 }

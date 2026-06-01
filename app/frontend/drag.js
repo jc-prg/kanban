@@ -296,10 +296,29 @@ document.addEventListener('drop',     e => { if (dragState || colDragState) e.pr
 
 // ---- Arrow-key scrolling for hovered column ----
 let hoveredCardsEl = null;
+let _arrowScrollTarget = 0;
+let _arrowScrollRafId = null;
+
+function _arrowScrollStep() {
+  if (!hoveredCardsEl) { _arrowScrollRafId = null; return; }
+  const diff = _arrowScrollTarget - hoveredCardsEl.scrollTop;
+  if (Math.abs(diff) < 1) {
+    hoveredCardsEl.scrollTop = _arrowScrollTarget;
+    _arrowScrollRafId = null;
+    return;
+  }
+  hoveredCardsEl.scrollTop += diff * 0.18;
+  _arrowScrollRafId = requestAnimationFrame(_arrowScrollStep);
+}
 
 document.addEventListener('mouseover', e => {
   const col = e.target.closest('[data-col-id]');
-  hoveredCardsEl = col ? col.querySelector('.cards') : null;
+  const next = col ? col.querySelector('.cards') : null;
+  if (next !== hoveredCardsEl) {
+    hoveredCardsEl = next;
+    _arrowScrollTarget = next ? next.scrollTop : 0;
+    if (_arrowScrollRafId) { cancelAnimationFrame(_arrowScrollRafId); _arrowScrollRafId = null; }
+  }
 });
 
 document.addEventListener('keydown', e => {
@@ -307,5 +326,8 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   e.preventDefault();
-  hoveredCardsEl.scrollBy({ top: e.key === 'ArrowDown' ? 80 : -80, behavior: 'smooth' });
+  _arrowScrollTarget += e.key === 'ArrowDown' ? 80 : -80;
+  const max = hoveredCardsEl.scrollHeight - hoveredCardsEl.clientHeight;
+  _arrowScrollTarget = Math.max(0, Math.min(max, _arrowScrollTarget));
+  if (!_arrowScrollRafId) _arrowScrollRafId = requestAnimationFrame(_arrowScrollStep);
 });
