@@ -1194,6 +1194,25 @@
 
 .search-col-group { margin-bottom: 10px; }
 
+.search-col-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.search-col-toggle-all {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.72rem;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.search-col-toggle-all:hover { opacity: 0.75; }
+
 .search-column-list {
   display: flex;
   flex-wrap: wrap;
@@ -1351,7 +1370,7 @@
 }
 
 .modal--fullscreen .modal-col-side,
-.modal--fullscreen h2 {
+.modal--fullscreen > h2 {
   display: none !important;
 }
 

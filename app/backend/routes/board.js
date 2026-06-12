@@ -111,8 +111,20 @@ router.put('/:board/board', writeRateLimit, withBoard(async (req, res, db) => {
   res.json({ success: true });
 }));
 
+const _KNOWN_SETTINGS = new Set([
+  'description','archived','inboxWithDate','persistCollapse','collapsedColumnIds',
+  'trackedColumns','notesSidebarOpen','notesSidebarWidth','notesFontSize',
+  'autoSaveDialogs','autoSaveIntervalMin','hideDoneInOverview',
+]);
+
 router.patch('/:board/board', writeRateLimit, withBoard(async (req, res, db) => {
-  if (!validateBoardPatch(req.body)) {
+  const body = stripNulls(req.body);
+  if (body.settings && typeof body.settings === 'object') {
+    const s = {};
+    for (const k of _KNOWN_SETTINGS) { if (body.settings[k] !== undefined) s[k] = body.settings[k]; }
+    body.settings = s;
+  }
+  if (!validateBoardPatch(body)) {
     const details = schemaError(validateBoardPatch);
     console.error(`[PATCH /${req.params.board}/board] schema validation failed:`, details);
     return res.status(400).json({ error: 'Invalid patch data', details });
@@ -120,7 +132,7 @@ router.patch('/:board/board', writeRateLimit, withBoard(async (req, res, db) => 
   const { _rev, ...data } = await db.get(DOC_ID);
   const ifMatch = req.headers['if-match'];
   if (ifMatch && ifMatch !== `"${_rev}"`) return res.status(409).json({ error: 'conflict' });
-  const { columnOrder, updatedColumns, removedColumnIds, settings } = req.body;
+  const { columnOrder, updatedColumns, removedColumnIds, settings } = body;
   let columns = data.columns;
 
   if (removedColumnIds?.length) {

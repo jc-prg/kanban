@@ -70,12 +70,19 @@
   }
 
   function renderColumnFilter() {
-    const list  = document.getElementById('searchColumnList');
-    const items = buildColumnItems();
+    const list   = document.getElementById('searchColumnList');
+    const toggle = document.getElementById('searchColToggleAll');
+    const items  = buildColumnItems();
     const allIds = state.columns.map(c => c.id);
+    // selColumns.size === 0 means "all columns" (no filter active).
+    // '__none__' sentinel means "no columns" (filter active, nothing passes).
+    const allOn  = selColumns.size === 0;
+    const noneOn = selColumns.size === 1 && selColumns.has('__none__');
+
+    toggle.textContent = allOn ? 'deselect all' : 'select all';
 
     list.innerHTML = items.map((item, i) => {
-      const checked = selColumns.size === 0 || item.ids.every(id => selColumns.has(id));
+      const checked = allOn || (!noneOn && item.ids.every(id => selColumns.has(id)));
       return `<label class="search-col-label">
         <input type="checkbox" class="search-col-cb" data-idx="${i}"${checked ? ' checked' : ''}>
         <span>${escHtml(item.label)}</span>
@@ -85,12 +92,24 @@
     list.querySelectorAll('.search-col-cb').forEach((cb, i) => {
       cb.addEventListener('change', () => {
         if (selColumns.size === 0) allIds.forEach(id => selColumns.add(id));
+        selColumns.delete('__none__');
         if (cb.checked) items[i].ids.forEach(id => selColumns.add(id));
         else            items[i].ids.forEach(id => selColumns.delete(id));
         if (allIds.every(id => selColumns.has(id))) selColumns.clear();
+        renderColumnFilter();
         runSearch();
       });
     });
+
+    toggle.onclick = () => {
+      if (allOn) {
+        selColumns.add('__none__'); // deselect all — sentinel keeps size > 0 so filter is active
+      } else {
+        selColumns.clear(); // select all — size === 0 means no filter
+      }
+      renderColumnFilter();
+      runSearch();
+    };
   }
 
   // ---- Search logic ----
