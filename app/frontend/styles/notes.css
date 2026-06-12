@@ -213,6 +213,7 @@
 .notes-item-indicator {
   display: flex;
   align-items: center;
+  gap: 2px;
   line-height: 1;
 }
 
@@ -472,6 +473,15 @@
 .note-mini-card-text--gone {
   color: var(--text-muted);
   font-style: italic;
+}
+
+.note-mini-card-attach {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
 .note-mini-card-remove {

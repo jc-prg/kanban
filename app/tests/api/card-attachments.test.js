@@ -116,7 +116,7 @@ describe('POST /:board/cards/attachments/:cardId', () => {
 // CA-2: List card IDs with attachments
 // ---------------------------------------------------------------------------
 describe('GET /:board/cards/attachments', () => {
-  it('CA-2: returns array of card IDs that have attachments', async () => {
+  it('CA-2: returns array of { id, count } for cards that have attachments', async () => {
     // Upload to ensure at least one card has an attachment
     await request(app)
       .post(`/api/${BOARD}/cards/attachments/${CARD_ID}`)
@@ -129,7 +129,10 @@ describe('GET /:board/cards/attachments', () => {
 
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
-    expect(res.body).toContain(CARD_ID)
+    const entry = res.body.find(e => e.id === CARD_ID)
+    expect(entry).toBeTruthy()
+    expect(typeof entry.count).toBe('number')
+    expect(entry.count).toBeGreaterThan(0)
   })
 })
 

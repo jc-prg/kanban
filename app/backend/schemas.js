@@ -79,8 +79,9 @@ const _noteItemSchema = {
     description:    { type: 'string' },
     link:           { type: 'string' },
     linkedCards:    { type: 'array', items: { type: 'string' } },
-    hasAttachments: { type: 'boolean' },
-    lastModified:   { type: 'string' },
+    hasAttachments:  { type: 'boolean' },
+    attachmentCount: { type: 'integer', minimum: 0 },
+    lastModified:    { type: 'string' },
   }
 };
 const validateNotes = ajv.compile({
@@ -99,9 +100,10 @@ const _notePagePatchSchema = {
     description:    { type: 'string' },
     link:           { type: 'string' },
     linkedCards:    { type: 'array', items: { type: 'string' } },
-    hasAttachments: { type: 'boolean' },
-    lastModified:   { type: 'string' },
-    wdPath:         { type: 'string' }
+    hasAttachments:  { type: 'boolean' },
+    attachmentCount: { type: 'integer', minimum: 0 },
+    lastModified:    { type: 'string' },
+    wdPath:          { type: 'string' }
   }
 };
 const validateNotesPatch = ajv.compile({

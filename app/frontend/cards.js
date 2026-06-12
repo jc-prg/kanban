@@ -145,14 +145,15 @@ document.addEventListener('DOMContentLoaded', () => {
 // ---- Card attachment constants & helpers ----
 const CARD_ATTACH_API = API_BASE ? `${API_BASE}/cards/attachments` : null;
 
-let cardAttachSet = new Set();
+let cardAttachMap = new Map(); // cardId → attachment count (null = unknown, number = known)
 
 async function loadCardAttachSet() {
   if (!CARD_ATTACH_API) return;
   try {
     const r = await fetch(CARD_ATTACH_API);
-    cardAttachSet = new Set(r.ok ? await r.json() : []);
-  } catch { cardAttachSet = new Set(); }
+    const entries = r.ok ? await r.json() : [];
+    cardAttachMap = new Map(entries.map(({ id, count }) => [id, count]));
+  } catch { cardAttachMap = new Map(); }
   render();
 }
 
@@ -191,9 +192,11 @@ function renderCardAttachments(cardId, files) {
   const list = document.getElementById('cardAttachList');
   if (!list) return;
   list.innerHTML = '';
-  const hadAttach = cardAttachSet.has(cardId);
-  if (files.length) cardAttachSet.add(cardId); else cardAttachSet.delete(cardId);
-  if (hadAttach !== cardAttachSet.has(cardId)) render();
+  const hadAttach = cardAttachMap.has(cardId);
+  const prevCount = cardAttachMap.get(cardId);
+  if (files.length) cardAttachMap.set(cardId, files.length); else cardAttachMap.delete(cardId);
+  if (hadAttach !== cardAttachMap.has(cardId) || prevCount !== files.length) render();
+  _updateToggleCount('cardToggleAttachments', files.length);
   if (!files.length) {
     const p = document.createElement('p');
     p.className = 'note-attach-empty';
@@ -390,6 +393,18 @@ async function tryCloseModal() {
   }
 }
 
+function _updateToggleCount(btnId, count) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  let countEl = btn.querySelector('.attach-count');
+  if (count > 0) {
+    if (countEl) countEl.textContent = count;
+    else btn.insertAdjacentHTML('beforeend', `<span class="attach-count">${count}</span>`);
+  } else {
+    countEl?.remove();
+  }
+}
+
 // ---- Collapsible card sections ----
 function setCardSection(sectionId, btnId, open) {
   const section = document.getElementById(sectionId);
@@ -433,6 +448,7 @@ function renderCardLinkedPages(cardId) {
   const wide = window.innerWidth >= 1200;
   if (toggle)  toggle.style.display = hasLinked ? '' : 'none';
   setCardSection('cardNotePagesSection', 'cardToggleNotePages', hasLinked && wide);
+  _updateToggleCount('cardToggleNotePages', linked.length);
 
   list.innerHTML = '';
   linked.forEach(page => {

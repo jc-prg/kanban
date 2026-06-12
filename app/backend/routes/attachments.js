@@ -190,14 +190,18 @@ router.get('/:board/cards/attachments', (req, res) => {
   const boardDir = path.join(ATTACHMENTS_DIR, board);
   if (!fs.existsSync(boardDir)) return res.json([]);
   try {
-    const ids = fs.readdirSync(boardDir).filter(name => {
+    const entries = fs.readdirSync(boardDir).filter(name => {
       if (!safeCardId(name)) return false;
       const dir = path.join(boardDir, name);
       try {
         return fs.statSync(dir).isDirectory() && fs.readdirSync(dir).some(f => !f.startsWith('.'));
       } catch { return false; }
+    }).map(name => {
+      const dir = path.join(boardDir, name);
+      const count = fs.readdirSync(dir).filter(f => !f.startsWith('.')).length;
+      return { id: name, count };
     });
-    res.json(ids);
+    res.json(entries);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

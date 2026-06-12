@@ -614,7 +614,7 @@ function _renderPageItem(page, container, depth) {
   const indicators =
     (hasLink        ? `<span class="notes-item-indicator" title="Has link">${SVGICONS.link(9, 9)}</span>` : '') +
     (hasCards       ? `<span class="notes-item-indicator" title="${page.linkedCards.length} linked card(s)">${SVGICONS.linkedCards(9, 9)}</span>` : '') +
-    (hasAttachments ? `<span class="notes-item-indicator" title="Has attachments">${SVGICONS.attachment(9, 9)}</span>` : '');
+    (hasAttachments ? `<span class="notes-item-indicator" title="${page.attachmentCount ? page.attachmentCount + ' attachment' + (page.attachmentCount > 1 ? 's' : '') : 'Has attachments'}">${SVGICONS.attachment(9, 9)}${page.attachmentCount ? `<span class="attach-count">${page.attachmentCount}</span>` : ''}</span>` : '');
 
   el.innerHTML =
     `<span class="notes-toggle-btn notes-toggle-btn--hidden"></span>` +
@@ -681,6 +681,18 @@ function _startFolderRename(itemEl, folder) {
 }
 
 // ---- Collapsible note sections ----
+function _updateNoteToggleCount(btnId, count) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  let countEl = btn.querySelector('.attach-count');
+  if (count > 0) {
+    if (countEl) countEl.textContent = count;
+    else btn.insertAdjacentHTML('beforeend', `<span class="attach-count">${count}</span>`);
+  } else {
+    countEl?.remove();
+  }
+}
+
 function setNoteSection(sectionId, btnId, open) {
   const section = document.getElementById(sectionId);
   const btn     = document.getElementById(btnId);
@@ -1042,6 +1054,7 @@ function renderLinkedCards(ids) {
   const container = document.getElementById('noteLinkedCardsList');
   if (!container) return;
   container.innerHTML = '';
+  _updateNoteToggleCount('noteToggleLinkedCards', ids.length);
 
   for (const id of ids) {
     let card = null, col = null;
@@ -1058,11 +1071,16 @@ function renderLinkedCards(ids) {
     const text = card ? card.text : `[card not found: ${id}]`;
     const isGone = !card;
 
+    const attachCount = card ? (cardAttachMap.get(card.id) ?? null) : null;
+    const attachBadge = attachCount
+      ? `<span class="note-mini-card-attach" title="${attachCount} attachment${attachCount > 1 ? 's' : ''}">${SVGICONS.attachment(9, 9)}<span class="attach-count">${attachCount}</span></span>`
+      : '';
     mini.innerHTML =
       `<div class="note-mini-card-body">` +
         (col ? `<span class="note-mini-card-col">${escHtml(col.title)}</span>` : '') +
         `<span class="note-mini-card-text${isGone ? ' note-mini-card-text--gone' : ''}" title="${escHtml(text)}">${escHtml(text)}</span>` +
       `</div>` +
+      attachBadge +
       `<button class="note-mini-card-remove" title="Unlink card">${ICONS.close}</button>`;
 
     if (card && col) {
@@ -1321,12 +1339,18 @@ function renderAttachments(pageId, files) {
   list.innerHTML = '';
 
   const page = findNotePage(pageId, notesState.items);
-  if (page && !!page.hasAttachments !== (files.length > 0)) {
+  if (page) {
+    const hadAttach = page.hasAttachments;
+    const prevCount = page.attachmentCount;
     page.hasAttachments = files.length > 0;
-    page.lastModified   = new Date().toISOString();
-    scheduleSaveNotes();
-    renderNotesTree();
+    page.attachmentCount = files.length;
+    if (!!hadAttach !== page.hasAttachments || prevCount !== files.length) {
+      if (!!hadAttach !== page.hasAttachments) page.lastModified = new Date().toISOString();
+      scheduleSaveNotes();
+      renderNotesTree();
+    }
   }
+  _updateNoteToggleCount('noteToggleAttachments', files.length);
   if (!files.length) {
     const p = document.createElement('p');
     p.className = 'note-attach-empty';

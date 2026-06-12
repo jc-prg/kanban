@@ -143,6 +143,13 @@
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+  gap: 2px;
+}
+
+.attach-count {
+  font-size: 0.62rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .card-link-icon {

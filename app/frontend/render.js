@@ -232,8 +232,10 @@ function render() {
         if (card.description) {
           metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">${SVGICONS.description()}</span>`);
         }
-        if (cardAttachSet.has(card.id)) {
-          metaParts.push(`<span class="card-attach-badge" title="Has attachments">${SVGICONS.attachment(10, 10)}</span>`);
+        if (cardAttachMap.has(card.id)) {
+          const attachCount = cardAttachMap.get(card.id);
+          const countHtml = attachCount ? `<span class="attach-count">${attachCount}</span>` : '';
+          metaParts.push(`<span class="card-attach-badge" title="${attachCount ? attachCount + ' attachment' + (attachCount > 1 ? 's' : '') : 'Has attachments'}">${SVGICONS.attachment(10, 10)}${countHtml}</span>`);
         }
         if (noteLinkedCards.has(card.id)) {
           metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
