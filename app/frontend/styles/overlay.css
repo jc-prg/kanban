@@ -103,6 +103,29 @@
 .ctx-priority-swatch:hover    { transform: scale(1.12); }
 .ctx-priority-swatch.selected { border-color: #fff; }
 
+.ctx-date-row {
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px;
+}
+
+.ctx-month-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  background: #ef4444;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.12s, border-color 0.12s;
+}
+.ctx-month-swatch:hover { transform: scale(1.12); border-color: #fff; }
+
 .ctx-actions-row {
   flex-direction: column;
   gap: 0;

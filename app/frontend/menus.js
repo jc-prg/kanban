@@ -8,6 +8,7 @@ function showContextMenu(x, y, colId, card) {
 
   document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
   document.getElementById('ctxInfo').style.display = dateEditMode ? '' : 'none';
+  document.getElementById('ctxCopyLink').style.display = card.link ? '' : 'none';
   document.getElementById('ctxColorRow').style.display = 'none';
 
   const submenu = document.getElementById('ctxMoveSubmenu');
@@ -77,6 +78,12 @@ document.getElementById('ctxDuplicate').addEventListener('click', () => {
   col.cards.splice(idx + 1, 0, copy);
   render();
   schedulesSave();
+});
+
+document.getElementById('ctxCopyLink').addEventListener('click', () => {
+  const link = ctxCard?.link;
+  hideContextMenu();
+  if (link) navigator.clipboard.writeText(link);
 });
 
 document.getElementById('ctxColor').addEventListener('click', e => {
@@ -440,6 +447,36 @@ document.getElementById('colCtxDeleteByColor').addEventListener('click', e => {
     });
   });
   colorRow.style.display = 'flex';
+});
+
+document.getElementById('colCtxDeleteByDate').addEventListener('click', e => {
+  e.stopPropagation();
+  const dateRow = document.getElementById('colCtxDeleteDateRow');
+  if (dateRow.style.display !== 'none') { dateRow.style.display = 'none'; return; }
+  const col = state.columns.find(c => c.id === ctxHeaderColId);
+  if (!col) return;
+  dateRow.innerHTML = [1, 2, 3, 4, 5, 6].map(m =>
+    `<div class="ctx-month-swatch" data-months="${m}" title="Delete cards created more than ${m} month${m > 1 ? 's' : ''} ago">${m}mo</div>`
+  ).join('');
+  dateRow.querySelectorAll('.ctx-month-swatch').forEach(s => {
+    s.addEventListener('click', async ev => {
+      ev.stopPropagation();
+      const months = parseInt(s.dataset.months, 10);
+      const colRef = state.columns.find(c => c.id === ctxHeaderColId);
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - months);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const count = colRef?.cards.filter(c => c.created && c.created < cutoffStr).length || 0;
+      hideColContextMenu();
+      if (colRef && count > 0 &&
+          await showConfirm(`Delete ${count} card(s) created more than ${months} month${months > 1 ? 's' : ''} ago from "${colRef.title}"?`, { okLabel: 'Delete', danger: true })) {
+        colRef.cards = colRef.cards.filter(c => !c.created || c.created >= cutoffStr);
+        render();
+        schedulesSave();
+      }
+    });
+  });
+  dateRow.style.display = 'flex';
 });
 
 document.getElementById('colCtxDelete').addEventListener('click', async () => {
