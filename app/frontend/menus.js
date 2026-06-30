@@ -163,6 +163,7 @@ function hideColContextMenu() {
   document.getElementById('colCtxColorRow').style.display = 'none';
   document.getElementById('colCtxActionsRow').style.display = 'none';
   document.getElementById('colCtxDeleteColorRow').style.display = 'none';
+  document.getElementById('colCtxDeleteDateRow').style.display = 'none';
   document.getElementById('colCtxFilterColorRow').style.display = 'none';
   ctxHeaderColId = null;
 }
@@ -313,6 +314,50 @@ document.getElementById('colCtxDeleteDuplicates').addEventListener('click', asyn
     render();
     schedulesSave();
   }
+});
+
+document.getElementById('colCtxDeleteByDate').addEventListener('click', e => {
+  e.stopPropagation();
+  const dateRow = document.getElementById('colCtxDeleteDateRow');
+  if (dateRow.style.display !== 'none') { dateRow.style.display = 'none'; return; }
+  const OPTIONS = [
+    { label: '1 mo',  months: 1 },
+    { label: '3 mo',  months: 3 },
+    { label: '6 mo',  months: 6 },
+    { label: '1 yr',  months: 12 },
+  ];
+  dateRow.innerHTML = OPTIONS.map(o =>
+    `<button class="ctx-item ctx-danger" data-months="${o.months}" style="font-size:0.72rem;padding:4px 6px;width:auto">${o.label}</button>`
+  ).join('');
+  dateRow.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', async ev => {
+      ev.stopPropagation();
+      const months = parseInt(btn.dataset.months, 10);
+      const colRef = state.columns.find(c => c.id === ctxHeaderColId);
+      if (!colRef) { hideColContextMenu(); return; }
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - months);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const includeNoDates = months >= 6;
+      const toDelete = colRef.cards.filter(c =>
+        (includeNoDates && !c.created) || (c.created && c.created <= cutoffStr)
+      );
+      const count = toDelete.length;
+      hideColContextMenu();
+      if (!count) return;
+      const msg = includeNoDates
+        ? `Delete ${count} card(s) older than ${btn.textContent} or without a creation date from "${colRef.title}"?`
+        : `Delete ${count} card(s) older than ${btn.textContent} from "${colRef.title}"?`;
+      if (await showConfirm(msg, { okLabel: 'Delete', danger: true })) {
+        colRef.cards = colRef.cards.filter(c =>
+          !((includeNoDates && !c.created) || (c.created && c.created <= cutoffStr))
+        );
+        render();
+        schedulesSave();
+      }
+    });
+  });
+  dateRow.style.display = 'flex';
 });
 
 document.getElementById('colCtxDeleteAll').addEventListener('click', async e => {
