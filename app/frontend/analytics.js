@@ -170,6 +170,31 @@
       },
       renderResult: (results, el) => renderDurationStats(results, el),
     },
+    {
+      id: 'created-per-month',
+      label: 'Created per month',
+      params: [],
+      run(cards) {
+        const cardCol = {};
+        state.columns.forEach(col => col.cards.forEach(c => { cardCol[c.id] = col.title; }));
+
+        const monthMap = {};
+        const noDate   = [];
+        cards.forEach(c => {
+          if (!c.created) {
+            noDate.push({ text: c.text, id: c.id, col: cardCol[c.id] || '' });
+            return;
+          }
+          const month = c.created.slice(0, 7);
+          monthMap[month] = (monthMap[month] || 0) + 1;
+        });
+        const months = Object.entries(monthMap)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([label, count]) => ({ label, count }));
+        return { months, noDate };
+      },
+      renderResult: (data, el) => renderCreatedPerMonth(data, el),
+    },
   ];
 
   // ---- Helpers ----
@@ -848,6 +873,80 @@
     </svg>
     <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
     ${durationHistogramHtml({ both, startOnly, endOnly })}`;
+  }
+
+  function renderCreatedPerMonth({ months, noDate }, el) {
+    if (!months.length && !noDate.length) {
+      el.innerHTML = '<p class="search-empty">No card data found.</p>';
+      return;
+    }
+
+    let html = '';
+
+    if (months.length) {
+      const W = 500, H = 180;
+      const ml = 30, mr = 8, mt = 8, mb = 44;
+      const plotW = W - ml - mr, plotH = H - mt - mb;
+      const maxCount = Math.max(...months.map(r => r.count));
+      const bw  = plotW / months.length;
+      const gap = Math.max(1, bw * 0.15);
+
+      const bars = months.map((r, i) => {
+        const bh = (r.count / maxCount) * plotH;
+        const x  = (ml + i * bw + gap / 2).toFixed(1);
+        const y  = (mt + plotH - bh).toFixed(1);
+        const w  = Math.max(1, bw - gap).toFixed(1);
+        return `<rect x="${x}" y="${y}" width="${w}" height="${bh.toFixed(1)}" style="fill:var(--accent)" opacity="0.8" rx="2"><title>${escHtml(r.label)}: ${r.count} card${r.count !== 1 ? 's' : ''}</title></rect>`;
+      }).join('');
+
+      const countLabels = months.map((r, i) => {
+        const bh = (r.count / maxCount) * plotH;
+        if (bh < 14) return '';
+        const x = (ml + i * bw + bw / 2).toFixed(1);
+        const y = (mt + plotH - bh + 10).toFixed(1);
+        return `<text x="${x}" y="${y}" text-anchor="middle" style="fill:var(--bg)">${r.count}</text>`;
+      }).join('');
+
+      const nTicks = Math.min(4, maxCount);
+      const yLines = Array.from({ length: nTicks + 1 }, (_, i) => {
+        const v  = Math.round((maxCount / nTicks) * i);
+        const y  = (mt + plotH - (v / maxCount) * plotH).toFixed(1);
+        const da = i === 0 ? '' : ' stroke-dasharray="3,3"';
+        return `<line x1="${ml}" y1="${y}" x2="${W - mr}" y2="${y}" style="stroke:var(--border)" stroke-width="0.5"${da}/>
+                <text x="${ml - 4}" y="${y}" text-anchor="end" dominant-baseline="middle">${v}</text>`;
+      }).join('');
+
+      const step = Math.max(1, Math.ceil(months.length / 12));
+      const xLabels = months.map((r, i) => {
+        if (i % step !== 0 && i !== months.length - 1) return '';
+        const cx  = (ml + i * bw + bw / 2).toFixed(1);
+        const cy  = H - mb + 12;
+        const [yr, mo] = r.label.split('-');
+        const lbl = `${MONTHS[parseInt(mo, 10) - 1]} ${yr.slice(2)}`;
+        return `<text x="${cx}" y="${cy}" text-anchor="end" transform="rotate(-40,${cx},${cy})">${lbl}</text>`;
+      }).join('');
+
+      html += `<p class="analytics-section-label">Created per month</p>
+      <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" class="analytics-histogram"
+                 style="font-size:9px;font-family:'DM Mono',monospace;fill:var(--text-muted);display:block;margin-top:10px;max-width:100%">
+        ${yLines}
+        <line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt + plotH}" style="stroke:var(--border)" stroke-width="1"/>
+        ${bars}
+        ${countLabels}
+        ${xLabels}
+      </svg>`;
+    }
+
+    if (noDate.length) {
+      const rows = noDate.map(c => `<div class="analytics-bar-row">
+        <span class="analytics-bar-label" title="${escHtml(c.text)}" style="flex:1;min-width:0">${escHtml(c.text)}</span>
+        ${c.col ? `<span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;margin-left:8px">${escHtml(c.col)}</span>` : ''}
+      </div>`).join('');
+      html += `<p class="analytics-section-label" style="margin-top:18px">No creation date (${noDate.length})</p>
+      <div style="margin-top:6px">${rows}</div>`;
+    }
+
+    el.innerHTML = html;
   }
 
   // ---- Run ----
