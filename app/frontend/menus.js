@@ -469,11 +469,14 @@ document.getElementById('colCtxDeleteByDate').addEventListener('click', e => {
       const includeNoDate = months === 6;
       const count = colRef?.cards.filter(c => (c.created && c.created < cutoffStr) || (includeNoDate && !c.created)).length || 0;
       hideColContextMenu();
+      if (!colRef || count === 0) {
+        await showConfirm(`No cards older than ${months} month${months > 1 ? 's' : ''} in "${colRef?.title}".`, { okLabel: 'OK' });
+        return;
+      }
       const confirmMsg = includeNoDate
         ? `Delete ${count} card(s) created more than ${months} months ago (including cards without a creation date) from "${colRef.title}"?`
         : `Delete ${count} card(s) created more than ${months} month${months > 1 ? 's' : ''} ago from "${colRef.title}"?`;
-      if (colRef && count > 0 &&
-          await showConfirm(confirmMsg, { okLabel: 'Delete', danger: true })) {
+      if (await showConfirm(confirmMsg, { okLabel: 'Delete', danger: true })) {
         colRef.cards = colRef.cards.filter(c => {
           if (!c.created) return !includeNoDate;
           return c.created >= cutoffStr;
