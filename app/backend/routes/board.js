@@ -179,8 +179,8 @@ router.get('/:board/column/:name', withBoard(async (req, res, db) => {
 
 router.get('/:board/card/:id', withBoard(async (req, res, db) => {
   const data = await loadBoardData(db);
-  for (const col of data.columns) {
-    const card = col.cards.find(c => c.id === req.params.id);
+  for (const col of (data.columns || [])) {
+    const card = (col.cards || []).find(c => c.id === req.params.id);
     if (card) return res.json({ created: card.created || null, moves: card.moves || [], column: col.title });
   }
   res.status(404).json({ error: 'Card not found' });
