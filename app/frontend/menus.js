@@ -320,6 +320,7 @@ document.getElementById('colCtxDeleteByDate').addEventListener('click', e => {
   e.stopPropagation();
   const dateRow = document.getElementById('colCtxDeleteDateRow');
   if (dateRow.style.display !== 'none') { dateRow.style.display = 'none'; return; }
+  const colId = ctxHeaderColId; // capture before any click handler can null it
   const OPTIONS = [
     { label: '1 mo',  months: 1 },
     { label: '3 mo',  months: 3 },
@@ -329,11 +330,12 @@ document.getElementById('colCtxDeleteByDate').addEventListener('click', e => {
   dateRow.innerHTML = OPTIONS.map(o =>
     `<button class="ctx-item ctx-danger" data-months="${o.months}" style="font-size:0.72rem;padding:4px 6px;width:auto">${o.label}</button>`
   ).join('');
+  dateRow.onclick = e => e.stopPropagation();
   dateRow.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', async ev => {
       ev.stopPropagation();
       const months = parseInt(btn.dataset.months, 10);
-      const colRef = state.columns.find(c => c.id === ctxHeaderColId);
+      const colRef = state.columns.find(c => c.id === colId);
       if (!colRef) { hideColContextMenu(); return; }
       const cutoff = new Date();
       cutoff.setMonth(cutoff.getMonth() - months);
@@ -344,7 +346,10 @@ document.getElementById('colCtxDeleteByDate').addEventListener('click', e => {
       );
       const count = toDelete.length;
       hideColContextMenu();
-      if (!count) return;
+      if (!count) {
+        await showConfirm(`No cards older than ${btn.textContent}${includeNoDates ? ' or without a creation date' : ''} found in "${colRef.title}".`, { okLabel: 'OK' });
+        return;
+      }
       const msg = includeNoDates
         ? `Delete ${count} card(s) older than ${btn.textContent} or without a creation date from "${colRef.title}"?`
         : `Delete ${count} card(s) older than ${btn.textContent} from "${colRef.title}"?`;
