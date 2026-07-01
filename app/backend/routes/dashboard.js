@@ -5,7 +5,7 @@ const { writeRateLimit }                          = require('../auth');
 const { getDashboardConfig, saveDashboardConfig } = require('../global-db');
 const { getCouch }                                = require('../db');
 const { DB_PREFIX, DOC_ID }                       = require('../config');
-const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount } = require('../dashboard/calendar');
+const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache } = require('../dashboard/calendar');
 const { fetchMailAccount, fetchMailMessage, testMailAccount,
         listMailFolders, markMailMessage, moveMailMessage, deleteMailMessage } = require('../dashboard/mail');
 
@@ -58,6 +58,7 @@ router.put('/dashboard/config', writeRateLimit, async (req, res) => {
     const stored = await getDashboardConfig();
     const merged = mergePasswords(stored, req.body);
     await saveDashboardConfig(merged);
+    clearCalendarUrlCache();
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

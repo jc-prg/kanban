@@ -12,12 +12,12 @@ npm install
 node backend/server.js
 ```
 
-Then open: http://localhost:3000
-
 Or via Docker (from project root):
 ```bash
 docker compose up -d --build
 ```
+
+Then open: http://localhost:3000
 
 ## Features
 - Multiple boards — create, rename, archive, delete

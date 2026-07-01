@@ -8,6 +8,11 @@ const TEST_TIMEOUT_MS  =  8_000;
 
 function _pad(n) { return String(n).padStart(2, '0'); }
 
+/** Format a Date as CalDAV UTC datetime string (YYYYMMDDTHHmmssZ). */
+function _fmtCalDavDate(d) {
+  return `${d.getUTCFullYear()}${_pad(d.getUTCMonth() + 1)}${_pad(d.getUTCDate())}T000000Z`;
+}
+
 function _icalTimeToString(t) {
   if (!t) return null;
   if (t.isDate) {
@@ -169,6 +174,10 @@ async function _resolveCalendarUrl(account, headers, signal) {
     return { url: account.url, discovered: false };
   }
 
+  const cacheKey = account.id || `${account.url}\x00${account.calendarName}`;
+  const cached = _urlCache.get(cacheKey);
+  if (cached) return cached;
+
   try {
     const homeUrl = await _discoverHomeSet(account, headers, signal);
     if (!homeUrl) return { url: _calendarUrlFallback(account), discovered: false };
@@ -185,7 +194,11 @@ async function _resolveCalendarUrl(account, headers, signal) {
       });
     }
 
-    if (match) return { url: match.url, discovered: true, allCalendars: calendars };
+    if (match) {
+      const result = { url: match.url, discovered: true, allCalendars: calendars };
+      _urlCache.set(cacheKey, { url: match.url, discovered: true });
+      return result;
+    }
     return { url: null, discovered: true, allCalendars: calendars };
   } catch {
     return { url: _calendarUrlFallback(account), discovered: false };
@@ -202,13 +215,43 @@ function _calendarUrlFallback(account) {
   return `${base}/${encodeURIComponent(account.calendarName)}/`;
 }
 
-const _REPORT_BODY = `<?xml version="1.0" encoding="utf-8"?>\
+/** REPORT body with no date filter — used for single-event lookups. */
+const _REPORT_BODY_ALL = `<?xml version="1.0" encoding="utf-8"?>\
 <C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">\
 <D:prop><D:getetag/><C:calendar-data/></D:prop>\
 <C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VEVENT"/>\
 </C:comp-filter></C:filter></C:calendar-query>`;
 
-async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS) {
+/** REPORT body restricted to [today, today + lookaheadDays). */
+function _buildReportBody(lookaheadDays) {
+  const now     = new Date();
+  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const start   = _fmtCalDavDate(new Date(todayMs));
+  const end     = _fmtCalDavDate(new Date(todayMs + lookaheadDays * 86_400_000));
+  return `<?xml version="1.0" encoding="utf-8"?>\
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">\
+<D:prop><D:getetag/><C:calendar-data/></D:prop>\
+<C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VEVENT">\
+<C:time-range start="${start}" end="${end}"/>\
+</C:comp-filter></C:comp-filter></C:filter></C:calendar-query>`;
+}
+
+// ---- URL cache ----
+
+/**
+ * Cache of resolved CalDAV collection URLs, keyed by account id (or url+calendarName).
+ * Avoids repeating the 3-step discovery (principal → home-set → collection list) on
+ * every fetch. Cleared when dashboard config is saved.
+ */
+const _urlCache = new Map();
+
+/** Clear cached calendar URL(s). Pass accountId to clear one entry, or omit to clear all. */
+function clearCalendarUrlCache(accountId) {
+  if (accountId !== undefined) _urlCache.delete(accountId);
+  else _urlCache.clear();
+}
+
+async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookaheadDays } = {}) {
   const { type, url, user, password } = account;
   const headers = {};
   if (user && password) {
@@ -227,14 +270,18 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS) {
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       allEvents = parseEvents(await res.text());
     } else {
-      // Resolve the correct calendar collection URL via CalDAV discovery
+      // Resolve the correct calendar collection URL via CalDAV discovery (cached after first call)
       const { url: calUrl } = await _resolveCalendarUrl(account, headers, controller.signal);
       const targetUrl = calUrl || _calendarUrlFallback(account);
+
+      const reportBody = lookaheadDays != null
+        ? _buildReportBody(lookaheadDays)
+        : _REPORT_BODY_ALL;
 
       const res = await fetch(targetUrl, {
         method:  'REPORT',
         headers: { ...headers, 'Content-Type': 'application/xml', 'Depth': '1' },
-        body:    _REPORT_BODY,
+        body:    reportBody,
         signal:  controller.signal,
       });
 
@@ -261,8 +308,8 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS) {
  */
 async function fetchCalendarAccount(account) {
   try {
-    const { events } = await fetchRawEvents(account);
     const days = account.lookaheadDays ?? 7;
+    const { events } = await fetchRawEvents(account, FETCH_TIMEOUT_MS, { lookaheadDays: days });
     return { events: filterEvents(events, days), error: null };
   } catch (err) {
     return { events: [], error: err.message };
@@ -357,4 +404,4 @@ async function testCalendarAccount(account) {
   }
 }
 
-module.exports = { parseEvents, filterEvents, fetchRawEvents, fetchCalendarAccount, testCalendarAccount };
+module.exports = { parseEvents, filterEvents, fetchRawEvents, fetchCalendarAccount, testCalendarAccount, clearCalendarUrlCache };
