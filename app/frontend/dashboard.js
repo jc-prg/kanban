@@ -441,6 +441,7 @@ function _renderMailPanel(accounts) {
       return header + '<p class="dashboard-empty">No messages.</p>';
     }
 
+    const colorStyle = acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : '';
     const items = acc.messages.map(msg => {
       const dateStr = msg.date ? (() => {
         const d = new Date(msg.date);
@@ -454,7 +455,7 @@ function _renderMailPanel(accounts) {
       if (msg.from) metaParts.push(`<span class="dashboard-mail-from">${escHtml(msg.from)}</span>`);
       if (dateStr)  metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
-      return `<div class="dashboard-mail-item card"
+      return `<div class="dashboard-mail-item card"${colorStyle}
           data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-unread="${msg.unread ? '1' : '0'}" data-web-url="${escHtml(acc.webInterfaceUrl || '')}">
         <div class="card-body">
           <div class="card-text">${msg.unread ? `<strong>${escHtml(msg.subject)}</strong>` : escHtml(msg.subject)}</div>

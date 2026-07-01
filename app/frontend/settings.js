@@ -87,8 +87,7 @@ async function checkAuth() {
   const r = await fetch('/api/auth/verify');
   const { ok } = await r.json();
   if (ok) { afterAuth(); return; }
-  document.getElementById('loginBackdrop').style.display = 'flex';
-  setTimeout(() => document.getElementById('loginPassword').focus(), 50);
+  handleSessionExpired();
 }
 
 document.getElementById('loginForm').addEventListener('submit', async () => {
@@ -878,6 +877,20 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   let _mailAccounts = [];
   let _mailEditIdx  = -1;
   let _mailDragIdx  = null;
+  let _mailColor    = COLORS[0];
+
+  function _renderMailColorRow() {
+    document.getElementById('mailColorRow').innerHTML = COLORS.map(c =>
+      `<div class="color-swatch${c === _mailColor ? ' selected' : ''}" style="background:${c}" data-mail-color="${c}"></div>`
+    ).join('');
+  }
+
+  document.getElementById('mailColorRow').addEventListener('click', e => {
+    const swatch = e.target.closest('[data-mail-color]');
+    if (!swatch) return;
+    _mailColor = swatch.dataset.mailColor;
+    _renderMailColorRow();
+  });
 
   function _renderMailList() {
     const list = document.getElementById('mailAccountsList');
@@ -954,6 +967,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('mailFolder').value      = acc.folder || '';
     document.getElementById('mailMaxMessages').value = acc.maxMessages ?? 20;
     document.getElementById('mailWebUrl').value      = acc.webInterfaceUrl || '';
+    _mailColor = acc.color || COLORS[0];
+    _renderMailColorRow();
     document.getElementById('mailTestResult').style.display = 'none';
     document.getElementById('mailAccountForm').style.display = '';
   }
@@ -1002,6 +1017,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       folder:         document.getElementById('mailFolder').value.trim() || undefined,
       maxMessages:    parseInt(document.getElementById('mailMaxMessages').value, 10) || 20,
       webInterfaceUrl: document.getElementById('mailWebUrl').value.trim() || undefined,
+      color:          _mailColor,
     };
     if (pass) acc.password = pass;
 
