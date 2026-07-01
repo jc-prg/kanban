@@ -63,6 +63,8 @@ async function _dashMoveCard(board, cardId, fromColId, toColId) {
 }
 
 function applyDashboardPanelVisibility(cfg) {
+  document.getElementById('dashboardBoardsPanel').closest('.dashboard-panel').style.display =
+    cfg.panelBoards !== false ? '' : 'none';
   document.getElementById('dashboardCardsPanel').closest('.dashboard-panel').style.display =
     cfg.panelCards !== false ? '' : 'none';
   document.getElementById('dashboardMailPanel').closest('.dashboard-panel').style.display =
@@ -207,6 +209,18 @@ async function initDashboard() {
     showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
   });
 
+  // Mobile accordion: clicking a panel header opens it and closes others
+  const _dashPanels = document.querySelectorAll('.dashboard-grid .dashboard-panel');
+  _dashPanels.forEach(panel => {
+    panel.querySelector('.dashboard-panel-header').addEventListener('click', () => {
+      const isOpen = panel.classList.contains('dashboard-panel--open');
+      _dashPanels.forEach(p => p.classList.remove('dashboard-panel--open'));
+      if (!isOpen) panel.classList.add('dashboard-panel--open');
+    });
+  });
+  // Default: Boards panel open (only has visual effect on mobile)
+  document.getElementById('dashboardBoardsPanel').closest('.dashboard-panel').classList.add('dashboard-panel--open');
+
   _initCardsDragDrop();
   await loadDashboard();
 
@@ -237,12 +251,19 @@ async function loadDashboard() {
   fetchedAt.classList.add('show');
   fetchedAt.textContent = 'Loading\u2026';
   const loadingHtml = '<p class="dashboard-loading">Loading\u2026</p>';
+  document.getElementById('dashboardBoardsPanel').innerHTML = loadingHtml;
   document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;
   document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;
   document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;
+  document.getElementById('dashBoardsCount').textContent = '';
   document.getElementById('dashCardsCount').textContent = '';
   document.getElementById('dashMailCount').textContent = '';
   document.getElementById('dashCalendarCount').textContent = '';
+
+  const boardsP = fetch('/api/boards')
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(data => { _renderBoardsPanel(data); return true; })
+    .catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
 
   const cardsP = fetch('/api/dashboard/cards')
     .then(r => { if (!r.ok) throw new Error(); return r.json(); })
@@ -259,11 +280,65 @@ async function loadDashboard() {
     .then(data => { _renderCalendarPanel(data); return true; })
     .catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
 
-  const [cardsOk, mailOk, calOk] = await Promise.all([cardsP, mailP, calP]);
-  const anyError = !cardsOk || !mailOk || !calOk;
+  const [boardsOk, cardsOk, mailOk, calOk] = await Promise.all([boardsP, cardsP, mailP, calP]);
+  const anyError = !boardsOk || !cardsOk || !mailOk || !calOk;
   fetchedAt.textContent = (anyError ? 'Partial load \u2014 ' : 'Refreshed at ') +
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   _fetchedAtTimer = setTimeout(() => fetchedAt.classList.remove('show'), 10000);
+}
+
+function _boardItemHtml(b) {
+  const { name, description, inboxCount, todoCount, inProgressCount, trackedCounts = [] } = b;
+  const trackedBadges = trackedCounts
+    .filter(t => t.count > 0)
+    .map(t => {
+      const style = t.color ? `background:${t.color}22;color:${t.color}` : '';
+      return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(t.title)} ${t.count}</span>`;
+    });
+  const badges = [
+    inboxCount      ? `<span class="board-card-count board-card-count-inbox">inbox ${inboxCount}</span>`           : '',
+    todoCount       ? `<span class="board-card-count board-card-count-todo">todo ${todoCount}</span>`              : '',
+    inProgressCount ? `<span class="board-card-count board-card-count-inprogress">doing ${inProgressCount}</span>` : '',
+    ...trackedBadges,
+  ].filter(Boolean).join('');
+  return `<a class="dashboard-board-item" href="/board/${encodeURIComponent(name)}">
+    <div class="board-card-info">
+      <span class="board-card-name">${escHtml(name)}</span>
+      ${description ? `<span class="board-card-desc">${escHtml(description)}</span>` : ''}
+      ${badges ? `<div class="board-card-counts">${badges}</div>` : ''}
+    </div>
+    <span class="board-card-arrow">\u2192</span>
+  </a>`;
+}
+
+function _renderBoardsPanel(boards) {
+  const panel = document.getElementById('dashboardBoardsPanel');
+  const active   = boards.filter(b => !b.archived);
+  const archived = boards.filter(b =>  b.archived);
+  document.getElementById('dashBoardsCount').textContent = active.length || '';
+
+  let html = '<div class="dashboard-group-header">Active</div>';
+  html += active.length
+    ? active.map(_boardItemHtml).join('')
+    : '<p class="dashboard-empty">No boards yet.</p>';
+
+  if (archived.length) {
+    html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
+      Archived<span class="column-count">${archived.length}</span><span class="dashboard-boards-chevron">\u203A</span>
+    </button>`;
+    html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
+  }
+
+  panel.innerHTML = html;
+
+  panel.querySelector('.dashboard-boards-archived-btn')?.addEventListener('click', function () {
+    const list    = panel.querySelector('.dashboard-boards-archived-list');
+    const chevron = this.querySelector('.dashboard-boards-chevron');
+    const isOpen  = list.style.display !== 'none';
+    list.style.display        = isOpen ? 'none' : '';
+    chevron.style.transform   = isOpen ? '' : 'rotate(90deg)';
+    this.setAttribute('aria-expanded', String(!isOpen));
+  });
 }
 
 function _renderCardsPanel(groups) {

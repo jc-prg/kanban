@@ -11,7 +11,7 @@
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   flex: 1;
   overflow: hidden;
@@ -94,6 +94,14 @@
   border-top: none;
 }
 
+.dashboard-panel-body > .dashboard-group-header:not(:first-child) {
+  margin-top: 10px;
+}
+
+.dashboard-card-group + .dashboard-card-group {
+  margin-top: 10px;
+}
+
 .dashboard-group-board-link {
   color: inherit;
   text-decoration: none;
@@ -118,16 +126,101 @@
   pointer-events: none;
 }
 
+/* ---- Boards panel items ---- */
+
+.dashboard-board-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  margin: 4px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.dashboard-board-item:hover {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---- Boards panel: archived toggle ---- */
+
+.dashboard-boards-archived-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  padding: 8px 14px 4px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+  margin-top: 10px;
+}
+
+.dashboard-boards-archived-btn:hover { color: var(--text); }
+
+.dashboard-boards-chevron {
+  margin-left: auto;
+  font-size: 1rem;
+  transition: transform 0.2s;
+  line-height: 1;
+}
+
 /* ---- Responsive: stack panels vertically on narrow screens ---- */
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr 1fr;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 600px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
     overflow-y: auto;
+    align-content: start;
   }
 
   .dashboard-panel {
-    max-height: 40vh;
+    max-height: none;
+  }
+
+  .dashboard-panel-header {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .dashboard-panel-header::after {
+    content: '\203A';
+    font-size: 1.1rem;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    line-height: 1;
+  }
+
+  .dashboard-panel--open .dashboard-panel-header::after {
+    transform: rotate(90deg);
+  }
+
+  .dashboard-panel-body {
+    display: none;
+  }
+
+  .dashboard-panel--open .dashboard-panel-body {
+    display: block;
+    max-height: 60vh;
+    overflow-y: auto;
   }
 }
 
