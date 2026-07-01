@@ -632,10 +632,17 @@ function _openMailDetail(accountId, msgId, webUrl) {
           + ' a{color:#7c6af7} img{max-width:100%;height:auto}'
           + ' blockquote{border-left:3px solid #4a4a6a;margin:8px 0;padding:0 12px;color:#94a3b8}'
           + ' pre,code{font-family:monospace;font-size:0.88em;background:#2a2a3e;padding:2px 5px;border-radius:3px}';
+        const emailStyles = (() => {
+          try {
+            const parsed = new DOMParser().parseFromString(msg.bodyHtml, 'text/html');
+            return [...parsed.querySelectorAll('style')].map(s => s.textContent).join('\n');
+          } catch { return ''; }
+        })();
         const doc = iframe.contentDocument;
         doc.open();
         const safeHtml = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
-        doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body>${safeHtml}</body></html>`);
+        const emailStyleTag = emailStyles ? `<style>${emailStyles}</style>` : '';
+        doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style>${emailStyleTag}</head><body>${safeHtml}</body></html>`);
         doc.close();
         const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
         iframe.addEventListener('load', resize);
