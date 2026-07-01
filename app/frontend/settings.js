@@ -1537,7 +1537,7 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
       const isDashboard = window.location.pathname === '/dashboard';
-      const dashEntry = isDashboard ? '' : '<a class="board-switch-item" href="/dashboard">Dashboard</a><div class="header-dd-separator"></div>';
+      const dashEntry = isDashboard ? '' : '<a class="board-switch-item" href="/dashboard">Dashboard</a>';
       const allEntry  = '<a class="board-switch-item" href="/">all boards</a>';
       const sep = others.length ? '<div class="header-dd-separator"></div>' : '';
       menu.innerHTML = dashEntry + allEntry + sep + others
