@@ -1,10 +1,16 @@
 // ---- Card context menu ----
 let ctxColId = null;
 let ctxCard  = null;
+let _dashCtxBoard = null; // non-null when menu triggered from the dashboard
 
 function showContextMenu(x, y, colId, card) {
   ctxColId = colId;
   ctxCard  = card;
+  _dashCtxBoard = null;
+
+  // Restore items that showDashboardContextMenu may have hidden
+  document.getElementById('ctxDuplicate').style.display = '';
+  document.querySelector('#contextMenu .ctx-submenu-trigger').style.display = '';
 
   document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
   document.getElementById('ctxInfo').style.display = dateEditMode ? '' : 'none';
@@ -44,8 +50,65 @@ function hideContextMenu() {
   document.getElementById('contextMenu').style.display = 'none';
   document.getElementById('ctxColorRow').style.display = 'none';
   document.getElementById('ctxPriorityRow').style.display = 'none';
+  _dashCtxBoard = null;
   ctxColId = null;
   ctxCard  = null;
+}
+
+function showDashboardContextMenu(x, y, board, card) {
+  _dashCtxBoard = board;
+  ctxColId = null;
+  ctxCard  = card;
+
+  document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
+  document.getElementById('ctxInfo').style.display = 'none';
+  document.getElementById('ctxCopyLink').style.display = card.link ? '' : 'none';
+  document.getElementById('ctxColorRow').style.display = 'none';
+  document.getElementById('ctxPriorityRow').style.display = 'none';
+  document.getElementById('ctxDuplicate').style.display = 'none';
+
+  // Populate Move to submenu asynchronously
+  const submenu = document.getElementById('ctxMoveSubmenu');
+  const trigger = document.querySelector('#contextMenu .ctx-submenu-trigger');
+  submenu.innerHTML = '';
+  trigger.style.display = 'none';
+
+  fetch(`/api/${encodeURIComponent(board)}/board`)
+    .then(r => r.json())
+    .then(data => {
+      let currentColId = null;
+      for (const col of data.columns) {
+        if (col.cards.some(c => c.id === card.id)) { currentColId = col.id; break; }
+      }
+      const cols = data.columns.filter(c => c.id !== currentColId);
+      if (!cols.length) return;
+      submenu.innerHTML = cols
+        .map(c => `<button class="ctx-item" data-col-id="${escHtml(c.id)}">${escHtml(c.title)}</button>`)
+        .join('');
+      submenu.querySelectorAll('.ctx-item').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          const b = _dashCtxBoard, cd = ctxCard;
+          hideContextMenu();
+          if (b && cd && currentColId) {
+            _dashMoveCard(b, cd.id, currentColId, btn.dataset.colId).then(() => loadDashboard());
+          }
+        });
+      });
+      trigger.style.display = '';
+      const menu = document.getElementById('contextMenu');
+      trigger.classList.toggle('ctx-submenu-left', parseFloat(menu.style.left) + (menu.offsetWidth || 140) + 160 > window.innerWidth - 4);
+      trigger.classList.toggle('ctx-submenu-up', trigger.getBoundingClientRect().bottom + 260 > window.innerHeight - 4);
+    })
+    .catch(() => { /* leave Move to hidden */ });
+
+  const menu = document.getElementById('contextMenu');
+  menu.style.display = 'block';
+  const mw = menu.offsetWidth || 140;
+  const mh = menu.offsetHeight || 100;
+  const edge = 4;
+  menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
+  menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
 }
 
 document.getElementById('ctxInfo').addEventListener('click', async () => {
@@ -55,16 +118,28 @@ document.getElementById('ctxInfo').addEventListener('click', async () => {
 });
 
 document.getElementById('ctxEdit').addEventListener('click', () => {
-  if (ctxColId && ctxCard) openEditModal(ctxColId, ctxCard);
+  const board = _dashCtxBoard, colId = ctxColId, card = ctxCard;
   hideContextMenu();
+  if (board && card) {
+    window.location.href = `/board/${encodeURIComponent(board)}#card:${card.id}`;
+  } else if (colId && card) {
+    openEditModal(colId, card);
+  }
 });
 
 document.getElementById('ctxDone').addEventListener('click', () => {
-  const colId = ctxColId, card = ctxCard;
+  const board = _dashCtxBoard, colId = ctxColId, card = ctxCard;
   hideContextMenu();
-  if (!colId || !card) return;
+  if (!card) return;
   const newDone = !card.done;
-  updateCardFull(colId, card.id, { ...card, done: newDone, doneAt: newDone ? new Date().toISOString() : null });
+  if (board) {
+    _dashPatchCard(board, card.id, c => {
+      c.done = newDone;
+      if (newDone) c.doneAt = new Date().toISOString(); else delete c.doneAt;
+    }).then(() => loadDashboard());
+  } else if (colId) {
+    updateCardFull(colId, card.id, { ...card, done: newDone, doneAt: newDone ? new Date().toISOString() : null });
+  }
 });
 
 document.getElementById('ctxDuplicate').addEventListener('click', () => {
@@ -99,10 +174,17 @@ document.getElementById('ctxColor').addEventListener('click', e => {
   row.querySelectorAll('.ctx-color-swatch').forEach(s => {
     s.addEventListener('click', ev => {
       ev.stopPropagation();
-      const col = state.columns.find(c => c.id === ctxColId);
-      const target = col?.cards.find(c => c.id === ctxCard?.id);
-      if (target) { target.color = s.dataset.color; target.lastModified = new Date().toISOString(); render(); schedulesSave(); }
-      hideContextMenu();
+      const board = _dashCtxBoard, cardId = ctxCard?.id, color = s.dataset.color;
+      if (board && cardId) {
+        hideContextMenu();
+        _dashPatchCard(board, cardId, c => { c.color = color; c.lastModified = new Date().toISOString(); })
+          .then(() => loadDashboard());
+      } else {
+        const col = state.columns.find(c => c.id === ctxColId);
+        const target = col?.cards.find(c => c.id === ctxCard?.id);
+        if (target) { target.color = color; target.lastModified = new Date().toISOString(); render(); schedulesSave(); }
+        hideContextMenu();
+      }
     });
   });
   row.style.display = 'flex';
@@ -124,26 +206,41 @@ document.getElementById('ctxPriority').addEventListener('click', e => {
   row.querySelectorAll('.priority-btn').forEach(btn => {
     btn.addEventListener('click', ev => {
       ev.stopPropagation();
-      const col = state.columns.find(c => c.id === ctxColId);
-      const target = col?.cards.find(c => c.id === ctxCard?.id);
-      if (target) {
-        const p = parseInt(btn.dataset.priority, 10);
-        if (p === 0) delete target.priority; else target.priority = p;
-        target.lastModified = new Date().toISOString();
-        render();
-        schedulesSave();
+      const board = _dashCtxBoard, cardId = ctxCard?.id, p = parseInt(btn.dataset.priority, 10);
+      if (board && cardId) {
+        hideContextMenu();
+        _dashPatchCard(board, cardId, c => {
+          if (p === 0) delete c.priority; else c.priority = p;
+          c.lastModified = new Date().toISOString();
+        }).then(() => loadDashboard());
+      } else {
+        const col = state.columns.find(c => c.id === ctxColId);
+        const target = col?.cards.find(c => c.id === ctxCard?.id);
+        if (target) {
+          if (p === 0) delete target.priority; else target.priority = p;
+          target.lastModified = new Date().toISOString();
+          render();
+          schedulesSave();
+        }
+        hideContextMenu();
       }
-      hideContextMenu();
     });
   });
   row.style.display = 'flex';
 });
 
 document.getElementById('ctxDelete').addEventListener('click', async () => {
-  const colId = ctxColId, card = ctxCard;
+  const board = _dashCtxBoard, colId = ctxColId, card = ctxCard;
   hideContextMenu();
-  if (colId && card && await showConfirm(`Delete card "${card.text}"?`, { okLabel: 'Delete', danger: true }))
+  if (!card) return;
+  if (board) {
+    if (await showConfirm(`Delete card "${card.text}"?`, { okLabel: 'Delete', danger: true })) {
+      await _dashDeleteCard(board, card.id);
+      loadDashboard();
+    }
+  } else if (colId && await showConfirm(`Delete card "${card.text}"?`, { okLabel: 'Delete', danger: true })) {
     deleteCard(colId, card.id);
+  }
 });
 
 // ---- Column context menu ----

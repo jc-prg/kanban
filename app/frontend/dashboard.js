@@ -4,6 +4,59 @@
 
 let _refreshTimer = null;
 
+// Map: cardId → { card, board } — populated on each render for context menu
+const _dashCardMap = new Map();
+
+async function _dashPatchCard(board, cardId, patchFn) {
+  const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
+  let foundCol = null;
+  for (const col of data.columns) {
+    const card = col.cards.find(c => c.id === cardId);
+    if (card) { patchFn(card); foundCol = col; break; }
+  }
+  if (!foundCol) return;
+  await fetch(`/api/${encodeURIComponent(board)}/board`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updatedColumns: [foundCol] }),
+  });
+}
+
+async function _dashDeleteCard(board, cardId) {
+  const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
+  let foundCol = null;
+  for (const col of data.columns) {
+    const idx = col.cards.findIndex(c => c.id === cardId);
+    if (idx >= 0) { col.cards.splice(idx, 1); foundCol = col; break; }
+  }
+  if (!foundCol) return;
+  await fetch(`/api/${encodeURIComponent(board)}/board`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updatedColumns: [foundCol] }),
+  });
+}
+
+async function _dashMoveCard(board, cardId, fromColId, toColId) {
+  const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
+  let fromCol = null, toCol = null;
+  for (const col of data.columns) {
+    if (col.id === fromColId) fromCol = col;
+    if (col.id === toColId)   toCol   = col;
+  }
+  if (!fromCol || !toCol) return;
+  const idx = fromCol.cards.findIndex(c => c.id === cardId);
+  if (idx < 0) return;
+  const [movedCard] = fromCol.cards.splice(idx, 1);
+  movedCard.moves = [...(movedCard.moves || []), { at: new Date().toISOString(), from: fromCol.title, to: toCol.title }];
+  toCol.cards.unshift(movedCard);
+  await fetch(`/api/${encodeURIComponent(board)}/board`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updatedColumns: [fromCol, toCol] }),
+  });
+}
+
 async function initDashboard() {
   document.querySelector('.board-area').style.display = 'none';
   document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
@@ -53,6 +106,17 @@ async function initDashboard() {
     window.location.href = `/board/${encodeURIComponent(item.dataset.board)}#card:${item.dataset.cardId}`;
   });
 
+  // Card right-click → card context menu (same as on the board)
+  document.getElementById('dashboardCardsPanel').addEventListener('contextmenu', e => {
+    const item = e.target.closest('[data-card-id]');
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const entry = _dashCardMap.get(item.dataset.cardId);
+    if (!entry) return;
+    showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
+  });
+
   await loadDashboard();
 
   // Set up auto-refresh based on config
@@ -83,6 +147,7 @@ async function loadDashboard() {
 
 function _renderCardsPanel(groups) {
   const panel = document.getElementById('dashboardCardsPanel');
+  _dashCardMap.clear();
   if (!groups.length) {
     panel.innerHTML = '<p class="dashboard-empty">No card sources configured.</p>';
     return;
@@ -98,6 +163,7 @@ function _renderCardsPanel(groups) {
       return groupHeader + '<p class="dashboard-empty">No cards.</p>';
     }
     const items = group.cards.map(card => {
+      _dashCardMap.set(card.id, { card, board: group.board });
       const isOverdue = card.endDate && card.endDate < today && !card.done;
       const colorStyle = card.color ? ` style="--card-color:${escHtml(card.color)}"` : '';
 
