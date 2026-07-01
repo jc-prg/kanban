@@ -59,6 +59,7 @@ async function fetchMailAccount(account) {
       uid:       true,
       envelope:  true,
       bodyParts: ['text'],
+      flags:     true,
     })) {
       msgs.push({
         id:      String(msg.uid),
@@ -66,6 +67,7 @@ async function fetchMailAccount(account) {
         from:    _fmtAddr(msg.envelope?.from?.[0]),
         date:    _fmtDate(msg.envelope?.date),
         preview: _preview(msg.bodyParts?.get('text')),
+        unread:  !msg.flags?.has('\\Seen'),
       });
     }
 

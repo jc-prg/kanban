@@ -239,7 +239,7 @@ function _renderMailPanel(accounts) {
       return `<div class="dashboard-mail-item card"
           data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-web-url="${escHtml(acc.webInterfaceUrl || '')}">
         <div class="card-body">
-          <div class="card-text">${escHtml(msg.subject)}</div>
+          <div class="card-text">${msg.unread ? `<strong>${escHtml(msg.subject)}</strong>` : escHtml(msg.subject)}</div>
           ${metaHtml}
         </div>
       </div>`;
