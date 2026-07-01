@@ -647,7 +647,7 @@ async function submitInboxCard() {
       selectedColor = COLORS[0]; selectedPriority = 0;
       renderColorRow(); renderPriorityRow();
       const goBtn = document.getElementById('modalGoBoardBtn');
-      goBtn.href = `/${encodeURIComponent(board)}`;
+      goBtn.href = `/board/${encodeURIComponent(board)}`;
       goBtn.style.display = '';
       document.getElementById('cardText').focus();
     } else {

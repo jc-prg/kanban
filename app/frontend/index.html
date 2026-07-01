@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="/styles/notes.css">
 <link rel="stylesheet" href="/styles/markdown.css">
 <link rel="stylesheet" href="/styles/print.css">
+<link rel="stylesheet" href="/styles/dashboard.css">
 </head>
 <body>
 
@@ -39,20 +40,51 @@
       <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
       <div class="board-switch-menu" id="boardSwitchMenu"></div>
     </div>
+    <a class="header-menu-btn" id="dashboardBtn" href="/dashboard" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
     <div class="header-dropdown" id="headerDropdown">
+      <a class="header-dd-item" id="menuDashboard" href="/dashboard">Dashboard</a>
       <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
       <button class="header-dd-item" id="menuFindCard">Find</button>
       <button class="header-dd-item" id="menuAnalytics">Analyze</button>
       <button class="header-dd-item" id="menuStatistics">Statistics</button>
       <button class="header-dd-item" id="menuWebhook" style="display:none"></button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
+      <button class="header-dd-item" id="menuDashboardSettings" style="display:none">Global settings</button>
       <div class="header-dd-separator"></div>
       <button class="header-dd-item header-dd-logout" id="menuLogout">Log out</button>
     </div>
   </div>
   </div>
 </header>
+
+<div id="dashboard" style="display:none">
+  <div class="dashboard-header">
+    <span id="dashboardFetchedAt" class="dashboard-fetched-at"></span>
+    <button class="btn" id="dashboardRefreshBtn">Refresh</button>
+  </div>
+  <div class="dashboard-detail" id="dashboardDetail" style="display:none">
+    <div class="dashboard-detail-titlebar">
+      <span id="dashboardDetailTitle" class="dashboard-detail-title"></span>
+      <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close">✕</button>
+    </div>
+    <div class="dashboard-detail-body" id="dashboardDetailBody"></div>
+  </div>
+  <div class="dashboard-grid">
+    <div class="dashboard-panel">
+      <div class="dashboard-panel-header">Mail</div>
+      <div class="dashboard-panel-body" id="dashboardMailPanel"></div>
+    </div>
+    <div class="dashboard-panel">
+      <div class="dashboard-panel-header">Cards</div>
+      <div class="dashboard-panel-body" id="dashboardCardsPanel"></div>
+    </div>
+    <div class="dashboard-panel">
+      <div class="dashboard-panel-header">Calendar</div>
+      <div class="dashboard-panel-body" id="dashboardCalendarPanel"></div>
+    </div>
+  </div>
+</div>
 
 <div id="overview" style="display:none">
   <div class="overview-inner">
@@ -622,6 +654,157 @@
           </div>
         </div>
 
+        <div class="settings-section" id="cardSourcesSection" data-settings-label="Card Sources" style="display:none">
+          <div class="settings-section-title">
+            <span>Card Sources</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <p class="settings-item-desc" style="margin-bottom:8px">Board columns to show in the Dashboard cards panel.</p>
+            <div id="cardSourcesList"></div>
+            <button class="btn" id="cardSourcesAddBtn" style="margin:8px 0 0">+ Add source</button>
+            <div class="settings-field-row" style="margin-top:10px">
+              <label class="settings-field-label" for="dashboardAutoRefresh">Auto-refresh</label>
+              <select id="dashboardAutoRefresh" class="new-board-input">
+                <option value="0">Off</option>
+                <option value="60000">1 min</option>
+                <option value="300000">5 min</option>
+                <option value="900000">15 min</option>
+                <option value="1800000">30 min</option>
+              </select>
+            </div>
+            <div id="cardSourcesForm" class="calendar-account-form" style="display:none">
+              <input type="hidden" id="csEditId">
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="csBoard">Board</label>
+                <select id="csBoard" class="new-board-input"></select>
+              </div>
+              <div class="settings-field-row" style="align-items:flex-start">
+                <label class="settings-field-label" style="padding-top:4px">Columns</label>
+                <div id="csColumnsList" class="cs-columns-list"></div>
+              </div>
+              <div class="settings-webdav-actions">
+                <button class="btn btn-accent" id="csSaveBtn">Save source</button>
+                <button class="btn" id="csCancelBtn">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section" id="mailSection" data-settings-label="Mail Accounts" style="display:none">
+          <div class="settings-section-title">
+            <span>Mail Accounts</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div id="mailAccountsList"></div>
+            <button class="btn" id="mailAddBtn" style="margin:8px 0 0">+ Add account</button>
+            <div id="mailAccountForm" class="calendar-account-form" style="display:none">
+              <input type="hidden" id="mailEditId">
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailLabel">Label</label>
+                <input id="mailLabel" class="new-board-input" type="text" placeholder="e.g. work@example.com" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailHost">IMAP host</label>
+                <input id="mailHost" class="new-board-input" type="text" placeholder="imap.example.com" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailPort">Port</label>
+                <input id="mailPort" class="new-board-input" type="number" min="1" max="65535" value="993">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailTls">TLS</label>
+                <div class="settings-toggle">
+                  <input type="checkbox" id="mailTls" checked>
+                  <span class="settings-toggle-track"></span>
+                </div>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailUser">Username</label>
+                <input id="mailUser" class="new-board-input" type="text" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailPass">Password</label>
+                <input id="mailPass" class="new-board-input" type="password" placeholder="unchanged" autocomplete="new-password">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailFolder">Folder</label>
+                <input id="mailFolder" class="new-board-input" type="text" placeholder="INBOX" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailMaxMessages">Max messages</label>
+                <input id="mailMaxMessages" class="new-board-input" type="number" min="1" max="200" value="20">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="mailWebUrl">Web interface URL</label>
+                <input id="mailWebUrl" class="new-board-input" type="url" placeholder="https://mail.example.com" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-webdav-actions">
+                <button class="btn btn-accent" id="mailSaveAccountBtn">Save account</button>
+                <button class="btn" id="mailTestAccountBtn">Test connection</button>
+                <button class="btn" id="mailCancelAccountBtn">Cancel</button>
+              </div>
+              <div id="mailTestResult" class="settings-webdav-result" style="display:none"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section" id="calendarSection" data-settings-label="Calendar Accounts" style="display:none">
+          <div class="settings-section-title">
+            <span>Calendar Accounts</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div id="calendarAccountsList"></div>
+            <button class="btn" id="calendarAddBtn" style="margin:8px 0 0">+ Add account</button>
+            <div id="calendarAccountForm" class="calendar-account-form" style="display:none">
+              <input type="hidden" id="calEditId">
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calLabel">Label</label>
+                <input id="calLabel" class="new-board-input" type="text" placeholder="e.g. Work Calendar" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calType">Type</label>
+                <select id="calType" class="new-board-input">
+                  <option value="caldav">CalDAV</option>
+                  <option value="ical-url">iCal URL</option>
+                </select>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calUrl">DAV URL</label>
+                <input id="calUrl" class="new-board-input" type="url" placeholder="https://cloud.example.com/remote.php/dav" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calCalendarName">Calendar name</label>
+                <input id="calCalendarName" class="new-board-input" type="text" placeholder="e.g. personal (slug of the calendar)" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calUser">Username</label>
+                <input id="calUser" class="new-board-input" type="text" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calPass">Password</label>
+                <input id="calPass" class="new-board-input" type="password" placeholder="unchanged" autocomplete="new-password">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calWebUrl">Web interface URL</label>
+                <input id="calWebUrl" class="new-board-input" type="url" placeholder="https://calendar.example.com" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="calLookahead">Show events for next (days)</label>
+                <input id="calLookahead" class="new-board-input" type="number" min="1" max="365" value="7">
+              </div>
+              <div class="settings-webdav-actions">
+                <button class="btn btn-accent" id="calSaveAccountBtn">Save account</button>
+                <button class="btn" id="calTestAccountBtn">Test connection</button>
+                <button class="btn" id="calCancelAccountBtn">Cancel</button>
+              </div>
+              <div id="calTestResult" class="settings-webdav-result" style="display:none"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="settings-section" id="apiKeySection" data-settings-label="API Access">
           <div class="settings-section-title">
             <span>API Access</span>
@@ -872,6 +1055,7 @@
 <script src="/inbox.js"></script>
 <script src="/search.js"></script>
 <script src="/analytics.js"></script>
+<script src="/dashboard.js"></script>
 <script src="/init.js"></script>
 </body>
 </html>

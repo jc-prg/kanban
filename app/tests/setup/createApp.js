@@ -2,8 +2,12 @@
 const path    = require('path')
 const express = require('express')
 
-const DB_MODULE     = path.resolve(__dirname, '../../backend/db.js')
-const BACKUP_MODULE = path.resolve(__dirname, '../../backend/backup.js')
+const DB_MODULE          = path.resolve(__dirname, '../../backend/db.js')
+const BACKUP_MODULE      = path.resolve(__dirname, '../../backend/backup.js')
+const GLOBAL_DB_MODULE   = path.resolve(__dirname, '../../backend/global-db.js')
+const DASHBOARD_ROUTE    = path.resolve(__dirname, '../../backend/routes/dashboard.js')
+const CALENDAR_MODULE    = path.resolve(__dirname, '../../backend/dashboard/calendar.js')
+const MAIL_MODULE        = path.resolve(__dirname, '../../backend/dashboard/mail.js')
 
 /**
  * Creates a test Express app.
@@ -22,6 +26,20 @@ function createApp(dbMock) {
       exports:  dbMock,
       children: [],
       paths:    [],
+    }
+  }
+
+  // Stub global-db if the test hasn't already injected its own mock.
+  if (!require.cache[GLOBAL_DB_MODULE]) {
+    require.cache[GLOBAL_DB_MODULE] = {
+      id: GLOBAL_DB_MODULE, filename: GLOBAL_DB_MODULE, loaded: true,
+      exports: {
+        getDashboardConfig:  async () => ({ mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }),
+        saveDashboardConfig: async () => ({ ok: true }),
+        initGlobalDb:        async () => {},
+        getGlobalDb:         () => ({}),
+      },
+      children: [], paths: [],
     }
   }
 
@@ -49,6 +67,7 @@ function createApp(dbMock) {
   app.use('/api', require('../../backend/routes/board'))
   app.use('/api', require('../../backend/routes/notes'))
   app.use('/api', require('../../backend/routes/attachments'))
+  app.use('/api', require('../../backend/routes/dashboard'))
 
   return app
 }
@@ -69,6 +88,10 @@ function clearAppCache() {
     path.resolve(__dirname, '../../backend/routes/board.js'),
     path.resolve(__dirname, '../../backend/routes/notes.js'),
     path.resolve(__dirname, '../../backend/routes/attachments.js'),
+    GLOBAL_DB_MODULE,
+    DASHBOARD_ROUTE,
+    CALENDAR_MODULE,
+    MAIL_MODULE,
   ]
   toDelete.forEach(p => { delete require.cache[p] })
 }

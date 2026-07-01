@@ -1,6 +1,9 @@
-const BOARD_NAME = window.location.pathname.split('/').filter(Boolean)[0] || null;
-const API_BASE   = BOARD_NAME ? `/api/${BOARD_NAME}` : null;
-const API        = BOARD_NAME ? `${API_BASE}/board`  : null;
+// Board URLs are /board/<name>; special views (/dashboard, /inbox) are top-level.
+const _pathSegs  = window.location.pathname.split('/').filter(Boolean);
+const _isBoard   = _pathSegs[0] === 'board' && _pathSegs.length > 1;
+const BOARD_NAME = _isBoard ? _pathSegs[1] : (_pathSegs[0] || null);
+const API_BASE   = _isBoard ? `/api/${BOARD_NAME}` : null;
+const API        = _isBoard ? `${API_BASE}/board`  : null;
 
 // Intercept fetch: handle 401 session expiry and detect connection loss.
 (function () {

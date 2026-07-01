@@ -5,6 +5,7 @@ const path    = require('path');
 
 const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES } = require('./config');
 const { initDb }                          = require('./db');
+const { initGlobalDb }                    = require('./global-db');
 const { authenticate }                    = require('./auth');
 const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize } = require('./backup');
 
@@ -70,12 +71,16 @@ app.use('/api', require('./routes/boards'));
 app.use('/api', require('./routes/board'));
 app.use('/api', require('./routes/notes'));
 app.use('/api', require('./routes/attachments'));
+app.use('/api', require('./routes/dashboard'));
 
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
-app.get('/:board',       (req, res) => res.sendFile(SPA_HTML));
-app.get('/:board/*path', (req, res) => res.sendFile(SPA_HTML));
+app.get('/dashboard',          (req, res) => res.sendFile(SPA_HTML));
+app.get('/inbox',              (req, res) => res.sendFile(SPA_HTML));
+app.get('/board/:board',       (req, res) => res.sendFile(SPA_HTML));
+app.get('/board/:board/*path', (req, res) => res.sendFile(SPA_HTML));
 
 initDb()
+  .then(() => initGlobalDb())
   .then(() => {
     checkDataDirectories();
     app.listen(PORT, () => console.log(`Kanban server running at http://${HOST}:${PORT}`));

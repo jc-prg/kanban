@@ -115,6 +115,11 @@ function _svgPrint(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="0.7" width="6" height="2.8" rx="0.8"/><rect x="0.7" y="3" width="10.6" height="5.5" rx="1.3"/><rect x="3" y="6.3" width="6" height="3" rx="0.5"/><circle cx="9" cy="5.5" r="0.6" fill="currentColor" stroke="none"/></svg>`;
 }
 
+// Three vertical columns — dashboard view
+function _svgDashboard(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="3" height="10.6" rx="1"/><rect x="4.5" y="0.7" width="3" height="10.6" rx="1"/><rect x="8.3" y="0.7" width="3" height="10.6" rx="1"/></svg>`;
+}
+
 // Funnel — filter / narrow down a list
 function _svgFilter(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 2h9L7 6.5V10L5 10V6.5Z"/></svg>`;
@@ -156,6 +161,7 @@ const SVGICONS = {
   networkFolder:  _svgNetworkFolder,
   print:          _svgPrint,
   filter:         _svgFilter,
+  dashboard:      _svgDashboard,
 };
 
 // ---- Icon registry (used to render the icon library in settings) ----
@@ -200,6 +206,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgNetworkFolder(16, 16), name: 'Network folder',   usage: 'Remote folder (WebDAV / shared network location)' },
   { type: 'svg', svg: _svgFilter(16, 16),        name: 'Filter',           usage: 'Filter duplicates in a column' },
   { type: 'svg', svg: _svgPrint(16, 16),         name: 'Print',            usage: 'Print a card or column' },
+  { type: 'svg', svg: _svgDashboard(16, 16),    name: 'Dashboard',        usage: 'Navigate to the dashboard view' },
 ];
 
 // ---- Render icon library grid ----
