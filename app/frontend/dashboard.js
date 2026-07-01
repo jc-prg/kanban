@@ -198,8 +198,19 @@ function _renderCardsPanel(groups) {
     }
     const items = group.cards.map(card => {
       _dashCardMap.set(card.id, { card, board: group.board });
-      const isOverdue = card.endDate && card.endDate < today && !card.done;
+      const isLabel   = (card.text || '').startsWith('#');
+      const isOverdue = !isLabel && card.endDate && card.endDate < today && !card.done;
       const colorStyle = card.color ? ` style="--card-color:${escHtml(card.color)}"` : '';
+
+      if (isLabel) {
+        const displayText = card.text.slice(1).trimStart();
+        return `<div class="dashboard-card-item card card--label"
+            data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
+          <div class="card-body">
+            <div class="card-label-text">${escHtml(displayText)}</div>
+          </div>
+        </div>`;
+      }
 
       const metaParts = [];
       if (card.priority) {
