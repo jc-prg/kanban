@@ -331,6 +331,7 @@ let selectedColor    = COLORS[0];
 let selectedPriority = 0;
 let modalDone        = false;
 let modalOriginalData = null;
+let _inboxOnSuccess  = null; // optional callback fired after a successful inbox card submit
 let _cardFullscreen  = false;
 
 function toggleCardFullscreen() {
@@ -542,6 +543,7 @@ function openEditModal(colId, card) {
 }
 
 function closeModal() {
+  _inboxOnSuccess = null;
   _exitCardFullscreen();
   _stopCardAutoSave();
   if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;
@@ -580,7 +582,8 @@ function submitCard() {
   closeModal();
 }
 
-async function openInboxModal(preselectedBoard, prefill = null) {
+async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null) {
+  _inboxOnSuccess = onSuccess;
   modalMode = 'inbox';
   selectedColor    = COLORS[0];
   selectedPriority = 0;
@@ -637,6 +640,7 @@ async function submitInboxCard() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Request failed');
     if (data.relevant > 0) {
+      if (_inboxOnSuccess) { _inboxOnSuccess(); _inboxOnSuccess = null; }
       showModalStatus('Card added.', false);
       document.getElementById('cardText').value  = '';
       setEditorValue('cardDesc', '');

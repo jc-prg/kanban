@@ -40,6 +40,7 @@
 
 .ctx-item:hover { background: var(--surface2); }
 .ctx-item.ctx-danger:hover { color: var(--danger); background: rgba(240,79,106,0.1); }
+.ctx-item--link { text-decoration: none; }
 
 .ctx-separator {
   height: 1px;

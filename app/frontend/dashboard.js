@@ -196,7 +196,7 @@ async function initDashboard() {
     if (!item) return;
     e.preventDefault();
     e.stopPropagation();
-    _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1');
+    _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
   });
 
   // Card click → navigate to the board and open the card's edit modal
@@ -645,11 +645,14 @@ function _closeDetail() {
 
 // ---- Mail context menu ----
 
-function _showMailContextMenu(x, y, accountId, msgId, unread) {
+function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
   _mailCtxAccountId = accountId;
   _mailCtxMsgId     = msgId;
   _mailCtxUnread    = !!unread;
   document.getElementById('mailCtxToggleReadLabel').textContent = unread ? 'Mark as read' : 'Mark as unread';
+  const webmailEl = document.getElementById('mailCtxWebmail');
+  if (webUrl) { webmailEl.href = webUrl; webmailEl.style.display = ''; }
+  else        { webmailEl.style.display = 'none'; }
   const menu = document.getElementById('mailContextMenu');
   menu.style.display = 'block';
   const mw   = menu.offsetWidth  || 160;
@@ -791,8 +794,10 @@ async function _createCardFromMail(accountId, msgId) {
     }
   } catch { /* proceed with empty prefill */ }
 
-  await openInboxModal(null, prefill);
+  await openInboxModal(null, prefill, () => _mailDelete(accountId, msgId));
 }
+
+document.getElementById('mailCtxWebmail').addEventListener('click', () => hideMailContextMenu());
 
 document.getElementById('mailCtxCreateCard').addEventListener('click', async () => {
   const accountId = _mailCtxAccountId;
@@ -813,7 +818,9 @@ document.getElementById('mailCtxDelete').addEventListener('click', async () => {
   const accountId = _mailCtxAccountId;
   const msgId     = _mailCtxMsgId;
   hideMailContextMenu();
-  if (accountId && msgId) await _mailDelete(accountId, msgId);
+  if (!accountId || !msgId) return;
+  const ok = await showConfirm('Move this message to trash?', { okLabel: 'Delete', danger: true });
+  if (ok) await _mailDelete(accountId, msgId);
 });
 
 // Populate folder list on hover — fetch once per account then serve from cache

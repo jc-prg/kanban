@@ -15,7 +15,6 @@ const ICONS = {
   done:         '✓',
   error:        '✗',
   close:        '✕',
-  openLink:     '↗',
   download:     '↓',
   copyCode:     '⧉',
   fullscreen:   '⛶',
@@ -135,6 +134,11 @@ function _svgFolder(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 5h10v5.5a.8.8 0 0 1-.8.8H1.8a.8.8 0 0 1-.8-.8V5z"/><path d="M1 5V3.5a.8.8 0 0 1 .8-.8h2.7L6 5"/></svg>`;
 }
 
+// Arrow leaving a box — open external link in a new tab
+function _svgOpenLink(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 1.5H2.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V7"/><path d="M7.5 1.5h3v3"/><line x1="5.5" y1="6.5" x2="10.5" y2="1.5"/></svg>`;
+}
+
 // Folder with stem and baseline — network/shared folder (e.g. WebDAV remote)
 function _svgNetworkFolder(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 3.5h10v4a.8.8 0 0 1-.8.8H1.8a.8.8 0 0 1-.8-.8V3.5z"/><path d="M1 3.5V2a.8.8 0 0 1 .8-.8h2.7L6 3.5"/><line x1="6" y1="8.3" x2="6" y2="10.5"/><line x1="2.5" y1="10.5" x2="9.5" y2="10.5"/></svg>`;
@@ -162,6 +166,7 @@ const SVGICONS = {
   print:          _svgPrint,
   filter:         _svgFilter,
   dashboard:      _svgDashboard,
+  openLink:       _svgOpenLink,
 };
 
 // ---- Icon registry (used to render the icon library in settings) ----
@@ -172,7 +177,7 @@ const ICON_REGISTRY = [
   { type: 'char', char: ICONS.close,        name: 'Close / Delete', usage: 'Remove item; close dialog or viewer' },
   { type: 'svg', svg: _svgEdit(16, 16),        name: 'Edit',           usage: 'Open card or note for editing' },
   { type: 'svg', svg: _svgDuplicate(16, 16),   name: 'Duplicate',      usage: 'Create a copy of a card' },
-  { type: 'char', char: ICONS.openLink,     name: 'Open link',      usage: 'Open URL in a new browser tab' },
+  { type: 'svg', svg: _svgOpenLink(16, 16),    name: 'Open link',      usage: 'Open URL in a new browser tab' },
   { type: 'char', char: ICONS.download,     name: 'Download',       usage: 'Download an attachment file' },
   { type: 'char', char: ICONS.fullscreen,   name: 'Full screen',    usage: 'Toggle distraction-free full screen mode in card/note modal' },
   { type: 'svg', svg: _svgMoveTo(16, 16),      name: 'Move to',        usage: 'Move card(s) to another column' },
