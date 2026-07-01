@@ -169,6 +169,13 @@
 
 .dashboard-boards-archived-btn:hover { color: var(--text); }
 
+.dash-new-board-inner {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .dashboard-boards-chevron {
   margin-left: auto;
   font-size: 1rem;

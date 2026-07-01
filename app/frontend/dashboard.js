@@ -392,6 +392,19 @@ function _renderBoardsPanel(boards, achievements) {
     html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
   }
 
+  html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
+    Create board<span class="dashboard-boards-chevron">\u203A</span>
+  </button>
+  <div class="dashboard-boards-archived-list" style="display:none">
+    <div class="dash-new-board-inner">
+      <div class="new-board-row">
+        <input id="dashNewBoardInput" class="new-board-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off">
+        <button id="dashNewBoardBtn" class="btn btn-accent">+&nbsp;new</button>
+      </div>
+      <p id="dashNewBoardError" class="new-board-error" style="display:none"></p>
+    </div>
+  </div>`;
+
   html += `<div id="dashAchSection" style="display:none">
     <div class="dashboard-group-header dash-ach-header" style="margin-top:10px">
       <span id="dashAchLabel">Today</span>
@@ -407,6 +420,35 @@ function _renderBoardsPanel(boards, achievements) {
   panel.innerHTML = html;
 
   document.getElementById('dashAchToday').innerHTML = SVGICONS.sync(10, 10);
+
+  document.getElementById('dashNewBoardBtn').addEventListener('click', async () => {
+    const input = document.getElementById('dashNewBoardInput');
+    const errEl = document.getElementById('dashNewBoardError');
+    const name  = input.value.trim().toLowerCase();
+    errEl.style.display = 'none';
+    if (!name) return;
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      errEl.textContent = 'Use only lowercase letters, digits and hyphens.';
+      errEl.style.display = '';
+      return;
+    }
+    if (name === 'inbox') {
+      errEl.textContent = '"inbox" is a reserved name.';
+      errEl.style.display = '';
+      return;
+    }
+    try {
+      const r    = await fetch(`/api/boards/${encodeURIComponent(name)}`, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) { errEl.textContent = data.error || 'Failed to create board.'; errEl.style.display = ''; return; }
+      window.location.href = `/board/${name}`;
+    } catch {
+      errEl.textContent = 'Failed to create board.'; errEl.style.display = '';
+    }
+  });
+  document.getElementById('dashNewBoardInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('dashNewBoardBtn').click();
+  });
 
   _renderDashAchTiles(achievements, _dashAchOffset);
 
