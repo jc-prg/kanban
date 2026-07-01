@@ -628,10 +628,10 @@ function _openMailDetail(accountId, msgId, webUrl) {
         iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
         iframe.setAttribute('referrerpolicy', 'no-referrer');
         body.appendChild(iframe);
-        const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#e2e8f0;background:#1e1e2e;padding:8px;margin:0;word-break:break-word}'
-          + ' a{color:#7c6af7} img{max-width:100%;height:auto}'
-          + ' blockquote{border-left:3px solid #4a4a6a;margin:8px 0;padding:0 12px;color:#94a3b8}'
-          + ' pre,code{font-family:monospace;font-size:0.88em;background:#2a2a3e;padding:2px 5px;border-radius:3px}';
+        const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#222;background:white;padding:8px;margin:0;word-break:break-word}'
+          + ' a{color:#4f46e5} img{max-width:100%;height:auto}'
+          + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
+          + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
         const { emailStyles, bodyClass } = (() => {
           try {
             const parsed = new DOMParser().parseFromString(msg.bodyHtml, 'text/html');
