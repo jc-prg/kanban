@@ -1,5 +1,7 @@
 # Kanban App
 
+A self-hosted, single-user kanban board with a vanilla JS frontend and a CouchDB-backed Express backend. Manage tasks across multiple boards with drag-and-drop cards, a Markdown notes sidebar, file attachments, a personal dashboard aggregating cards, email (IMAP), and calendar (CalDAV/iCal), and optional WebDAV sync for notes.
+
 > **Single-user application.** Authentication is a single global password with no per-board or per-user access control. One valid session token grants full read/write/delete access to all boards. Do not expose this app to untrusted users or the public internet without additional access controls in front of it.
 
 ## Setup & Start
@@ -28,36 +30,3 @@ docker compose up -d --build
 - WebDAV sync: sync notes with a WebDAV server (e.g. Nextcloud) per board — credentials stored server-side
 - Webhook trigger: configure a URL and label per board; fires a server-side HTTP request and shows the response
 - Auto-save (debounced 600 ms); print view for cards and notes
-
-## Files
-
-```
-app/
-  backend/
-    server.js           Express entry point
-    config.js           Env vars and derived constants
-    db.js               CouchDB helpers
-    auth.js             Authentication middleware
-    routes/             REST API routers
-    dashboard/          Dashboard data fetchers (mail.js, calendar.js)
-  frontend/
-    index.html          HTML shell + modal markup
-    styles/             CSS (base, layout, column, card, overlay, notes, dashboard, …)
-    *.js                Vanilla JS modules (icons, state, render, menus, dashboard, …)
-data/                   JSON backups (auto-created)
-```
-
-## API
-
-Full API reference is in `CLAUDE.md`. Key endpoint groups:
-
-- `POST /api/auth` — login
-- `GET/POST/DELETE /api/boards/:name` — board management
-- `GET/PUT/PATCH /api/:board/board` — board state
-- `GET /api/:board/all-columns` — all columns with cards
-- `POST /api/:board/import` — bulk card import
-- `GET/PUT /api/:board/notes` — notes document
-- `GET/PUT /api/:board/webdav-config` — WebDAV config
-- `GET/PUT /api/:board/webhook-config` — webhook config
-- `GET/PUT /api/dashboard/config` — dashboard config (card sources, mail, calendar accounts)
-- `GET /api/dashboard/data` — fetch all dashboard data in parallel
