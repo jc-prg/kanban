@@ -540,8 +540,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
           <span class="settings-item-desc">${escHtml((cs.columns || []).join(', ') || 'all columns')}</span>
         </div>
         <div class="calendar-account-actions">
-          <button class="btn" data-cs-edit="${i}">Edit</button>
-          <button class="btn" data-cs-del="${i}">Delete</button>
+          <button class="btn btn--icon" data-cs-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" data-cs-del="${i}" title="Delete">${ICONS.close}</button>
         </div>
       </div>`).join('');
 
@@ -719,8 +719,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
           <span class="settings-item-desc">${escHtml(acc.host || '')}:${escHtml(String(acc.port || 993))} · ${escHtml(acc.user || '')}</span>
         </div>
         <div class="calendar-account-actions">
-          <button class="btn" data-mail-edit="${i}">Edit</button>
-          <button class="btn" data-mail-del="${i}">Delete</button>
+          <button class="btn btn--icon" data-mail-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" data-mail-del="${i}" title="Delete">${ICONS.close}</button>
         </div>
       </div>`).join('');
 
@@ -900,8 +900,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
           <span class="settings-item-desc">${escHtml(acc.type === 'ical-url' ? 'iCal URL' : 'CalDAV')} · ${escHtml(acc.url || '')}</span>
         </div>
         <div class="calendar-account-actions">
-          <button class="btn" data-cal-edit="${i}">Edit</button>
-          <button class="btn" data-cal-del="${i}">Delete</button>
+          <button class="btn btn--icon" data-cal-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" data-cal-del="${i}" title="Delete">${ICONS.close}</button>
         </div>
       </div>`).join('');
 
