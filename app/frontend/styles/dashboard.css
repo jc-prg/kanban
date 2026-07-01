@@ -8,18 +8,6 @@
   gap: 12px;
 }
 
-.dashboard-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.dashboard-fetched-at {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  margin-right: auto;
-}
 
 .dashboard-grid {
   display: grid;

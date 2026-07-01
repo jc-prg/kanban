@@ -31,12 +31,14 @@
 <header>
   <h1 id="appTitle">jc://<span>kanban</span>/</h1>
   <div class="header-right">
-  <div class="header-actions">
-    <span class="save-indicator" id="saveIndicator">saved</span>
-  </div>
   <div class="header-menu">
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
     <a class="header-menu-btn" id="dashboardBtn" href="/dashboard" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
+    <div class="header-actions">
+      <span class="save-indicator" id="saveIndicator">saved</span>
+      <span class="save-indicator" id="dashboardFetchedAt" style="display:none"></span>
+    </div>
+    <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh dashboard" style="display:none"><span data-icon="sync"></span></button>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
       <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
       <div class="board-switch-menu" id="boardSwitchMenu"></div>
@@ -58,10 +60,7 @@
 </header>
 
 <div id="dashboard" style="display:none">
-  <div class="dashboard-header">
-    <span id="dashboardFetchedAt" class="dashboard-fetched-at"></span>
-    <button class="btn btn--icon" id="dashboardRefreshBtn" title="Refresh" style="padding:6px 9px"><span data-icon="sync"></span></button>
-  </div>
+
   <div class="modal-backdrop" id="dashboardDetail" style="display:none">
     <div class="modal dashboard-detail-modal">
       <div class="dashboard-detail-titlebar">

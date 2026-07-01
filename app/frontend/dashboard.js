@@ -2,7 +2,8 @@
 
 // ---- Dashboard ----
 
-let _refreshTimer = null;
+let _refreshTimer   = null;
+let _fetchedAtTimer = null;
 
 // Map: cardId → { card, board } — populated on each render for context menu
 const _dashCardMap = new Map();
@@ -68,12 +69,14 @@ function applyDashboardPanelVisibility(cfg) {
 
 async function initDashboard() {
   document.querySelector('.board-area').style.display = 'none';
-  document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
+  document.getElementById('saveIndicator').style.display = 'none';
+  document.getElementById('dashboardFetchedAt').style.display = '';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
   document.getElementById('dashboard').style.display = 'flex';
 
-  // Show board-switch wrap (headerHomeBtn) for navigation
+  // Show board-switch wrap (headerHomeBtn) and refresh button for navigation
   document.getElementById('boardSwitchWrap').style.display = '';
+  document.getElementById('dashboardRefreshBtn').style.display = '';
 
   // Show only Dashboard settings + Log out in the menu dropdown
   ['menuInbox', 'menuFindCard', 'menuAnalytics',
@@ -141,6 +144,8 @@ async function initDashboard() {
 
 async function loadDashboard() {
   const fetchedAt = document.getElementById('dashboardFetchedAt');
+  clearTimeout(_fetchedAtTimer);
+  fetchedAt.classList.add('show');
   fetchedAt.textContent = 'Loading\u2026';
   const loadingHtml = '<p class="dashboard-loading">Loading\u2026</p>';
   document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;
@@ -177,6 +182,7 @@ async function loadDashboard() {
 
   fetchedAt.textContent = (anyError ? 'Partial load \u2014 ' : 'Refreshed at ') +
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  _fetchedAtTimer = setTimeout(() => fetchedAt.classList.remove('show'), 10000);
 }
 
 function _renderCardsPanel(groups) {
