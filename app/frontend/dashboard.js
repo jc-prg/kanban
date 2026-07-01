@@ -151,6 +151,9 @@ async function loadDashboard() {
   document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;
   document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;
   document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;
+  document.getElementById('dashCardsCount').textContent = '';
+  document.getElementById('dashMailCount').textContent = '';
+  document.getElementById('dashCalendarCount').textContent = '';
   let anyError = false;
 
   try {
@@ -188,6 +191,8 @@ async function loadDashboard() {
 function _renderCardsPanel(groups) {
   const panel = document.getElementById('dashboardCardsPanel');
   _dashCardMap.clear();
+  const total = groups.reduce((s, g) => s + (g.cards?.length || 0), 0);
+  document.getElementById('dashCardsCount').textContent = total || '';
   if (!groups.length) {
     panel.innerHTML = '<p class="dashboard-empty">No card sources configured.</p>';
     return;
@@ -258,6 +263,8 @@ function _renderCardsPanel(groups) {
 
 function _renderMailPanel(accounts) {
   const panel = document.getElementById('dashboardMailPanel');
+  const total = accounts.reduce((s, a) => s + (a.messages?.length || 0), 0);
+  document.getElementById('dashMailCount').textContent = total || '';
 
   if (!accounts.length) {
     panel.innerHTML = '<p class="dashboard-empty">No mail accounts configured.</p>';
@@ -364,6 +371,8 @@ function _openMailDetail(accountId, msgId, webUrl) {
 
 function _renderCalendarPanel(accounts) {
   const panel = document.getElementById('dashboardCalendarPanel');
+  const total = accounts.reduce((s, a) => s + (a.events?.length || 0), 0);
+  document.getElementById('dashCalendarCount').textContent = total || '';
 
   if (!accounts.length) {
     panel.innerHTML = '<p class="dashboard-empty">No calendar accounts configured.</p>';

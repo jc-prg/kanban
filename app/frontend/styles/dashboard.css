@@ -29,15 +29,22 @@
   overflow: hidden;
 }
 
+.dashboard-panel-header .column-count { margin-left: auto; }
+
 .dashboard-panel-header {
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 10px 14px;
+  padding: 14px 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
   flex-shrink: 0;
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
 }
 
 .dashboard-panel-body {

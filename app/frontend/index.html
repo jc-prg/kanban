@@ -32,12 +32,12 @@
   <h1 id="appTitle">jc://<span>kanban</span>/</h1>
   <div class="header-right">
   <div class="header-menu">
-    <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
-    <a class="header-menu-btn" id="dashboardBtn" href="/dashboard" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <div class="header-actions">
       <span class="save-indicator" id="saveIndicator">saved</span>
       <span class="save-indicator" id="dashboardFetchedAt" style="display:none"></span>
     </div>
+    <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
+    <a class="header-menu-btn" id="dashboardBtn" href="/dashboard" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh dashboard" style="display:none"><span data-icon="sync"></span></button>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
       <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
@@ -74,15 +74,15 @@
   </div>
   <div class="dashboard-grid">
     <div class="dashboard-panel">
-      <div class="dashboard-panel-header">Cards</div>
+      <div class="dashboard-panel-header">Cards<span class="column-count" id="dashCardsCount"></span></div>
       <div class="dashboard-panel-body" id="dashboardCardsPanel"></div>
     </div>
     <div class="dashboard-panel">
-      <div class="dashboard-panel-header">Mail</div>
+      <div class="dashboard-panel-header">Mail<span class="column-count" id="dashMailCount"></span></div>
       <div class="dashboard-panel-body" id="dashboardMailPanel"></div>
     </div>
     <div class="dashboard-panel">
-      <div class="dashboard-panel-header">Calendar</div>
+      <div class="dashboard-panel-header">Calendar<span class="column-count" id="dashCalendarCount"></span></div>
       <div class="dashboard-panel-body" id="dashboardCalendarPanel"></div>
     </div>
   </div>
