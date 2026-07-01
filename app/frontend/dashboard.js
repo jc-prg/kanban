@@ -641,16 +641,12 @@ function _openMailDetail(accountId, msgId, webUrl) {
             };
           } catch { return { emailStyles: '', bodyClass: '' }; }
         })();
-        const doc = iframe.contentDocument;
-        doc.open();
-        const safeHtml = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
+        const safeHtml    = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
         const emailStyleTag = emailStyles ? `<style>${emailStyles}</style>` : '';
-        doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style>${emailStyleTag}</head><body>${safeHtml}</body></html>`);
-        doc.close();
-        if (bodyClass) doc.body.className = bodyClass;
+        const bodyAttr    = bodyClass ? ` class="${bodyClass.replace(/"/g, '&quot;')}"` : '';
+        iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${safeHtml}</body></html>`;
         const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
         iframe.addEventListener('load', resize);
-        resize();
       } else if (msg.body) {
         const pre = document.createElement('pre');
         pre.className = 'dashboard-mail-body';
