@@ -140,19 +140,43 @@ async function initDashboard() {
 }
 
 async function loadDashboard() {
-  document.getElementById('dashboardFetchedAt').textContent = 'Loading\u2026';
+  const fetchedAt = document.getElementById('dashboardFetchedAt');
+  fetchedAt.textContent = 'Loading\u2026';
+  const loadingHtml = '<p class="dashboard-loading">Loading\u2026</p>';
+  document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;
+  document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;
+  document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;
+  let anyError = false;
+
   try {
-    const res = await fetch('/api/dashboard/data');
+    const res = await fetch('/api/dashboard/cards');
     if (!res.ok) throw new Error('Failed');
-    const { cards, mail, calendar } = await res.json();
-    _renderCardsPanel(cards);
-    _renderMailPanel(mail);
-    _renderCalendarPanel(calendar);
-    document.getElementById('dashboardFetchedAt').textContent =
-      'Refreshed at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch (e) {
-    document.getElementById('dashboardFetchedAt').textContent = 'Failed to load';
+    _renderCardsPanel(await res.json());
+  } catch {
+    anyError = true;
+    document.getElementById('dashboardCardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
   }
+
+  try {
+    const res = await fetch('/api/dashboard/mail');
+    if (!res.ok) throw new Error('Failed');
+    _renderMailPanel(await res.json());
+  } catch {
+    anyError = true;
+    document.getElementById('dashboardMailPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
+  }
+
+  try {
+    const res = await fetch('/api/dashboard/calendar');
+    if (!res.ok) throw new Error('Failed');
+    _renderCalendarPanel(await res.json());
+  } catch {
+    anyError = true;
+    document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
+  }
+
+  fetchedAt.textContent = (anyError ? 'Partial load \u2014 ' : 'Refreshed at ') +
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function _renderCardsPanel(groups) {

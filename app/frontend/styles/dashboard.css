@@ -58,7 +58,20 @@
   padding: 6px 0;
 }
 
-/* ---- Empty / error states ---- */
+/* ---- Empty / error / loading states ---- */
+
+.dashboard-loading {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 12px 14px;
+  opacity: 0.5;
+  animation: dashboard-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dashboard-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1;   }
+}
 
 .dashboard-empty {
   font-size: 0.78rem;
