@@ -84,7 +84,7 @@ function applyDashboardPanelVisibility(cfg) {
     document.getElementById(id).closest('.dashboard-panel').style.display = show ? '' : 'none';
     if (show) visible++;
   }
-  document.querySelector('.dashboard-grid').style.gridTemplateColumns = `repeat(${visible || 1}, 1fr)`;
+  document.querySelector('.dashboard-grid').style.setProperty('--dash-panel-count', visible || 1);
 }
 
 async function _dashReorderColumn(board, columnTitle, newCardIdOrder) {
@@ -281,7 +281,10 @@ async function loadDashboard() {
   if (showCalendar) { document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;  document.getElementById('dashCalendarCount').textContent  = ''; }
 
   const resolved = await Promise.all([
-    showBoards   ? fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderBoardsPanel(d);   return true; }).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML   = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+    showBoards   ? Promise.all([
+      fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetch('/api/achievements/today').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([d, a]) => { _renderBoardsPanel(d, a); return true; }).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showCalendar ? fetch('/api/dashboard/calendar').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
@@ -317,7 +320,7 @@ function _boardItemHtml(b) {
   </a>`;
 }
 
-function _renderBoardsPanel(boards) {
+function _renderBoardsPanel(boards, achievements) {
   const panel = document.getElementById('dashboardBoardsPanel');
   const active   = boards.filter(b => !b.archived);
   const archived = boards.filter(b =>  b.archived);
@@ -335,15 +338,43 @@ function _renderBoardsPanel(boards) {
     html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
   }
 
+  if (achievements) {
+    const { done = 0, moved = 0, created = 0, inboxCreated = 0,
+            doneCards = [], movedCards = [], createdCards = [], inboxCreatedCards = [] } = achievements;
+    if (done + moved + created > 0) {
+      const _tip = cards => {
+        const lines = cards.slice(0, 8).map(({ board, text }) => {
+          const short = text.length > 35 ? text.slice(0, 35) + '\u2026' : text;
+          return `${board}: ${short}`;
+        });
+        if (cards.length > 8) lines.push(`${cards.length - 8} further cards \u2026`);
+        return lines.join('\n');
+      };
+      const _tile = (value, label, cls, cards) => {
+        const tip = cards.length ? ` data-tooltip="${escHtml(_tip(cards))}"` : '';
+        return `<div class="achievement-item ${cls}"${tip}><span class="achievement-value">${value}</span><span class="achievement-label">${label}</span></div>`;
+      };
+      html += '<div class="dashboard-group-header" style="margin-top:10px">Today</div>';
+      html += `<div class="dashboard-achievement-tiles">
+        ${_tile(inboxCreated,           'cards<br>inbox',   'dash-ach--inbox',   inboxCreatedCards)}
+        ${_tile(created - inboxCreated, 'cards<br>created', 'dash-ach--created', createdCards)}
+        ${_tile(moved,                  'cards<br>moved',   'dash-ach--moved',   movedCards)}
+        ${_tile(done,                   'cards<br>done',    'dash-ach--done',    doneCards)}
+      </div>`;
+    }
+  }
+
   panel.innerHTML = html;
 
-  panel.querySelector('.dashboard-boards-archived-btn')?.addEventListener('click', function () {
-    const list    = panel.querySelector('.dashboard-boards-archived-list');
-    const chevron = this.querySelector('.dashboard-boards-chevron');
-    const isOpen  = list.style.display !== 'none';
-    list.style.display        = isOpen ? 'none' : '';
-    chevron.style.transform   = isOpen ? '' : 'rotate(90deg)';
-    this.setAttribute('aria-expanded', String(!isOpen));
+  panel.querySelectorAll('.dashboard-boards-archived-btn').forEach(btn => {
+    btn.addEventListener('click', function () {
+      const list    = this.nextElementSibling;
+      const chevron = this.querySelector('.dashboard-boards-chevron');
+      const isOpen  = list.style.display !== 'none';
+      list.style.display      = isOpen ? 'none' : '';
+      chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
+      this.setAttribute('aria-expanded', String(!isOpen));
+    });
   });
 }
 

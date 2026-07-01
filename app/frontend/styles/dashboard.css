@@ -11,7 +11,7 @@
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(var(--dash-panel-count, 4), 1fr);
   gap: 16px;
   flex: 1;
   overflow: hidden;
@@ -176,11 +176,44 @@
   line-height: 1;
 }
 
+/* ---- Boards panel: today's achievements ---- */
+
+.dashboard-achievement-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px 12px;
+}
+
+.dashboard-achievement-tiles .achievement-item {
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.dashboard-achievement-tiles .achievement-value {
+  font-size: calc(0.78rem * 2);
+}
+
+.dash-ach--inbox,
+.dash-ach--created { background: #f9731618; border-color: #f9731640; }
+.dash-ach--inbox .achievement-value,
+.dash-ach--created .achievement-value { color: #f97316; }
+.dash-ach--inbox .achievement-label,
+.dash-ach--created .achievement-label { color: #f97316cc; }
+
+.dash-ach--moved { background: #eab30818; border-color: #eab30840; }
+.dash-ach--moved .achievement-value { color: #eab308; }
+.dash-ach--moved .achievement-label { color: #eab308cc; }
+
+.dash-ach--done { background: #10b98118; border-color: #10b98140; }
+.dash-ach--done .achievement-value { color: #10b981; }
+.dash-ach--done .achievement-label { color: #10b981cc; }
+
 /* ---- Responsive: stack panels vertically on narrow screens ---- */
 
 @media (max-width: 900px) {
   .dashboard-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(min(2, var(--dash-panel-count, 4)), 1fr);
     overflow-y: auto;
   }
 }
