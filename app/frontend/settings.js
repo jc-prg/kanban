@@ -1499,6 +1499,8 @@ async function afterAuth() {
     document.title = `jc://${BOARD_NAME}/`;
     document.getElementById('boardSwitchWrap').style.display = '';
     document.getElementById('notesToggleBtn').style.display = '';
+    if (window.matchMedia('(min-width: 640px)').matches)
+      document.getElementById('dashboardBtn').style.display = '';
     await load();
     // If the sidebar was open on last visit, open it immediately and show a
     // loading indicator so the panel is visible while notes are being fetched.
@@ -1710,7 +1712,8 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
       const isDashboard = window.location.pathname === '/dashboard';
-      const dashEntry = isDashboard ? '' : '<a class="board-switch-item" href="/dashboard">Dashboard</a>';
+      const isDesktop = window.matchMedia('(min-width: 640px)').matches;
+      const dashEntry = isDashboard || isDesktop ? '' : '<a class="board-switch-item" href="/dashboard">Dashboard</a>';
       const allEntry  = '<a class="board-switch-item" href="/">all boards</a>';
       const sep = others.length ? '<div class="header-dd-separator"></div>' : '';
       menu.innerHTML = dashEntry + allEntry + sep + others

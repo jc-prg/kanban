@@ -76,7 +76,7 @@ async function initDashboard() {
   document.getElementById('boardSwitchWrap').style.display = '';
 
   // Show only Dashboard settings + Log out in the menu dropdown
-  ['menuDashboard', 'menuInbox', 'menuFindCard', 'menuAnalytics',
+  ['menuInbox', 'menuFindCard', 'menuAnalytics',
    'menuStatistics', 'menuWebhook', 'menuSettings'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -295,10 +295,18 @@ function _renderMailPanel(accounts) {
 }
 
 function _openMailDetail(accountId, msgId, webUrl) {
-  const detail = document.getElementById('dashboardDetail');
-  const body   = document.getElementById('dashboardDetailBody');
+  const detail    = document.getElementById('dashboardDetail');
+  const body      = document.getElementById('dashboardDetailBody');
+  const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   body.innerHTML = '';
+  if (webUrl) {
+    webUrlBtn.href = webUrl;
+    webUrlBtn.title = 'Open in Webmail';
+    webUrlBtn.style.display = '';
+  } else {
+    webUrlBtn.style.display = 'none';
+  }
   detail.style.display = '';
 
   fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`)
@@ -344,13 +352,6 @@ function _openMailDetail(accountId, msgId, webUrl) {
         body.appendChild(pre);
       }
 
-      if (webUrl) {
-        const link = document.createElement('a');
-        link.href = webUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
-        link.className = 'btn'; link.style.marginTop = '12px'; link.style.display = 'inline-block';
-        link.textContent = 'Open in Webmail \u2197';
-        body.appendChild(link);
-      }
     })
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load message.</p>'; });
 }
@@ -425,9 +426,17 @@ function _renderCalendarPanel(accounts) {
 // ---- Detail panel ----
 
 function _openEventDetail(accountId, uid, webUrl) {
-  const detail = document.getElementById('dashboardDetail');
-  const body   = document.getElementById('dashboardDetailBody');
+  const detail    = document.getElementById('dashboardDetail');
+  const body      = document.getElementById('dashboardDetailBody');
+  const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
+  if (webUrl) {
+    webUrlBtn.href = webUrl;
+    webUrlBtn.title = 'Open in Calendar';
+    webUrlBtn.style.display = '';
+  } else {
+    webUrlBtn.style.display = 'none';
+  }
   body.innerHTML = '';
   detail.style.display = '';
 
@@ -456,13 +465,6 @@ function _openEventDetail(accountId, uid, webUrl) {
         rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
       }</table>`;
 
-      if (webUrl) {
-        const link = document.createElement('a');
-        link.href = webUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
-        link.className = 'btn'; link.style.marginTop = '12px'; link.style.display = 'inline-block';
-        link.textContent = 'Open in Calendar \u2197';
-        body.appendChild(link);
-      }
     })
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load event.</p>'; });
 }

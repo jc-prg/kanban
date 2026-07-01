@@ -36,14 +36,13 @@
   </div>
   <div class="header-menu">
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
+    <a class="header-menu-btn" id="dashboardBtn" href="/dashboard" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
       <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
       <div class="board-switch-menu" id="boardSwitchMenu"></div>
     </div>
-    <a class="header-menu-btn" id="dashboardBtn" href="/dashboard" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
     <div class="header-dropdown" id="headerDropdown">
-      <a class="header-dd-item" id="menuDashboard" href="/dashboard">Dashboard</a>
       <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
       <button class="header-dd-item" id="menuFindCard">Find</button>
       <button class="header-dd-item" id="menuAnalytics">Analyze</button>
@@ -67,6 +66,7 @@
     <div class="modal dashboard-detail-modal">
       <div class="dashboard-detail-titlebar">
         <span id="dashboardDetailTitle" class="dashboard-detail-title"></span>
+        <a class="modal-fs-btn" id="dashboardDetailWebUrl" href="#" target="_blank" rel="noopener noreferrer" title="Open in Webmail" style="position:static;opacity:0.55;display:none">&#x2197;</a>
         <button class="modal-fs-btn" id="dashboardDetailFsBtn" title="Full screen" style="position:static;opacity:0.55">⛶</button>
         <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close">✕</button>
       </div>

@@ -1392,6 +1392,7 @@
   line-height: 1;
   font-family: inherit;
   opacity: 0.45;
+  text-decoration: none;
   transition: color 0.15s, border-color 0.15s, opacity 0.15s;
 }
 
