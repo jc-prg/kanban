@@ -158,14 +158,16 @@ function _renderMailPanel(accounts) {
       const dateStr = msg.date
         ? new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '';
-      return `<div class="dashboard-mail-item"
+      const metaParts = [];
+      if (msg.from) metaParts.push(`<span class="dashboard-mail-from">${escHtml(msg.from)}</span>`);
+      if (dateStr)  metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
+      const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
+      return `<div class="dashboard-mail-item card"
           data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-web-url="${escHtml(acc.webInterfaceUrl || '')}">
-        <div class="dashboard-mail-subject">${escHtml(msg.subject)}</div>
-        <div class="dashboard-mail-meta">
-          <span class="dashboard-mail-from">${escHtml(msg.from)}</span>
-          <span class="dashboard-mail-date">${escHtml(dateStr)}</span>
+        <div class="card-body">
+          <div class="card-text">${escHtml(msg.subject)}</div>
+          ${metaHtml}
         </div>
-        ${msg.preview ? `<div class="dashboard-mail-preview">${escHtml(msg.preview)}</div>` : ''}
       </div>`;
     }).join('');
 
