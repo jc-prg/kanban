@@ -580,12 +580,12 @@ function submitCard() {
   closeModal();
 }
 
-async function openInboxModal(preselectedBoard) {
+async function openInboxModal(preselectedBoard, prefill = null) {
   modalMode = 'inbox';
   selectedColor    = COLORS[0];
   selectedPriority = 0;
-  document.getElementById('cardText').value  = '';
-  setEditorValue('cardDesc', '');
+  document.getElementById('cardText').value  = prefill?.text || '';
+  setEditorValue('cardDesc', prefill?.description || '');
   document.getElementById('cardLink').value  = '';
   document.getElementById('cardStart').value = '';
   document.getElementById('cardEnd').value   = '';

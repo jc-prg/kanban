@@ -6,6 +6,8 @@ let _refreshTimer   = null;
 let _fetchedAtTimer = null;
 let _dragCardId     = null;
 let _dragCardGroup  = null;
+let _mailCtxAccountId = null;
+let _mailCtxMsgId     = null;
 
 // Map: cardId → { card, board } — populated on each render for context menu
 const _dashCardMap = new Map();
@@ -176,6 +178,15 @@ async function initDashboard() {
     const item = e.target.closest('[data-msg-id]');
     if (!item) return;
     _openMailDetail(item.dataset.accountId, item.dataset.msgId, item.dataset.webUrl || '');
+  });
+
+  // Mail message right-click → mail context menu
+  document.getElementById('dashboardMailPanel').addEventListener('contextmenu', e => {
+    const item = e.target.closest('[data-msg-id]');
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId);
   });
 
   // Card click → navigate to the board and open the card's edit modal
@@ -556,3 +567,70 @@ function _closeDetail() {
   document.getElementById('dashboardDetail').style.display = 'none';
   document.querySelector('#dashboardDetail .modal')?.classList.remove('modal--fullscreen');
 }
+
+// ---- Mail context menu ----
+
+function _showMailContextMenu(x, y, accountId, msgId) {
+  _mailCtxAccountId = accountId;
+  _mailCtxMsgId     = msgId;
+  const menu = document.getElementById('mailContextMenu');
+  menu.style.display = 'block';
+  const mw   = menu.offsetWidth  || 160;
+  const mh   = menu.offsetHeight || 40;
+  const edge = 4;
+  menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
+  menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
+}
+
+function hideMailContextMenu() {
+  document.getElementById('mailContextMenu').style.display = 'none';
+  _mailCtxAccountId = null;
+  _mailCtxMsgId     = null;
+}
+
+async function _createCardFromMail(accountId, msgId) {
+  let prefill = { text: '', description: '' };
+  try {
+    const msg = await fetch(
+      `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`
+    ).then(r => r.ok ? r.json() : null);
+
+    if (msg) {
+      prefill.text = msg.subject || '';
+
+      const headerLines = [];
+      if (msg.from)    headerLines.push(`**From:** ${msg.from}`);
+      if (msg.to)      headerLines.push(`**To:** ${msg.to}`);
+      if (msg.cc)      headerLines.push(`**Cc:** ${msg.cc}`);
+      if (msg.date)    headerLines.push(`**Date:** ${new Date(msg.date).toLocaleString()}`);
+      if (msg.subject) headerLines.push(`**Subject:** ${msg.subject}`);
+
+      let bodyText = '';
+      if (msg.bodyHtml) {
+        try {
+          bodyText = new DOMParser()
+            .parseFromString(msg.bodyHtml, 'text/html')
+            .body.innerText.trim();
+        } catch {
+          bodyText = msg.body || '';
+        }
+      } else {
+        bodyText = msg.body || '';
+      }
+
+      prefill.description = headerLines.join('  \n') +
+        (bodyText ? '\n\n---\n\n' + bodyText : '');
+    }
+  } catch { /* proceed with empty prefill */ }
+
+  await openInboxModal(null, prefill);
+}
+
+document.getElementById('mailCtxCreateCard').addEventListener('click', async () => {
+  const accountId = _mailCtxAccountId;
+  const msgId     = _mailCtxMsgId;
+  hideMailContextMenu();
+  if (accountId && msgId) await _createCardFromMail(accountId, msgId);
+});
+
+document.addEventListener('click', () => hideMailContextMenu());
