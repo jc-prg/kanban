@@ -224,9 +224,12 @@ function _renderMailPanel(accounts) {
     }
 
     const items = acc.messages.map(msg => {
-      const dateStr = msg.date
-        ? new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-        : '';
+      const dateStr = msg.date ? (() => {
+        const d = new Date(msg.date);
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        return `${dd}.${mm}.`;
+      })() : '';
       const metaParts = [];
       if (msg.from) metaParts.push(`<span class="dashboard-mail-from">${escHtml(msg.from)}</span>`);
       if (dateStr)  metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
