@@ -7,6 +7,7 @@ const { writeRateLimit }                                            = require('.
 const { withBoard, withExistingBoard, loadNotesData, saveNotesData } = require('../db');
 const { validateNotes, validateNotesPatch, schemaError }            = require('../schemas');
 const { NOTES_DOC_ID, ATTACHMENTS_DIR }                             = require('../config');
+const { getWebdavDb, getWebdavAccounts }                             = require('../global-db');
 const {
   wdGet, wdPut, wdDelete, wdMove, wdMkcol, wdGetMeta,
   buildPath, getAttachmentPrefix, parseFm, renderMd,
@@ -16,13 +17,14 @@ const {
 } = require('../webdav-notes');
 
 // ---------------------------------------------------------------------------
-// WebDAV config — stored per board under _id 'webdav-config'
+// WebDAV config — stored globally in jc-config-webdav, keyed by board name
+// Per-board doc format (new): { enabled, accountId, subfolder }
+// Per-board doc format (old/compat): { enabled, url, user, password }
 // ---------------------------------------------------------------------------
-const WEBDAV_CFG_ID = 'webdav-config';
 
-async function _loadWebdavDoc(db) {
+async function _loadWebdavDoc(board) {
   try {
-    const { _id, _rev, ...data } = await db.get(WEBDAV_CFG_ID);
+    const { _id, _rev, ...data } = await getWebdavDb().get(board);
     return { _rev, ...data };
   } catch (err) {
     if (err.statusCode === 404) return {};
@@ -31,31 +33,70 @@ async function _loadWebdavDoc(db) {
 }
 
 /** Returns full config including password — for internal backend use only. */
-async function getWebdavConfig(db) {
-  const doc = await _loadWebdavDoc(db);
-  return { enabled: doc.enabled ?? false, url: doc.url || '', user: doc.user || '', password: doc.password || '' };
+async function getWebdavConfig(board) {
+  const doc = await _loadWebdavDoc(board);
+  if (!doc.enabled) return { enabled: false, url: '', user: '', password: '' };
+
+  // New format: accountId + subfolder
+  if (doc.accountId) {
+    const accounts = await getWebdavAccounts();
+    const account  = accounts.find(a => a.id === doc.accountId);
+    if (!account) return { enabled: false, url: '', user: '', password: '' };
+    const base      = account.url.endsWith('/') ? account.url : account.url + '/';
+    const subfolder = (doc.subfolder || '').replace(/^\/|\/$/g, '');
+    const url       = subfolder ? base + subfolder + '/' : base;
+    return { enabled: true, url, user: account.user || '', password: account.password || '' };
+  }
+
+  // Legacy inline format (backward compat)
+  return { enabled: true, url: doc.url || '', user: doc.user || '', password: doc.password || '' };
 }
 
-router.get('/:board/webdav-config', withExistingBoard(async (req, res, db) => {
+router.get('/:board/webdav-config', withExistingBoard(async (req, res, _db) => {
   try {
-    const doc = await _loadWebdavDoc(db);
+    const doc = await _loadWebdavDoc(req.params.board);
+    // Resolve account label for display
+    let accountLabel = '';
+    if (doc.accountId) {
+      const accounts = await getWebdavAccounts();
+      const account  = accounts.find(a => a.id === doc.accountId);
+      accountLabel   = account ? (account.label || account.url || '') : '';
+    }
     res.json({
-      enabled:     doc.enabled     ?? false,
-      url:         doc.url         || '',
-      user:        doc.user        || '',
-      hasPassword: !!(doc.password),
+      enabled:      doc.enabled      ?? false,
+      accountId:    doc.accountId    || '',
+      subfolder:    doc.subfolder    || '',
+      accountLabel,
+      // legacy fields — present only for old docs, omitted when using account
+      ...(doc.url  ? { url:  doc.url,  user: doc.user || '', hasPassword: !!doc.password } : {}),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }));
 
-router.post('/:board/webdav-config/test', writeRateLimit, withExistingBoard(async (req, res, db) => {
+// Test connectivity — accepts {accountId, subfolder} from body (no credentials sent from browser)
+router.post('/:board/webdav-config/test', writeRateLimit, withExistingBoard(async (req, res, _db) => {
   try {
-    const stored   = await getWebdavConfig(db);
-    const url      = (typeof req.body.url  === 'string' && req.body.url.trim())  ? req.body.url.trim()  : stored.url;
-    const user     = (typeof req.body.user === 'string')                          ? req.body.user.trim() : stored.user;
-    const password = (typeof req.body.password === 'string' && req.body.password.length > 0)
-      ? req.body.password
-      : stored.password;
+    const accountId = req.body.accountId || '';
+    const subfolder = typeof req.body.subfolder === 'string' ? req.body.subfolder.trim() : '';
+
+    let url, user, password;
+
+    if (accountId) {
+      const accounts = await getWebdavAccounts();
+      const account  = accounts.find(a => a.id === accountId);
+      if (!account) return res.json({ ok: false, error: 'Account not found' });
+      const base = account.url.endsWith('/') ? account.url : account.url + '/';
+      const sub  = subfolder.replace(/^\/|\/$/g, '');
+      url      = sub ? base + sub + '/' : base;
+      user     = account.user     || '';
+      password = account.password || '';
+    } else {
+      // Legacy: test with stored inline config
+      const stored = await getWebdavConfig(req.params.board);
+      url      = stored.url;
+      user     = stored.user;
+      password = stored.password;
+    }
 
     if (!url) return res.json({ ok: false, error: 'No WebDAV URL configured' });
 
@@ -86,21 +127,18 @@ router.post('/:board/webdav-config/test', writeRateLimit, withExistingBoard(asyn
   }
 }));
 
-router.put('/:board/webdav-config', writeRateLimit, withBoard(async (req, res, db) => {
+router.put('/:board/webdav-config', writeRateLimit, withBoard(async (req, res, _db) => {
   try {
-    const { enabled, url, user, password } = req.body;
-    const existing = await _loadWebdavDoc(db);
+    const { enabled, accountId, subfolder } = req.body;
+    const existing = await _loadWebdavDoc(req.params.board);
     const doc = {
-      _id:     WEBDAV_CFG_ID,
+      _id:       req.params.board,
       ...(existing._rev ? { _rev: existing._rev } : {}),
-      enabled: !!enabled,
-      url:     (typeof url  === 'string' ? url.trim()  : existing.url  || ''),
-      user:    (typeof user === 'string' ? user.trim() : existing.user || ''),
-      password: (typeof password === 'string' && password.length > 0)
-        ? password
-        : (existing.password || ''),
+      enabled:   !!enabled,
+      accountId: typeof accountId === 'string' ? accountId.trim() : (existing.accountId || ''),
+      subfolder: typeof subfolder === 'string' ? subfolder.trim() : (existing.subfolder || ''),
     };
-    await db.insert(doc);
+    await getWebdavDb().insert(doc);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }));
@@ -189,7 +227,7 @@ router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
       else throw err;
     }
 
-    const cfg = await getWebdavConfig(db);
+    const cfg = await getWebdavConfig(req.params.board);
     if (cfg.enabled) {
       try {
         const { tree, changed } = await syncRootFromWebdav(cfg, data);
@@ -396,7 +434,7 @@ function _insertItem(item, parentId, items, targetId = null, position = null) {
 
 // GET /:board/notes/pages/:id/content  — fetch page body fresh from WebDAV
 router.get('/:board/notes/pages/:id/content', withExistingBoard(async (req, res, db) => {
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   if (!cfg.enabled) return res.status(400).json({ error: 'WebDAV not enabled' });
   const notes = await _loadNotes(db);
   const page  = _findItem(req.params.id, notes.items);
@@ -416,7 +454,7 @@ router.get('/:board/notes/pages/:id/content', withExistingBoard(async (req, res,
 
 // GET /:board/notes/pages/:id/meta  — get last-modified from WebDAV (conflict check)
 router.get('/:board/notes/pages/:id/meta', withExistingBoard(async (req, res, db) => {
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   if (!cfg.enabled) return res.status(400).json({ error: 'WebDAV not enabled' });
   const notes = await _loadNotes(db);
   const page  = _findItem(req.params.id, notes.items);
@@ -462,7 +500,7 @@ router.post('/:board/notes/pages', writeRateLimit, withBoard(async (req, res, db
   const notes = await _loadNotes(db);
   if (_findItem(page.id, notes.items)) return res.status(409).json({ error: 'Page ID already exists' });
   _insertItem({ type: 'page', ...page }, parentId || null, notes.items);
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   if (cfg.enabled) {
     const inserted = _findItem(page.id, notes.items);
     const basePath = buildPath(inserted, notes.items);
@@ -493,7 +531,7 @@ router.patch('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, re
   const page   = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
 
-  const cfg          = await getWebdavConfig(db);
+  const cfg          = await getWebdavConfig(req.params.board);
   const oldPath      = cfg.enabled ? (page.wdPath || buildPath(page, notes.items)) : null;
   const titleChanged = req.body.title !== undefined && req.body.title !== page.title;
 
@@ -537,7 +575,7 @@ router.delete('/:board/notes/pages/:id', writeRateLimit, withBoard(async (req, r
   const page  = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
 
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   if (cfg.enabled) {
     const boardAttachDir = ATTACHMENTS_DIR ? path.join(ATTACHMENTS_DIR, board) : null;
     try {
@@ -569,7 +607,7 @@ router.post('/:board/notes/pages/:id/move', writeRateLimit, withBoard(async (req
   const page  = _findItem(id, notes.items);
   if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
 
-  const cfg       = await getWebdavConfig(db);
+  const cfg       = await getWebdavConfig(req.params.board);
   const oldPath   = page.wdPath || buildPath(page, notes.items);
   const oldPrefix = getAttachmentPrefix(page, notes.items); // computed before tree mutation
 
@@ -630,7 +668,7 @@ router.post('/:board/notes/folders', writeRateLimit, withBoard(async (req, res, 
   const notes = await _loadNotes(db);
   if (_findItem(folder.id, notes.items)) return res.status(409).json({ error: 'Folder ID already exists' });
   _insertItem({ type: 'folder', ...folder, children: folder.children || [] }, parentId || null, notes.items);
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   if (cfg.enabled) {
     const inserted   = _findItem(folder.id, notes.items);
     const folderPath = buildPath(inserted, notes.items);
@@ -652,7 +690,7 @@ router.patch('/:board/notes/folders/:id', writeRateLimit, withBoard(async (req, 
   const folder = _findItem(id, notes.items);
   if (!folder || folder.type !== 'folder') return res.status(404).json({ error: 'Folder not found' });
 
-  const cfg     = await getWebdavConfig(db);
+  const cfg     = await getWebdavConfig(req.params.board);
   const oldPath = cfg.enabled ? (folder.wdPath || buildPath(folder, notes.items)) : null;
   folder.title  = title;
   if (cfg.enabled && oldPath) {
@@ -683,7 +721,7 @@ router.delete('/:board/notes/folders/:id', writeRateLimit, withBoard(async (req,
   const folder = _findItem(id, notes.items);
   if (!folder || folder.type !== 'folder') return res.status(404).json({ error: 'Folder not found' });
 
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   if (cfg.enabled) {
     const boardAttachDir = ATTACHMENTS_DIR ? path.join(ATTACHMENTS_DIR, board) : null;
     try {
@@ -706,7 +744,7 @@ router.post('/:board/notes/folders/:id/move', writeRateLimit, withBoard(async (r
   const folder = _findItem(id, notes.items);
   if (!folder || folder.type !== 'folder') return res.status(404).json({ error: 'Folder not found' });
 
-  const cfg     = await getWebdavConfig(db);
+  const cfg     = await getWebdavConfig(req.params.board);
   const oldPath = cfg.enabled ? (folder.wdPath || buildPath(folder, notes.items)) : null;
   _removeItem(id, notes.items);
   _insertItem(folder, parentId || null, notes.items, targetId || null, position || null);
@@ -733,7 +771,7 @@ router.post('/:board/notes/folders/:id/move', writeRateLimit, withBoard(async (r
 // POST /:board/notes/folders/:id/sync  — sync one folder's children from WebDAV
 router.post('/:board/notes/folders/:id/sync', withBoard(async (req, res, db) => {
   const { id } = req.params;
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   const notes = await _loadNotes(db);
   if (!cfg.enabled) return res.json({ ok: true, changed: false, notes });
   try {
@@ -750,7 +788,7 @@ router.post('/:board/notes/folders/:id/sync', withBoard(async (req, res, db) => 
 // Body: { folderIds?: string[] } — if provided, syncs root + those folders only;
 // omitting folderIds triggers a full depth-infinity sync (backward compat).
 router.post('/:board/notes/sync', withBoard(async (req, res, db) => {
-  const cfg = await getWebdavConfig(db);
+  const cfg = await getWebdavConfig(req.params.board);
   if (!cfg.enabled) return res.json({ ok: true, changed: false, notes: await _loadNotes(db) });
   const notes = await _loadNotes(db);
   const { folderIds } = req.body || {};

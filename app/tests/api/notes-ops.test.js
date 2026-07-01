@@ -47,6 +47,34 @@ const request       = require('supertest')
 const { createApp } = require('../setup/createApp')
 
 // ---------------------------------------------------------------------------
+// WebDAV global DB mock — injected before createApp so getWebdavDb() is wired
+// ---------------------------------------------------------------------------
+const GLOBAL_DB_MODULE = path.resolve(__dirname, '../../backend/global-db.js')
+const mockWdStore = {}
+const mockWdDb = {
+  get:    async (id)   => {
+    const doc = mockWdStore[id]
+    if (!doc) throw Object.assign(new Error('missing'), { statusCode: 404 })
+    return JSON.parse(JSON.stringify(doc))
+  },
+  insert: async (data) => {
+    mockWdStore[data._id] = { ...JSON.parse(JSON.stringify(data)), _rev: '2-wdcfg' }
+    return { ok: true, id: data._id, rev: '2-wdcfg' }
+  },
+}
+require.cache[GLOBAL_DB_MODULE] = {
+  id: GLOBAL_DB_MODULE, filename: GLOBAL_DB_MODULE, loaded: true,
+  exports: {
+    getDashboardConfig:  async () => ({ mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }),
+    saveDashboardConfig: async () => ({ ok: true }),
+    initGlobalDb:        async () => {},
+    getGlobalDb:         () => ({}),
+    getWebdavDb:         () => mockWdDb,
+  },
+  children: [], paths: [],
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -54,8 +82,14 @@ const WD_URL = 'http://dav.test/'
 
 /** Make an in-memory db mock. webdav: null → no config doc (WebDAV disabled). */
 function makeDb({ notes = null, webdav = null } = {}) {
-  let notesDoc  = notes  ? { _id: 'notes',         _rev: '1-n',    ...notes  } : null
-  let webdavDoc = webdav ? { _id: 'webdav-config', _rev: '1-wdcfg', ...webdav } : null
+  // WebDAV config lives in the global jc-config-webdav DB, keyed by board name
+  if (webdav) {
+    mockWdStore[B] = { _id: B, _rev: '1-wdcfg', ...webdav }
+  } else {
+    delete mockWdStore[B]
+  }
+
+  let notesDoc = notes ? { _id: 'notes', _rev: '1-n', ...notes } : null
 
   return {
     get: vi.fn(async (id) => {
@@ -63,20 +97,14 @@ function makeDb({ notes = null, webdav = null } = {}) {
         if (!notesDoc) throw Object.assign(new Error('missing'), { statusCode: 404 })
         return JSON.parse(JSON.stringify(notesDoc))
       }
-      if (id === 'webdav-config') {
-        if (!webdavDoc) throw Object.assign(new Error('missing'), { statusCode: 404 })
-        return JSON.parse(JSON.stringify(webdavDoc))
-      }
       if (id === 'board') return { _id: 'board', _rev: '1-b', columns: [] }
       throw Object.assign(new Error('missing'), { statusCode: 404 })
     }),
     insert: vi.fn(async (data) => {
-      if (data._id === 'notes')         notesDoc  = { ...JSON.parse(JSON.stringify(data)), _rev: '2-n' }
-      if (data._id === 'webdav-config') webdavDoc = { ...JSON.parse(JSON.stringify(data)), _rev: '2-wdcfg' }
+      if (data._id === 'notes') notesDoc = { ...JSON.parse(JSON.stringify(data)), _rev: '2-n' }
       return { ok: true, id: data._id, rev: '2-abc' }
     }),
-    lastNotes:  () => notesDoc,
-    lastWebdav: () => webdavDoc,
+    lastNotes: () => notesDoc,
   }
 }
 
@@ -180,7 +208,10 @@ const AUTH = { 'x-api-key': 'test-api-key-that-is-32chars-long!' }
 const B    = 'test-board'
 
 afterAll(() => { try { fs.rmSync(TEST_DIR, { recursive: true, force: true }) } catch (_) {} })
-beforeEach(() => { mockFetch.mockReset() })
+beforeEach(() => {
+  mockFetch.mockReset()
+  Object.keys(mockWdStore).forEach(k => delete mockWdStore[k])
+})
 
 // ===========================================================================
 // WC — WebDAV Config
@@ -214,8 +245,8 @@ describe('PUT /:board/webdav-config', () => {
     expect(putRes.status).toBe(200)
     expect(putRes.body.ok).toBe(true)
 
-    // Verify stored (simulate re-GET via db state)
-    const stored = mockDbCtx.db.lastWebdav()
+    // Verify stored (simulate re-GET via global webdav db state)
+    const stored = mockWdStore[B]
     expect(stored.enabled).toBe(true)
     expect(stored.url).toBe('http://my-dav/')
     expect(stored.user).toBe('alice')

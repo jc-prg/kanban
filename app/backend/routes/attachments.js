@@ -135,7 +135,7 @@ router.post('/:board/notes/attachments/:pageId', uploadRateLimit, async (req, re
     res.json({ name: originalName, size: req.file.size });
     try {
       const db  = await getBoardDb(board);
-      const cfg = await getWebdavConfig(db);
+      const cfg = await getWebdavConfig(board);
       if (cfg.enabled) {
         // Ensure all ancestor folders and _attachments collection exist
         if (prefix) {
@@ -175,7 +175,7 @@ router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, asy
   res.json({ ok: true });
   try {
     const db  = await getBoardDb(board);
-    const cfg = await getWebdavConfig(db);
+    const cfg = await getWebdavConfig(board);
     if (cfg.enabled) await wdDelete(cfg, `${prefix}_attachments/${pageId}_${filename}`);
   } catch (wdErr) {
     console.warn('WebDAV attachment delete failed:', wdErr.message);

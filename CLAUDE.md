@@ -81,6 +81,10 @@ Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.
 
 ## CouchDB
 
+**Database naming convention:**
+- `jc-kanban-<name>` — one database per board (e.g. `jc-kanban-cards`)
+- `jc-config-<name>` — global/shared config databases (e.g. `jc-config-dashboard`, `jc-config-prompts`)
+
 The board state is stored as a single document (`_id: "board"`) in the `jc-kanban-cards` database. On startup `db.js#initDb`:
 1. Retries the CouchDB connection up to 15 times (2 s apart)
 2. Creates the `jc-kanban-cards` database if absent
@@ -166,7 +170,7 @@ All `/api/*` routes require authentication via one of:
 | `PUT` | `/api/:board/webhook-config` | Save webhook config; body: `{ enabled, name, url, method }` |
 | `POST` | `/api/:board/webhook/trigger` | Fire the configured webhook server-side; returns `{ ok, status?, error? }` |
 
-WebDAV config is stored as a separate CouchDB document (`_id: "webdav-config"`) per board. When enabled, notes are synced with the configured WebDAV server (e.g. Nextcloud). Credentials are stored server-side and never sent to the browser.
+WebDAV config is stored globally in `jc-config-webdav`, with each board's config as a separate document keyed by board name. When enabled, notes are synced with the configured WebDAV server (e.g. Nextcloud). Credentials are stored server-side and never sent to the browser.
 
 Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`) per board. The configured button name appears in the board menu; clicking it fires `POST /:board/webhook/trigger` which makes a server-side HTTP request (GET/POST/PUT/PATCH) to the URL and returns the result in a dialog.
 
@@ -206,7 +210,7 @@ Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`
 | `GET` | `/api/dashboard/calendar/:accountId/event/:uid` | Full event detail |
 | `POST` | `/api/dashboard/calendar/:accountId/test` | Test CalDAV/iCal connectivity; returns `{ ok, error? }` |
 
-Dashboard config is stored in a global CouchDB database (`jc-kanban-dashboard`). Card sources reference board names and column titles. Mail and calendar credentials are stored server-side and never sent to the browser.
+Dashboard config is stored in `jc-config-dashboard`. Card sources reference board names and column titles. Mail and calendar credentials are stored server-side and never sent to the browser.
 
 ## Move-to endpoint
 
@@ -345,9 +349,9 @@ Markdown body of the note…
 
 The `id` front-matter field ties the file back to the CouchDB item. On first sync the app writes its internal ID; files created directly on the WebDAV server (without an `id` field) get a generated `n-wd-<hex>` ID when imported. The `wdPath` field stored on CouchDB items tracks the authoritative relative path after any renames or moves, so the file is found even if the title slug would differ.
 
-### WebDAV config document (`_id: "webdav-config"`)
+### WebDAV config document
 
-Stored as a separate CouchDB document per board. Never exposed to the browser (password stays server-side).
+Stored in the global `jc-config-webdav` database, one document per board (`_id` = board name). Never exposed to the browser (password stays server-side).
 
 ```jsonc
 {

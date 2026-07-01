@@ -139,17 +139,15 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('apiKeySection').style.display = 'none';
     document.getElementById('promptsSection').style.display = 'none';
     document.getElementById('iconLibrarySection').style.display = 'none';
-    document.getElementById('calendarSection').style.display = 'none';
-    document.getElementById('mailSection').style.display = 'none';
-    document.getElementById('cardSourcesSection').style.display = 'none';
+    document.getElementById('accountsSection').style.display = 'none';
+    document.getElementById('dashboardSection').style.display = 'none';
   } else {
     document.getElementById('menuSettings').textContent = 'Global settings';
     document.getElementById('webdavSection').style.display = 'none';
     document.getElementById('webhookSection').style.display = 'none';
     document.getElementById('aboutSection').style.display = '';
-    document.getElementById('calendarSection').style.display = '';
-    document.getElementById('mailSection').style.display = '';
-    document.getElementById('cardSourcesSection').style.display = '';
+    document.getElementById('accountsSection').style.display = '';
+    document.getElementById('dashboardSection').style.display = '';
   }
 
   // ---- Prompts tabs (overview only) ----
@@ -160,6 +158,28 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       promptsSection.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       promptsSection.querySelector(`.prompts-panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
+    });
+  });
+
+  // ---- Accounts tabs (overview only) ----
+  const accountsSection = document.getElementById('accountsSection');
+  accountsSection.querySelectorAll('.prompts-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      accountsSection.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
+      accountsSection.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      accountsSection.querySelector(`.prompts-panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
+    });
+  });
+
+  // ---- Dashboard tabs (overview only) ----
+  const dashboardSection = document.getElementById('dashboardSection');
+  dashboardSection.querySelectorAll('.prompts-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      dashboardSection.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
+      dashboardSection.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      dashboardSection.querySelector(`.prompts-panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
     });
   });
 
@@ -366,17 +386,28 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       loadWebdavSettings();
       loadWebhookSettings();
     }
-    if (!_isBoard) { loadPrompts(); renderIconLibrary(); loadCardSourcesSettings(); loadCalendarSettings(); loadMailSettings(); }
+    if (!_isBoard) { loadPrompts(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); }
     buildSettingsNav();
     backdrop.style.display = 'flex';
   }
 
   function closeSettings() { backdrop.style.display = 'none'; }
 
-  // ---- WebDAV config (stored server-side) ----
+  // ---- WebDAV Notes config (board-only, references a global account) ----
 
   function _webdavFieldsVisible(show) {
     document.getElementById('webdavFields').style.display = show ? '' : 'none';
+  }
+
+  async function _populateWebdavAccountDropdown(selectedId) {
+    const sel = document.getElementById('webdavAccount');
+    try {
+      const accounts = await fetch('/api/webdav-accounts').then(r => r.json());
+      sel.innerHTML = '<option value="">— select account —</option>' +
+        accounts.map(a => `<option value="${escHtml(a.id)}"${a.id === selectedId ? ' selected' : ''}>${escHtml(a.label || a.url || a.id)}</option>`).join('');
+    } catch {
+      sel.innerHTML = '<option value="">Could not load accounts</option>';
+    }
   }
 
   async function loadWebdavSettings() {
@@ -385,13 +416,10 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       if (!r.ok) return;
       const cfg = await r.json();
       document.getElementById('webdavEnabledToggle').checked = cfg.enabled;
-      document.getElementById('webdavUrl').value             = cfg.url  || '';
-      document.getElementById('webdavUser').value            = cfg.user || '';
-      document.getElementById('webdavPass').value            = '';
-      document.getElementById('webdavPass').placeholder      = cfg.hasPassword ? '••••••••' : 'password';
+      await _populateWebdavAccountDropdown(cfg.accountId || '');
+      document.getElementById('webdavSubfolder').value = cfg.subfolder || '';
       _webdavFieldsVisible(cfg.enabled);
-      // Expose to the rest of the frontend (no password — backend handles it)
-      window.WEBDAV_CFG = cfg.enabled ? { enabled: true, url: cfg.url, user: cfg.user } : null;
+      window.WEBDAV_CFG = cfg.enabled && cfg.accountId ? { enabled: true } : null;
     } catch (_) {}
   }
 
@@ -416,23 +444,23 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   }
 
   document.getElementById('webdavTestBtn').addEventListener('click', async () => {
-    const btn      = document.getElementById('webdavTestBtn');
-    const resultEl = document.getElementById('webdavTestResult');
-    const url      = document.getElementById('webdavUrl').value.trim();
-    const user     = document.getElementById('webdavUser').value.trim();
-    const pass     = document.getElementById('webdavPass').value;
+    const btn       = document.getElementById('webdavTestBtn');
+    const resultEl  = document.getElementById('webdavTestResult');
+    const accountId = document.getElementById('webdavAccount').value;
+    const subfolder = document.getElementById('webdavSubfolder').value.trim();
 
-    btn.disabled     = true;
-    btn.textContent  = 'Testing…';
+    if (!accountId) {
+      _showWebdavTestResult(false, 'Select an account first.');
+      return;
+    }
+    btn.disabled    = true;
+    btn.textContent = 'Testing…';
     resultEl.style.display = 'none';
-
     try {
-      const body = { url, user };
-      if (pass) body.password = pass;
       const r    = await fetch(`/api/${BOARD_NAME}/webdav-config/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ accountId, subfolder }),
       });
       const data = await r.json();
       _showWebdavTestResult(data.ok, data.ok ? data.message : data.error);
@@ -445,17 +473,14 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   });
 
   document.getElementById('webdavSaveBtn').addEventListener('click', async () => {
-    const enabled = document.getElementById('webdavEnabledToggle').checked;
-    const url     = document.getElementById('webdavUrl').value.trim();
-    const user    = document.getElementById('webdavUser').value.trim();
-    const pass    = document.getElementById('webdavPass').value;
-    const body    = { enabled, url, user };
-    if (pass) body.password = pass;
+    const enabled   = document.getElementById('webdavEnabledToggle').checked;
+    const accountId = document.getElementById('webdavAccount').value;
+    const subfolder = document.getElementById('webdavSubfolder').value.trim();
     try {
       const r = await fetch(`/api/${BOARD_NAME}/webdav-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ enabled, accountId, subfolder }),
       });
       if (!r.ok) { flashIndicator(' error'); return; }
       await loadWebdavSettings();
@@ -465,6 +490,128 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   // Expose global loader so afterAuth can prime window.WEBDAV_CFG at startup
   window.loadWebdavSettings = loadWebdavSettings;
+
+  // ---- WebDAV Accounts (global settings) ----
+
+  let _wdaAccounts = [];
+  let _wdaEditIdx  = -1;
+
+  function _renderWdaList() {
+    const list = document.getElementById('webdavAccountsList');
+    if (!_wdaAccounts.length) {
+      list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No WebDAV accounts configured.</p>';
+      return;
+    }
+    list.innerHTML = _wdaAccounts.map((acc, i) => `
+      <div class="calendar-account-row">
+        <div class="calendar-account-info">
+          <strong>${escHtml(acc.label || '(no label)')}</strong>
+          <span class="settings-item-desc">${escHtml(acc.url || '')} · ${escHtml(acc.user || '')}</span>
+        </div>
+        <div class="calendar-account-actions">
+          <button class="btn btn--icon" data-wda-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" data-wda-del="${i}" title="Delete">${ICONS.close}</button>
+        </div>
+      </div>`).join('');
+
+    list.querySelectorAll('[data-wda-edit]').forEach(btn => {
+      btn.addEventListener('click', () => _openWdaForm(parseInt(btn.dataset.wdaEdit, 10)));
+    });
+    list.querySelectorAll('[data-wda-del]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.wdaDel, 10);
+        const id  = _wdaAccounts[idx]?.id;
+        if (!id) return;
+        await fetch(`/api/webdav-accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        _wdaAccounts.splice(idx, 1);
+        _renderWdaList();
+        flashIndicator(`${ICONS.done} deleted`);
+      });
+    });
+  }
+
+  function _openWdaForm(idx) {
+    _wdaEditIdx = idx;
+    const acc = idx >= 0 ? _wdaAccounts[idx] : {};
+    document.getElementById('wdaEditId').value   = acc.id    || '';
+    document.getElementById('wdaLabel').value    = acc.label || '';
+    document.getElementById('wdaUrl').value      = acc.url   || '';
+    document.getElementById('wdaUser').value     = acc.user  || '';
+    document.getElementById('wdaPass').value     = '';
+    document.getElementById('wdaPass').placeholder = acc.hasPassword ? '••••••••' : 'password';
+    document.getElementById('wdaTestResult').style.display = 'none';
+    document.getElementById('webdavAccountForm').style.display = '';
+  }
+
+  function _closeWdaForm() {
+    document.getElementById('webdavAccountForm').style.display = 'none';
+    _wdaEditIdx = -1;
+  }
+
+  async function loadWebdavAccountsSettings() {
+    try {
+      _wdaAccounts = await fetch('/api/webdav-accounts').then(r => r.json());
+    } catch { _wdaAccounts = []; }
+    _renderWdaList();
+    _closeWdaForm();
+  }
+
+  document.getElementById('webdavAccountAddBtn').addEventListener('click', () => _openWdaForm(-1));
+  document.getElementById('wdaCancelBtn').addEventListener('click', _closeWdaForm);
+
+  document.getElementById('wdaSaveBtn').addEventListener('click', async () => {
+    const id    = document.getElementById('wdaEditId').value;
+    const label = document.getElementById('wdaLabel').value.trim();
+    const url   = document.getElementById('wdaUrl').value.trim();
+    const user  = document.getElementById('wdaUser').value.trim();
+    const pass  = document.getElementById('wdaPass').value;
+    const body  = { label, url, user };
+    if (pass) body.password = pass;
+    try {
+      let r;
+      if (id) {
+        r = await fetch(`/api/webdav-accounts/${encodeURIComponent(id)}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+      } else {
+        r = await fetch('/api/webdav-accounts', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        if (data.id) document.getElementById('wdaEditId').value = data.id;
+      }
+      if (!r.ok) { flashIndicator(' error'); return; }
+      await loadWebdavAccountsSettings();
+      flashIndicator(`${ICONS.done} saved`);
+    } catch { flashIndicator(' error'); }
+  });
+
+  document.getElementById('wdaTestBtn').addEventListener('click', async () => {
+    const btn      = document.getElementById('wdaTestBtn');
+    const resultEl = document.getElementById('wdaTestResult');
+    const id       = document.getElementById('wdaEditId').value;
+    if (!id) {
+      resultEl.textContent = '✗ Save the account first to test connectivity.';
+      resultEl.className   = 'settings-webdav-result settings-webdav-result--err';
+      resultEl.style.display = '';
+      return;
+    }
+    btn.disabled    = true;
+    btn.textContent = 'Testing…';
+    resultEl.style.display = 'none';
+    try {
+      const r = await fetch(`/api/webdav-accounts/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      const d = await r.json();
+      resultEl.textContent = d.ok ? `✓ ${d.message || 'Connection successful'}` : `✗ ${d.error || 'Failed'}`;
+      resultEl.className   = 'settings-webdav-result ' + (d.ok ? 'settings-webdav-result--ok' : 'settings-webdav-result--err');
+    } catch {
+      resultEl.textContent = '✗ Request failed';
+      resultEl.className   = 'settings-webdav-result settings-webdav-result--err';
+    }
+    resultEl.style.display = '';
+    btn.disabled    = false;
+    btn.textContent = 'Test connection';
+  });
 
   // ---- Webhook config (board-only, stored server-side) ----
 
@@ -654,6 +801,10 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       // Select the closest matching option
       const options = [...sel.options].map(o => parseInt(o.value, 10));
       sel.value = options.includes(ms) ? String(ms) : '0';
+      // Panel visibility toggles (default: enabled)
+      document.getElementById('dashPanelCards').checked    = cfg.panelCards    !== false;
+      document.getElementById('dashPanelMail').checked     = cfg.panelMail     !== false;
+      document.getElementById('dashPanelCalendar').checked = cfg.panelCalendar !== false;
     } catch {
       _cardSources = [];
     }
@@ -671,6 +822,22 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       });
       flashIndicator(`${ICONS.done} saved`);
     } catch { flashIndicator(' error'); }
+  });
+
+  ['dashPanelCards', 'dashPanelMail', 'dashPanelCalendar'].forEach(id => {
+    document.getElementById(id).addEventListener('change', async function () {
+      try {
+        const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+        const key = id === 'dashPanelCards' ? 'panelCards' : id === 'dashPanelMail' ? 'panelMail' : 'panelCalendar';
+        await fetch('/api/dashboard/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...cfg, [key]: this.checked }),
+        });
+        applyDashboardPanelVisibility({ ...cfg, [key]: this.checked });
+        flashIndicator(`${ICONS.done} saved`);
+      } catch { flashIndicator(' error'); }
+    });
   });
 
   document.getElementById('cardSourcesAddBtn').addEventListener('click', () => _openCsForm(-1));

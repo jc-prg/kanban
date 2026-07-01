@@ -38,6 +38,10 @@ function createApp(dbMock) {
         saveDashboardConfig: async () => ({ ok: true }),
         initGlobalDb:        async () => {},
         getGlobalDb:         () => ({}),
+        getWebdavDb:         () => ({
+          get:    async () => { throw Object.assign(new Error('missing'), { statusCode: 404 }) },
+          insert: async (doc) => ({ ok: true, id: doc._id, rev: '1-abc' }),
+        }),
       },
       children: [], paths: [],
     }

@@ -72,6 +72,7 @@ app.use('/api', require('./routes/board'));
 app.use('/api', require('./routes/notes'));
 app.use('/api', require('./routes/attachments'));
 app.use('/api', require('./routes/dashboard'));
+app.use('/api', require('./routes/webdav-accounts'));
 
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
 app.get('/dashboard',          (req, res) => res.sendFile(SPA_HTML));

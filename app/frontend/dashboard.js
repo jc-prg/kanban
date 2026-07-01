@@ -57,6 +57,15 @@ async function _dashMoveCard(board, cardId, fromColId, toColId) {
   });
 }
 
+function applyDashboardPanelVisibility(cfg) {
+  document.getElementById('dashboardCardsPanel').closest('.dashboard-panel').style.display =
+    cfg.panelCards !== false ? '' : 'none';
+  document.getElementById('dashboardMailPanel').closest('.dashboard-panel').style.display =
+    cfg.panelMail !== false ? '' : 'none';
+  document.getElementById('dashboardCalendarPanel').closest('.dashboard-panel').style.display =
+    cfg.panelCalendar !== false ? '' : 'none';
+}
+
 async function initDashboard() {
   document.querySelector('.board-area').style.display = 'none';
   document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
@@ -119,9 +128,10 @@ async function initDashboard() {
 
   await loadDashboard();
 
-  // Set up auto-refresh based on config
+  // Set up auto-refresh and panel visibility based on config
   try {
     const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+    applyDashboardPanelVisibility(cfg);
     if (cfg.autoRefreshMs > 0) {
       _refreshTimer = setInterval(loadDashboard, cfg.autoRefreshMs);
       window.addEventListener('pagehide', () => clearInterval(_refreshTimer), { once: true });
