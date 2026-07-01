@@ -153,9 +153,9 @@ router.get('/dashboard/data', async (req, res) => {
       return accounts.map((acc, i) => {
         const r = settled[i];
         if (r.status === 'fulfilled') {
-          return { accountId: acc.id, label: acc.label, webInterfaceUrl: acc.webInterfaceUrl || null, ...r.value };
+          return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, ...r.value };
         }
-        return { accountId: acc.id, label: acc.label, webInterfaceUrl: acc.webInterfaceUrl || null, events: [], error: r.reason?.message || 'Unknown error' };
+        return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, events: [], error: r.reason?.message || 'Unknown error' };
       });
     })();
 
@@ -257,9 +257,9 @@ router.get('/dashboard/calendar', async (req, res) => {
     const result = accounts.map((acc, i) => {
       const r = settled[i];
       if (r.status === 'fulfilled') {
-        return { accountId: acc.id, label: acc.label, webInterfaceUrl: acc.webInterfaceUrl || null, ...r.value };
+        return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, ...r.value };
       }
-      return { accountId: acc.id, label: acc.label, webInterfaceUrl: acc.webInterfaceUrl || null, events: [], error: r.reason?.message || 'Unknown error' };
+      return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, events: [], error: r.reason?.message || 'Unknown error' };
     });
 
     res.json(result);

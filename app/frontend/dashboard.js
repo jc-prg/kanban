@@ -233,7 +233,7 @@ function _renderCalendarPanel(accounts) {
       continue;
     }
     for (const ev of (acc.events || [])) {
-      allEvents.push({ ...ev, _label: acc.label, _accountId: acc.accountId, _webUrl: acc.webInterfaceUrl });
+      allEvents.push({ ...ev, _label: acc.label, _accountId: acc.accountId, _webUrl: acc.webInterfaceUrl, _color: acc.color });
     }
   }
 
@@ -267,12 +267,16 @@ function _renderCalendarPanel(accounts) {
 
   const groupHtml = [...groups.entries()].map(([day, evs]) => {
     const header = `<div class="dashboard-group-header">${escHtml(day)}</div>`;
-    const items  = evs.map(ev =>
-      `<div class="dashboard-event-item" data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}">
-        <span class="dashboard-event-time">${escHtml(_fmtTime(ev))}</span>
-        <span class="dashboard-event-text">${escHtml(ev.title)}</span>
-      </div>`
-    ).join('');
+    const items  = evs.map(ev => {
+      const colorStyle = ev._color ? ` style="--card-color:${escHtml(ev._color)}"` : '';
+      const metaHtml = `<div class="card-meta"><span class="card-date">${escHtml(_fmtTime(ev))}</span><span class="dashboard-event-label">${escHtml(ev._label)}</span></div>`;
+      return `<div class="dashboard-event-item card" data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}"${colorStyle}>
+        <div class="card-body">
+          <div class="card-text">${escHtml(ev.title)}</div>
+          ${metaHtml}
+        </div>
+      </div>`;
+    }).join('');
     return header + items;
   }).join('');
 

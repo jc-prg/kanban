@@ -134,31 +134,17 @@
 /* ---- Calendar event items ---- */
 
 .dashboard-event-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 5px 14px;
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: background 0.1s;
+  margin: 4px 10px;
 }
 
-.dashboard-event-item:hover {
-  background: var(--surface2);
-}
-
-.dashboard-event-time {
-  font-size: 0.72rem;
+.dashboard-event-label {
+  font-size: 0.65rem;
   color: var(--text-muted);
-  flex-shrink: 0;
-  min-width: 50px;
-}
-
-.dashboard-event-text {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 /* ---- Detail panel ---- */

@@ -807,6 +807,20 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   let _calAccounts = [];   // in-memory list while settings modal is open
   let _calEditIdx  = -1;   // index of account being edited, -1 = new
+  let _calColor    = COLORS[0];
+
+  function _renderCalColorRow() {
+    document.getElementById('calColorRow').innerHTML = COLORS.map(c =>
+      `<div class="color-swatch${c === _calColor ? ' selected' : ''}" style="background:${c}" data-cal-color="${c}"></div>`
+    ).join('');
+  }
+
+  document.getElementById('calColorRow').addEventListener('click', e => {
+    const swatch = e.target.closest('[data-cal-color]');
+    if (!swatch) return;
+    _calColor = swatch.dataset.calColor;
+    _renderCalColorRow();
+  });
 
   function _renderCalendarList() {
     const list = document.getElementById('calendarAccountsList');
@@ -851,6 +865,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('calPass').placeholder    = acc.hasPassword ? '••••••••' : 'password';
     document.getElementById('calWebUrl').value        = acc.webInterfaceUrl || '';
     document.getElementById('calLookahead').value     = acc.lookaheadDays ?? 7;
+    _calColor = acc.color || COLORS[0];
+    _renderCalColorRow();
     document.getElementById('calTestResult').style.display = 'none';
     document.getElementById('calendarAccountForm').style.display = '';
   }
@@ -898,6 +914,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       user:           document.getElementById('calUser').value.trim(),
       webInterfaceUrl: document.getElementById('calWebUrl').value.trim() || undefined,
       lookaheadDays:  parseInt(document.getElementById('calLookahead').value, 10) || 7,
+      color:          _calColor,
     };
     if (pass) acc.password = pass;
     // else omit — server merges existing password
