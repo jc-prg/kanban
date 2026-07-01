@@ -9,6 +9,7 @@ let _dragCardGroup  = null;
 let _mailCtxAccountId = null;
 let _mailCtxMsgId     = null;
 let _mailCtxUnread    = false;
+let _dashAchOffset  = 0;
 
 // Map: accountId → folders array (cached per session)
 const _folderCache = new Map();
@@ -283,7 +284,7 @@ async function loadDashboard() {
   const resolved = await Promise.all([
     showBoards   ? Promise.all([
       fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-      fetch('/api/achievements/today').then(r => r.ok ? r.json() : null).catch(() => null),
+      (() => { const d = new Date(); d.setDate(d.getDate() + _dashAchOffset); return fetch(`/api/achievements/today?date=${d.toISOString().slice(0,10)}`).then(r => r.ok ? r.json() : null).catch(() => null); })(),
     ]).then(([d, a]) => { _renderBoardsPanel(d, a); return true; }).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
@@ -320,6 +321,59 @@ function _boardItemHtml(b) {
   </a>`;
 }
 
+function _dashAchDateLabel(offset) {
+  if (offset === 0)  return 'Today';
+  if (offset === -1) return 'Yesterday';
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+}
+
+function _renderDashAchTiles(data, offset) {
+  const section = document.getElementById('dashAchSection');
+  if (!section) return;
+  const { done = 0, moved = 0, created = 0, inboxCreated = 0,
+          doneCards = [], movedCards = [], createdCards = [], inboxCreatedCards = [],
+          hasPast = false } = data || {};
+
+  document.getElementById('dashAchLabel').textContent = _dashAchDateLabel(offset);
+  document.getElementById('dashAchPrev').disabled   = !hasPast;
+  document.getElementById('dashAchNext').disabled   = offset >= 0;
+  document.getElementById('dashAchToday').style.display = offset < 0 ? '' : 'none';
+
+  if (done + moved + created === 0 && offset === 0) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  const _tip = cards => {
+    const lines = cards.slice(0, 8).map(({ board, text }) => {
+      const short = text.length > 35 ? text.slice(0, 35) + '\u2026' : text;
+      return `${board}: ${short}`;
+    });
+    if (cards.length > 8) lines.push(`${cards.length - 8} further cards \u2026`);
+    return lines.join('\n');
+  };
+  const _tile = (value, label, cls, cards) => {
+    const tip = cards.length ? ` data-tooltip="${escHtml(_tip(cards))}"` : '';
+    return `<div class="achievement-item ${cls}"${tip}><span class="achievement-value">${value}</span><span class="achievement-label">${label}</span></div>`;
+  };
+  document.getElementById('dashAchTiles').innerHTML = `<div class="dashboard-achievement-tiles">
+    ${_tile(inboxCreated,           'cards<br>inbox',   'dash-ach--inbox',   inboxCreatedCards)}
+    ${_tile(created - inboxCreated, 'cards<br>created', 'dash-ach--created', createdCards)}
+    ${_tile(moved,                  'cards<br>moved',   'dash-ach--moved',   movedCards)}
+    ${_tile(done,                   'cards<br>done',    'dash-ach--done',    doneCards)}
+  </div>`;
+}
+
+async function _loadDashAchievements(offset) {
+  _dashAchOffset = offset;
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  try {
+    const res = await fetch(`/api/achievements/today?date=${d.toISOString().slice(0, 10)}`);
+    _renderDashAchTiles(res.ok ? await res.json() : {}, offset);
+  } catch { /* ignore */ }
+}
+
 function _renderBoardsPanel(boards, achievements) {
   const panel = document.getElementById('dashboardBoardsPanel');
   const active   = boards.filter(b => !b.archived);
@@ -338,33 +392,27 @@ function _renderBoardsPanel(boards, achievements) {
     html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
   }
 
-  if (achievements) {
-    const { done = 0, moved = 0, created = 0, inboxCreated = 0,
-            doneCards = [], movedCards = [], createdCards = [], inboxCreatedCards = [] } = achievements;
-    if (done + moved + created > 0) {
-      const _tip = cards => {
-        const lines = cards.slice(0, 8).map(({ board, text }) => {
-          const short = text.length > 35 ? text.slice(0, 35) + '\u2026' : text;
-          return `${board}: ${short}`;
-        });
-        if (cards.length > 8) lines.push(`${cards.length - 8} further cards \u2026`);
-        return lines.join('\n');
-      };
-      const _tile = (value, label, cls, cards) => {
-        const tip = cards.length ? ` data-tooltip="${escHtml(_tip(cards))}"` : '';
-        return `<div class="achievement-item ${cls}"${tip}><span class="achievement-value">${value}</span><span class="achievement-label">${label}</span></div>`;
-      };
-      html += '<div class="dashboard-group-header" style="margin-top:10px">Today</div>';
-      html += `<div class="dashboard-achievement-tiles">
-        ${_tile(inboxCreated,           'cards<br>inbox',   'dash-ach--inbox',   inboxCreatedCards)}
-        ${_tile(created - inboxCreated, 'cards<br>created', 'dash-ach--created', createdCards)}
-        ${_tile(moved,                  'cards<br>moved',   'dash-ach--moved',   movedCards)}
-        ${_tile(done,                   'cards<br>done',    'dash-ach--done',    doneCards)}
-      </div>`;
-    }
-  }
+  html += `<div id="dashAchSection" style="display:none">
+    <div class="dashboard-group-header dash-ach-header" style="margin-top:10px">
+      <span id="dashAchLabel">Today</span>
+      <span class="dash-ach-nav">
+        <button id="dashAchPrev" class="ach-nav-btn" title="Previous day">&#8249;</button>
+        <button id="dashAchToday" class="ach-nav-btn" style="display:none" title="Jump to today"></button>
+        <button id="dashAchNext" class="ach-nav-btn" disabled title="Next day">&#8250;</button>
+      </span>
+    </div>
+    <div id="dashAchTiles"></div>
+  </div>`;
 
   panel.innerHTML = html;
+
+  document.getElementById('dashAchToday').innerHTML = SVGICONS.sync(12, 12);
+
+  _renderDashAchTiles(achievements, _dashAchOffset);
+
+  document.getElementById('dashAchPrev').addEventListener('click',  () => _loadDashAchievements(_dashAchOffset - 1));
+  document.getElementById('dashAchNext').addEventListener('click',  () => _loadDashAchievements(_dashAchOffset + 1));
+  document.getElementById('dashAchToday').addEventListener('click', () => _loadDashAchievements(0));
 
   panel.querySelectorAll('.dashboard-boards-archived-btn').forEach(btn => {
     btn.addEventListener('click', function () {

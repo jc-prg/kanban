@@ -178,6 +178,23 @@
 
 /* ---- Boards panel: today's achievements ---- */
 
+.dash-ach-header {
+  display: flex;
+  align-items: center;
+}
+
+.dash-ach-nav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.dash-ach-nav .ach-nav-btn {
+  font-size: 0.9rem;
+  padding: 1px 5px;
+}
+
 .dashboard-achievement-tiles {
   display: grid;
   grid-template-columns: 1fr 1fr;
