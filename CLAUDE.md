@@ -18,7 +18,7 @@ Or via Docker (from project root):
 docker compose up -d --build
 ```
 
-No build step, no linter, no test framework configured.
+No build step, no linter. Tests: `npm test` (Vitest, unit + API) and `npm run test:e2e` (Playwright, requires running server).
 
 ## Architecture
 
@@ -43,6 +43,9 @@ Single-page kanban board with a minimal three-layer design:
 | `routes/board.js` | All `/:board/board`, `all-columns`, `column`, `card`, `move-to`, `import` |
 | `routes/notes.js` | All `/:board/notes*` including ZIP export |
 | `routes/attachments.js` | All notes/card attachment routes + `GET /api/db-size` |
+| `routes/dashboard.js` | All `/api/dashboard/*` routes (config, data, mail, calendar) |
+| `dashboard/mail.js` | IMAP helpers — `fetchMailAccount`, `fetchMailMessage`, `testMailAccount` |
+| `dashboard/calendar.js` | CalDAV/iCal helpers — `fetchCalendarAccount`, `fetchCalendarEvent`, `testCalendarAccount` |
 
 ### CSS (`app/frontend/styles/`)
 
@@ -55,6 +58,7 @@ Single-page kanban board with a minimal three-layer design:
 | `overlay.css` | Context menus, all modals & dialogs (add/edit card, login, confirm, prompts, card-info, settings), priority/color rows |
 | `notes.css` | Notes sidebar, resizer, tree/list, note modal |
 | `markdown.css` | Markdown preview pane (card modal + note modal) |
+| `dashboard.css` | Dashboard layout, panels, mail/calendar/card items, detail modal, settings drag handles |
 
 ### JS (`app/frontend/`) — load order matters, no bundler
 
@@ -72,6 +76,7 @@ Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.
 | `notes.js` | Notes sidebar state, load/save (`loadNotes`, `scheduleSaveNotes`), page CRUD (`addNotePage`, `deleteNotePage`), sidebar toggle/resize, note modal (`openNoteModal`, `submitNote`), linked-card creation |
 | `inbox.js` | Add-to-inbox modal (`openInboxModal`, `submitInboxCard`) used from the overview and board menu |
 | `search.js` | Find-card dialog (`openSearch`, `closeSearch`) — text (all-words, accent-folding), priority, date range, and column filters; results open the edit modal |
+| `dashboard.js` | Dashboard view — `initDashboard`, `loadDashboard`, card/mail/calendar panel renderers, detail panel, API helpers (`_dashPatchCard`, `_dashDeleteCard`, `_dashMoveCard`) |
 | `init.js` | Entry point — calls `initTitleChars()` and `checkAuth()` |
 
 ## CouchDB
@@ -183,6 +188,25 @@ Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`
 | `POST` | `/api/:board/cards/attachments/:cardId` | Upload file (multipart `file` field, max 50 MB); returns `{ name, size }` |
 | `GET` | `/api/:board/cards/attachments/:cardId/:filename` | Download attachment file |
 | `DELETE` | `/api/:board/cards/attachments/:cardId/:filename` | Delete attachment; returns `{ ok: true }` |
+
+### Dashboard (global)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/dashboard/config` | Load dashboard config: `{ cardSources, mailAccounts, calendarAccounts, autoRefreshMs }` |
+| `PUT` | `/api/dashboard/config` | Save dashboard config |
+| `GET` | `/api/dashboard/data` | Fetch all sources in parallel; returns `{ cards, mail, calendar }` |
+| `GET` | `/api/dashboard/cards` | Cards from configured card sources |
+| `GET` | `/api/dashboard/mail` | Summaries from all mail accounts |
+| `GET` | `/api/dashboard/mail/:accountId` | Messages for one account |
+| `GET` | `/api/dashboard/mail/:accountId/message/:uid` | Full message (envelope + body) |
+| `POST` | `/api/dashboard/mail/:accountId/test` | Test IMAP connectivity; returns `{ ok, error? }` |
+| `GET` | `/api/dashboard/calendar` | Events from all calendar accounts |
+| `GET` | `/api/dashboard/calendar/:accountId` | Events for one account |
+| `GET` | `/api/dashboard/calendar/:accountId/event/:uid` | Full event detail |
+| `POST` | `/api/dashboard/calendar/:accountId/test` | Test CalDAV/iCal connectivity; returns `{ ok, error? }` |
+
+Dashboard config is stored in a global CouchDB database (`jc-kanban-dashboard`). Card sources reference board names and column titles. Mail and calendar credentials are stored server-side and never sent to the browser.
 
 ## Move-to endpoint
 
