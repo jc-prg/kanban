@@ -80,8 +80,8 @@ router.get('/dashboard/cards', async (req, res) => {
           sourceId: source.id,
           board:    source.board,
           column:   col.title,
-          cards: (col.cards || []).map(({ id, text, priority, color, endDate, done, hasAttachments }) => ({
-            id, text, priority, color, endDate, done, hasAttachments,
+          cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
+            id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
           })),
           error: null,
         }));
@@ -121,8 +121,8 @@ router.get('/dashboard/data', async (req, res) => {
             sourceId: source.id,
             board:    source.board,
             column:   col.title,
-            cards: (col.cards || []).map(({ id, text, priority, color, endDate, done, hasAttachments }) => ({
-              id, text, priority, color, endDate, done, hasAttachments,
+            cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
+              id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
             })),
             error: null,
           }));

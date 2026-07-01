@@ -88,47 +88,8 @@
 /* ---- Card items ---- */
 
 .dashboard-card-item {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: background 0.1s;
+  margin: 4px 10px;
 }
-
-.dashboard-card-item:hover {
-  background: var(--surface2);
-}
-
-.dashboard-card-text {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dashboard-card-date {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.dashboard-card-priority {
-  font-size: 0.68rem;
-  padding: 1px 4px;
-  border-radius: 4px;
-  flex-shrink: 0;
-  background: var(--surface2);
-  color: var(--text-muted);
-}
-
-.dashboard-card-priority--1 { background: rgba(240,79,106,0.2); color: #f04f6a; }
-.dashboard-card-priority--2 { background: rgba(249,115,22,0.2);  color: #f97316; }
-.dashboard-card-priority--3 { background: rgba(124,106,247,0.2); color: var(--accent); }
-
-.dashboard-card--overdue .dashboard-card-date { color: var(--danger); }
-.dashboard-card--done { opacity: 0.45; }
 
 /* ---- Responsive: stack panels vertically on narrow screens ---- */
 

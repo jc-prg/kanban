@@ -84,6 +84,7 @@ function _renderCardsPanel(groups) {
     panel.innerHTML = '<p class="dashboard-empty">No card sources configured.</p>';
     return;
   }
+  const today = new Date().toISOString().slice(0, 10);
   panel.innerHTML = groups.map(group => {
     if (group.error) {
       return `<div class="dashboard-source-error">\u26a0 ${escHtml(group.board)}: ${escHtml(group.error)}</div>`;
@@ -94,18 +95,41 @@ function _renderCardsPanel(groups) {
       return groupHeader + '<p class="dashboard-empty">No cards.</p>';
     }
     const items = group.cards.map(card => {
-      const priority = card.priority
-        ? `<span class="dashboard-card-priority dashboard-card-priority--${card.priority}">P${card.priority}</span>`
-        : '';
-      const today    = new Date().toISOString().slice(0, 10);
-      const overdue  = card.endDate && card.endDate < today && !card.done
-        ? ' dashboard-card--overdue' : '';
-      const done     = card.done ? ' dashboard-card--done' : '';
-      const dateSpan = card.endDate
-        ? ` <span class="dashboard-card-date">${escHtml(card.endDate)}</span>` : '';
-      return `<div class="dashboard-card-item${overdue}${done}"
-          data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}">
-        ${priority}<span class="dashboard-card-text">${escHtml(card.text || '')}</span>${dateSpan}
+      const isOverdue = card.endDate && card.endDate < today && !card.done;
+      const colorStyle = card.color ? ` style="--card-color:${escHtml(card.color)}"` : '';
+
+      const metaParts = [];
+      if (card.priority) {
+        const pc = PRIORITY_COLORS[card.priority];
+        metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);
+      }
+      if (card.description) {
+        metaParts.push(`<span class="card-desc" title="Has description">${SVGICONS.description()}</span>`);
+      }
+      if (card.startDate || card.endDate) {
+        const cls = 'card-date' + (isOverdue ? ' card-date--overdue' : '');
+        if (card.startDate && card.endDate)
+          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} \u2192 ${fmtDate(card.endDate)}</span>`);
+        else if (card.startDate)
+          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} \u2192</span>`);
+        else
+          metaParts.push(`<span class="${cls}">\u2192 ${fmtDate(card.endDate)}</span>`);
+      }
+      if (card.done) {
+        metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
+      }
+      if (card.link) {
+        const safeLinkHref = safeLink(card.link);
+        if (safeLinkHref) metaParts.push(getLinkBadgeHtml(card.link, safeLinkHref));
+      }
+      const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
+
+      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}"
+          data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
+        <div class="card-body">
+          <div class="card-text">${escHtml(card.text || '')}</div>
+          ${metaHtml}
+        </div>
       </div>`;
     }).join('');
     return groupHeader + items;
