@@ -12,6 +12,7 @@
     "release:minor": "npm version minor",
     "release:major": "npm version major"
   },
+  "repository": "https://github.com/jc-prg/kanban",
   "keywords": [],
   "author": "",
   "license": "ISC",

@@ -1,9 +1,13 @@
-const express = require('express');
+const express      = require('express');
+const { execSync } = require('child_process');
 const router  = express.Router();
 const { writeRateLimit } = require('../auth');
 const { getPromptsDb }   = require('../db');
 const { API_KEY }        = require('../config');
-const { version }        = require('../../package.json');
+const { version, repository } = require('../../package.json');
+
+let _branch = 'unknown';
+try { _branch = execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { /* not a git repo */ }
 
 const PROMPTS_DOC_ID  = 'prompts';
 const PROMPTS_DEFAULT = { searchProfile: '', criteriaInclude: '', criteriaExclude: '', searchRadius: '' };
@@ -25,7 +29,7 @@ async function savePrompts(data) {
 }
 
 router.get('/settings', (req, res) => {
-  res.json({ apiKeyConfigured: !!API_KEY, version });
+  res.json({ apiKeyConfigured: !!API_KEY, version, branch: _branch, repository: repository || '' });
 });
 
 router.get('/prompts', async (req, res) => {

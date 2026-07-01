@@ -276,10 +276,16 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('apiKeyCopyBtn').style.display = 'none';
     try {
       const r = await fetch('/api/settings');
-      const { apiKeyConfigured, version } = await r.json();
+      const { apiKeyConfigured, version, branch, repository } = await r.json();
       input.value = '';
       input.placeholder = apiKeyConfigured ? 'configured — see .env' : 'not configured — set API_KEY in .env';
       if (version) document.getElementById('appVersion').textContent = version;
+      if (branch) document.getElementById('appBranch').textContent = branch;
+      if (repository) {
+        const a = document.getElementById('appGithub');
+        a.href = repository;
+        a.textContent = repository;
+      }
     } catch {
       input.placeholder = 'failed to load';
     }
