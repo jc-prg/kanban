@@ -28,6 +28,9 @@ async function initDashboard() {
 
   document.getElementById('dashboardRefreshBtn').addEventListener('click', loadDashboard);
   document.getElementById('dashboardDetailClose').addEventListener('click', _closeDetail);
+  document.getElementById('dashboardDetailFsBtn').addEventListener('click', () => {
+    document.querySelector('#dashboardDetail .modal').classList.toggle('modal--fullscreen');
+  });
 
   // Calendar event click → detail panel
   document.getElementById('dashboardCalendarPanel').addEventListener('click', e => {
@@ -198,7 +201,26 @@ function _openMailDetail(accountId, msgId, webUrl) {
         rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
       }</table>`;
 
-      if (msg.body) {
+      if (msg.bodyHtml) {
+        const iframe = document.createElement('iframe');
+        iframe.className = 'dashboard-mail-iframe';
+        // allow-same-origin lets us write content and read scrollHeight;
+        // scripts are still blocked (no allow-scripts), so this is safe.
+        iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
+        iframe.setAttribute('referrerpolicy', 'no-referrer');
+        body.appendChild(iframe);
+        const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#e2e8f0;background:#1e1e2e;padding:8px;margin:0;word-break:break-word}'
+          + ' a{color:#7c6af7} img{max-width:100%;height:auto}'
+          + ' blockquote{border-left:3px solid #4a4a6a;margin:8px 0;padding:0 12px;color:#94a3b8}'
+          + ' pre,code{font-family:monospace;font-size:0.88em;background:#2a2a3e;padding:2px 5px;border-radius:3px}';
+        const doc = iframe.contentDocument;
+        doc.open();
+        doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body>${msg.bodyHtml}</body></html>`);
+        doc.close();
+        const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
+        iframe.addEventListener('load', resize);
+        resize();
+      } else if (msg.body) {
         const pre = document.createElement('pre');
         pre.className = 'dashboard-mail-body';
         pre.textContent = msg.body;
@@ -330,4 +352,5 @@ function _openEventDetail(accountId, uid, webUrl) {
 
 function _closeDetail() {
   document.getElementById('dashboardDetail').style.display = 'none';
+  document.querySelector('#dashboardDetail .modal')?.classList.remove('modal--fullscreen');
 }

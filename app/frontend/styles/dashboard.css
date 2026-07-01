@@ -131,6 +131,16 @@
   font-family: inherit;
 }
 
+.dashboard-mail-iframe {
+  width: 100%;
+  border: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: block;
+  min-height: 120px;
+}
+
 /* ---- Calendar event items ---- */
 
 .dashboard-event-item {
@@ -149,20 +159,13 @@
 
 /* ---- Detail panel ---- */
 
-.dashboard-detail {
-  position: absolute;
-  inset: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  z-index: 10;
+.dashboard-detail-modal {
+  width: min(960px, 92vw);
+  height: 85dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-
-#dashboard {
-  position: relative;
+  padding: 0;
 }
 
 .dashboard-detail-titlebar {

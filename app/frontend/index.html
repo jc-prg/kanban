@@ -63,12 +63,15 @@
     <span id="dashboardFetchedAt" class="dashboard-fetched-at"></span>
     <button class="btn" id="dashboardRefreshBtn">Refresh</button>
   </div>
-  <div class="dashboard-detail" id="dashboardDetail" style="display:none">
-    <div class="dashboard-detail-titlebar">
-      <span id="dashboardDetailTitle" class="dashboard-detail-title"></span>
-      <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close">✕</button>
+  <div class="modal-backdrop" id="dashboardDetail" style="display:none">
+    <div class="modal dashboard-detail-modal">
+      <div class="dashboard-detail-titlebar">
+        <span id="dashboardDetailTitle" class="dashboard-detail-title"></span>
+        <button class="modal-fs-btn" id="dashboardDetailFsBtn" title="Full screen" style="position:static;opacity:0.55">⛶</button>
+        <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close">✕</button>
+      </div>
+      <div class="dashboard-detail-body" id="dashboardDetailBody"></div>
     </div>
-    <div class="dashboard-detail-body" id="dashboardDetailBody"></div>
   </div>
   <div class="dashboard-grid">
     <div class="dashboard-panel">
