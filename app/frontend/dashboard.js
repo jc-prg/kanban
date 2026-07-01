@@ -191,7 +191,7 @@ async function loadDashboard() {
 function _renderCardsPanel(groups) {
   const panel = document.getElementById('dashboardCardsPanel');
   _dashCardMap.clear();
-  const total = groups.reduce((s, g) => s + (g.cards?.length || 0), 0);
+  const total = groups.reduce((s, g) => s + (g.cards?.filter(c => !c.text?.startsWith('#')).length || 0), 0);
   document.getElementById('dashCardsCount').textContent = total || '';
   if (!groups.length) {
     panel.innerHTML = '<p class="dashboard-empty">No card sources configured.</p>';
