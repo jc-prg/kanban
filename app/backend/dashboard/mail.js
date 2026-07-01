@@ -90,12 +90,25 @@ function _findBodyParts(struct) {
     if (!node) return;
     // Root single-part messages have no .part set; IMAP section '1' covers them.
     const part = node.part || (isRoot && !node.childNodes ? '1' : null);
-    if (node.type === 'text/plain' && !text && part) text = part;
-    if (node.type === 'text/html'  && !html && part) html = part;
+    if (node.type === 'text/plain' && !text && part) text = { part, encoding: (node.encoding || '7bit').toLowerCase() };
+    if (node.type === 'text/html'  && !html && part) html = { part, encoding: (node.encoding || '7bit').toLowerCase() };
     (node.childNodes || []).forEach(c => visit(c, false));
   }
   visit(struct, true);
   return { textPart: text, htmlPart: html };
+}
+
+function _decodePart(buf, encoding) {
+  if (!buf) return '';
+  if (encoding === 'base64') {
+    return Buffer.from(buf.toString('ascii').replace(/\s+/g, ''), 'base64').toString('utf8');
+  }
+  if (encoding === 'quoted-printable') {
+    return buf.toString('utf8')
+      .replace(/=\r?\n/g, '')
+      .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  }
+  return buf.toString('utf8');
 }
 
 /**
@@ -119,16 +132,16 @@ async function fetchMailMessage(account, uid) {
     if (!meta) return null;
 
     const { textPart, htmlPart } = _findBodyParts(meta.bodyStructure);
-    const partsToFetch = [...new Set([textPart, htmlPart].filter(Boolean))];
+    const partKeys = [...new Set([textPart?.part, htmlPart?.part].filter(Boolean))];
 
     // Step 2: fetch discovered body parts; fall back to BODY[TEXT] on any error
     let bodyHtml = '', body = '';
-    if (partsToFetch.length) {
+    if (partKeys.length) {
       try {
-        const bodyMsg = await client.fetchOne(String(meta.uid), { bodyParts: partsToFetch }, { uid: true });
+        const bodyMsg = await client.fetchOne(String(meta.uid), { bodyParts: partKeys }, { uid: true });
         const parts = bodyMsg?.bodyParts;
-        if (textPart) body     = parts?.get(textPart)?.toString('utf8') || '';
-        if (htmlPart) bodyHtml = parts?.get(htmlPart)?.toString('utf8') || '';
+        if (textPart) body     = _decodePart(parts?.get(textPart.part), textPart.encoding);
+        if (htmlPart) bodyHtml = _decodePart(parts?.get(htmlPart.part), htmlPart.encoding);
       } catch {
         try {
           const fb = await client.fetchOne(String(meta.uid), { bodyParts: ['text'] }, { uid: true });

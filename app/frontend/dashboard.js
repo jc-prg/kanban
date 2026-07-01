@@ -215,7 +215,8 @@ function _openMailDetail(accountId, msgId, webUrl) {
           + ' pre,code{font-family:monospace;font-size:0.88em;background:#2a2a3e;padding:2px 5px;border-radius:3px}';
         const doc = iframe.contentDocument;
         doc.open();
-        doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body>${msg.bodyHtml}</body></html>`);
+        const safeHtml = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
+        doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body>${safeHtml}</body></html>`);
         doc.close();
         const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
         iframe.addEventListener('load', resize);
