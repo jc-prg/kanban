@@ -91,7 +91,7 @@ function showDashboardContextMenu(x, y, board, card) {
           const b = _dashCtxBoard, cd = ctxCard;
           hideContextMenu();
           if (b && cd && currentColId) {
-            _dashMoveCard(b, cd.id, currentColId, btn.dataset.colId).then(() => loadDashboard());
+            _dashMoveCard(b, cd.id, currentColId, btn.dataset.colId).then(() => _reloadCardsPanel());
           }
         });
       });
@@ -136,7 +136,7 @@ document.getElementById('ctxDone').addEventListener('click', () => {
     _dashPatchCard(board, card.id, c => {
       c.done = newDone;
       if (newDone) c.doneAt = new Date().toISOString(); else delete c.doneAt;
-    }).then(() => loadDashboard());
+    }).then(() => _reloadCardsPanel());
   } else if (colId) {
     updateCardFull(colId, card.id, { ...card, done: newDone, doneAt: newDone ? new Date().toISOString() : null });
   }
@@ -178,7 +178,7 @@ document.getElementById('ctxColor').addEventListener('click', e => {
       if (board && cardId) {
         hideContextMenu();
         _dashPatchCard(board, cardId, c => { c.color = color; c.lastModified = new Date().toISOString(); })
-          .then(() => loadDashboard());
+          .then(() => _reloadCardsPanel());
       } else {
         const col = state.columns.find(c => c.id === ctxColId);
         const target = col?.cards.find(c => c.id === ctxCard?.id);
@@ -212,7 +212,7 @@ document.getElementById('ctxPriority').addEventListener('click', e => {
         _dashPatchCard(board, cardId, c => {
           if (p === 0) delete c.priority; else c.priority = p;
           c.lastModified = new Date().toISOString();
-        }).then(() => loadDashboard());
+        }).then(() => _reloadCardsPanel());
       } else {
         const col = state.columns.find(c => c.id === ctxColId);
         const target = col?.cards.find(c => c.id === ctxCard?.id);
@@ -236,7 +236,7 @@ document.getElementById('ctxDelete').addEventListener('click', async () => {
   if (board) {
     if (await showConfirm(`Delete card "${card.text}"?`, { okLabel: 'Delete', danger: true })) {
       await _dashDeleteCard(board, card.id);
-      loadDashboard();
+      _reloadCardsPanel();
     }
   } else if (colId && await showConfirm(`Delete card "${card.text}"?`, { okLabel: 'Delete', danger: true })) {
     deleteCard(colId, card.id);

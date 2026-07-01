@@ -142,6 +142,16 @@ async function initDashboard() {
   } catch { /* ignore */ }
 }
 
+async function _reloadCardsPanel() {
+  try {
+    const res = await fetch('/api/dashboard/cards');
+    if (!res.ok) throw new Error('Failed');
+    _renderCardsPanel(await res.json());
+  } catch {
+    document.getElementById('dashboardCardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
+  }
+}
+
 async function loadDashboard() {
   const fetchedAt = document.getElementById('dashboardFetchedAt');
   clearTimeout(_fetchedAtTimer);
@@ -154,35 +164,24 @@ async function loadDashboard() {
   document.getElementById('dashCardsCount').textContent = '';
   document.getElementById('dashMailCount').textContent = '';
   document.getElementById('dashCalendarCount').textContent = '';
-  let anyError = false;
 
-  try {
-    const res = await fetch('/api/dashboard/cards');
-    if (!res.ok) throw new Error('Failed');
-    _renderCardsPanel(await res.json());
-  } catch {
-    anyError = true;
-    document.getElementById('dashboardCardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
-  }
+  const cardsP = fetch('/api/dashboard/cards')
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(data => { _renderCardsPanel(data); return true; })
+    .catch(() => { document.getElementById('dashboardCardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
 
-  try {
-    const res = await fetch('/api/dashboard/mail');
-    if (!res.ok) throw new Error('Failed');
-    _renderMailPanel(await res.json());
-  } catch {
-    anyError = true;
-    document.getElementById('dashboardMailPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
-  }
+  const mailP = fetch('/api/dashboard/mail')
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(data => { _renderMailPanel(data); return true; })
+    .catch(() => { document.getElementById('dashboardMailPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
 
-  try {
-    const res = await fetch('/api/dashboard/calendar');
-    if (!res.ok) throw new Error('Failed');
-    _renderCalendarPanel(await res.json());
-  } catch {
-    anyError = true;
-    document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
-  }
+  const calP = fetch('/api/dashboard/calendar')
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(data => { _renderCalendarPanel(data); return true; })
+    .catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
 
+  const [cardsOk, mailOk, calOk] = await Promise.all([cardsP, mailP, calP]);
+  const anyError = !cardsOk || !mailOk || !calOk;
   fetchedAt.textContent = (anyError ? 'Partial load \u2014 ' : 'Refreshed at ') +
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   _fetchedAtTimer = setTimeout(() => fetchedAt.classList.remove('show'), 10000);
