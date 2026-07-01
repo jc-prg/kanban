@@ -4,6 +4,8 @@
 
 let _refreshTimer   = null;
 let _fetchedAtTimer = null;
+let _dragCardId     = null;
+let _dragCardGroup  = null;
 
 // Map: cardId → { card, board } — populated on each render for context menu
 const _dashCardMap = new Map();
@@ -65,6 +67,71 @@ function applyDashboardPanelVisibility(cfg) {
     cfg.panelMail !== false ? '' : 'none';
   document.getElementById('dashboardCalendarPanel').closest('.dashboard-panel').style.display =
     cfg.panelCalendar !== false ? '' : 'none';
+}
+
+async function _dashReorderColumn(board, columnTitle, newCardIdOrder) {
+  try {
+    const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
+    const col = data.columns.find(c => c.title === columnTitle);
+    if (!col) return;
+    const byId = new Map(col.cards.map(c => [c.id, c]));
+    col.cards = [
+      ...newCardIdOrder.map(id => byId.get(id)).filter(Boolean),
+      ...col.cards.filter(c => !newCardIdOrder.includes(c.id)),
+    ];
+    await fetch(`/api/${encodeURIComponent(board)}/board`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updatedColumns: [col] }),
+    });
+  } catch { /* ignore */ }
+}
+
+function _initCardsDragDrop() {
+  const panel = document.getElementById('dashboardCardsPanel');
+
+  panel.addEventListener('dragstart', e => {
+    const card = e.target.closest('.dashboard-card-item[data-card-id]');
+    if (!card) return;
+    _dragCardId    = card.dataset.cardId;
+    _dragCardGroup = card.closest('.dashboard-card-group');
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => card.classList.add('dragging'), 0);
+  });
+
+  panel.addEventListener('dragend', () => {
+    panel.querySelectorAll('.dashboard-card-item.dragging').forEach(el => el.classList.remove('dragging'));
+    panel.querySelectorAll('.dash-drop-indicator').forEach(el => el.remove());
+    _dragCardId    = null;
+    _dragCardGroup = null;
+  });
+
+  panel.addEventListener('dragover', e => {
+    if (!_dragCardId) return;
+    const card = e.target.closest('.dashboard-card-item[data-card-id]');
+    if (!card || card.closest('.dashboard-card-group') !== _dragCardGroup) return;
+    if (card.dataset.cardId === _dragCardId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    panel.querySelectorAll('.dash-drop-indicator').forEach(el => el.remove());
+    const rect   = card.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    const ind    = document.createElement('div');
+    ind.className = 'dash-drop-indicator';
+    if (before) card.before(ind); else card.after(ind);
+  });
+
+  panel.addEventListener('drop', e => {
+    e.preventDefault();
+    const ind = panel.querySelector('.dash-drop-indicator');
+    if (!ind || !_dragCardId || !_dragCardGroup) { ind?.remove(); return; }
+    const src = _dragCardGroup.querySelector(`.dashboard-card-item[data-card-id="${_dragCardId}"]`);
+    if (!src) { ind.remove(); return; }
+    ind.replaceWith(src);
+    const newOrder = [..._dragCardGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
+      .map(el => el.dataset.cardId);
+    _dashReorderColumn(_dragCardGroup.dataset.board, _dragCardGroup.dataset.column, newOrder);
+  });
 }
 
 async function initDashboard() {
@@ -129,6 +196,7 @@ async function initDashboard() {
     showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
   });
 
+  _initCardsDragDrop();
   await loadDashboard();
 
   // Set up auto-refresh and panel visibility based on config
@@ -202,9 +270,10 @@ function _renderCardsPanel(groups) {
       return `<div class="dashboard-source-error">\u26a0 ${escHtml(group.board)}: ${escHtml(group.error)}</div>`;
     }
     const groupHeader =
-      `<div class="dashboard-group-header">${escHtml(group.board)} \xb7 ${escHtml(group.column)}</div>`;
+      `<div class="dashboard-group-header"><a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}</div>`;
+    const groupAttrs = `class="dashboard-card-group" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}"`;
     if (!group.cards.length) {
-      return groupHeader + '<p class="dashboard-empty">No cards.</p>';
+      return `<div ${groupAttrs}>${groupHeader}<p class="dashboard-empty">No cards.</p></div>`;
     }
     const items = group.cards.map(card => {
       _dashCardMap.set(card.id, { card, board: group.board });
@@ -214,7 +283,7 @@ function _renderCardsPanel(groups) {
 
       if (isLabel) {
         const displayText = card.text.slice(1).trimStart();
-        return `<div class="dashboard-card-item card card--label"
+        return `<div class="dashboard-card-item card card--label" draggable="true"
             data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
           <div class="card-body">
             <div class="card-label-text">${escHtml(displayText)}</div>
@@ -248,7 +317,7 @@ function _renderCardsPanel(groups) {
       }
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
 
-      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}"
+      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}" draggable="true"
           data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
         <div class="card-body">
           <div class="card-text">${escHtml(card.text || '')}</div>
@@ -256,7 +325,7 @@ function _renderCardsPanel(groups) {
         </div>
       </div>`;
     }).join('');
-    return groupHeader + items;
+    return `<div ${groupAttrs}>${groupHeader}${items}</div>`;
   }).join('');
 }
 
