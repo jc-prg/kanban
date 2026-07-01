@@ -264,6 +264,31 @@
   border-top: 1px solid var(--border);
 }
 
+/* ---- Card sources drag-to-reorder ---- */
+
+.cs-drag-handle {
+  color: var(--text-muted);
+  cursor: grab;
+  font-size: 1rem;
+  padding: 0 2px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.cs-drag-handle:active {
+  cursor: grabbing;
+}
+
+.cs-row-dragging {
+  opacity: 0.4;
+}
+
+.cs-row-drag-over {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
+
 /* ---- Card sources column checklist ---- */
 
 .cs-columns-list {

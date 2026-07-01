@@ -524,6 +524,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   let _cardSources = [];
   let _csEditIdx   = -1;
 
+  let _csDragIdx = null;
+
   function _renderCardSourcesList() {
     const list = document.getElementById('cardSourcesList');
     if (!_cardSources.length) {
@@ -531,7 +533,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       return;
     }
     list.innerHTML = _cardSources.map((cs, i) => `
-      <div class="calendar-account-row">
+      <div class="calendar-account-row cs-source-row" draggable="true" data-cs-idx="${i}">
+        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
         <div class="calendar-account-info">
           <strong>${escHtml(cs.board || '(no board)')}</strong>
           <span class="settings-item-desc">${escHtml((cs.columns || []).join(', ') || 'all columns')}</span>
@@ -548,6 +551,36 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     list.querySelectorAll('[data-cs-del]').forEach(btn => {
       btn.addEventListener('click', () => {
         _cardSources.splice(parseInt(btn.dataset.csDel, 10), 1);
+        _renderCardSourcesList();
+        _saveCardSourcesConfig();
+      });
+    });
+
+    list.querySelectorAll('.cs-source-row').forEach(row => {
+      const i = parseInt(row.dataset.csIdx, 10);
+
+      row.addEventListener('dragstart', e => {
+        _csDragIdx = i;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.classList.add('cs-row-dragging'), 0);
+      });
+      row.addEventListener('dragend', () => {
+        _csDragIdx = null;
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-dragging', 'cs-row-drag-over'));
+      });
+      row.addEventListener('dragover', e => {
+        if (_csDragIdx === null || _csDragIdx === i) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-drag-over'));
+        row.classList.add('cs-row-drag-over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('cs-row-drag-over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        if (_csDragIdx === null || _csDragIdx === i) return;
+        const [moved] = _cardSources.splice(_csDragIdx, 1);
+        _cardSources.splice(i, 0, moved);
         _renderCardSourcesList();
         _saveCardSourcesConfig();
       });
