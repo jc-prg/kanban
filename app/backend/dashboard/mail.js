@@ -106,9 +106,22 @@ function _decodePart(buf, encoding) {
     return Buffer.from(buf.toString('ascii').replace(/\s+/g, ''), 'base64').toString('utf8');
   }
   if (encoding === 'quoted-printable') {
-    return buf.toString('utf8')
-      .replace(/=\r?\n/g, '')
-      .replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    // Remove soft line breaks first, then collect raw bytes so that
+    // multibyte UTF-8 sequences (e.g. =C3=BC → ü, =E2=9C=85 → ✅)
+    // are decoded correctly via Buffer.toString('utf8') rather than
+    // String.fromCharCode which treats each byte as a separate code point.
+    const qp = buf.toString('utf8').replace(/=\r?\n/g, '');
+    const bytes = [];
+    for (let i = 0; i < qp.length; ) {
+      if (qp[i] === '=' && /^[0-9A-Fa-f]{2}/.test(qp.slice(i + 1, i + 3))) {
+        bytes.push(parseInt(qp.slice(i + 1, i + 3), 16));
+        i += 3;
+      } else {
+        bytes.push(qp.charCodeAt(i));
+        i++;
+      }
+    }
+    return Buffer.from(bytes).toString('utf8');
   }
   return buf.toString('utf8');
 }
