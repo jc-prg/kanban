@@ -317,6 +317,17 @@ header h1 span { color: var(--accent); }
   margin-top: 12px;
 }
 
+.inbox-board-row {
+  display: flex;
+  gap: 8px;
+}
+
+.inbox-board-row .inbox-select {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
 .inbox-select {
   width: 100%;
   background: var(--surface2);

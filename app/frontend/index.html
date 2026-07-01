@@ -239,8 +239,11 @@
     <button class="modal-fs-btn" id="cardFullscreenBtn" title="Enter full screen" onclick="toggleCardFullscreen()">⛶</button>
     <h2 id="modalTitle" style="display:none">Add Card</h2>
     <div class="modal-field" id="modalBoardField" style="display:none">
-      <label>Board</label>
-      <select id="modalBoardSelect" class="inbox-select"></select>
+      <label>Board / Column</label>
+      <div class="inbox-board-row">
+        <select id="modalBoardSelect" class="inbox-select"></select>
+        <select id="modalColumnSelect" class="inbox-select"></select>
+      </div>
     </div>
     <div class="modal-columns">
       <div class="modal-col-main">

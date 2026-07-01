@@ -164,18 +164,12 @@ async function initDashboard() {
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('dashboardRefreshBtn').style.display = '';
 
-  // Show only Dashboard settings + Log out in the menu dropdown
-  ['menuInbox', 'menuFindCard', 'menuAnalytics',
-   'menuStatistics', 'menuWebhook', 'menuSettings'].forEach(id => {
+  // Match overview menu: hide board-specific items; Inbox/Analyze/Settings stay visible
+  ['menuFindCard', 'menuWebhook', 'menuDashboardSettings'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  const menuDashboardSettings = document.getElementById('menuDashboardSettings');
-  menuDashboardSettings.style.display = '';
-  menuDashboardSettings.addEventListener('click', () => {
-    window.hideMenu();
-    window.openSettings();
-  });
+  document.getElementById('menuInbox').style.display = '';
 
   document.getElementById('dashboardRefreshBtn').addEventListener('click', loadDashboard);
   document.getElementById('dashboardDetailClose').addEventListener('click', _closeDetail);

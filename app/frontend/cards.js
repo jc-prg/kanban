@@ -601,30 +601,60 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
   renderColorRow();
   renderPriorityRow();
 
-  const field  = document.getElementById('modalBoardField');
-  const select = document.getElementById('modalBoardSelect');
+  const field        = document.getElementById('modalBoardField');
+  const select       = document.getElementById('modalBoardSelect');
+  const colSelect    = document.getElementById('modalColumnSelect');
   field.style.display = '';
+
+  const submitBtn = document.getElementById('modalSubmitBtn');
+
+  function _setInboxEnabled(enabled) {
+    colSelect.disabled  = !enabled;
+    submitBtn.disabled  = !enabled;
+  }
+
+  async function _loadColumns(boardName) {
+    colSelect.innerHTML = '<option value="__inbox__">INBOX*</option>';
+    if (!boardName) { _setInboxEnabled(false); return; }
+    _setInboxEnabled(true);
+    try {
+      const data = await fetch(`/api/${encodeURIComponent(boardName)}/board`).then(r => r.json());
+      const cols = (data.columns || []).filter(c => c.title);
+      cols.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.title;
+        opt.textContent = c.title;
+        colSelect.appendChild(opt);
+      });
+    } catch { /* keep INBOX* only */ }
+  }
+
   try {
     const boards = await fetch('/api/boards').then(r => r.json());
-    select.innerHTML = boards.length
-      ? boards.map(b => `<option value="${escHtml(b.name)}">${escHtml(b.name)}</option>`).join('')
-      : '<option value="">No boards available</option>';
+    select.innerHTML = '<option value="" disabled selected hidden>Select board \u2026</option>'
+      + (boards.length
+        ? boards.map(b => `<option value="${escHtml(b.name)}">${escHtml(b.name)}</option>`).join('')
+        : '');
     if (preselectedBoard) select.value = preselectedBoard;
   } catch {
     select.innerHTML = '<option value="">Failed to load boards</option>';
   }
+  colSelect.innerHTML = '<option value="__inbox__">INBOX*</option>';
+  await _loadColumns(select.value);
+  select.onchange = () => _loadColumns(select.value);
 
   document.getElementById('modal').style.display = 'flex';
 }
 
 async function submitInboxCard() {
   document.getElementById('modalGoBoardBtn').style.display = 'none';
-  const board = document.getElementById('modalBoardSelect').value;
-  const text  = document.getElementById('cardText').value.trim();
+  const board  = document.getElementById('modalBoardSelect').value;
+  const column = document.getElementById('modalColumnSelect').value;
+  const text   = document.getElementById('cardText').value.trim();
   if (!board) { showModalStatus('Select a board.', true); return; }
   if (!text)  { showModalStatus('Text is required.', true); return; }
 
-  const card = {
+  const cardData = {
     text,
     color:       selectedColor,
     priority:    selectedPriority || null,
@@ -633,13 +663,51 @@ async function submitInboxCard() {
     startDate:   document.getElementById('cardStart').value         || null,
     endDate:     document.getElementById('cardEnd').value           || null,
   };
+
   try {
-    const r    = await fetch(`/api/${encodeURIComponent(board)}/import`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify([card]),
+    // Load board state for all cases
+    const boardRes = await fetch(`/api/${encodeURIComponent(board)}/board`);
+    if (!boardRes.ok) throw new Error('Failed to load board');
+    const boardData = await boardRes.json();
+    const columns   = boardData.columns || [];
+
+    let col;
+    let newColumnCreated = false;
+    if (column === '__inbox__') {
+      const d   = new Date();
+      const dd  = String(d.getDate()).padStart(2, '0');
+      const mm  = String(d.getMonth() + 1).padStart(2, '0');
+      const inboxWithDate = boardData.settings?.inboxWithDate;
+      const inboxTitle    = inboxWithDate ? `Inbox ${dd}.${mm}.` : 'Inbox';
+      col = inboxWithDate
+        ? columns.find(c => c.title === inboxTitle)
+        : columns.find(c => /^inbox/i.test(c.title));
+      if (!col) {
+        col = { id: uid(), title: inboxTitle, cards: [] };
+        columns.unshift(col);
+        newColumnCreated = true;
+      }
+    } else {
+      col = columns.find(c => c.title === column);
+      if (!col) { showModalStatus('Column not found.', true); return; }
+    }
+
+    const today   = new Date().toISOString().slice(0, 10);
+    const newCard = { ...cardData, id: uid(), created: today };
+    col.cards = [newCard, ...(col.cards || [])];
+
+    const patchBody = newColumnCreated
+      ? { columnOrder: columns.map(c => c.id), updatedColumns: columns }
+      : { updatedColumns: [col] };
+
+    const r = await fetch(`/api/${encodeURIComponent(board)}/board`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patchBody),
     });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Request failed');
-    if (data.relevant > 0) {
+    if (!r.ok) throw new Error('Failed to save card');
+    const added = true;
+
+    if (added) {
       if (_inboxOnSuccess) { _inboxOnSuccess(); _inboxOnSuccess = null; }
       showModalStatus('Card added.', false);
       document.getElementById('cardText').value  = '';
@@ -654,8 +722,6 @@ async function submitInboxCard() {
       goBtn.href = `/board/${encodeURIComponent(board)}`;
       goBtn.style.display = '';
       document.getElementById('cardText').focus();
-    } else {
-      showModalStatus('Card already exists in this board.', true);
     }
   } catch (e) {
     showModalStatus(e.message || 'Failed to add card.', true);
