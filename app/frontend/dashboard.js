@@ -15,7 +15,8 @@ let _dashAchOffset  = 0;
 const _folderCache = new Map();
 
 // Map: cardId → { card, board } — populated on each render for context menu
-const _dashCardMap = new Map();
+const _dashCardMap      = new Map();
+const _collapsedGroups  = new Set(); // keyed by "board\0column"
 
 async function _dashPatchCard(board, cardId, patchFn) {
   const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
@@ -216,6 +217,21 @@ async function initDashboard() {
     const entry = _dashCardMap.get(item.dataset.cardId);
     if (!entry) return;
     showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
+  });
+
+  // Card group collapse toggle
+  document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
+    const hdr = e.target.closest('.dashboard-group-header--collapsible');
+    if (!hdr || e.target.closest('a')) return;
+    const key   = hdr.dataset.groupKey;
+    const group = hdr.closest('.dashboard-card-group');
+    if (_collapsedGroups.has(key)) {
+      _collapsedGroups.delete(key);
+      group.classList.remove('dashboard-card-group--collapsed');
+    } else {
+      _collapsedGroups.add(key);
+      group.classList.add('dashboard-card-group--collapsed');
+    }
   });
 
   // Mobile accordion: clicking a panel header opens it and closes others
@@ -476,9 +492,15 @@ function _renderCardsPanel(groups) {
     if (group.error) {
       return `<div class="dashboard-source-error">\u26a0 ${escHtml(group.board)}: ${escHtml(group.error)}</div>`;
     }
+    const groupKey   = `${group.board}\0${group.column}`;
+    const collapsed  = _collapsedGroups.has(groupKey);
+    const cardCount  = group.cards.filter(c => !c.text?.startsWith('#')).length;
     const groupHeader =
-      `<div class="dashboard-group-header"><a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}</div>`;
-    const groupAttrs = `class="dashboard-card-group" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}"`;
+      `<div class="dashboard-group-header dashboard-group-header--collapsible" data-group-key="${escHtml(groupKey)}">` +
+      `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}` +
+      `<span class="dash-group-right"><span class="column-count dash-group-count">${cardCount}</span><span class="dashboard-boards-chevron">\u203a</span></span></div>`;
+    const collapsedClass = collapsed ? ' dashboard-card-group--collapsed' : '';
+    const groupAttrs = `class="dashboard-card-group${collapsedClass}" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}"`;
     if (!group.cards.length) {
       return `<div ${groupAttrs}>${groupHeader}<p class="dashboard-empty">No cards.</p></div>`;
     }
