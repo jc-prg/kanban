@@ -703,6 +703,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   let _mailAccounts = [];
   let _mailEditIdx  = -1;
+  let _mailDragIdx  = null;
 
   function _renderMailList() {
     const list = document.getElementById('mailAccountsList');
@@ -711,7 +712,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       return;
     }
     list.innerHTML = _mailAccounts.map((acc, i) => `
-      <div class="calendar-account-row">
+      <div class="calendar-account-row cs-source-row" draggable="true" data-mail-idx="${i}">
+        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
         <div class="calendar-account-info">
           <strong>${escHtml(acc.label || '(no label)')}</strong>
           <span class="settings-item-desc">${escHtml(acc.host || '')}:${escHtml(String(acc.port || 993))} · ${escHtml(acc.user || '')}</span>
@@ -728,6 +730,36 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     list.querySelectorAll('[data-mail-del]').forEach(btn => {
       btn.addEventListener('click', () => {
         _mailAccounts.splice(parseInt(btn.dataset.mailDel, 10), 1);
+        _renderMailList();
+        _saveMailConfig();
+      });
+    });
+
+    list.querySelectorAll('.cs-source-row').forEach(row => {
+      const i = parseInt(row.dataset.mailIdx, 10);
+
+      row.addEventListener('dragstart', e => {
+        _mailDragIdx = i;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.classList.add('cs-row-dragging'), 0);
+      });
+      row.addEventListener('dragend', () => {
+        _mailDragIdx = null;
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-dragging', 'cs-row-drag-over'));
+      });
+      row.addEventListener('dragover', e => {
+        if (_mailDragIdx === null || _mailDragIdx === i) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-drag-over'));
+        row.classList.add('cs-row-drag-over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('cs-row-drag-over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        if (_mailDragIdx === null || _mailDragIdx === i) return;
+        const [moved] = _mailAccounts.splice(_mailDragIdx, 1);
+        _mailAccounts.splice(i, 0, moved);
         _renderMailList();
         _saveMailConfig();
       });
