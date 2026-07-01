@@ -396,8 +396,8 @@ function _renderBoardsPanel(boards, achievements) {
     <div class="dashboard-group-header dash-ach-header" style="margin-top:10px">
       <span id="dashAchLabel">Today</span>
       <span class="dash-ach-nav">
-        <button id="dashAchPrev" class="ach-nav-btn" title="Previous day">&#8249;</button>
         <button id="dashAchToday" class="ach-nav-btn" style="display:none" title="Jump to today"></button>
+        <button id="dashAchPrev" class="ach-nav-btn" title="Previous day">&#8249;</button>
         <button id="dashAchNext" class="ach-nav-btn" disabled title="Next day">&#8250;</button>
       </span>
     </div>
@@ -406,7 +406,7 @@ function _renderBoardsPanel(boards, achievements) {
 
   panel.innerHTML = html;
 
-  document.getElementById('dashAchToday').innerHTML = SVGICONS.sync(12, 12);
+  document.getElementById('dashAchToday').innerHTML = SVGICONS.sync(10, 10);
 
   _renderDashAchTiles(achievements, _dashAchOffset);
 
