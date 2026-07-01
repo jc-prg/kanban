@@ -205,6 +205,10 @@ Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`
 | `GET` | `/api/dashboard/mail/:accountId` | Messages for one account |
 | `GET` | `/api/dashboard/mail/:accountId/message/:uid` | Full message (envelope + body) |
 | `POST` | `/api/dashboard/mail/:accountId/test` | Test IMAP connectivity; returns `{ ok, error? }` |
+| `GET` | `/api/dashboard/mail/:accountId/folders` | List IMAP folders; returns `{ folders: [{ path, name }] }` |
+| `PATCH` | `/api/dashboard/mail/:accountId/message/:uid` | Mark read/unread; body: `{ seen: bool }` |
+| `POST` | `/api/dashboard/mail/:accountId/message/:uid/move` | Move to folder; body: `{ folder: string }` |
+| `DELETE` | `/api/dashboard/mail/:accountId/message/:uid` | Move to trash (uses `trashFolder` account config, default `'Trash'`) |
 | `GET` | `/api/dashboard/calendar` | Events from all calendar accounts |
 | `GET` | `/api/dashboard/calendar/:accountId` | Events for one account |
 | `GET` | `/api/dashboard/calendar/:accountId/event/:uid` | Full event detail |

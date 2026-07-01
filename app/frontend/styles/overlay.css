@@ -41,6 +41,19 @@
 .ctx-item:hover { background: var(--surface2); }
 .ctx-item.ctx-danger:hover { color: var(--danger); background: rgba(240,79,106,0.1); }
 
+.ctx-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px;
+}
+
+.ctx-folder-loading {
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
 .ctx-submenu-trigger {
   position: relative;
   user-select: none;

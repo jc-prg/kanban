@@ -8,6 +8,10 @@ let _dragCardId     = null;
 let _dragCardGroup  = null;
 let _mailCtxAccountId = null;
 let _mailCtxMsgId     = null;
+let _mailCtxUnread    = false;
+
+// Map: accountId → folders array (cached per session)
+const _folderCache = new Map();
 
 // Map: cardId → { card, board } — populated on each render for context menu
 const _dashCardMap = new Map();
@@ -63,14 +67,18 @@ async function _dashMoveCard(board, cardId, fromColId, toColId) {
 }
 
 function applyDashboardPanelVisibility(cfg) {
-  document.getElementById('dashboardBoardsPanel').closest('.dashboard-panel').style.display =
-    cfg.panelBoards !== false ? '' : 'none';
-  document.getElementById('dashboardCardsPanel').closest('.dashboard-panel').style.display =
-    cfg.panelCards !== false ? '' : 'none';
-  document.getElementById('dashboardMailPanel').closest('.dashboard-panel').style.display =
-    cfg.panelMail !== false ? '' : 'none';
-  document.getElementById('dashboardCalendarPanel').closest('.dashboard-panel').style.display =
-    cfg.panelCalendar !== false ? '' : 'none';
+  const panels = [
+    { id: 'dashboardBoardsPanel',   visible: cfg.panelBoards   !== false },
+    { id: 'dashboardCardsPanel',    visible: cfg.panelCards    !== false },
+    { id: 'dashboardMailPanel',     visible: cfg.panelMail     !== false },
+    { id: 'dashboardCalendarPanel', visible: cfg.panelCalendar !== false },
+  ];
+  let visible = 0;
+  for (const { id, visible: show } of panels) {
+    document.getElementById(id).closest('.dashboard-panel').style.display = show ? '' : 'none';
+    if (show) visible++;
+  }
+  document.querySelector('.dashboard-grid').style.gridTemplateColumns = `repeat(${visible || 1}, 1fr)`;
 }
 
 async function _dashReorderColumn(board, columnTitle, newCardIdOrder) {
@@ -188,7 +196,7 @@ async function initDashboard() {
     if (!item) return;
     e.preventDefault();
     e.stopPropagation();
-    _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId);
+    _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1');
   });
 
   // Card click → navigate to the board and open the card's edit modal
@@ -221,10 +229,7 @@ async function initDashboard() {
   // Default: Boards panel open (only has visual effect on mobile)
   document.getElementById('dashboardBoardsPanel').closest('.dashboard-panel').classList.add('dashboard-panel--open');
 
-  _initCardsDragDrop();
-  await loadDashboard();
-
-  // Set up auto-refresh and panel visibility based on config
+  // Fetch config first: apply panel visibility before loading any data
   try {
     const cfg = await fetch('/api/dashboard/config').then(r => r.json());
     applyDashboardPanelVisibility(cfg);
@@ -233,6 +238,9 @@ async function initDashboard() {
       window.addEventListener('pagehide', () => clearInterval(_refreshTimer), { once: true });
     }
   } catch { /* ignore */ }
+
+  _initCardsDragDrop();
+  await loadDashboard();
 }
 
 async function _reloadCardsPanel() {
@@ -245,43 +253,35 @@ async function _reloadCardsPanel() {
   }
 }
 
+function _panelShown(id) {
+  return document.getElementById(id).closest('.dashboard-panel').style.display !== 'none';
+}
+
 async function loadDashboard() {
   const fetchedAt = document.getElementById('dashboardFetchedAt');
   clearTimeout(_fetchedAtTimer);
   fetchedAt.classList.add('show');
   fetchedAt.textContent = 'Loading\u2026';
   const loadingHtml = '<p class="dashboard-loading">Loading\u2026</p>';
-  document.getElementById('dashboardBoardsPanel').innerHTML = loadingHtml;
-  document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;
-  document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;
-  document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;
-  document.getElementById('dashBoardsCount').textContent = '';
-  document.getElementById('dashCardsCount').textContent = '';
-  document.getElementById('dashMailCount').textContent = '';
-  document.getElementById('dashCalendarCount').textContent = '';
 
-  const boardsP = fetch('/api/boards')
-    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-    .then(data => { _renderBoardsPanel(data); return true; })
-    .catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
+  const showBoards   = _panelShown('dashboardBoardsPanel');
+  const showCards    = _panelShown('dashboardCardsPanel');
+  const showMail     = _panelShown('dashboardMailPanel');
+  const showCalendar = _panelShown('dashboardCalendarPanel');
 
-  const cardsP = fetch('/api/dashboard/cards')
-    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-    .then(data => { _renderCardsPanel(data); return true; })
-    .catch(() => { document.getElementById('dashboardCardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
+  if (showBoards)   { document.getElementById('dashboardBoardsPanel').innerHTML = loadingHtml;   document.getElementById('dashBoardsCount').textContent   = ''; }
+  if (showCards)    { document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;     document.getElementById('dashCardsCount').textContent     = ''; }
+  if (showMail)     { document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;      document.getElementById('dashMailCount').textContent      = ''; }
+  if (showCalendar) { document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;  document.getElementById('dashCalendarCount').textContent  = ''; }
 
-  const mailP = fetch('/api/dashboard/mail')
-    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-    .then(data => { _renderMailPanel(data); return true; })
-    .catch(() => { document.getElementById('dashboardMailPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
+  const resolved = await Promise.all([
+    showBoards   ? fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderBoardsPanel(d);   return true; }).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML   = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+    showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+    showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+    showCalendar ? fetch('/api/dashboard/calendar').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+  ]);
 
-  const calP = fetch('/api/dashboard/calendar')
-    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-    .then(data => { _renderCalendarPanel(data); return true; })
-    .catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; });
-
-  const [boardsOk, cardsOk, mailOk, calOk] = await Promise.all([boardsP, cardsP, mailP, calP]);
-  const anyError = !boardsOk || !cardsOk || !mailOk || !calOk;
+  const anyError = resolved.some((ok, i) => !ok && [showBoards, showCards, showMail, showCalendar][i]);
   fetchedAt.textContent = (anyError ? 'Partial load \u2014 ' : 'Refreshed at ') +
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   _fetchedAtTimer = setTimeout(() => fetchedAt.classList.remove('show'), 10000);
@@ -449,7 +449,7 @@ function _renderMailPanel(accounts) {
       if (dateStr)  metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
       return `<div class="dashboard-mail-item card"
-          data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-web-url="${escHtml(acc.webInterfaceUrl || '')}">
+          data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-unread="${msg.unread ? '1' : '0'}" data-web-url="${escHtml(acc.webInterfaceUrl || '')}">
         <div class="card-body">
           <div class="card-text">${msg.unread ? `<strong>${escHtml(msg.subject)}</strong>` : escHtml(msg.subject)}</div>
           ${metaHtml}
@@ -645,9 +645,11 @@ function _closeDetail() {
 
 // ---- Mail context menu ----
 
-function _showMailContextMenu(x, y, accountId, msgId) {
+function _showMailContextMenu(x, y, accountId, msgId, unread) {
   _mailCtxAccountId = accountId;
   _mailCtxMsgId     = msgId;
+  _mailCtxUnread    = !!unread;
+  document.getElementById('mailCtxToggleReadLabel').textContent = unread ? 'Mark as read' : 'Mark as unread';
   const menu = document.getElementById('mailContextMenu');
   menu.style.display = 'block';
   const mw   = menu.offsetWidth  || 160;
@@ -661,6 +663,97 @@ function hideMailContextMenu() {
   document.getElementById('mailContextMenu').style.display = 'none';
   _mailCtxAccountId = null;
   _mailCtxMsgId     = null;
+  _mailCtxUnread    = false;
+}
+
+async function _reloadMailPanel() {
+  try {
+    const res = await fetch('/api/dashboard/mail');
+    if (!res.ok) throw new Error('Failed');
+    _renderMailPanel(await res.json());
+  } catch {
+    document.getElementById('dashboardMailPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
+  }
+}
+
+function _populateFolderList(folders, listEl) {
+  if (!folders.length) {
+    listEl.innerHTML = '<p class="ctx-folder-loading">No folders found.</p>';
+    return;
+  }
+  listEl.innerHTML = folders
+    .map(f => `<button class="ctx-item" data-folder="${escHtml(f.path)}">${escHtml(f.name || f.path)}</button>`)
+    .join('');
+  listEl.querySelectorAll('[data-folder]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const accountId = _mailCtxAccountId;
+      const msgId     = _mailCtxMsgId;
+      hideMailContextMenu();
+      if (accountId && msgId) _mailMove(accountId, msgId, btn.dataset.folder);
+    });
+  });
+}
+
+async function _mailToggleRead(accountId, msgId, unread) {
+  const seen = unread; // unread=true → mark as seen; unread=false → mark as unseen
+  const item = document.querySelector(
+    `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
+  );
+  try {
+    const res = await fetch(
+      `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seen }) }
+    );
+    if (!res.ok) throw new Error('Failed');
+    if (item) {
+      const textEl = item.querySelector('.card-text');
+      if (textEl) {
+        if (seen) {
+          // Was unread → now read: remove bold
+          const strong = textEl.querySelector('strong');
+          textEl.textContent = strong ? strong.textContent : textEl.textContent;
+        } else {
+          // Was read → now unread: add bold
+          textEl.innerHTML = `<strong>${escHtml(textEl.textContent)}</strong>`;
+        }
+      }
+      item.dataset.unread = seen ? '0' : '1';
+    }
+  } catch {
+    _reloadMailPanel();
+  }
+}
+
+async function _mailDelete(accountId, msgId) {
+  const item = document.querySelector(
+    `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
+  );
+  item?.remove();
+  try {
+    const res = await fetch(
+      `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) throw new Error('Failed');
+  } catch {
+    _reloadMailPanel();
+  }
+}
+
+async function _mailMove(accountId, msgId, folder) {
+  const item = document.querySelector(
+    `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
+  );
+  item?.remove();
+  try {
+    const res = await fetch(
+      `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/move`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }
+    );
+    if (!res.ok) throw new Error('Failed');
+  } catch {
+    _reloadMailPanel();
+  }
 }
 
 async function _createCardFromMail(accountId, msgId) {
@@ -706,6 +799,42 @@ document.getElementById('mailCtxCreateCard').addEventListener('click', async () 
   const msgId     = _mailCtxMsgId;
   hideMailContextMenu();
   if (accountId && msgId) await _createCardFromMail(accountId, msgId);
+});
+
+document.getElementById('mailCtxToggleRead').addEventListener('click', async () => {
+  const accountId = _mailCtxAccountId;
+  const msgId     = _mailCtxMsgId;
+  const unread    = _mailCtxUnread;
+  hideMailContextMenu();
+  if (accountId && msgId) await _mailToggleRead(accountId, msgId, unread);
+});
+
+document.getElementById('mailCtxDelete').addEventListener('click', async () => {
+  const accountId = _mailCtxAccountId;
+  const msgId     = _mailCtxMsgId;
+  hideMailContextMenu();
+  if (accountId && msgId) await _mailDelete(accountId, msgId);
+});
+
+// Populate folder list on hover — fetch once per account then serve from cache
+document.getElementById('mailCtxMoveWrap').addEventListener('mouseenter', async () => {
+  const accountId = _mailCtxAccountId;
+  if (!accountId) return;
+  const listEl = document.getElementById('mailCtxFolderList');
+  if (_folderCache.has(accountId)) {
+    _populateFolderList(_folderCache.get(accountId), listEl);
+    return;
+  }
+  listEl.innerHTML = '<p class="ctx-folder-loading">Loading\u2026</p>';
+  try {
+    const res = await fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/folders`);
+    if (!res.ok) throw new Error('Failed');
+    const { folders } = await res.json();
+    _folderCache.set(accountId, folders);
+    _populateFolderList(folders, listEl);
+  } catch {
+    listEl.innerHTML = '<p class="ctx-folder-loading">Failed to load.</p>';
+  }
 });
 
 document.addEventListener('click', () => hideMailContextMenu());

@@ -198,4 +198,77 @@ async function testMailAccount(account) {
   }
 }
 
-module.exports = { fetchMailAccount, fetchMailMessage, testMailAccount };
+// ---- List folders ----
+
+/**
+ * List all IMAP folders for an account.
+ * Returns [{ path, name }] sorted by path.
+ */
+async function listMailFolders(account) {
+  const client = _makeClient(account);
+  await client.connect();
+  try {
+    const list = await client.list('', '*');
+    return list
+      .map(f => ({ path: f.path, name: f.name || f.path }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  } finally {
+    await client.logout();
+  }
+}
+
+// ---- Mutate messages ----
+
+/**
+ * Mark a message as read (seen=true) or unread (seen=false) by UID.
+ */
+async function markMailMessage(account, uid, seen) {
+  const { folder = 'INBOX' } = account;
+  const client = _makeClient(account);
+  await client.connect();
+  const lock = await client.getMailboxLock(folder);
+  try {
+    if (seen) {
+      await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
+    } else {
+      await client.messageFlagsRemove(String(uid), ['\\Seen'], { uid: true });
+    }
+  } finally {
+    lock.release();
+    await client.logout();
+  }
+}
+
+/**
+ * Move a message by UID to targetFolder.
+ */
+async function moveMailMessage(account, uid, targetFolder) {
+  const { folder = 'INBOX' } = account;
+  const client = _makeClient(account);
+  await client.connect();
+  const lock = await client.getMailboxLock(folder);
+  try {
+    await client.messageMove(String(uid), targetFolder, { uid: true });
+  } finally {
+    lock.release();
+    await client.logout();
+  }
+}
+
+/**
+ * Delete a message by UID — moves it to the configured trash folder
+ * (account.trashFolder, default: 'Trash').
+ */
+async function deleteMailMessage(account, uid) {
+  return moveMailMessage(account, uid, account.trashFolder || 'Trash');
+}
+
+module.exports = {
+  fetchMailAccount,
+  fetchMailMessage,
+  testMailAccount,
+  listMailFolders,
+  markMailMessage,
+  moveMailMessage,
+  deleteMailMessage,
+};

@@ -808,6 +808,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       const options = [...sel.options].map(o => parseInt(o.value, 10));
       sel.value = options.includes(ms) ? String(ms) : '0';
       // Panel visibility toggles (default: enabled)
+      document.getElementById('dashPanelBoards').checked   = cfg.panelBoards   !== false;
       document.getElementById('dashPanelCards').checked    = cfg.panelCards    !== false;
       document.getElementById('dashPanelMail').checked     = cfg.panelMail     !== false;
       document.getElementById('dashPanelCalendar').checked = cfg.panelCalendar !== false;
@@ -830,11 +831,11 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     } catch { flashIndicator(' error'); }
   });
 
-  ['dashPanelCards', 'dashPanelMail', 'dashPanelCalendar'].forEach(id => {
+  ['dashPanelBoards', 'dashPanelCards', 'dashPanelMail', 'dashPanelCalendar'].forEach(id => {
     document.getElementById(id).addEventListener('change', async function () {
       try {
         const cfg = await fetch('/api/dashboard/config').then(r => r.json());
-        const key = id === 'dashPanelCards' ? 'panelCards' : id === 'dashPanelMail' ? 'panelMail' : 'panelCalendar';
+        const key = id === 'dashPanelBoards' ? 'panelBoards' : id === 'dashPanelCards' ? 'panelCards' : id === 'dashPanelMail' ? 'panelMail' : 'panelCalendar';
         await fetch('/api/dashboard/config', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },

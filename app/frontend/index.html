@@ -224,6 +224,15 @@
 
 <div id="mailContextMenu" class="context-menu" style="display:none">
   <button class="ctx-item" id="mailCtxCreateCard"><span data-icon="edit"></span>  Create card…</button>
+  <div class="ctx-separator"></div>
+  <button class="ctx-item" id="mailCtxToggleRead"><span data-icon="done"></span>  <span id="mailCtxToggleReadLabel">Mark as read</span></button>
+  <div class="ctx-submenu-trigger ctx-item" id="mailCtxMoveWrap">
+    <span data-icon="moveTo"></span>  Move to folder
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
+    <div class="ctx-submenu ctx-submenu-left" id="mailCtxFolderList"></div>
+  </div>
+  <div class="ctx-separator"></div>
+  <button class="ctx-item ctx-danger" id="mailCtxDelete"><span data-icon="close"></span>  Delete (trash)</button>
 </div>
 
 <div id="modal" class="modal-backdrop" style="display:none">
@@ -686,25 +695,32 @@
                   </select>
                 </div>
                 <div class="settings-field-row">
-                  <label class="settings-field-label" for="dashPanelCards">Cards</label>
-                  <div class="settings-toggle">
+                  <span class="settings-field-label">Boards</span>
+                  <label class="settings-toggle">
+                    <input type="checkbox" id="dashPanelBoards" checked>
+                    <span class="settings-toggle-track"></span>
+                  </label>
+                </div>
+                <div class="settings-field-row">
+                  <span class="settings-field-label">Cards</span>
+                  <label class="settings-toggle">
                     <input type="checkbox" id="dashPanelCards" checked>
                     <span class="settings-toggle-track"></span>
-                  </div>
+                  </label>
                 </div>
                 <div class="settings-field-row">
-                  <label class="settings-field-label" for="dashPanelMail">Mail</label>
-                  <div class="settings-toggle">
+                  <span class="settings-field-label">Mail</span>
+                  <label class="settings-toggle">
                     <input type="checkbox" id="dashPanelMail" checked>
                     <span class="settings-toggle-track"></span>
-                  </div>
+                  </label>
                 </div>
                 <div class="settings-field-row">
-                  <label class="settings-field-label" for="dashPanelCalendar">Calendar</label>
-                  <div class="settings-toggle">
+                  <span class="settings-field-label">Calendar</span>
+                  <label class="settings-toggle">
                     <input type="checkbox" id="dashPanelCalendar" checked>
                     <span class="settings-toggle-track"></span>
-                  </div>
+                  </label>
                 </div>
               </div>
 

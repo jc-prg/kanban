@@ -6,7 +6,8 @@ const { getDashboardConfig, saveDashboardConfig } = require('../global-db');
 const { getCouch }                                = require('../db');
 const { DB_PREFIX, DOC_ID }                       = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount } = require('../dashboard/calendar');
-const { fetchMailAccount, fetchMailMessage, testMailAccount }       = require('../dashboard/mail');
+const { fetchMailAccount, fetchMailMessage, testMailAccount,
+        listMailFolders, markMailMessage, moveMailMessage, deleteMailMessage } = require('../dashboard/mail');
 
 // ---- Password utilities (also exported for unit tests) ----
 
@@ -237,6 +238,84 @@ router.post('/dashboard/mail/:accountId/test', async (req, res) => {
 
     const result = await testMailAccount(account);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/dashboard/mail/:accountId/folders — list IMAP folders
+router.get('/dashboard/mail/:accountId/folders', async (req, res) => {
+  try {
+    const config  = await getDashboardConfig();
+    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+
+    try {
+      const folders = await listMailFolders(account);
+      res.json({ folders });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread
+router.patch('/dashboard/mail/:accountId/message/:uid', writeRateLimit, async (req, res) => {
+  try {
+    const config  = await getDashboardConfig();
+    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+
+    const { seen } = req.body;
+    if (typeof seen !== 'boolean') return res.status(400).json({ error: 'seen must be boolean' });
+
+    try {
+      await markMailMessage(account, req.params.uid, seen);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dashboard/mail/:accountId/message/:uid/move — move to folder
+router.post('/dashboard/mail/:accountId/message/:uid/move', writeRateLimit, async (req, res) => {
+  try {
+    const config  = await getDashboardConfig();
+    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+
+    const { folder } = req.body;
+    if (!folder || typeof folder !== 'string') return res.status(400).json({ error: 'folder is required' });
+
+    try {
+      await moveMailMessage(account, req.params.uid, folder);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/dashboard/mail/:accountId/message/:uid — move to trash
+router.delete('/dashboard/mail/:accountId/message/:uid', writeRateLimit, async (req, res) => {
+  try {
+    const config  = await getDashboardConfig();
+    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+
+    try {
+      await deleteMailMessage(account, req.params.uid);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
