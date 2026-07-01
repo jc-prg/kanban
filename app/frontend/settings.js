@@ -124,7 +124,10 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     dbSection.style.display = 'none';
   }
 
-  if (BOARD_NAME) {
+  // API_BASE is non-null only on real board pages (/board/<name>); null on overview + dashboard.
+  const _isBoard = !!API_BASE;
+
+  if (_isBoard) {
     document.getElementById('settingsTitle').textContent = `Board settings: ${BOARD_NAME}`;
     document.getElementById('menuSettings').textContent  = 'Board settings';
     document.getElementById('boardRenameSection').style.display = '';
@@ -136,11 +139,17 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('apiKeySection').style.display = 'none';
     document.getElementById('promptsSection').style.display = 'none';
     document.getElementById('iconLibrarySection').style.display = 'none';
+    document.getElementById('calendarSection').style.display = 'none';
+    document.getElementById('mailSection').style.display = 'none';
+    document.getElementById('cardSourcesSection').style.display = 'none';
   } else {
     document.getElementById('menuSettings').textContent = 'Global settings';
     document.getElementById('webdavSection').style.display = 'none';
     document.getElementById('webhookSection').style.display = 'none';
     document.getElementById('aboutSection').style.display = '';
+    document.getElementById('calendarSection').style.display = '';
+    document.getElementById('mailSection').style.display = '';
+    document.getElementById('cardSourcesSection').style.display = '';
   }
 
   // ---- Prompts tabs (overview only) ----
@@ -338,8 +347,9 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     }</tbody></table>`;
   };
 
+  window.openSettings = openSettings;
   function openSettings() {
-    if (BOARD_NAME) {
+    if (_isBoard) {
       document.getElementById('boardDescription').value = state.settings?.description || '';
       document.getElementById('boardRenameInput').value = BOARD_NAME;
       document.getElementById('boardRenameError').style.display = 'none';
@@ -352,9 +362,11 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       renderTrackedCols();
     }
     loadApiKey();
-    loadWebdavSettings();
-    if (BOARD_NAME) loadWebhookSettings();
-    if (!BOARD_NAME) { loadPrompts(); renderIconLibrary(); }
+    if (_isBoard) {
+      loadWebdavSettings();
+      loadWebhookSettings();
+    }
+    if (!_isBoard) { loadPrompts(); renderIconLibrary(); loadCardSourcesSettings(); loadCalendarSettings(); loadMailSettings(); }
     buildSettingsNav();
     backdrop.style.display = 'flex';
   }
@@ -467,7 +479,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   }
 
   async function loadWebhookSettings() {
-    if (!BOARD_NAME) return;
+    if (!API_BASE) return;
     try {
       const r = await fetch(`/api/${BOARD_NAME}/webhook-config`);
       if (!r.ok) return;
@@ -507,6 +519,510 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     } catch (_) { flashIndicator(' error'); }
   });
 
+  // ---- Card sources (global / dashboard view) ----
+
+  let _cardSources = [];
+  let _csEditIdx   = -1;
+
+  let _csDragIdx = null;
+
+  function _renderCardSourcesList() {
+    const list = document.getElementById('cardSourcesList');
+    if (!_cardSources.length) {
+      list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No card sources configured.</p>';
+      return;
+    }
+    list.innerHTML = _cardSources.map((cs, i) => `
+      <div class="calendar-account-row cs-source-row" draggable="true" data-cs-idx="${i}">
+        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
+        <div class="calendar-account-info">
+          <strong>${escHtml(cs.board || '(no board)')}</strong>
+          <span class="settings-item-desc">${escHtml((cs.columns || []).join(', ') || 'all columns')}</span>
+        </div>
+        <div class="calendar-account-actions">
+          <button class="btn btn--icon" data-cs-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" data-cs-del="${i}" title="Delete">${ICONS.close}</button>
+        </div>
+      </div>`).join('');
+
+    list.querySelectorAll('[data-cs-edit]').forEach(btn => {
+      btn.addEventListener('click', () => _openCsForm(parseInt(btn.dataset.csEdit, 10)));
+    });
+    list.querySelectorAll('[data-cs-del]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _cardSources.splice(parseInt(btn.dataset.csDel, 10), 1);
+        _renderCardSourcesList();
+        _saveCardSourcesConfig();
+      });
+    });
+
+    list.querySelectorAll('.cs-source-row').forEach(row => {
+      const i = parseInt(row.dataset.csIdx, 10);
+
+      row.addEventListener('dragstart', e => {
+        _csDragIdx = i;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.classList.add('cs-row-dragging'), 0);
+      });
+      row.addEventListener('dragend', () => {
+        _csDragIdx = null;
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-dragging', 'cs-row-drag-over'));
+      });
+      row.addEventListener('dragover', e => {
+        if (_csDragIdx === null || _csDragIdx === i) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-drag-over'));
+        row.classList.add('cs-row-drag-over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('cs-row-drag-over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        if (_csDragIdx === null || _csDragIdx === i) return;
+        const [moved] = _cardSources.splice(_csDragIdx, 1);
+        _cardSources.splice(i, 0, moved);
+        _renderCardSourcesList();
+        _saveCardSourcesConfig();
+      });
+    });
+  }
+
+  async function _loadCsColumns(boardName, selectedCols) {
+    const colsList = document.getElementById('csColumnsList');
+    colsList.innerHTML = '<span class="settings-item-desc">Loading…</span>';
+    try {
+      const data = await fetch(`/api/${encodeURIComponent(boardName)}/all-columns`).then(r => r.ok ? r.json() : null);
+      if (!data) { colsList.innerHTML = '<span class="settings-item-desc">Could not load columns.</span>'; return; }
+      const titles = Object.keys(data);
+      if (!titles.length) { colsList.innerHTML = '<span class="settings-item-desc">No columns found.</span>'; return; }
+      colsList.innerHTML = titles.map(t => {
+        const checked = selectedCols.includes(t) ? ' checked' : '';
+        return `<label><input type="checkbox" value="${escHtml(t)}"${checked}> ${escHtml(t)}</label>`;
+      }).join('');
+    } catch {
+      colsList.innerHTML = '<span class="settings-item-desc">Could not load columns.</span>';
+    }
+  }
+
+  async function _openCsForm(idx) {
+    _csEditIdx = idx;
+    const cs = idx >= 0 ? _cardSources[idx] : {};
+    document.getElementById('csEditId').value = cs.id || '';
+    document.getElementById('cardSourcesForm').style.display = '';
+
+    // Populate board select
+    const boardSel = document.getElementById('csBoard');
+    boardSel.innerHTML = '<option value="">Loading…</option>';
+    try {
+      const boards = await fetch('/api/boards').then(r => r.json());
+      boardSel.innerHTML = boards
+        .filter(b => !b.archived)
+        .map(b => `<option value="${escHtml(b.name)}"${b.name === cs.board ? ' selected' : ''}>${escHtml(b.name)}</option>`)
+        .join('');
+    } catch {
+      boardSel.innerHTML = '<option value="">Could not load boards</option>';
+    }
+
+    const board = boardSel.value;
+    if (board) await _loadCsColumns(board, cs.columns || []);
+    else document.getElementById('csColumnsList').innerHTML = '<span class="settings-item-desc">Select a board first.</span>';
+  }
+
+  function _closeCsForm() {
+    document.getElementById('cardSourcesForm').style.display = 'none';
+    _csEditIdx = -1;
+  }
+
+  async function _saveCardSourcesConfig() {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      await fetch('/api/dashboard/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, cardSources: _cardSources }),
+      });
+      flashIndicator(`${ICONS.done} saved`);
+    } catch { flashIndicator(' error'); }
+  }
+
+  async function loadCardSourcesSettings() {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      _cardSources = (cfg.cardSources || []).map(cs => ({ ...cs }));
+      const sel = document.getElementById('dashboardAutoRefresh');
+      const ms  = cfg.autoRefreshMs || 0;
+      // Select the closest matching option
+      const options = [...sel.options].map(o => parseInt(o.value, 10));
+      sel.value = options.includes(ms) ? String(ms) : '0';
+    } catch {
+      _cardSources = [];
+    }
+    _renderCardSourcesList();
+    _closeCsForm();
+  }
+
+  document.getElementById('dashboardAutoRefresh').addEventListener('change', async function () {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      await fetch('/api/dashboard/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, autoRefreshMs: parseInt(this.value, 10) }),
+      });
+      flashIndicator(`${ICONS.done} saved`);
+    } catch { flashIndicator(' error'); }
+  });
+
+  document.getElementById('cardSourcesAddBtn').addEventListener('click', () => _openCsForm(-1));
+  document.getElementById('csCancelBtn').addEventListener('click', _closeCsForm);
+
+  document.getElementById('csBoard').addEventListener('change', () => {
+    const board = document.getElementById('csBoard').value;
+    if (board) _loadCsColumns(board, []);
+    else document.getElementById('csColumnsList').innerHTML = '<span class="settings-item-desc">Select a board first.</span>';
+  });
+
+  document.getElementById('csSaveBtn').addEventListener('click', () => {
+    const id      = document.getElementById('csEditId').value || ('cs-' + Math.random().toString(36).slice(2, 10));
+    const board   = document.getElementById('csBoard').value;
+    if (!board) return;
+    const columns = [...document.getElementById('csColumnsList').querySelectorAll('input[type=checkbox]:checked')]
+      .map(cb => cb.value);
+    const cs = { id, board, columns };
+    if (_csEditIdx >= 0) {
+      _cardSources[_csEditIdx] = cs;
+    } else {
+      _cardSources.push(cs);
+    }
+    _closeCsForm();
+    _renderCardSourcesList();
+    _saveCardSourcesConfig();
+  });
+
+  // ---- Mail accounts (global / dashboard view) ----
+
+  let _mailAccounts = [];
+  let _mailEditIdx  = -1;
+  let _mailDragIdx  = null;
+
+  function _renderMailList() {
+    const list = document.getElementById('mailAccountsList');
+    if (!_mailAccounts.length) {
+      list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No mail accounts configured.</p>';
+      return;
+    }
+    list.innerHTML = _mailAccounts.map((acc, i) => `
+      <div class="calendar-account-row cs-source-row" draggable="true" data-mail-idx="${i}">
+        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
+        <div class="calendar-account-info">
+          <strong>${escHtml(acc.label || '(no label)')}</strong>
+          <span class="settings-item-desc">${escHtml(acc.host || '')}:${escHtml(String(acc.port || 993))} · ${escHtml(acc.user || '')}</span>
+        </div>
+        <div class="calendar-account-actions">
+          <button class="btn btn--icon" data-mail-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" data-mail-del="${i}" title="Delete">${ICONS.close}</button>
+        </div>
+      </div>`).join('');
+
+    list.querySelectorAll('[data-mail-edit]').forEach(btn => {
+      btn.addEventListener('click', () => _openMailForm(parseInt(btn.dataset.mailEdit, 10)));
+    });
+    list.querySelectorAll('[data-mail-del]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _mailAccounts.splice(parseInt(btn.dataset.mailDel, 10), 1);
+        _renderMailList();
+        _saveMailConfig();
+      });
+    });
+
+    list.querySelectorAll('.cs-source-row').forEach(row => {
+      const i = parseInt(row.dataset.mailIdx, 10);
+
+      row.addEventListener('dragstart', e => {
+        _mailDragIdx = i;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.classList.add('cs-row-dragging'), 0);
+      });
+      row.addEventListener('dragend', () => {
+        _mailDragIdx = null;
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-dragging', 'cs-row-drag-over'));
+      });
+      row.addEventListener('dragover', e => {
+        if (_mailDragIdx === null || _mailDragIdx === i) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-drag-over'));
+        row.classList.add('cs-row-drag-over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('cs-row-drag-over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        if (_mailDragIdx === null || _mailDragIdx === i) return;
+        const [moved] = _mailAccounts.splice(_mailDragIdx, 1);
+        _mailAccounts.splice(i, 0, moved);
+        _renderMailList();
+        _saveMailConfig();
+      });
+    });
+  }
+
+  function _openMailForm(idx) {
+    _mailEditIdx = idx;
+    const acc = idx >= 0 ? _mailAccounts[idx] : {};
+    document.getElementById('mailEditId').value      = acc.id || '';
+    document.getElementById('mailLabel').value       = acc.label || '';
+    document.getElementById('mailHost').value        = acc.host || '';
+    document.getElementById('mailPort').value        = acc.port ?? 993;
+    document.getElementById('mailTls').checked       = acc.tls !== false;
+    document.getElementById('mailUser').value        = acc.user || '';
+    document.getElementById('mailPass').value        = '';
+    document.getElementById('mailPass').placeholder  = acc.hasPassword ? '••••••••' : 'password';
+    document.getElementById('mailFolder').value      = acc.folder || '';
+    document.getElementById('mailMaxMessages').value = acc.maxMessages ?? 20;
+    document.getElementById('mailWebUrl').value      = acc.webInterfaceUrl || '';
+    document.getElementById('mailTestResult').style.display = 'none';
+    document.getElementById('mailAccountForm').style.display = '';
+  }
+
+  function _closeMailForm() {
+    document.getElementById('mailAccountForm').style.display = 'none';
+    _mailEditIdx = -1;
+  }
+
+  async function _saveMailConfig() {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      await fetch('/api/dashboard/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, mailAccounts: _mailAccounts }),
+      });
+      flashIndicator(`${ICONS.done} saved`);
+    } catch { flashIndicator(' error'); }
+  }
+
+  async function loadMailSettings() {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      _mailAccounts = (cfg.mailAccounts || []).map(a => ({ ...a }));
+    } catch {
+      _mailAccounts = [];
+    }
+    _renderMailList();
+    _closeMailForm();
+  }
+
+  document.getElementById('mailAddBtn').addEventListener('click', () => _openMailForm(-1));
+  document.getElementById('mailCancelAccountBtn').addEventListener('click', _closeMailForm);
+
+  document.getElementById('mailSaveAccountBtn').addEventListener('click', () => {
+    const id   = document.getElementById('mailEditId').value || ('ma-' + Math.random().toString(36).slice(2, 10));
+    const pass = document.getElementById('mailPass').value;
+    const acc  = {
+      id,
+      label:          document.getElementById('mailLabel').value.trim(),
+      host:           document.getElementById('mailHost').value.trim(),
+      port:           parseInt(document.getElementById('mailPort').value, 10) || 993,
+      tls:            document.getElementById('mailTls').checked,
+      user:           document.getElementById('mailUser').value.trim(),
+      folder:         document.getElementById('mailFolder').value.trim() || undefined,
+      maxMessages:    parseInt(document.getElementById('mailMaxMessages').value, 10) || 20,
+      webInterfaceUrl: document.getElementById('mailWebUrl').value.trim() || undefined,
+    };
+    if (pass) acc.password = pass;
+
+    if (_mailEditIdx >= 0) {
+      _mailAccounts[_mailEditIdx] = acc;
+    } else {
+      _mailAccounts.push(acc);
+    }
+    _closeMailForm();
+    _renderMailList();
+    _saveMailConfig();
+  });
+
+  document.getElementById('mailTestAccountBtn').addEventListener('click', async () => {
+    const btn      = document.getElementById('mailTestAccountBtn');
+    const resultEl = document.getElementById('mailTestResult');
+    const id = document.getElementById('mailEditId').value;
+    if (!id) {
+      resultEl.textContent = '✗ Save the account first to test connectivity.';
+      resultEl.className   = 'settings-webdav-result settings-webdav-result--err';
+      resultEl.style.display = '';
+      return;
+    }
+    btn.disabled    = true;
+    btn.textContent = 'Testing…';
+    resultEl.style.display = 'none';
+    try {
+      const r = await fetch(`/api/dashboard/mail/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      const d = await r.json();
+      resultEl.textContent = d.ok ? '✓ Connection successful' : `✗ ${d.error || 'Failed'}`;
+      resultEl.className   = 'settings-webdav-result ' + (d.ok ? 'settings-webdav-result--ok' : 'settings-webdav-result--err');
+    } catch {
+      resultEl.textContent = '✗ Request failed';
+      resultEl.className   = 'settings-webdav-result settings-webdav-result--err';
+    }
+    resultEl.style.display = '';
+    btn.disabled    = false;
+    btn.textContent = 'Test connection';
+  });
+
+  // ---- Calendar accounts (global / dashboard view) ----
+
+  let _calAccounts = [];   // in-memory list while settings modal is open
+  let _calEditIdx  = -1;   // index of account being edited, -1 = new
+  let _calColor    = COLORS[0];
+
+  function _renderCalColorRow() {
+    document.getElementById('calColorRow').innerHTML = COLORS.map(c =>
+      `<div class="color-swatch${c === _calColor ? ' selected' : ''}" style="background:${c}" data-cal-color="${c}"></div>`
+    ).join('');
+  }
+
+  document.getElementById('calColorRow').addEventListener('click', e => {
+    const swatch = e.target.closest('[data-cal-color]');
+    if (!swatch) return;
+    _calColor = swatch.dataset.calColor;
+    _renderCalColorRow();
+  });
+
+  function _renderCalendarList() {
+    const list = document.getElementById('calendarAccountsList');
+    if (!_calAccounts.length) {
+      list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No calendar accounts configured.</p>';
+      return;
+    }
+    list.innerHTML = _calAccounts.map((acc, i) => `
+      <div class="calendar-account-row">
+        <div class="calendar-account-info">
+          <strong>${escHtml(acc.label || '(no label)')}</strong>
+          <span class="settings-item-desc">${escHtml(acc.type === 'ical-url' ? 'iCal URL' : 'CalDAV')} · ${escHtml(acc.url || '')}</span>
+        </div>
+        <div class="calendar-account-actions">
+          <button class="btn btn--icon" data-cal-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" data-cal-del="${i}" title="Delete">${ICONS.close}</button>
+        </div>
+      </div>`).join('');
+
+    list.querySelectorAll('[data-cal-edit]').forEach(btn => {
+      btn.addEventListener('click', () => _openCalForm(parseInt(btn.dataset.calEdit, 10)));
+    });
+    list.querySelectorAll('[data-cal-del]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _calAccounts.splice(parseInt(btn.dataset.calDel, 10), 1);
+        _renderCalendarList();
+        _saveCalendarConfig();
+      });
+    });
+  }
+
+  function _openCalForm(idx) {
+    _calEditIdx = idx;
+    const acc = idx >= 0 ? _calAccounts[idx] : {};
+    document.getElementById('calEditId').value        = acc.id || '';
+    document.getElementById('calLabel').value         = acc.label || '';
+    document.getElementById('calType').value          = acc.type || 'caldav';
+    document.getElementById('calUrl').value           = acc.url || '';
+    document.getElementById('calCalendarName').value  = acc.calendarName || '';
+    document.getElementById('calUser').value          = acc.user || '';
+    document.getElementById('calPass').value          = '';
+    document.getElementById('calPass').placeholder    = acc.hasPassword ? '••••••••' : 'password';
+    document.getElementById('calWebUrl').value        = acc.webInterfaceUrl || '';
+    document.getElementById('calLookahead').value     = acc.lookaheadDays ?? 7;
+    _calColor = acc.color || COLORS[0];
+    _renderCalColorRow();
+    document.getElementById('calTestResult').style.display = 'none';
+    document.getElementById('calendarAccountForm').style.display = '';
+  }
+
+  function _closeCalForm() {
+    document.getElementById('calendarAccountForm').style.display = 'none';
+    _calEditIdx = -1;
+  }
+
+  async function _saveCalendarConfig() {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      await fetch('/api/dashboard/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, calendarAccounts: _calAccounts }),
+      });
+      flashIndicator(`${ICONS.done} saved`);
+    } catch { flashIndicator(' error'); }
+  }
+
+  async function loadCalendarSettings() {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      _calAccounts = (cfg.calendarAccounts || []).map(a => ({ ...a }));
+    } catch {
+      _calAccounts = [];
+    }
+    _renderCalendarList();
+    _closeCalForm();
+  }
+
+  document.getElementById('calendarAddBtn').addEventListener('click', () => _openCalForm(-1));
+  document.getElementById('calCancelAccountBtn').addEventListener('click', _closeCalForm);
+
+  document.getElementById('calSaveAccountBtn').addEventListener('click', () => {
+    const id    = document.getElementById('calEditId').value || ('ca-' + Math.random().toString(36).slice(2, 10));
+    const pass  = document.getElementById('calPass').value;
+    const acc   = {
+      id,
+      label:          document.getElementById('calLabel').value.trim(),
+      type:           document.getElementById('calType').value,
+      url:            document.getElementById('calUrl').value.trim(),
+      calendarName:   document.getElementById('calCalendarName').value.trim() || undefined,
+      user:           document.getElementById('calUser').value.trim(),
+      webInterfaceUrl: document.getElementById('calWebUrl').value.trim() || undefined,
+      lookaheadDays:  parseInt(document.getElementById('calLookahead').value, 10) || 7,
+      color:          _calColor,
+    };
+    if (pass) acc.password = pass;
+    // else omit — server merges existing password
+
+    if (_calEditIdx >= 0) {
+      _calAccounts[_calEditIdx] = acc;
+    } else {
+      _calAccounts.push(acc);
+    }
+    _closeCalForm();
+    _renderCalendarList();
+    _saveCalendarConfig();
+  });
+
+  document.getElementById('calTestAccountBtn').addEventListener('click', async () => {
+    const btn      = document.getElementById('calTestAccountBtn');
+    const resultEl = document.getElementById('calTestResult');
+    const id = document.getElementById('calEditId').value;
+    if (!id) {
+      resultEl.textContent = '✗ Save the account first to test connectivity.';
+      resultEl.className   = 'settings-webdav-result settings-webdav-result--err';
+      resultEl.style.display = '';
+      return;
+    }
+    btn.disabled    = true;
+    btn.textContent = 'Testing…';
+    resultEl.style.display = 'none';
+    try {
+      const r = await fetch(`/api/dashboard/calendar/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      const d = await r.json();
+      resultEl.textContent = d.ok
+        ? `✓ ${d.detail || 'Connection successful'}`
+        : `✗ ${d.error || 'Failed'}`;
+      resultEl.className   = 'settings-webdav-result ' + (d.ok ? 'settings-webdav-result--ok' : 'settings-webdav-result--err');
+    } catch {
+      resultEl.textContent = '✗ Request failed';
+      resultEl.className   = 'settings-webdav-result settings-webdav-result--err';
+    }
+    resultEl.style.display = '';
+    btn.disabled    = false;
+    btn.textContent = 'Test connection';
+  });
+
   document.getElementById('menuSettings').addEventListener('click', () => {
     hideMenu();
     openSettings();
@@ -517,7 +1033,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     if (e.key === 'Escape' && backdrop.style.display !== 'none') closeSettings();
   });
 
-  if (BOARD_NAME) {
+  if (_isBoard) {
     document.getElementById('boardRenameBtn').addEventListener('click', async () => {
       const input  = document.getElementById('boardRenameInput');
       const errEl  = document.getElementById('boardRenameError');
@@ -547,7 +1063,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
         });
         const data = await r.json();
         if (!r.ok) { backdrop.style.display = 'flex'; errEl.textContent = data.error || 'Failed to rename.'; errEl.style.display = 'block'; return; }
-        window.location.replace(`/${newName}`);
+        window.location.replace(`/board/${newName}`);
       } catch (e) {
         backdrop.style.display = 'flex'; errEl.textContent = 'Failed to rename.'; errEl.style.display = 'block';
       }
@@ -802,8 +1318,9 @@ async function afterAuth() {
     if (loadingEl) loadingEl.style.display = 'flex';
   }
   // Prime WebDAV and webhook config at startup (board-only)
-  if (BOARD_NAME && typeof loadWebdavSettings  === 'function') await loadWebdavSettings();
-  if (BOARD_NAME && typeof loadWebhookSettings === 'function') await loadWebhookSettings();
+  if (API_BASE && typeof loadWebdavSettings  === 'function') await loadWebdavSettings();
+  if (API_BASE && typeof loadWebhookSettings === 'function') await loadWebhookSettings();
+  if (BOARD_NAME === 'dashboard') { await initDashboard(); return; }
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;
@@ -832,6 +1349,7 @@ async function initOverview() {
   document.querySelector('.header-menu').style.marginLeft = 'auto';
   document.getElementById('menuInbox').style.display = '';
   document.getElementById('menuFindCard').style.display = 'none';
+  document.getElementById('dashboardBtn').style.display = '';
   document.getElementById('overview').style.display = 'flex';
 
   document.getElementById('achPrev').onclick  = () => loadAchievements(achDayOffset - 1);
@@ -925,7 +1443,7 @@ function makeBoardCard({ name, description, inboxCount, todoCount, inProgressCou
   ].filter(Boolean).join('');
   const a = document.createElement('a');
   a.className = 'board-card' + (archived ? ' board-card--archived' : '');
-  a.href = `/${escHtml(name)}`;
+  a.href = `/board/${escHtml(name)}`;
   a.innerHTML = `
     <div class="board-card-info">
       <span class="board-card-name">${escHtml(name)}</span>
@@ -992,7 +1510,7 @@ document.getElementById('newBoardBtn').addEventListener('click', async () => {
     const r = await fetch(`/api/boards/${encodeURIComponent(name)}`, { method: 'POST' });
     const data = await r.json();
     if (!r.ok) { errEl.textContent = data.error || 'Failed to create board.'; errEl.style.display = 'block'; return; }
-    window.location.href = `/${name}`;
+    window.location.href = `/board/${name}`;
   } catch (e) {
     errEl.textContent = 'Failed to create board.'; errEl.style.display = 'block';
   }
@@ -1018,10 +1536,12 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
     try {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
-      const allEntry = '<a class="board-switch-item" href="/">all boards</a>';
+      const isDashboard = window.location.pathname === '/dashboard';
+      const dashEntry = isDashboard ? '' : '<a class="board-switch-item" href="/dashboard">Dashboard</a>';
+      const allEntry  = '<a class="board-switch-item" href="/">all boards</a>';
       const sep = others.length ? '<div class="header-dd-separator"></div>' : '';
-      menu.innerHTML = allEntry + sep + others
-        .map(b => `<a class="board-switch-item" href="/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
+      menu.innerHTML = dashEntry + allEntry + sep + others
+        .map(b => `<a class="board-switch-item" href="/board/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
         .join('');
     } catch { return; }
     menu.classList.add('open');

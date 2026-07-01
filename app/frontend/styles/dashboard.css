@@ -1,0 +1,317 @@
+/* ---- Dashboard view ---- */
+
+#dashboard {
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  padding: 16px 20px 0;
+  gap: 12px;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.dashboard-fetched-at {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  flex: 1;
+  overflow: hidden;
+  padding-bottom: 16px;
+}
+
+/* ---- Panel ---- */
+
+.dashboard-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.dashboard-panel-header {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.dashboard-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+/* ---- Empty / error states ---- */
+
+.dashboard-empty {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 12px 14px;
+}
+
+.dashboard-source-error {
+  font-size: 0.78rem;
+  color: var(--danger);
+  padding: 8px 14px;
+}
+
+/* ---- Group header ---- */
+
+.dashboard-group-header {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 8px 14px 4px;
+  border-top: 1px solid var(--border);
+}
+
+.dashboard-panel-body > .dashboard-group-header:first-child {
+  border-top: none;
+}
+
+/* ---- Card items ---- */
+
+.dashboard-card-item {
+  margin: 4px 10px;
+}
+
+/* ---- Responsive: stack panels vertically on narrow screens ---- */
+
+@media (max-width: 700px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .dashboard-panel {
+    max-height: 40vh;
+  }
+}
+
+/* ---- Mail message items ---- */
+
+.dashboard-mail-item {
+  margin: 4px 10px;
+}
+
+.dashboard-mail-from {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.dashboard-mail-body {
+  font-size: 0.80rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-family: inherit;
+}
+
+.dashboard-mail-iframe {
+  width: 100%;
+  border: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: block;
+  min-height: 120px;
+}
+
+/* ---- Calendar event items ---- */
+
+.dashboard-event-item {
+  margin: 4px 10px;
+}
+
+.dashboard-event-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Detail panel ---- */
+
+.dashboard-detail-modal {
+  width: min(960px, 92vw);
+  height: 85dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.dashboard-detail-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.dashboard-detail-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-detail-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.dashboard-detail-close:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.dashboard-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.dashboard-detail-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.82rem;
+}
+
+.dashboard-detail-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 400;
+  padding: 4px 12px 4px 0;
+  vertical-align: top;
+  white-space: nowrap;
+  width: 90px;
+}
+
+.dashboard-detail-table td {
+  padding: 4px 0;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+/* ---- Calendar accounts settings ---- */
+
+.calendar-account-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.calendar-account-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-account-info strong {
+  font-size: 0.85rem;
+}
+
+.calendar-account-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.calendar-account-form {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Card sources drag-to-reorder ---- */
+
+.cs-drag-handle {
+  color: var(--text-muted);
+  cursor: grab;
+  font-size: 1rem;
+  padding: 0 2px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.cs-drag-handle:active {
+  cursor: grabbing;
+}
+
+.cs-row-dragging {
+  opacity: 0.4;
+}
+
+.cs-row-drag-over {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
+
+/* ---- Card sources column checklist ---- */
+
+.cs-columns-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.cs-columns-list label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.cs-columns-list .settings-item-desc {
+  margin: 0;
+}
+
+/* ---- Board-switch Dashboard entry ---- */
+
+.board-switch-dashboard {
+  color: var(--accent);
+}
