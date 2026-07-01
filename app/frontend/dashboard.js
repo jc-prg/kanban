@@ -58,6 +58,12 @@ async function _dashMoveCard(board, cardId, fromColId, toColId) {
   if (idx < 0) return;
   const [movedCard] = fromCol.cards.splice(idx, 1);
   movedCard.moves = [...(movedCard.moves || []), { at: new Date().toISOString(), from: fromCol.title, to: toCol.title }];
+  const actions = toCol.actions || [];
+  const today = new Date().toISOString().slice(0, 10);
+  if (actions.includes('markDone'))    { movedCard.done = true;  movedCard.doneAt = new Date().toISOString(); }
+  if (actions.includes('markUndone'))  { movedCard.done = false; delete movedCard.doneAt; }
+  if (actions.includes('setStartDate')) movedCard.startDate = today;
+  if (actions.includes('setEndDate'))   movedCard.endDate   = today;
   toCol.cards.unshift(movedCard);
   await fetch(`/api/${encodeURIComponent(board)}/board`, {
     method: 'PATCH',
