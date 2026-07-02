@@ -698,7 +698,7 @@ function _openMailDetail(accountId, msgId, webUrl) {
         const safeHtml    = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
         const emailStyleTag = emailStyles ? `<style>${emailStyles}</style>` : '';
         const bodyAttr    = bodyClass ? ` class="${bodyClass.replace(/"/g, '&quot;')}"` : '';
-        iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${safeHtml}</body></html>`;
+        iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${safeHtml}</body></html>`;
         const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
         iframe.addEventListener('load', resize);
       } else if (msg.body) {
@@ -864,7 +864,7 @@ function _openEventDetail(accountId, uid, webUrl) {
       descSrc = descSrc.replace(/(href=["'][^"']*["'])|(https?:\/\/[^\s<>"')\]]+)/g,
         (m, attr, url) => attr ? attr : `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
       const safeHtml = DOMPurify.sanitize(descSrc, { FORCE_BODY: true, ADD_ATTR: ['target', 'rel'] });
-      iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body>${safeHtml}</body></html>`;
+      iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${baseStyle}</style></head><body>${safeHtml}</body></html>`;
       const resize = () => {
         const natural = iframe.contentDocument.body.scrollHeight + 16;
         iframe.style.height = Math.max(450, Math.min(natural, body.clientHeight)) + 'px';
