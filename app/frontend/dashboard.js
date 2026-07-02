@@ -433,12 +433,17 @@ function _renderBoardsPanel(boards, achievements) {
     ? active.map(_boardItemHtml).join('')
     : '<p class="dashboard-empty">No boards yet.</p>';
 
-  if (archived.length) {
-    html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
-      Archived<span class="column-count">${archived.length}</span><span class="dashboard-boards-chevron">\u203A</span>
-    </button>`;
-    html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
-  }
+  html += `<div id="dashAchSection" style="display:none;margin-top:10px">
+    <div class="dashboard-group-header dash-ach-header">
+      <span id="dashAchLabel">Today</span>
+      <span class="dash-ach-nav">
+        <button id="dashAchToday" class="ach-nav-btn" style="display:none" title="Jump to today"></button>
+        <button id="dashAchPrev" class="ach-nav-btn" title="Previous day">&#8249;</button>
+        <button id="dashAchNext" class="ach-nav-btn" disabled title="Next day">&#8250;</button>
+      </span>
+    </div>
+    <div id="dashAchTiles"></div>
+  </div>`;
 
   html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
     Create board<span class="dashboard-boards-chevron">\u203A</span>
@@ -453,17 +458,12 @@ function _renderBoardsPanel(boards, achievements) {
     </div>
   </div>`;
 
-  html += `<div id="dashAchSection" style="display:none">
-    <div class="dashboard-group-header dash-ach-header" style="margin-top:10px">
-      <span id="dashAchLabel">Today</span>
-      <span class="dash-ach-nav">
-        <button id="dashAchToday" class="ach-nav-btn" style="display:none" title="Jump to today"></button>
-        <button id="dashAchPrev" class="ach-nav-btn" title="Previous day">&#8249;</button>
-        <button id="dashAchNext" class="ach-nav-btn" disabled title="Next day">&#8250;</button>
-      </span>
-    </div>
-    <div id="dashAchTiles"></div>
-  </div>`;
+  if (archived.length) {
+    html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
+      Archived<span class="column-count">${archived.length}</span><span class="dashboard-boards-chevron">\u203A</span>
+    </button>`;
+    html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
+  }
 
   panel.innerHTML = html;
 
