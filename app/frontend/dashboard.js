@@ -587,7 +587,7 @@ function _renderCardsPanel(groups) {
       }
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
 
-      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}" draggable="true"
+      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}${isOverdue ? ' card--overdue' : ''}" draggable="true"
           data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
         <div class="card-body">
           <div class="card-text">${escHtml(card.text || '')}</div>
