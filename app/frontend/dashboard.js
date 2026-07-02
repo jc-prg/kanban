@@ -209,10 +209,11 @@ async function initDashboard() {
     _openEventDetail(item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
   });
 
-  // Mail message click → detail panel
+  // Mail message click → detail panel (skipped on touch; handled by touchend below)
   document.getElementById('dashboardMailPanel').addEventListener('click', e => {
     const item = e.target.closest('[data-msg-id]');
     if (!item) return;
+    if (lastInputWasTouch) return;
     _openMailDetail(item.dataset.accountId, item.dataset.msgId, item.dataset.webUrl || '');
   });
 
@@ -225,27 +226,35 @@ async function initDashboard() {
     _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
   });
 
-  // Mail message double-touch → mail context menu
-  { let _mailLastTouch = { el: null, t: 0 };
-    document.getElementById('dashboardMailPanel').addEventListener('touchend', e => {
+  // Mail message touch: single tap → open detail, double tap → context menu
+  { let _mailTap = null; let _mailTouchMoved = false;
+    const _mailPanel = document.getElementById('dashboardMailPanel');
+    _mailPanel.addEventListener('touchstart', () => { _mailTouchMoved = false; }, { passive: true });
+    _mailPanel.addEventListener('touchmove',  () => { _mailTouchMoved = true;  }, { passive: true });
+    _mailPanel.addEventListener('touchend', e => {
+      if (_mailTouchMoved) return;
       const item = e.target.closest('[data-msg-id]');
       if (!item) return;
-      const now = Date.now();
-      if (_mailLastTouch.el === item && now - _mailLastTouch.t < 350) {
-        e.preventDefault();
-        e.stopPropagation();
-        const touch = e.changedTouches[0];
-        _showMailContextMenu(touch.clientX, touch.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
-        _mailLastTouch = { el: null, t: 0 };
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      if (_mailTap && _mailTap.el === item) {
+        clearTimeout(_mailTap.timer);
+        _mailTap = null;
+        _showMailContextMenu(t.clientX, t.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
       } else {
-        _mailLastTouch = { el: item, t: now };
+        clearTimeout(_mailTap?.timer);
+        _mailTap = { el: item, timer: setTimeout(() => {
+          _mailTap = null;
+          _openMailDetail(item.dataset.accountId, item.dataset.msgId, item.dataset.webUrl || '');
+        }, 280) };
       }
-    }); }
+    }, { passive: false }); }
 
-  // Card click → navigate to the board and open the card's edit modal
+  // Card click → navigate to the board and open the card's edit modal (skipped on touch; handled by touchend below)
   document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
     const item = e.target.closest('[data-card-id]');
     if (!item) return;
+    if (lastInputWasTouch) return;
     window.location.href = `/board/${encodeURIComponent(item.dataset.board)}#card:${item.dataset.cardId}`;
   });
 
@@ -260,24 +269,31 @@ async function initDashboard() {
     showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
   });
 
-  // Card double-touch → card context menu
-  { let _cardLastTouch = { el: null, t: 0 };
-    document.getElementById('dashboardCardsPanel').addEventListener('touchend', e => {
+  // Card touch: single tap → navigate, double tap → context menu
+  { let _cardTap = null; let _cardTouchMoved = false;
+    const _cardsPanel = document.getElementById('dashboardCardsPanel');
+    _cardsPanel.addEventListener('touchstart', () => { _cardTouchMoved = false; }, { passive: true });
+    _cardsPanel.addEventListener('touchmove',  () => { _cardTouchMoved = true;  }, { passive: true });
+    _cardsPanel.addEventListener('touchend', e => {
+      if (_cardTouchMoved) return;
       const item = e.target.closest('[data-card-id]');
       if (!item) return;
-      const now = Date.now();
-      if (_cardLastTouch.el === item && now - _cardLastTouch.t < 350) {
-        e.preventDefault();
-        e.stopPropagation();
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      if (_cardTap && _cardTap.el === item) {
+        clearTimeout(_cardTap.timer);
+        _cardTap = null;
         const entry = _dashCardMap.get(item.dataset.cardId);
         if (!entry) return;
-        const touch = e.changedTouches[0];
-        showDashboardContextMenu(touch.clientX, touch.clientY, entry.board, entry.card);
-        _cardLastTouch = { el: null, t: 0 };
+        showDashboardContextMenu(t.clientX, t.clientY, entry.board, entry.card);
       } else {
-        _cardLastTouch = { el: item, t: now };
+        clearTimeout(_cardTap?.timer);
+        _cardTap = { el: item, timer: setTimeout(() => {
+          _cardTap = null;
+          window.location.href = `/board/${encodeURIComponent(item.dataset.board)}#card:${item.dataset.cardId}`;
+        }, 280) };
       }
-    }); }
+    }, { passive: false }); }
 
   // Card group collapse toggle
   document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
