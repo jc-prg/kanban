@@ -118,6 +118,7 @@
 }
 
 .dashboard-group-header--collapsible:hover { color: var(--text); }
+.dashboard-group-header--drag-over { outline: 2px solid var(--accent); border-radius: 4px; }
 
 .dashboard-card-group:not(.dashboard-card-group--collapsed) .dashboard-boards-chevron {
   transform: rotate(90deg);

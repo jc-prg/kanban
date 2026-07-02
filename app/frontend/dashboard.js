@@ -6,6 +6,7 @@ let _refreshTimer   = null;
 let _fetchedAtTimer = null;
 let _dragCardId     = null;
 let _dragCardGroup  = null;
+let _dragCardBoard  = null;
 let _mailCtxAccountId = null;
 let _mailCtxMsgId     = null;
 let _mailCtxUnread    = false;
@@ -70,6 +71,36 @@ async function _dashDeleteCard(board, cardId) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ updatedColumns: [foundCol] }),
   });
+}
+
+async function _dashMoveCardCrossGroup(board, cardId, fromColTitle, toColTitle, newToColOrder) {
+  try {
+    const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
+    const fromCol = data.columns.find(c => c.title === fromColTitle);
+    const toCol   = data.columns.find(c => c.title === toColTitle);
+    if (!fromCol || !toCol) return;
+    const cardIdx = fromCol.cards.findIndex(c => c.id === cardId);
+    if (cardIdx < 0) return;
+    const [movedCard] = fromCol.cards.splice(cardIdx, 1);
+    movedCard.moves = [...(movedCard.moves || []), { at: new Date().toISOString(), from: fromCol.title, to: toCol.title }];
+    const actions = toCol.actions || [];
+    const today = new Date().toISOString().slice(0, 10);
+    if (actions.includes('markDone'))     { movedCard.done = true;  movedCard.doneAt = new Date().toISOString(); }
+    if (actions.includes('markUndone'))   { movedCard.done = false; delete movedCard.doneAt; }
+    if (actions.includes('setStartDate')) movedCard.startDate = today;
+    if (actions.includes('setEndDate'))   movedCard.endDate   = today;
+    const byId = new Map(toCol.cards.map(c => [c.id, c]));
+    byId.set(cardId, movedCard);
+    toCol.cards = [
+      ...newToColOrder.map(id => byId.get(id)).filter(Boolean),
+      ...toCol.cards.filter(c => !newToColOrder.includes(c.id)),
+    ];
+    await fetch(`/api/${encodeURIComponent(board)}/board`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updatedColumns: [fromCol, toCol] }),
+    });
+  } catch { /* ignore */ }
 }
 
 async function _dashMoveCard(board, cardId, fromColId, toColId) {
@@ -139,6 +170,7 @@ function _initCardsDragDrop() {
     if (!card) return;
     _dragCardId    = card.dataset.cardId;
     _dragCardGroup = card.closest('.dashboard-card-group');
+    _dragCardBoard = _dragCardGroup.dataset.board;
     e.dataTransfer.effectAllowed = 'move';
     setTimeout(() => card.classList.add('dragging'), 0);
   });
@@ -146,35 +178,73 @@ function _initCardsDragDrop() {
   panel.addEventListener('dragend', () => {
     panel.querySelectorAll('.dashboard-card-item.dragging').forEach(el => el.classList.remove('dragging'));
     panel.querySelectorAll('.dash-drop-indicator').forEach(el => el.remove());
+    panel.querySelectorAll('.dashboard-group-header--drag-over').forEach(el => el.classList.remove('dashboard-group-header--drag-over'));
     _dragCardId    = null;
     _dragCardGroup = null;
+    _dragCardBoard = null;
   });
 
   panel.addEventListener('dragover', e => {
     if (!_dragCardId) return;
-    const card = e.target.closest('.dashboard-card-item[data-card-id]');
-    if (!card || card.closest('.dashboard-card-group') !== _dragCardGroup) return;
-    if (card.dataset.cardId === _dragCardId) return;
+    const header = e.target.closest('.dashboard-group-header');
+    const card   = !header && e.target.closest('.dashboard-card-item[data-card-id]');
+    const group  = header
+      ? header.closest('.dashboard-card-group')
+      : card
+        ? card.closest('.dashboard-card-group')
+        : e.target.closest('.dashboard-card-group');
+    if (!group || group.dataset.board !== _dragCardBoard) return;
+    if (card && card.dataset.cardId === _dragCardId) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     panel.querySelectorAll('.dash-drop-indicator').forEach(el => el.remove());
-    const rect   = card.getBoundingClientRect();
-    const before = e.clientY < rect.top + rect.height / 2;
-    const ind    = document.createElement('div');
+    panel.querySelectorAll('.dashboard-group-header--drag-over').forEach(el => el.classList.remove('dashboard-group-header--drag-over'));
+    const ind = document.createElement('div');
     ind.className = 'dash-drop-indicator';
-    if (before) card.before(ind); else card.after(ind);
+    if (header) {
+      header.classList.add('dashboard-group-header--drag-over');
+      header.after(ind);
+    } else if (card) {
+      const rect   = card.getBoundingClientRect();
+      const before = e.clientY < rect.top + rect.height / 2;
+      if (before) card.before(ind); else card.after(ind);
+    } else {
+      group.appendChild(ind);
+    }
   });
 
   panel.addEventListener('drop', e => {
     e.preventDefault();
+    panel.querySelectorAll('.dashboard-group-header--drag-over').forEach(el => el.classList.remove('dashboard-group-header--drag-over'));
     const ind = panel.querySelector('.dash-drop-indicator');
     if (!ind || !_dragCardId || !_dragCardGroup) { ind?.remove(); return; }
+    const targetGroup = ind.closest('.dashboard-card-group');
+    if (!targetGroup) { ind.remove(); return; }
     const src = _dragCardGroup.querySelector(`.dashboard-card-item[data-card-id="${_dragCardId}"]`);
     if (!src) { ind.remove(); return; }
     ind.replaceWith(src);
-    const newOrder = [..._dragCardGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
-      .map(el => el.dataset.cardId);
-    _dashReorderColumn(_dragCardGroup.dataset.board, _dragCardGroup.dataset.column, newOrder);
+    // Expand target group if it was collapsed
+    if (targetGroup.classList.contains('dashboard-card-group--collapsed')) {
+      const key = `${targetGroup.dataset.board}\0${targetGroup.dataset.column}`;
+      _collapsedGroups.delete(key);
+      targetGroup.classList.remove('dashboard-card-group--collapsed');
+      _persistGroupState(key, false);
+    }
+    if (targetGroup === _dragCardGroup) {
+      const newOrder = [..._dragCardGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
+        .map(el => el.dataset.cardId);
+      _dashReorderColumn(_dragCardGroup.dataset.board, _dragCardGroup.dataset.column, newOrder);
+    } else {
+      const newToColOrder = [...targetGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
+        .map(el => el.dataset.cardId);
+      _dashMoveCardCrossGroup(
+        _dragCardBoard,
+        _dragCardId,
+        _dragCardGroup.dataset.column,
+        targetGroup.dataset.column,
+        newToColOrder,
+      );
+    }
   });
 }
 
