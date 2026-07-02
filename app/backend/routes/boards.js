@@ -36,16 +36,33 @@ router.get('/boards', async (req, res) => {
         const trackedCards    = col => col.cards.filter(c => !c.text?.startsWith('#') && !(hideDone && c.done));
         const totalCards      = data.columns.reduce((s, c) => s + visibleCards(c).length, 0);
         const trackedSet      = new Set(data.settings?.trackedColumns || []);
-        const inboxCount      = data.columns.filter(c => /^inbox/i.test(c.title)      && !trackedSet.has(c.title)).reduce((s, c) => s + trackedCards(c).length, 0);
-        const todoCount       = data.columns.filter(c => /^todo/i.test(c.title)       && !trackedSet.has(c.title)).reduce((s, c) => s + trackedCards(c).length, 0);
-        const inProgressCount = data.columns.filter(c => (/^in.?progress/i.test(c.title) || /^doing$/i.test(c.title)) && !trackedSet.has(c.title)).reduce((s, c) => s + trackedCards(c).length, 0);
-        const trackedCounts   = data.columns
-          .filter(col => trackedSet.has(col.title))
-          .map(col => ({ title: col.title, count: trackedCards(col).length, color: col.color || null }));
+        // Build badge entries in column order, tracking first position of each aggregate type
+        const inboxRe = /^inbox/i, todoRe = /^todo/i, inProgressRe = /^in.?progress/i, doingRe = /^doing$/i;
+        let inboxCount = 0, todoCount = 0, inProgressCount = 0;
+        let inboxPos = Infinity, todoPos = Infinity, inProgressPos = Infinity;
+        const trackedEntries = [];
+        data.columns.forEach((col, i) => {
+          const cnt = trackedCards(col).length;
+          if (trackedSet.has(col.title)) {
+            trackedEntries.push({ pos: i, type: 'tracked', title: col.title, count: cnt, color: col.color || null });
+          } else if (inboxRe.test(col.title)) {
+            inboxCount += cnt; if (i < inboxPos) inboxPos = i;
+          } else if (todoRe.test(col.title)) {
+            todoCount += cnt; if (i < todoPos) todoPos = i;
+          } else if (inProgressRe.test(col.title) || doingRe.test(col.title)) {
+            inProgressCount += cnt; if (i < inProgressPos) inProgressPos = i;
+          }
+        });
+        const columnBadges = [
+          ...(inboxCount      > 0 ? [{ pos: inboxPos,      type: 'inbox',      count: inboxCount }]      : []),
+          ...(todoCount       > 0 ? [{ pos: todoPos,       type: 'todo',       count: todoCount }]       : []),
+          ...(inProgressCount > 0 ? [{ pos: inProgressPos, type: 'inprogress', count: inProgressCount }] : []),
+          ...trackedEntries,
+        ].sort((a, b) => a.pos - b.pos).map(({ pos, ...rest }) => rest);
         const { count: attachCount, size: attachSize } = getBoardAttachStats(name);
-        return { name, description: data.settings?.description || '', archived: data.settings?.archived || false, totalCards, inboxCount, todoCount, inProgressCount, trackedCounts, attachCount, attachSize };
+        return { name, description: data.settings?.description || '', archived: data.settings?.archived || false, totalCards, columnBadges, attachCount, attachSize };
       } catch (e) {
-        return { name, description: '', totalCards: 0, inboxCount: 0, todoCount: 0, inProgressCount: 0, trackedCounts: [], attachCount: 0, attachSize: 0 };
+        return { name, description: '', totalCards: 0, columnBadges: [], attachCount: 0, attachSize: 0 };
       }
     }));
     res.json(boards);

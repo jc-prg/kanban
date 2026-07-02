@@ -1622,19 +1622,14 @@ function renderAchievements({ created = 0, inboxCreated = 0, moved = 0, done = 0
   section.style.display = '';
 }
 
-function makeBoardCard({ name, description, inboxCount, todoCount, inProgressCount, trackedCounts = [], archived = false }) {
-  const trackedBadges = trackedCounts
-    .filter(t => t.count > 0)
-    .map(t => {
-      const style = t.color ? `background:${t.color}22;color:${t.color}` : '';
-      return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(t.title)} ${t.count}</span>`;
-    });
-  const badges = [
-    inboxCount      ? `<span class="board-card-count board-card-count-inbox">inbox ${inboxCount}</span>`           : '',
-    todoCount       ? `<span class="board-card-count board-card-count-todo">todo ${todoCount}</span>`              : '',
-    inProgressCount ? `<span class="board-card-count board-card-count-inprogress">doing ${inProgressCount}</span>` : '',
-    ...trackedBadges,
-  ].filter(Boolean).join('');
+function makeBoardCard({ name, description, columnBadges = [], archived = false }) {
+  const badges = columnBadges.filter(b => b.count > 0).map(b => {
+    if (b.type === 'inbox')      return `<span class="board-card-count board-card-count-inbox">inbox ${b.count}</span>`;
+    if (b.type === 'todo')       return `<span class="board-card-count board-card-count-todo">todo ${b.count}</span>`;
+    if (b.type === 'inprogress') return `<span class="board-card-count board-card-count-inprogress">doing ${b.count}</span>`;
+    const style = b.color ? `background:${b.color}22;color:${b.color}` : '';
+    return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(b.title)} ${b.count}</span>`;
+  }).join('');
   const a = document.createElement('a');
   a.className = 'board-card' + (archived ? ' board-card--archived' : '');
   a.href = `/board/${escHtml(name)}`;
