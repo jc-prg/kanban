@@ -17,6 +17,8 @@ const _folderCache = new Map();
 // Map: cardId → { card, board } — populated on each render for context menu
 const _dashCardMap      = new Map();
 const _collapsedGroups  = new Set(); // keyed by "board\0column"
+// Map: "accountId\0uid" → event object — populated on each calendar render for instant detail view
+const _calEventMap      = new Map();
 
 async function _dashPatchCard(board, cardId, patchFn) {
   const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
@@ -201,6 +203,23 @@ async function initDashboard() {
     _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
   });
 
+  // Mail message double-touch → mail context menu
+  { let _mailLastTouch = { el: null, t: 0 };
+    document.getElementById('dashboardMailPanel').addEventListener('touchend', e => {
+      const item = e.target.closest('[data-msg-id]');
+      if (!item) return;
+      const now = Date.now();
+      if (_mailLastTouch.el === item && now - _mailLastTouch.t < 350) {
+        e.preventDefault();
+        e.stopPropagation();
+        const touch = e.changedTouches[0];
+        _showMailContextMenu(touch.clientX, touch.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
+        _mailLastTouch = { el: null, t: 0 };
+      } else {
+        _mailLastTouch = { el: item, t: now };
+      }
+    }); }
+
   // Card click → navigate to the board and open the card's edit modal
   document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
     const item = e.target.closest('[data-card-id]');
@@ -218,6 +237,25 @@ async function initDashboard() {
     if (!entry) return;
     showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
   });
+
+  // Card double-touch → card context menu
+  { let _cardLastTouch = { el: null, t: 0 };
+    document.getElementById('dashboardCardsPanel').addEventListener('touchend', e => {
+      const item = e.target.closest('[data-card-id]');
+      if (!item) return;
+      const now = Date.now();
+      if (_cardLastTouch.el === item && now - _cardLastTouch.t < 350) {
+        e.preventDefault();
+        e.stopPropagation();
+        const entry = _dashCardMap.get(item.dataset.cardId);
+        if (!entry) return;
+        const touch = e.changedTouches[0];
+        showDashboardContextMenu(touch.clientX, touch.clientY, entry.board, entry.card);
+        _cardLastTouch = { el: null, t: 0 };
+      } else {
+        _cardLastTouch = { el: item, t: now };
+      }
+    }); }
 
   // Card group collapse toggle
   document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
@@ -687,58 +725,83 @@ function _renderCalendarPanel(accounts) {
   // Flatten events tagged with account info
   const allEvents = [];
   const errors    = [];
+  _calEventMap.clear();
   for (const acc of accounts) {
     if (acc.error) {
       errors.push(`<div class="dashboard-source-error">\u26a0 ${escHtml(acc.label)}: ${escHtml(acc.error)}</div>`);
       continue;
     }
     for (const ev of (acc.events || [])) {
-      allEvents.push({ ...ev, _label: acc.label, _accountId: acc.accountId, _webUrl: acc.webInterfaceUrl, _color: acc.color });
+      const tagged = { ...ev, _label: acc.label, _accountId: acc.accountId, _webUrl: acc.webInterfaceUrl, _color: acc.color };
+      allEvents.push(tagged);
+      _calEventMap.set(`${acc.accountId}\0${ev.uid}`, tagged);
     }
   }
 
   // Sort by start
   allEvents.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
 
-  // Group by day label
   const todayStr    = new Date().toISOString().slice(0, 10);
   const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
-  function _dayKey(ev) {
-    const s = (ev.start || '').slice(0, 10);
-    if (s === todayStr)    return 'Today';
-    if (s === tomorrowStr) return 'Tomorrow';
-    return new Date(s).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  function _dayLabel(dateStr) {
+    if (dateStr === todayStr)    return 'Today';
+    if (dateStr === tomorrowStr) return 'Tomorrow';
+    return new Date(dateStr).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
-  const groups = new Map();
+  // Group by day, expanding multi-day events across every day they span.
+  // All-day DTEND is exclusive in iCal, so subtract one day for those.
+  const groups = new Map(); // YYYY-MM-DD → ev[]
   for (const ev of allEvents) {
-    const key = _dayKey(ev);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(ev);
+    const startDay = (ev.start || '').slice(0, 10);
+    if (!startDay) continue;
+    let endDay = startDay;
+    if (ev.end) {
+      const endDateStr = ev.end.slice(0, 10);
+      if (ev.allDay) {
+        const d = new Date(endDateStr + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() - 1);
+        endDay = d.toISOString().slice(0, 10);
+      } else {
+        endDay = endDateStr;
+      }
+    }
+    let cur = new Date(startDay + 'T00:00:00Z');
+    const last = new Date(endDay + 'T00:00:00Z');
+    while (cur <= last) {
+      const dayStr = cur.toISOString().slice(0, 10);
+      if (!groups.has(dayStr)) groups.set(dayStr, []);
+      groups.get(dayStr).push(ev);
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
   }
 
-  function _fmtTime(ev) {
-    if (ev.allDay) return 'all day';
+  function _fmtTime(ev, dayStr) {
+    if (ev.allDay) return '';
+    if (dayStr !== (ev.start || '').slice(0, 10)) return 'continues';
     try {
       return new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch { return ''; }
   }
 
-  const groupHtml = [...groups.entries()].map(([day, evs]) => {
-    const header = `<div class="dashboard-group-header">${escHtml(day)}</div>`;
-    const items  = evs.map(ev => {
-      const colorStyle = ev._color ? ` style="--card-color:${escHtml(ev._color)}"` : '';
-      const metaHtml = `<div class="card-meta"><span class="card-date">${escHtml(_fmtTime(ev))}</span><span class="dashboard-event-label">${escHtml(ev._label)}</span></div>`;
-      return `<div class="dashboard-event-item card" data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}"${colorStyle}>
-        <div class="card-body">
-          <div class="card-text">${escHtml(ev.title)}</div>
-          ${metaHtml}
-        </div>
-      </div>`;
+  const groupHtml = [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([dayStr, evs]) => {
+      const day    = _dayLabel(dayStr);
+      const header = `<div class="dashboard-group-header">${escHtml(day)}</div>`;
+      const items  = evs.map(ev => {
+        const colorStyle = ev._color ? ` style="--card-color:${escHtml(ev._color)}"` : '';
+        const metaHtml = `<div class="card-meta"><span class="card-date">${escHtml(_fmtTime(ev, dayStr))}</span><span class="dashboard-event-label">${escHtml(ev._label)}</span></div>`;
+        return `<div class="dashboard-event-item card" data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}"${colorStyle}>
+          <div class="card-body">
+            <div class="card-text">${escHtml(ev.title)}</div>
+            ${metaHtml}
+          </div>
+        </div>`;
+      }).join('');
+      return header + items;
     }).join('');
-    return header + items;
-  }).join('');
 
   panel.innerHTML = errors.join('') + (groupHtml || '<p class="dashboard-empty">No upcoming events.</p>');
 }
@@ -759,39 +822,77 @@ function _openEventDetail(accountId, uid, webUrl) {
   }
   body.innerHTML = '';
   detail.style.display = '';
+  const modal = detail.querySelector('.modal');
+  const maxH  = modal.offsetHeight;
+  modal.style.height    = 'auto';
+  modal.style.minHeight = '450px';
+  modal.style.maxHeight = maxH + 'px';
+
+  function _renderEventDetail(ev) {
+    document.getElementById('dashboardDetailTitle').textContent = ev.title;
+    const rows = [];
+    if (ev.start) {
+      const startStr = ev.allDay
+        ? new Date(ev.start).toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+        : new Date(ev.start).toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const endStr = (!ev.allDay && ev.end)
+        ? '\u2013 ' + new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '';
+      rows.push(['When', escHtml(startStr + endStr)]);
+    }
+    if (ev.location)  rows.push(['Where',    escHtml(ev.location)]);
+    if (ev.status)    rows.push(['Status',   escHtml(ev.status)]);
+    if (ev.organizer) rows.push(['Organiser',escHtml(ev.organizer)]);
+    if (ev._label)    rows.push(['Calendar', escHtml(ev._label)]);
+    body.innerHTML = `<table class="dashboard-detail-table">${
+      rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
+    }</table>`;
+    if (ev.description) {
+      const iframe = document.createElement('iframe');
+      iframe.className = 'dashboard-mail-iframe';
+      iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
+      iframe.setAttribute('referrerpolicy', 'no-referrer');
+      body.appendChild(iframe);
+      const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#222;background:white;padding:8px;margin:0;word-break:break-word}'
+        + ' a{color:#4f46e5} img{max-width:100%;height:auto}'
+        + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
+        + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
+      let descSrc = /<p[\s>]|<br[\s/>]/i.test(ev.description)
+        ? ev.description
+        : ev.description.replace(/\n/g, '<br/>');
+      // Linkify bare URLs not already inside an href attribute
+      descSrc = descSrc.replace(/(href=["'][^"']*["'])|(https?:\/\/[^\s<>"')\]]+)/g,
+        (m, attr, url) => attr ? attr : `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+      const safeHtml = DOMPurify.sanitize(descSrc, { FORCE_BODY: true, ADD_ATTR: ['target', 'rel'] });
+      iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>${baseStyle}</style></head><body>${safeHtml}</body></html>`;
+      const resize = () => {
+        const natural = iframe.contentDocument.body.scrollHeight + 16;
+        iframe.style.height = Math.max(450, Math.min(natural, body.clientHeight)) + 'px';
+      };
+      iframe.addEventListener('load', resize);
+    }
+  }
+
+  // Use cached event data if available — avoids a full CalDAV round-trip
+  const cached = _calEventMap.get(`${accountId}\0${uid}`);
+  if (cached) { _renderEventDetail(cached); return; }
 
   fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(uid)}`)
     .then(r => r.ok ? r.json() : null)
     .then(ev => {
       if (!ev) { body.innerHTML = '<p class="dashboard-empty">Event not found.</p>'; return; }
-      document.getElementById('dashboardDetailTitle').textContent = ev.title;
-
-      const rows = [];
-      if (ev.start) {
-        const startStr = ev.allDay
-          ? new Date(ev.start).toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-          : new Date(ev.start).toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        const endStr = (!ev.allDay && ev.end)
-          ? '\u2013 ' + new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : '';
-        rows.push(['When', escHtml(startStr + endStr)]);
-      }
-      if (ev.location)    rows.push(['Where',       escHtml(ev.location)]);
-      if (ev.status)      rows.push(['Status',      escHtml(ev.status)]);
-      if (ev.organizer)   rows.push(['Organiser',   escHtml(ev.organizer)]);
-      if (ev.description) rows.push(['Description', escHtml(ev.description).replace(/\n/g, '<br>')]);
-
-      body.innerHTML = `<table class="dashboard-detail-table">${
-        rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
-      }</table>`;
-
+      _renderEventDetail(ev);
     })
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load event.</p>'; });
 }
 
 function _closeDetail() {
   document.getElementById('dashboardDetail').style.display = 'none';
-  document.querySelector('#dashboardDetail .modal')?.classList.remove('modal--fullscreen');
+  const modal = document.querySelector('#dashboardDetail .modal');
+  if (modal) {
+    modal.classList.remove('modal--fullscreen');
+    modal.style.height = modal.style.minHeight = modal.style.maxHeight = '';
+  }
 }
 
 // ---- Mail context menu ----
