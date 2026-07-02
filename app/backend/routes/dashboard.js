@@ -107,9 +107,10 @@ router.get('/dashboard/cards', async (req, res) => {
         );
         const linkedCards = notesMap.get(source.board) || new Set();
         return cols.map(col => ({
-          sourceId: source.id,
-          board:    source.board,
-          column:   col.title,
+          sourceId:           source.id,
+          board:              source.board,
+          column:             col.title,
+          initiallyCollapsed: source.collapsed || false,
           cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
             id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
             hasLinkedNotes: linkedCards.has(id),
@@ -151,9 +152,10 @@ router.get('/dashboard/data', async (req, res) => {
           );
           const linkedCards = notesMap.get(source.board) || new Set();
           return cols.map(col => ({
-            sourceId: source.id,
-            board:    source.board,
-            column:   col.title,
+            sourceId:          source.id,
+            board:             source.board,
+            column:            col.title,
+            initiallyCollapsed: source.collapsed || false,
             cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
               id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
               hasLinkedNotes: linkedCards.has(id),

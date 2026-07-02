@@ -17,6 +17,28 @@ const _folderCache = new Map();
 // Map: cardId → { card, board } — populated on each render for context menu
 const _dashCardMap      = new Map();
 const _collapsedGroups  = new Set(); // keyed by "board\0column"
+const _seededGroups     = new Set(); // groups already seeded from config
+
+const _DASH_STATE_KEY = 'dash-group-state';
+function _loadGroupState() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(_DASH_STATE_KEY));
+    if (stored && typeof stored === 'object') {
+      for (const [key, collapsed] of Object.entries(stored)) {
+        _seededGroups.add(key);          // skip config seeding for stored groups
+        if (collapsed) _collapsedGroups.add(key);
+      }
+    }
+  } catch { /* ignore */ }
+}
+function _persistGroupState(key, collapsed) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(_DASH_STATE_KEY)) || {};
+    stored[key] = collapsed;
+    localStorage.setItem(_DASH_STATE_KEY, JSON.stringify(stored));
+  } catch { /* ignore */ }
+}
+_loadGroupState();
 // Map: "accountId\0uid" → event object — populated on each calendar render for instant detail view
 const _calEventMap      = new Map();
 
@@ -261,14 +283,16 @@ async function initDashboard() {
   document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
     const hdr = e.target.closest('.dashboard-group-header--collapsible');
     if (!hdr || e.target.closest('a')) return;
-    const key   = hdr.dataset.groupKey;
+    const key   = `${hdr.dataset.board}\0${hdr.dataset.column}`;
     const group = hdr.closest('.dashboard-card-group');
     if (_collapsedGroups.has(key)) {
       _collapsedGroups.delete(key);
       group.classList.remove('dashboard-card-group--collapsed');
+      _persistGroupState(key, false);
     } else {
       _collapsedGroups.add(key);
       group.classList.add('dashboard-card-group--collapsed');
+      _persistGroupState(key, true);
     }
   });
 
@@ -531,10 +555,17 @@ function _renderCardsPanel(groups) {
       return `<div class="dashboard-source-error">\u26a0 ${escHtml(group.board)}: ${escHtml(group.error)}</div>`;
     }
     const groupKey   = `${group.board}\0${group.column}`;
+    if (!_seededGroups.has(groupKey)) {
+      _seededGroups.add(groupKey);
+      if (group.initiallyCollapsed) {
+        _collapsedGroups.add(groupKey);
+        _persistGroupState(groupKey, true);
+      }
+    }
     const collapsed  = _collapsedGroups.has(groupKey);
     const cardCount  = group.cards.filter(c => !c.text?.startsWith('#')).length;
     const groupHeader =
-      `<div class="dashboard-group-header dashboard-group-header--collapsible" data-group-key="${escHtml(groupKey)}">` +
+      `<div class="dashboard-group-header dashboard-group-header--collapsible" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}">` +
       `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}` +
       `<span class="dash-group-right"><span class="column-count dash-group-count">${cardCount}</span><span class="dashboard-boards-chevron">\u203a</span></span></div>`;
     const collapsedClass = collapsed ? ' dashboard-card-group--collapsed' : '';

@@ -760,6 +760,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     _csEditIdx = idx;
     const cs = idx >= 0 ? _cardSources[idx] : {};
     document.getElementById('csEditId').value = cs.id || '';
+    document.getElementById('csCollapsed').checked = !!cs.collapsed;
     document.getElementById('cardSourcesForm').style.display = '';
 
     // Populate board select
@@ -859,9 +860,10 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     const id      = document.getElementById('csEditId').value || ('cs-' + Math.random().toString(36).slice(2, 10));
     const board   = document.getElementById('csBoard').value;
     if (!board) return;
-    const columns = [...document.getElementById('csColumnsList').querySelectorAll('input[type=checkbox]:checked')]
+    const columns   = [...document.getElementById('csColumnsList').querySelectorAll('input[type=checkbox]:checked')]
       .map(cb => cb.value);
-    const cs = { id, board, columns };
+    const collapsed = document.getElementById('csCollapsed').checked;
+    const cs = { id, board, columns, ...(collapsed ? { collapsed: true } : {}) };
     if (_csEditIdx >= 0) {
       _cardSources[_csEditIdx] = cs;
     } else {
