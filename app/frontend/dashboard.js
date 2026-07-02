@@ -566,6 +566,9 @@ function _renderCardsPanel(groups) {
       if (card.description) {
         metaParts.push(`<span class="card-desc" title="Has description">${SVGICONS.description()}</span>`);
       }
+      if (card.hasLinkedNotes) {
+        metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
+      }
       if (card.startDate || card.endDate) {
         const cls = 'card-date' + (isOverdue ? ' card-date--overdue' : '');
         if (card.startDate && card.endDate)

@@ -42,6 +42,31 @@ function mergePasswords(stored, incoming) {
   };
 }
 
+// ---- Helpers ----
+
+function _collectLinkedCardIds(items) {
+  const ids = new Set();
+  for (const item of (items || [])) {
+    if (item.type === 'page') {
+      for (const id of (item.linkedCards || [])) ids.add(id);
+    } else if (item.type === 'folder') {
+      for (const id of _collectLinkedCardIds(item.children)) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+async function _fetchNotesMap(couch, boards) {
+  const map = new Map();
+  await Promise.allSettled(boards.map(async board => {
+    try {
+      const raw = await couch.use(DB_PREFIX + board).get('notes');
+      map.set(board, _collectLinkedCardIds(raw.items || []));
+    } catch { map.set(board, new Set()); }
+  }));
+  return map;
+}
+
 // ---- Routes ----
 
 router.get('/dashboard/config', async (req, res) => {
@@ -71,6 +96,8 @@ router.get('/dashboard/cards', async (req, res) => {
     const couch   = getCouch();
     const sources = config.cardSources || [];
 
+    const notesMap = await _fetchNotesMap(couch, [...new Set(sources.map(s => s.board))]);
+
     const settled = await Promise.allSettled(
       sources.map(async source => {
         const db  = couch.use(DB_PREFIX + source.board);
@@ -78,12 +105,14 @@ router.get('/dashboard/cards', async (req, res) => {
         const cols = (doc.columns || []).filter(col =>
           !source.columns?.length || source.columns.includes(col.title)
         );
+        const linkedCards = notesMap.get(source.board) || new Set();
         return cols.map(col => ({
           sourceId: source.id,
           board:    source.board,
           column:   col.title,
           cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
             id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
+            hasLinkedNotes: linkedCards.has(id),
           })),
           error: null,
         }));
@@ -112,6 +141,7 @@ router.get('/dashboard/data', async (req, res) => {
     const cardsPromise = (async () => {
       const couch   = getCouch();
       const sources = config.cardSources || [];
+      const notesMap = await _fetchNotesMap(couch, [...new Set(sources.map(s => s.board))]);
       const settled = await Promise.allSettled(
         sources.map(async source => {
           const db  = couch.use(DB_PREFIX + source.board);
@@ -119,12 +149,14 @@ router.get('/dashboard/data', async (req, res) => {
           const cols = (doc.columns || []).filter(col =>
             !source.columns?.length || source.columns.includes(col.title)
           );
+          const linkedCards = notesMap.get(source.board) || new Set();
           return cols.map(col => ({
             sourceId: source.id,
             board:    source.board,
             column:   col.title,
             cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
               id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
+              hasLinkedNotes: linkedCards.has(id),
             })),
             error: null,
           }));
