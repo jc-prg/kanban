@@ -793,10 +793,12 @@ function _renderCalendarPanel(accounts) {
     .map(([dayStr, evs]) => {
       const day    = _dayLabel(dayStr);
       const header = `<div class="dashboard-group-header">${escHtml(day)}</div>`;
+      const now = new Date();
       const items  = evs.map(ev => {
+        const isPast = ev.end && new Date(ev.end) < now;
         const colorStyle = ev._color ? ` style="--card-color:${escHtml(ev._color)}"` : '';
         const metaHtml = `<div class="card-meta"><span class="card-date">${escHtml(_fmtTime(ev, dayStr))}</span><span class="dashboard-event-label">${escHtml(ev._label)}</span></div>`;
-        return `<div class="dashboard-event-item card" data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}"${colorStyle}>
+        return `<div class="dashboard-event-item card${isPast ? ' card--done' : ''}" data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}"${colorStyle}>
           <div class="card-body">
             <div class="card-text">${escHtml(ev.title)}</div>
             ${metaHtml}
