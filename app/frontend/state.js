@@ -109,6 +109,7 @@ function showMessage(msg) {
 
 // ---- Constants ----
 const COLORS         = ['#7c6af7','#f59e0b','#10b981','#ec4899','#3b82f6','#f97316','#14b8a6','#ef4444'];
+const COLORS_NEUTRAL = ['#6b7280'];
 const COL_COLORS     = ['#7c6af7','#f59e0b','#10b981','#ec4899','#3b82f6','#f97316','#14b8a6','#06b6d4'];
 const PRIORITY_COLORS = ['', '#ef4444', '#f97316', '#f59e0b', '#10b981', '#6b7280'];
 const PRIORITY_LABELS = ['—', 'P1', 'P2', 'P3', 'P4', 'P5'];

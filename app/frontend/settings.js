@@ -391,7 +391,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       loadWebdavSettings();
       loadWebhookSettings();
     }
-    if (!_isBoard) { loadPrompts(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); }
+    if (!_isBoard) { loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); }
     buildSettingsNav();
     backdrop.style.display = 'flex';
   }
@@ -798,6 +798,18 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     } catch { flashIndicator(' error'); }
   }
 
+  function renderColorPalette() {
+    const swatchHtml = colors => colors.map(c => `
+      <div class="color-palette-item">
+        <div class="color-palette-swatch" style="background:${c}"></div>
+        <span class="color-palette-hex">${c}</span>
+      </div>`).join('');
+    document.getElementById('colorPaletteGrid').innerHTML =
+      `<div class="color-palette-row">${swatchHtml(COLORS)}</div>` +
+      `<p class="settings-item-desc" style="margin:15px 0 0">Used for notes:</p>` +
+      `<div class="color-palette-row">${swatchHtml(COLORS_NEUTRAL)}</div>`;
+  }
+
   async function loadCardSourcesSettings() {
     try {
       const cfg = await fetch('/api/dashboard/config').then(r => r.json());
@@ -807,6 +819,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       // Select the closest matching option
       const options = [...sel.options].map(o => parseInt(o.value, 10));
       sel.value = options.includes(ms) ? String(ms) : '0';
+      // Last edited limit
+      document.getElementById('dashRecentLimit').value = String(cfg.recentLimit || 10);
       // Panel visibility toggles (default: enabled)
       document.getElementById('dashPanelBoards').checked   = cfg.panelBoards   !== false;
       document.getElementById('dashPanelCards').checked    = cfg.panelCards    !== false;
@@ -818,6 +832,18 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     _renderCardSourcesList();
     _closeCsForm();
   }
+
+  document.getElementById('dashRecentLimit').addEventListener('change', async function () {
+    try {
+      const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      await fetch('/api/dashboard/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, recentLimit: parseInt(this.value, 10) }),
+      });
+      flashIndicator(`${ICONS.done} saved`);
+    } catch { flashIndicator(' error'); }
+  });
 
   document.getElementById('dashboardAutoRefresh').addEventListener('change', async function () {
     try {

@@ -74,7 +74,7 @@
   </div>
   <div class="dashboard-grid">
     <div class="dashboard-panel">
-      <div class="dashboard-panel-header">Boards<span class="column-count" id="dashBoardsCount"></span></div>
+      <div class="dashboard-panel-header">Overview<span class="column-count" id="dashBoardsCount"></span></div>
       <div class="dashboard-panel-body" id="dashboardBoardsPanel"></div>
     </div>
     <div class="dashboard-panel">
@@ -697,6 +697,17 @@
                   </select>
                 </div>
                 <div class="settings-field-row">
+                  <label class="settings-field-label" for="dashRecentLimit">Last edited</label>
+                  <select id="dashRecentLimit" class="new-board-input" style="width:auto;flex:none">
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="15">15</option>
+                    <option value="20">20</option>
+                    <option value="30">30</option>
+                    <option value="50">50</option>
+                  </select>
+                </div>
+                <div class="settings-field-row">
                   <span class="settings-field-label">Boards</span>
                   <label class="settings-toggle">
                     <input type="checkbox" id="dashPanelBoards" checked>
@@ -926,6 +937,17 @@
               Send the key in HTTP requests via <code>x-api-key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.
               Set <code>API_KEY</code> in <code>.env</code> to enable external access.
             </p>
+          </div>
+        </div>
+
+        <div class="settings-section" id="colorPaletteSection" data-settings-label="Color Palette">
+          <div class="settings-section-title">
+            <span>Color palette</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <p class="settings-item-desc" style="margin-bottom:10px">Used for cards, mail accounts, and calendar accounts:</p>
+            <div id="colorPaletteGrid" class="color-palette-grid"></div>
           </div>
         </div>
 

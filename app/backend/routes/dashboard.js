@@ -4,7 +4,7 @@ const router  = express.Router();
 const { writeRateLimit }                          = require('../auth');
 const { getDashboardConfig, saveDashboardConfig } = require('../global-db');
 const { getCouch }                                = require('../db');
-const { DB_PREFIX, DOC_ID }                       = require('../config');
+const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache } = require('../dashboard/calendar');
 const { fetchMailAccount, fetchMailMessage, testMailAccount,
         listMailFolders, markMailMessage, moveMailMessage, deleteMailMessage } = require('../dashboard/mail');
@@ -67,12 +67,64 @@ async function _fetchNotesMap(couch, boards) {
   return map;
 }
 
+function _flattenPages(items) {
+  const pages = [];
+  for (const item of (items || [])) {
+    if (item.type === 'page') pages.push(item);
+    else if (item.type === 'folder') pages.push(..._flattenPages(item.children));
+  }
+  return pages;
+}
+
+function _cardLastEdited(card) {
+  let best = card.created || '';
+  if (card.doneAt && card.doneAt > best) best = card.doneAt;
+  const moves = card.moves;
+  if (moves?.length) { const at = moves[moves.length - 1].at; if (at > best) best = at; }
+  return best;
+}
+
 // ---- Routes ----
 
 router.get('/dashboard/config', async (req, res) => {
   try {
     const config = await getDashboardConfig();
     res.json(stripPasswords(config));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/dashboard/recent', async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const couch = getCouch();
+    const allDbs = await couch.db.list();
+    const boardNames = allDbs.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
+    const items = [];
+    await Promise.allSettled(boardNames.map(async board => {
+      const db = couch.use(DB_PREFIX + board);
+      const [boardRes, notesRes] = await Promise.allSettled([db.get(DOC_ID), db.get(NOTES_DOC_ID)]);
+      if (boardRes.status === 'fulfilled') {
+        const doc = boardRes.value;
+        if (!doc.settings?.archived) {
+          for (const col of doc.columns || []) {
+            for (const card of col.cards || []) {
+              if ((card.text || '').startsWith('#')) continue;
+              items.push({ type: 'card', id: card.id, title: card.text || '', board, context: col.title, at: _cardLastEdited(card), color: card.color || '' });
+            }
+          }
+        }
+      }
+      if (notesRes.status === 'fulfilled') {
+        for (const page of _flattenPages(notesRes.value.items)) {
+          if (!page.lastModified) continue;
+          items.push({ type: 'note', id: page.id, title: page.title || '', board, context: 'notes', at: page.lastModified });
+        }
+      }
+    }));
+    items.sort((a, b) => (b.at > a.at ? 1 : b.at < a.at ? -1 : 0));
+    res.json(items.slice(0, limit));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

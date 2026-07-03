@@ -19,6 +19,7 @@ const _folderCache = new Map();
 const _dashCardMap      = new Map();
 const _collapsedGroups  = new Set(); // keyed by "board\0column"
 const _seededGroups     = new Set(); // groups already seeded from config
+let _dashRecentLimit    = 10;
 
 const _DASH_STATE_KEY = 'dash-group-state';
 function _loadGroupState() {
@@ -400,6 +401,7 @@ async function initDashboard() {
   try {
     const cfg = await fetch('/api/dashboard/config').then(r => r.json());
     applyDashboardPanelVisibility(cfg);
+    _dashRecentLimit = cfg.recentLimit || 10;
     if (cfg.autoRefreshMs > 0) {
       _refreshTimer = setInterval(loadDashboard, cfg.autoRefreshMs);
       window.addEventListener('pagehide', () => clearInterval(_refreshTimer), { once: true });
@@ -445,7 +447,7 @@ async function loadDashboard() {
     showBoards   ? Promise.all([
       fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
       (() => { const d = new Date(); d.setDate(d.getDate() + _dashAchOffset); return fetch(`/api/achievements/today?date=${d.toISOString().slice(0,10)}`).then(r => r.ok ? r.json() : null).catch(() => null); })(),
-    ]).then(([d, a]) => { _renderBoardsPanel(d, a); return true; }).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+    ]).then(([d, a]) => _renderBoardsPanel(d, a).then(() => true)).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showCalendar ? fetch('/api/dashboard/calendar').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
@@ -529,13 +531,46 @@ async function _loadDashAchievements(offset) {
   } catch { /* ignore */ }
 }
 
-function _renderBoardsPanel(boards, achievements) {
+function _fmtRecentDate(at) {
+  if (!at) return '';
+  if (at.length <= 10) {
+    const [y, m, d] = at.split('-');
+    return `${d}.${m}.${y.slice(2)}`;
+  }
+  const d = new Date(at);
+  if (isNaN(d)) return at.slice(0, 10);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `today ${time}`;
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return `yesterday`;
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.`;
+}
+
+function _recentItemHtml(item) {
+  const href = item.type === 'note'
+    ? `/board/${encodeURIComponent(item.board)}#note:${encodeURIComponent(item.id)}`
+    : `/board/${encodeURIComponent(item.board)}`;
+  const icon = item.type === 'note' ? SVGICONS.notePages(10, 10) : SVGICONS.card(14, 10);
+  const color = item.type === 'note' ? COLORS_NEUTRAL[0] : (item.color || '');
+  const colorStyle = color ? ` style="--card-color:${escHtml(color)}"` : '';
+  const contextLabel = item.type === 'note' ? escHtml(item.board) : `${escHtml(item.board)} \xb7 ${escHtml(item.context)}`;
+  const metaHtml = `<div class="card-meta"><span class="dashboard-recent-icon">${icon}</span><span class="dashboard-recent-context">${contextLabel}</span><span class="card-date">${escHtml(_fmtRecentDate(item.at))}</span></div>`;
+  return `<a class="dashboard-recent-item card" href="${href}"${colorStyle}>
+    <div class="card-body">
+      <div class="card-text">${escHtml(item.title)}</div>
+      ${metaHtml}
+    </div>
+  </a>`;
+}
+
+async function _renderBoardsPanel(boards, achievements) {
   const panel = document.getElementById('dashboardBoardsPanel');
   const active   = boards.filter(b => !b.archived);
   const archived = boards.filter(b =>  b.archived);
   document.getElementById('dashBoardsCount').textContent = active.length || '';
 
-  let html = '<div class="dashboard-group-header">Active</div>';
+  let html = '<div class="dashboard-group-header">Active boards</div>';
   html += active.length
     ? active.map(_boardItemHtml).join('')
     : '<p class="dashboard-empty">No boards yet.</p>';
@@ -567,10 +602,16 @@ function _renderBoardsPanel(boards, achievements) {
 
   if (archived.length) {
     html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
-      Archived<span class="column-count">${archived.length}</span><span class="dashboard-boards-chevron">\u203A</span>
+      Archived boards<span class="dash-group-right"><span class="column-count">${archived.length}</span><span class="dashboard-boards-chevron">\u203A</span></span>
     </button>`;
     html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
   }
+
+  const recent = await fetch(`/api/dashboard/recent?limit=${_dashRecentLimit}`).then(r => r.ok ? r.json() : []).catch(() => []);
+  html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
+    Last edited<span class="dash-group-right"><span class="column-count">${recent.length}</span><span class="dashboard-boards-chevron">\u203A</span></span>
+  </button>`;
+  html += `<div class="dashboard-boards-archived-list" style="display:none">${recent.length ? recent.map(_recentItemHtml).join('') : '<p class="dashboard-empty">No items yet.</p>'}</div>`;
 
   panel.innerHTML = html;
 

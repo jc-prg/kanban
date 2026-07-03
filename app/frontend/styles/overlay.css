@@ -1706,6 +1706,36 @@
 
 .analytics-histogram { min-height: 140px; }
 
+/* ---- Color Palette (settings section) ---- */
+.color-palette-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.color-palette-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.color-palette-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.color-palette-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.color-palette-hex {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  font-family: monospace;
+  letter-spacing: 0.02em;
+}
+
 /* ---- Icon Library (settings section) ---- */
 .icon-lib-grid {
   display: grid;

@@ -124,6 +124,11 @@ function _svgFilter(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 2h9L7 6.5V10L5 10V6.5Z"/></svg>`;
 }
 
+// Landscape rounded rectangle with a single headline — kanban card
+function _svgCard(w = 14, h = 10) {
+  return `<svg viewBox="0 0 14 10" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="12.6" height="8.6" rx="1.3"/><line x1="2.5" y1="3.5" x2="9" y2="3.5"/></svg>`;
+}
+
 // Single circular arrow — sync / refresh
 function _svgSync(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 6a4.5 4.5 0 1 1-1.4-3.2"/><path d="M8.7 1.4L9.1 2.8L7.6 2.4"/></svg>`;
@@ -160,6 +165,7 @@ const SVGICONS = {
   moveTo:       _svgMoveTo,
   actions:      _svgActions,
   notePages:      _svgNotePages,
+  card:           _svgCard,
   sync:           _svgSync,
   folder:         _svgFolder,
   networkFolder:  _svgNetworkFolder,
@@ -206,6 +212,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgColorPalette(16, 16), name: 'Color palette',    usage: 'Color selection in card modal' },
   { type: 'svg', svg: _svgCardInfo(16, 16),       name: 'Card info',        usage: 'Card info / history (context menu and card modal)' },
   { type: 'svg', svg: _svgNotePages(16, 16),     name: 'Note pages',       usage: 'Note pages linked to this card' },
+  { type: 'svg', svg: _svgCard(16, 11),          name: 'Card',             usage: 'Kanban card type indicator (e.g. last-edited list)' },
   { type: 'svg', svg: _svgSync(16, 16),          name: 'Sync',             usage: 'WebDAV sync status and trigger' },
   { type: 'svg', svg: _svgFolder(16, 16),        name: 'Folder',           usage: 'Folder in the notes tree or file system' },
   { type: 'svg', svg: _svgNetworkFolder(16, 16), name: 'Network folder',   usage: 'Remote folder (WebDAV / shared network location)' },

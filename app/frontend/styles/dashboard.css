@@ -205,6 +205,34 @@
 
 .dashboard-boards-archived-btn:hover { color: var(--text); }
 
+/* ---- Last edited / recent items ---- */
+
+.dashboard-recent-item {
+  margin: 6px 10px;
+  text-decoration: none;
+  color: inherit;
+}
+.dashboard-recent-item .card-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dashboard-recent-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.dashboard-recent-context {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
 .dash-new-board-inner {
   padding: 8px 10px 10px;
   display: flex;
