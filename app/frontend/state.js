@@ -264,7 +264,7 @@ const uid = () => 'id-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), 
 // ---- State mutations ----
 function addColumn() {
   const idx = state.columns.length;
-  state.columns.push({ id: uid(), title: 'New Column', cards: [], color: COL_COLORS[idx % COL_COLORS.length] });
+  state.columns.push({ id: uid(), title: 'NEW COLUMN', cards: [], color: COL_COLORS[idx % COL_COLORS.length] });
   render();
   schedulesSave();
   setTimeout(() => {
@@ -282,7 +282,7 @@ function deleteColumn(colId) {
 
 function updateColumnTitle(colId, title) {
   const col = state.columns.find(c => c.id === colId);
-  if (col) { col.title = title; schedulesSave(); }
+  if (col) { col.title = title.toUpperCase(); schedulesSave(); }
 }
 
 function addCard(colId, data) {
