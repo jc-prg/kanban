@@ -221,7 +221,10 @@ function render() {
 
       const cardEl = document.createElement('div');
       const today0 = new Date().toISOString().slice(0, 10);
+      const warnD0 = new Date(); warnD0.setDate(warnD0.getDate() + 2);
+      const warnDate0 = warnD0.toISOString().slice(0, 10);
       const isOverdue = !card.done && card.endDate && card.endDate < today0;
+      const isWarning = !card.done && !isOverdue && card.endDate && card.endDate >= today0 && card.endDate <= warnDate0;
       cardEl.className = 'card' + (card.done ? ' card--done' : '') + (isLabel ? ' card--label' : '') + (isOverdue ? ' card--overdue' : '');
       cardEl.dataset.cardId = card.id;
       cardEl.draggable = true;
@@ -245,7 +248,7 @@ function render() {
           metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);
         }
         if (card.startDate || card.endDate) {
-          const cls = isOverdue ? 'card-date card-date--overdue' : 'card-date';
+          const cls = isOverdue ? 'card-date card-date--overdue' : isWarning ? 'card-date card-date--warning' : 'card-date';
           if (card.startDate && card.endDate)
             metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} → ${fmtDate(card.endDate)}</span>`);
           else if (card.startDate)

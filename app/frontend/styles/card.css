@@ -114,6 +114,7 @@
 }
 
 .card-date--overdue { color: var(--danger); }
+.card-date--warning { color: #f59e0b; }
 
 .card--overdue {
   border-color: var(--danger);

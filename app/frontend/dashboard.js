@@ -23,6 +23,8 @@ const _seededGroups     = new Set(); // groups already seeded from config
 const _DASH_STATE_KEY = 'dash-group-state';
 function _loadGroupState() {
   try {
+    const navType = performance.getEntriesByType?.('navigation')[0]?.type;
+    if (navType === 'reload') { localStorage.removeItem(_DASH_STATE_KEY); return; }
     const stored = JSON.parse(localStorage.getItem(_DASH_STATE_KEY));
     if (stored && typeof stored === 'object') {
       for (const [key, collapsed] of Object.entries(stored)) {
@@ -643,12 +645,18 @@ function _renderCardsPanel(groups) {
         _persistGroupState(groupKey, true);
       }
     }
-    const collapsed  = _collapsedGroups.has(groupKey);
-    const cardCount  = group.cards.filter(c => !c.text?.startsWith('#')).length;
+    const collapsed     = _collapsedGroups.has(groupKey);
+    const visibleCards  = group.cards.filter(c => !c.text?.startsWith('#'));
+    const cardCount     = visibleCards.length;
+    const warnD = new Date(); warnD.setDate(warnD.getDate() + 2);
+    const warnDate      = warnD.toISOString().slice(0, 10);
+    const hasOverdue    = visibleCards.some(c => !c.done && c.endDate && c.endDate < today);
+    const hasWarning    = !hasOverdue && visibleCards.some(c => !c.done && c.endDate && c.endDate >= today && c.endDate <= warnDate);
+    const countClass    = hasOverdue ? ' dash-group-count--overdue' : hasWarning ? ' dash-group-count--warning' : '';
     const groupHeader =
       `<div class="dashboard-group-header dashboard-group-header--collapsible" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}">` +
       `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}` +
-      `<span class="dash-group-right"><span class="column-count dash-group-count">${cardCount}</span><span class="dashboard-boards-chevron">\u203a</span></span></div>`;
+      `<span class="dash-group-right"><span class="column-count dash-group-count${countClass}">${cardCount}</span><span class="dashboard-boards-chevron">\u203a</span></span></div>`;
     const collapsedClass = collapsed ? ' dashboard-card-group--collapsed' : '';
     const groupAttrs = `class="dashboard-card-group${collapsedClass}" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}"`;
     if (!group.cards.length) {
@@ -658,6 +666,7 @@ function _renderCardsPanel(groups) {
       _dashCardMap.set(card.id, { card, board: group.board });
       const isLabel   = (card.text || '').startsWith('#');
       const isOverdue = !isLabel && card.endDate && card.endDate < today && !card.done;
+      const isWarning = !isLabel && !isOverdue && card.endDate && card.endDate >= today && card.endDate <= warnDate && !card.done;
       const colorStyle = card.color ? ` style="--card-color:${escHtml(card.color)}"` : '';
 
       if (isLabel) {
@@ -682,7 +691,7 @@ function _renderCardsPanel(groups) {
         metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
       }
       if (card.startDate || card.endDate) {
-        const cls = 'card-date' + (isOverdue ? ' card-date--overdue' : '');
+        const cls = 'card-date' + (isOverdue ? ' card-date--overdue' : isWarning ? ' card-date--warning' : '');
         if (card.startDate && card.endDate)
           metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} \u2192 ${fmtDate(card.endDate)}</span>`);
         else if (card.startDate)
