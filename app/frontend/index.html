@@ -65,6 +65,7 @@
     <div class="modal dashboard-detail-modal">
       <div class="dashboard-detail-titlebar">
         <span id="dashboardDetailTitle" class="dashboard-detail-title"></span>
+        <a class="modal-fs-btn" id="dashboardDetailEditBtn" href="#" title="Edit card" style="position:static;opacity:0.55;display:none"><span data-icon="edit"></span></a>
         <a class="modal-fs-btn" id="dashboardDetailWebUrl" href="#" target="_blank" rel="noopener noreferrer" title="Open in Webmail" style="position:static;opacity:0.55;display:none">&#x2197;</a>
         <button class="modal-fs-btn" id="dashboardDetailFsBtn" title="Full screen" style="position:static;opacity:0.55">⛶</button>
         <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close">✕</button>
@@ -205,6 +206,7 @@
 </div>
 
 <div id="contextMenu" class="context-menu" style="display:none">
+  <button class="ctx-item" id="ctxOpen" style="display:none"><span data-icon="cardInfo"></span>  Open</button>
   <button class="ctx-item" id="ctxInfo" style="display:none"><span data-icon="cardInfo"></span>  Info</button>
   <button class="ctx-item" id="ctxEdit"><span data-icon="edit"></span>  Edit</button>
   <button class="ctx-item" id="ctxCopyLink" style="display:none"><span data-icon="link"></span>  Copy link</button>

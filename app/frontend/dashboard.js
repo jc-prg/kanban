@@ -323,12 +323,14 @@ async function initDashboard() {
       }
     }, { passive: false }); }
 
-  // Card click → navigate to the board and open the card's edit modal (skipped on touch; handled by touchend below)
+  // Card click → open detail panel (skipped on touch; handled by touchend below)
   document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
     const item = e.target.closest('[data-card-id]');
     if (!item) return;
     if (lastInputWasTouch) return;
-    window.location.href = `/board/${encodeURIComponent(item.dataset.board)}#card:${item.dataset.cardId}`;
+    const entry = _dashCardMap.get(item.dataset.cardId);
+    if (!entry) return;
+    _openCardDetail(entry.board, entry.card);
   });
 
   // Card right-click → card context menu (same as on the board)
@@ -342,7 +344,7 @@ async function initDashboard() {
     showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
   });
 
-  // Card touch: single tap → navigate, double tap → context menu
+  // Card touch: single tap → open detail panel, double tap → context menu
   { let _cardTap = null; let _cardTouchMoved = false;
     const _cardsPanel = document.getElementById('dashboardCardsPanel');
     _cardsPanel.addEventListener('touchstart', () => { _cardTouchMoved = false; }, { passive: true });
@@ -353,17 +355,17 @@ async function initDashboard() {
       if (!item) return;
       e.preventDefault();
       const t = e.changedTouches[0];
+      const entry = _dashCardMap.get(item.dataset.cardId);
+      if (!entry) return;
       if (_cardTap && _cardTap.el === item) {
         clearTimeout(_cardTap.timer);
         _cardTap = null;
-        const entry = _dashCardMap.get(item.dataset.cardId);
-        if (!entry) return;
         showDashboardContextMenu(t.clientX, t.clientY, entry.board, entry.card);
       } else {
         clearTimeout(_cardTap?.timer);
         _cardTap = { el: item, timer: setTimeout(() => {
           _cardTap = null;
-          window.location.href = `/board/${encodeURIComponent(item.dataset.board)}#card:${item.dataset.cardId}`;
+          _openCardDetail(entry.board, entry.card);
         }, 280) };
       }
     }, { passive: false }); }
@@ -812,6 +814,7 @@ function _openMailDetail(accountId, msgId, webUrl) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
+  document.getElementById('dashboardDetailEditBtn').style.display = 'none';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   body.innerHTML = '';
   if (webUrl) {
@@ -822,6 +825,11 @@ function _openMailDetail(accountId, msgId, webUrl) {
     webUrlBtn.style.display = 'none';
   }
   detail.style.display = '';
+  { const modal = detail.querySelector('.modal');
+    const maxH  = modal.offsetHeight;
+    modal.style.height    = 'auto';
+    modal.style.minHeight = '450px';
+    modal.style.maxHeight = maxH + 'px'; }
 
   fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`)
     .then(r => r.ok ? r.json() : null)
@@ -975,10 +983,159 @@ function _renderCalendarPanel(accounts) {
 
 // ---- Detail panel ----
 
+async function _resolveDashCardAttachments(container, board, cardId) {
+  const base = `/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(cardId)}`;
+  for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
+    const fn = img.getAttribute('src').slice('attachment:'.length);
+    try {
+      const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
+      if (!r.ok) continue;
+      const obj = URL.createObjectURL(await r.blob());
+      if (_attachType(fn) === 'pdf') {
+        const embed = document.createElement('embed');
+        embed.src = obj; embed.type = 'application/pdf'; embed.className = 'md-pdf-embed';
+        img.replaceWith(embed);
+      } else {
+        img.src = obj;
+      }
+    } catch { /* ignore */ }
+  }
+  for (const a of container.querySelectorAll('a[href^="attachment:"]')) {
+    const fn = a.getAttribute('href').slice('attachment:'.length);
+    const url = `${base}/${encodeURIComponent(fn)}`;
+    a.removeAttribute('href');
+    a.style.cursor = 'pointer';
+    const ft = _attachType(fn);
+    a.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      if (ft === 'image' || ft === 'pdf') openAttachmentViewer(url, fn, ft);
+      else _downloadAttachment(url, fn);
+    });
+  }
+}
+
+async function _openCardDetail(board, card) {
+  const detail    = document.getElementById('dashboardDetail');
+  const body      = document.getElementById('dashboardDetailBody');
+  const editBtn   = document.getElementById('dashboardDetailEditBtn');
+  const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
+
+  document.getElementById('dashboardDetailTitle').textContent = card.text || '';
+  editBtn.href = `/board/${encodeURIComponent(board)}#card:${encodeURIComponent(card.id)}`;
+  editBtn.style.display = '';
+  webUrlBtn.style.display = 'none';
+  body.innerHTML = '';
+  detail.style.display = '';
+  { const modal = detail.querySelector('.modal');
+    const maxH  = modal.offsetHeight;
+    modal.style.height    = 'auto';
+    modal.style.minHeight = '450px';
+    modal.style.maxHeight = maxH + 'px'; }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = [];
+
+  rows.push(['Board', escHtml(board)]);
+
+  if (card.priority) {
+    const pc = PRIORITY_COLORS[card.priority];
+    const pl = PRIORITY_LABELS[card.priority];
+    rows.push(['Priority', `<span class="priority-badge" style="background:${pc}22;color:${pc}">${escHtml(pl)}</span>`]);
+  }
+
+  if (card.startDate || card.endDate) {
+    let dateStr;
+    if (card.startDate && card.endDate) dateStr = `${fmtDate(card.startDate)} \u2192 ${fmtDate(card.endDate)}`;
+    else if (card.startDate)            dateStr = `${fmtDate(card.startDate)} \u2192`;
+    else                                dateStr = `\u2192 ${fmtDate(card.endDate)}`;
+    const isOverdue = card.endDate && card.endDate < today && !card.done;
+    rows.push(['Date', `<span${isOverdue ? ' style="color:#ef4444"' : ''}>${escHtml(dateStr)}</span>`]);
+  }
+
+  if (card.done) {
+    rows.push(['Status', `<span class="card-done-mark">${ICONS.done} done</span>`]);
+  }
+
+  if (card.created) {
+    rows.push(['Created', escHtml(fmtDate(card.created))]);
+  }
+
+  if (card.link) {
+    const safe = safeLink(card.link);
+    if (safe) rows.push(['Link', `<a href="${escHtml(safe)}" target="_blank" rel="noopener noreferrer">${escHtml(card.link)}</a>`]);
+  }
+
+  body.innerHTML = `<table class="dashboard-detail-table">${
+    rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
+  }</table>`;
+
+  // Fetch full card (description is a boolean flag in dashboard API), attachments and linked notes in parallel
+  const [boardData, attachments, notesDoc] = await Promise.all([
+    fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch(`/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(card.id)}`)
+      .then(r => r.ok ? r.json() : []).catch(() => []),
+    card.hasLinkedNotes
+      ? fetch(`/api/${encodeURIComponent(board)}/notes`).then(r => r.ok ? r.json() : null).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  // Get full description from board data
+  let fullDescription = '';
+  if (boardData) {
+    for (const col of boardData.columns || []) {
+      const found = col.cards.find(c => c.id === card.id);
+      if (found) { fullDescription = found.description || ''; break; }
+    }
+  }
+
+  if (fullDescription) {
+    const div = document.createElement('div');
+    div.className = 'cm-preview card-desc-preview dash-card-desc-preview';
+    div.innerHTML = renderMarkdown(fullDescription);
+    body.appendChild(div);
+    buildToc(div);
+    _resolveDashCardAttachments(div, board, card.id);
+  }
+
+  // Collect pages that link to this card
+  const linkedPages = [];
+  function _collectLinked(items) {
+    for (const item of items || []) {
+      if (item.type === 'page' && item.linkedCards?.includes(card.id)) linkedPages.push(item);
+      if (item.children) _collectLinked(item.children);
+    }
+  }
+  _collectLinked(notesDoc?.items);
+
+  if (attachments.length) {
+    const fmtSize = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+    const section = document.createElement('div');
+    section.className = 'dash-card-detail-section';
+    section.innerHTML = '<div class="dash-card-detail-section-hdr">Attachments</div>' +
+      attachments.map(a => {
+        const url = `/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(card.id)}/${encodeURIComponent(a.name)}`;
+        return `<a class="dash-card-attach-item" href="${escHtml(url)}" download="${escHtml(a.name)}">${SVGICONS.attachment(12, 12)} ${escHtml(a.name)}<span class="dash-card-attach-size">${fmtSize(a.size)}</span></a>`;
+      }).join('');
+    body.appendChild(section);
+  }
+
+  if (linkedPages.length) {
+    const section = document.createElement('div');
+    section.className = 'dash-card-detail-section';
+    section.innerHTML = '<div class="dash-card-detail-section-hdr">Linked notes</div>' +
+      linkedPages.map(p => {
+        const href = `/board/${encodeURIComponent(board)}#note:${encodeURIComponent(p.id)}`;
+        return `<a class="dash-card-note-link" href="${escHtml(href)}">${SVGICONS.noteDoc(9, 11)} ${escHtml(p.title || 'Untitled')}</a>`;
+      }).join('');
+    body.appendChild(section);
+  }
+}
+
 function _openEventDetail(accountId, uid, webUrl) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
+  document.getElementById('dashboardDetailEditBtn').style.display = 'none';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   if (webUrl) {
     webUrlBtn.href = webUrl;

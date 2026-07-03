@@ -551,6 +551,65 @@
   margin: 0;
 }
 
+/* ---- Card detail: description ---- */
+
+.dash-card-desc-preview {
+  margin-top: 24px;
+  padding: 5px;
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+}
+
+.dash-card-desc-preview:hover { background: transparent; border-color: var(--border); }
+
+/* ---- Card detail sections (attachments, linked notes) ---- */
+
+.dash-card-detail-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.dash-card-detail-section-hdr {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.dash-card-attach-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text);
+  text-decoration: none;
+  padding: 3px 0;
+}
+
+.dash-card-attach-item:hover { color: var(--accent); }
+
+.dash-card-attach-size {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.dash-card-note-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text);
+  text-decoration: none;
+  padding: 3px 0;
+}
+
+.dash-card-note-link:hover { color: var(--accent); }
+
 /* ---- Board-switch Dashboard entry ---- */
 
 .board-switch-dashboard {

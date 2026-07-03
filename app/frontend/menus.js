@@ -9,6 +9,7 @@ function showContextMenu(x, y, colId, card) {
   _dashCtxBoard = null;
 
   // Restore items that showDashboardContextMenu may have hidden
+  document.getElementById('ctxOpen').style.display = 'none';
   document.getElementById('ctxDuplicate').style.display = '';
   document.querySelector('#contextMenu .ctx-submenu-trigger').style.display = '';
 
@@ -60,6 +61,7 @@ function showDashboardContextMenu(x, y, board, card) {
   ctxColId = null;
   ctxCard  = card;
 
+  document.getElementById('ctxOpen').style.display = '';
   document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
   document.getElementById('ctxInfo').style.display = 'none';
   document.getElementById('ctxCopyLink').style.display = card.link ? '' : 'none';
@@ -110,6 +112,12 @@ function showDashboardContextMenu(x, y, board, card) {
   menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
   menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
 }
+
+document.getElementById('ctxOpen').addEventListener('click', () => {
+  const board = _dashCtxBoard, card = ctxCard;
+  hideContextMenu();
+  if (board && card) _openCardDetail(board, card);
+});
 
 document.getElementById('ctxInfo').addEventListener('click', async () => {
   const card = ctxCard;

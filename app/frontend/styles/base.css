@@ -47,6 +47,8 @@
   --accent: #7c6af7;
   --accent-glow: rgba(124,106,247,0.25);
   --danger: #f04f6a;
+  --link: #93c5fd;
+  --link-visited: #c4b5fd;
   --radius: 12px;
   --col-width: 300px;
   --mark-bg: rgba(161, 118, 0, 0.7);
@@ -64,6 +66,8 @@
     --accent-glow: rgba(91,77,224,0.18);
     --danger: #d93a55;
     --mark-bg: rgba(250, 204, 21, 0.45);
+    --link: #2563eb;
+    --link-visited: #7c3aed;
   }
 }
 
@@ -89,6 +93,10 @@ body::before {
   z-index: 0;
   opacity: 0.5;
 }
+
+/* Links */
+a { color: var(--link); }
+a:visited { color: var(--link-visited); }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

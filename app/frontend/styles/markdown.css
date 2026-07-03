@@ -18,14 +18,26 @@
 /* Headings — 5px top margin, none for the very first element */
 .card-desc-preview h1,
 .card-desc-preview h2,
-.card-desc-preview h3 {
+.card-desc-preview h3,
+.card-desc-preview h4,
+.card-desc-preview h5,
+.card-desc-preview h6 {
   font-family: 'Syne', sans-serif;
-  margin: 5px 0 4px;
+  font-weight: 700;
+  margin: 10px 0 4px;
 }
 .card-desc-preview h1:first-child,
 .card-desc-preview h2:first-child,
-.card-desc-preview h3:first-child { margin-top: 0; }
-.card-desc-preview h1 { font-size: 1.35rem; font-weight: 700; }
+.card-desc-preview h3:first-child,
+.card-desc-preview h4:first-child,
+.card-desc-preview h5:first-child,
+.card-desc-preview h6:first-child { margin-top: 0; }
+.card-desc-preview h1 { font-size: 1.35rem; }
+.card-desc-preview h2 { font-size: 1.15rem; }
+.card-desc-preview h3 { font-size: 1.0rem; }
+.card-desc-preview h4,
+.card-desc-preview h5,
+.card-desc-preview h6 { font-size: 0.9rem; }
 
 /* Lists */
 .card-desc-preview ul,
@@ -137,7 +149,8 @@
 }
 
 /* Links */
-.card-desc-preview a { color: var(--accent); }
+.card-desc-preview a { color: var(--link); }
+.card-desc-preview a:visited { color: var(--link-visited); }
 
 /* Bold */
 .card-desc-preview strong { color: var(--text); }
@@ -208,11 +221,12 @@
 .md-toc-h2  { padding-left: 12px; }
 .md-toc-h3  { padding-left: 24px; }
 .md-toc a {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
   font-size: 0.82rem;
   cursor: pointer;
 }
+.md-toc a:visited { color: var(--link-visited); }
 .md-toc a:hover { text-decoration: underline; }
 .md-toc a.md-toc-active { color: var(--text); font-weight: 600; }
 
@@ -250,11 +264,12 @@
   gap: 8px;
 }
 .md-subpages-title {
-  color: var(--accent);
+  color: var(--link);
   text-decoration: none;
   font-size: 0.82rem;
   cursor: pointer;
 }
+.md-subpages-title:visited { color: var(--link-visited); }
 .md-subpages-title:hover { text-decoration: underline; }
 .md-subpages-meta {
   display: flex;
