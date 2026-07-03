@@ -1,4 +1,4 @@
-// Board URLs are /board/<name>; special views (/dashboard, /inbox) are top-level.
+// Board URLs are /board/<name>; special views (/focus, /inbox) are top-level.
 const _pathSegs  = window.location.pathname.split('/').filter(Boolean);
 const _isBoard   = _pathSegs[0] === 'board' && _pathSegs.length > 1;
 const BOARD_NAME = _isBoard ? _pathSegs[1] : (_pathSegs[0] || null);

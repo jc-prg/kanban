@@ -37,8 +37,8 @@
       <span class="save-indicator" id="dashboardFetchedAt" style="display:none"></span>
     </div>
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
-    <a class="header-menu-btn" id="dashboardBtn" href="/dashboard" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
-    <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh dashboard" style="display:none"><span data-icon="sync"></span></button>
+    <a class="header-menu-btn" id="dashboardBtn" href="/focus" title="Focus" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
+    <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh focus" style="display:none"><span data-icon="sync"></span></button>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
       <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
       <div class="board-switch-menu" id="boardSwitchMenu"></div>
@@ -675,9 +675,9 @@
           </div>
         </div>
 
-        <div class="settings-section" id="dashboardSection" data-settings-label="Dashboard" style="display:none">
+        <div class="settings-section" id="dashboardSection" data-settings-label="Focus" style="display:none">
           <div class="settings-section-title">
-            <span>Dashboard</span>
+            <span>Focus</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
           </div>
           <div class="settings-section-body">
@@ -740,7 +740,7 @@
               </div>
 
               <div class="prompts-panel" data-panel="cardsources">
-                <p class="settings-item-desc" style="margin-bottom:8px">Board columns to show in the Dashboard cards panel.</p>
+                <p class="settings-item-desc" style="margin-bottom:8px">Board columns to show in the Focus cards panel.</p>
                 <div id="cardSourcesList"></div>
                 <button class="btn" id="cardSourcesAddBtn" style="margin:8px 0 0">+ Add source</button>
                 <div id="cardSourcesForm" class="calendar-account-form" style="display:none">

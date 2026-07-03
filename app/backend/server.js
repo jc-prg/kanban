@@ -75,7 +75,8 @@ app.use('/api', require('./routes/dashboard'));
 app.use('/api', require('./routes/webdav-accounts'));
 
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
-app.get('/dashboard',          (req, res) => res.sendFile(SPA_HTML));
+app.get('/focus',              (req, res) => res.sendFile(SPA_HTML));
+app.get('/dashboard',          (req, res) => res.redirect(301, '/focus'));
 app.get('/inbox',              (req, res) => res.sendFile(SPA_HTML));
 app.get('/board/:board',       (req, res) => res.sendFile(SPA_HTML));
 app.get('/board/:board/*path', (req, res) => res.sendFile(SPA_HTML));

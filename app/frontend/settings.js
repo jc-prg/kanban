@@ -392,6 +392,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       loadWebhookSettings();
     }
     if (!_isBoard) { loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); }
+    document.getElementById('colorPaletteSection').style.display = _isBoard ? 'none' : '';
     buildSettingsNav();
     backdrop.style.display = 'flex';
   }
@@ -1538,7 +1539,7 @@ async function afterAuth() {
   // Prime WebDAV and webhook config at startup (board-only)
   if (API_BASE && typeof loadWebdavSettings  === 'function') await loadWebdavSettings();
   if (API_BASE && typeof loadWebhookSettings === 'function') await loadWebhookSettings();
-  if (BOARD_NAME === 'dashboard') { await initDashboard(); return; }
+  if (BOARD_NAME === 'focus') { await initDashboard(); return; }
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;
@@ -1751,9 +1752,9 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
     try {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
-      const isDashboard = window.location.pathname === '/dashboard';
+      const isDashboard = window.location.pathname === '/focus';
       const isDesktop = window.matchMedia('(min-width: 640px)').matches;
-      const dashEntry = isDashboard || isDesktop ? '' : '<a class="board-switch-item" href="/dashboard">Dashboard</a>';
+      const dashEntry = isDashboard || isDesktop ? '' : '<a class="board-switch-item" href="/focus">Focus</a>';
       const allEntry  = '<a class="board-switch-item" href="/">all boards</a>';
       const sep = others.length ? '<div class="header-dd-separator"></div>' : '';
       menu.innerHTML = dashEntry + allEntry + sep + others
