@@ -65,11 +65,13 @@ const mockWdDb = {
 require.cache[GLOBAL_DB_MODULE] = {
   id: GLOBAL_DB_MODULE, filename: GLOBAL_DB_MODULE, loaded: true,
   exports: {
-    getDashboardConfig:  async () => ({ mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }),
-    saveDashboardConfig: async () => ({ ok: true }),
-    initGlobalDb:        async () => {},
-    getGlobalDb:         () => ({}),
-    getWebdavDb:         () => mockWdDb,
+    getDashboardConfig:   async () => ({ mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }),
+    saveDashboardConfig:  async () => ({ ok: true }),
+    initGlobalDb:         async () => {},
+    getGlobalDb:          () => ({}),
+    getWebdavDb:          () => mockWdDb,
+    getWebdavAccounts:    async () => [{ id: 'acc-1', label: 'Test DAV', url: WD_URL, user: 'u', password: 'p' }],
+    saveWebdavAccounts:   async () => ({ ok: true }),
   },
   children: [], paths: [],
 }
@@ -222,7 +224,7 @@ describe('GET /:board/webdav-config', () => {
     mockDbCtx.db = makeDb()
     const res = await request(app).get(`/api/${B}/webdav-config`).set(AUTH)
     expect(res.status).toBe(200)
-    expect(res.body).toMatchObject({ enabled: false, url: '', user: '', hasPassword: false })
+    expect(res.body).toMatchObject({ enabled: false, accountId: '', subfolder: '' })
     expect(res.body.password).toBeUndefined()
   })
 
@@ -241,16 +243,15 @@ describe('PUT /:board/webdav-config', () => {
     mockDbCtx.db = makeDb()
     const putRes = await request(app)
       .put(`/api/${B}/webdav-config`).set(AUTH)
-      .send({ enabled: true, url: 'http://my-dav/', user: 'alice', password: 's3cr3t' })
+      .send({ enabled: true, accountId: 'acc-1', subfolder: 'notes' })
     expect(putRes.status).toBe(200)
     expect(putRes.body.ok).toBe(true)
 
     // Verify stored (simulate re-GET via global webdav db state)
     const stored = mockWdStore[B]
     expect(stored.enabled).toBe(true)
-    expect(stored.url).toBe('http://my-dav/')
-    expect(stored.user).toBe('alice')
-    expect(stored.password).toBe('s3cr3t')
+    expect(stored.accountId).toBe('acc-1')
+    expect(stored.subfolder).toBe('notes')
   })
 })
 
@@ -260,7 +261,7 @@ describe('POST /:board/webdav-config/test', () => {
     mockFetch.mockResolvedValueOnce({ ok: true, status: 207 })
     const res = await request(app)
       .post(`/api/${B}/webdav-config/test`).set(AUTH)
-      .send({ url: WD_URL })
+      .send({ accountId: 'acc-1' })
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
   })
@@ -270,7 +271,7 @@ describe('POST /:board/webdav-config/test', () => {
     mockFetch.mockResolvedValueOnce({ ok: false, status: 401 })
     const res = await request(app)
       .post(`/api/${B}/webdav-config/test`).set(AUTH)
-      .send({ url: WD_URL })
+      .send({ accountId: 'acc-1' })
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(false)
     expect(res.body.error).toMatch(/auth/i)
@@ -281,7 +282,7 @@ describe('POST /:board/webdav-config/test', () => {
     mockFetch.mockRejectedValueOnce(Object.assign(new Error('abort'), { name: 'AbortError' }))
     const res = await request(app)
       .post(`/api/${B}/webdav-config/test`).set(AUTH)
-      .send({ url: WD_URL })
+      .send({ accountId: 'acc-1' })
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(false)
     expect(res.body.error).toMatch(/timed? ?out/i)
