@@ -18,7 +18,7 @@ const fs   = require('fs');
 const AUTH_STATE = path.join(__dirname, '.auth-state.json');
 const BASE_URL   = 'http://localhost:3000';
 const BOARD      = 'e2e-print';
-const BOARD_URL  = `/${BOARD}`;
+const BOARD_URL  = `/board/${BOARD}`;
 
 // A real 1×1 PNG (smallest valid PNG binary)
 const MINIMAL_PNG = Buffer.from([

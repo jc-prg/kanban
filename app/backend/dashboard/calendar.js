@@ -1,5 +1,6 @@
 'use strict';
 const ICAL = require('ical.js');
+const { randomUUID } = require('crypto');
 
 const FETCH_TIMEOUT_MS = 10_000;
 const TEST_TIMEOUT_MS  =  8_000;
@@ -21,6 +22,225 @@ function _icalTimeToString(t) {
   return t.toJSDate().toISOString();
 }
 
+/** Format UTC offset in minutes as ±HHmm (e.g. +0200, -0530). */
+function _offsetStr(minutes) {
+  const sign = minutes >= 0 ? '+' : '-';
+  const abs  = Math.abs(minutes);
+  return `${sign}${_pad(Math.floor(abs / 60))}${_pad(abs % 60)}`;
+}
+
+/** Escape special characters in ICS TEXT values per RFC 5545. */
+function _icsEscape(str) {
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+}
+
+/**
+ * Fold long ICS lines at 75 octets per RFC 5545.
+ * Continuation lines begin with a single SPACE character.
+ */
+function _icsFold(line) {
+  const bytes = Buffer.from(line, 'utf8');
+  if (bytes.length <= 75) return line;
+  const chunks = [];
+  let offset   = 0;
+  let maxBytes = 75;
+  while (offset < bytes.length) {
+    let end = Math.min(offset + maxBytes, bytes.length);
+    // Don't split in the middle of a multi-byte UTF-8 sequence
+    while (end < bytes.length && (bytes[end] & 0xC0) === 0x80) end--;
+    chunks.push(bytes.slice(offset, end).toString('utf8'));
+    offset   = end;
+    maxBytes = 74; // continuation lines: 1 byte for leading space, 74 bytes content
+  }
+  return chunks.join('\r\n ');
+}
+
+// ---- VTIMEZONE generation ----
+
+/**
+ * Build a VTIMEZONE ICS block for a given IANA timezone, using Intl.DateTimeFormat
+ * to derive the UTC offsets and DST transition times for the current year.
+ * Returns an empty string for UTC (no VTIMEZONE needed per RFC 5545).
+ */
+function _buildVTimezone(tzid) {
+  if (!tzid || tzid === 'UTC') return '';
+
+  const year = new Date().getUTCFullYear();
+
+  // Get UTC offset in minutes for a given UTC timestamp in the target timezone
+  function getOffset(utcMs) {
+    const dtf = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tzid,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+    const parts = Object.fromEntries(
+      dtf.formatToParts(new Date(utcMs)).map(p => [p.type, p.value])
+    );
+    const h = parts.hour === '24' ? 0 : +parts.hour;
+    const localMs = Date.UTC(+parts.year, +parts.month - 1, +parts.day, h, +parts.minute, +parts.second);
+    return Math.round((localMs - utcMs) / 60000);
+  }
+
+  // Format a UTC timestamp as iCal local datetime in the given timezone (YYYYMMDDTHHMMSS)
+  function fmtLocal(utcMs) {
+    const dtf = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tzid,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+    const parts = Object.fromEntries(
+      dtf.formatToParts(new Date(utcMs)).map(p => [p.type, p.value])
+    );
+    const h = parts.hour === '24' ? '00' : parts.hour;
+    return `${parts.year}${parts.month}${parts.day}T${h}${parts.minute}${parts.second}`;
+  }
+
+  // Find transitions by sampling every 2 weeks throughout the year
+  const transitions = [];
+  let prevOffset = getOffset(Date.UTC(year, 0, 1));
+  for (let week = 1; week <= 26; week++) {
+    const ts = Date.UTC(year, 0, 1) + week * 14 * 86_400_000;
+    const offset = getOffset(ts);
+    if (offset !== prevOffset) {
+      // Binary-search for the hour of transition
+      let lo = ts - 14 * 86_400_000, hi = ts;
+      const offLo = getOffset(lo);
+      while (hi - lo > 3_600_000) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (getOffset(mid) === offLo) lo = mid;
+        else hi = mid;
+      }
+      transitions.push({ ts: hi, fromOffset: prevOffset, toOffset: offset });
+      prevOffset = offset;
+    }
+  }
+
+  const stdOffset = getOffset(Date.UTC(year, 0, 15)); // January ≈ standard for most zones
+
+  // No DST — emit a single STANDARD component
+  if (transitions.length === 0) {
+    return [
+      'BEGIN:VTIMEZONE',
+      `TZID:${tzid}`,
+      'BEGIN:STANDARD',
+      'DTSTART:19700101T000000',
+      `TZOFFSETFROM:${_offsetStr(stdOffset)}`,
+      `TZOFFSETTO:${_offsetStr(stdOffset)}`,
+      'END:STANDARD',
+      'END:VTIMEZONE',
+    ].join('\r\n');
+  }
+
+  // DST zone — find the spring-forward (DST start) and fall-back (standard start) transitions
+  const dstTrans = transitions.find(t => t.toOffset > t.fromOffset); // clocks spring forward
+  const stdTrans = transitions.find(t => t.toOffset < t.fromOffset); // clocks fall back
+
+  const lines = ['BEGIN:VTIMEZONE', `TZID:${tzid}`];
+
+  if (dstTrans) {
+    lines.push(
+      'BEGIN:DAYLIGHT',
+      `DTSTART:${fmtLocal(dstTrans.ts)}`,
+      `TZOFFSETFROM:${_offsetStr(dstTrans.fromOffset)}`,
+      `TZOFFSETTO:${_offsetStr(dstTrans.toOffset)}`,
+      'END:DAYLIGHT',
+    );
+  }
+
+  if (stdTrans) {
+    lines.push(
+      'BEGIN:STANDARD',
+      `DTSTART:${fmtLocal(stdTrans.ts)}`,
+      `TZOFFSETFROM:${_offsetStr(stdTrans.fromOffset)}`,
+      `TZOFFSETTO:${_offsetStr(stdTrans.toOffset)}`,
+      'END:STANDARD',
+    );
+  }
+
+  lines.push('END:VTIMEZONE');
+  return lines.join('\r\n');
+}
+
+// ---- ICS generation ----
+
+/**
+ * Build a minimal VCALENDAR/VEVENT ICS string suitable for a CalDAV PUT.
+ * For timed events with a named timezone a VTIMEZONE block is embedded.
+ * Returns { ics: string, uid: string }.
+ */
+function buildIcs(event, uid) {
+  const { title, allDay, start, end, location, description, timezone } = event;
+
+  const startMs = new Date(start).getTime();
+  const endMs   = new Date(end).getTime();
+  if (isNaN(startMs) || isNaN(endMs)) throw new Error('invalid start or end date');
+  if (endMs < startMs) throw new Error('end must be >= start');
+
+  const evUid   = uid || event.uid || randomUUID();
+  const dtstamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+
+  // Strip TZ suffix → "20260706T100000" (preserves what the user entered as local time)
+  function toLocalDt(iso) {
+    return iso.replace(/[-:]/g, '').replace(/\.\d+/, '').replace(/Z$/, '').substring(0, 15);
+  }
+
+  // Date-only → "20260706"
+  function toDateOnly(iso) {
+    return iso.substring(0, 10).replace(/-/g, '');
+  }
+
+  const useTzid = !allDay && timezone && timezone !== 'UTC';
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//kanban//kanban//EN',
+  ];
+
+  if (useTzid) {
+    const vtz = _buildVTimezone(timezone);
+    if (vtz) lines.push(vtz);
+  }
+
+  lines.push('BEGIN:VEVENT');
+  lines.push(_icsFold(`UID:${evUid}`));
+  lines.push(`DTSTAMP:${dtstamp}`);
+
+  if (allDay) {
+    const startDate = toDateOnly(start);
+    const endDate   = end
+      ? toDateOnly(end)
+      : toDateOnly(new Date(new Date(start.substring(0, 10)).getTime() + 86_400_000).toISOString());
+    lines.push(`DTSTART;VALUE=DATE:${startDate}`);
+    lines.push(`DTEND;VALUE=DATE:${endDate}`);
+  } else if (useTzid) {
+    lines.push(_icsFold(`DTSTART;TZID=${timezone}:${toLocalDt(start)}`));
+    lines.push(_icsFold(`DTEND;TZID=${timezone}:${toLocalDt(end)}`));
+  } else {
+    // UTC
+    const startUtc = new Date(start).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const endUtc   = new Date(end).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    lines.push(`DTSTART:${startUtc}`);
+    lines.push(`DTEND:${endUtc}`);
+  }
+
+  lines.push(_icsFold(`SUMMARY:${_icsEscape(title)}`));
+  if (location)    lines.push(_icsFold(`LOCATION:${_icsEscape(location)}`));
+  if (description) lines.push(_icsFold(`DESCRIPTION:${_icsEscape(description)}`));
+
+  lines.push('END:VEVENT');
+  lines.push('END:VCALENDAR');
+
+  return { ics: lines.join('\r\n'), uid: evUid };
+}
+
 // ---- Parse ----
 
 /**
@@ -28,11 +248,14 @@ function _icalTimeToString(t) {
  * Exported for unit tests.
  */
 function parseEvents(icsString) {
-  const jcal   = ICAL.parse(icsString);
-  const vcal   = new ICAL.Component(jcal);
+  const jcal    = ICAL.parse(icsString);
+  const vcal    = new ICAL.Component(jcal);
   const vevents = vcal.getAllSubcomponents('vevent');
   return vevents.map(ve => {
-    const ev = new ICAL.Event(ve);
+    const ev          = new ICAL.Event(ve);
+    const dtStartProp = ve.getFirstProperty('dtstart');
+    const timezone    = (dtStartProp && dtStartProp.getParameter('tzid')) || null;
+    const hasRrule    = !!ve.getFirstProperty('rrule');
     return {
       uid:         ev.uid         || '',
       title:       ev.summary     || '(no title)',
@@ -43,6 +266,8 @@ function parseEvents(icsString) {
       description: ve.getFirstPropertyValue('description') || '',
       status:      ve.getFirstPropertyValue('status')      || '',
       organizer:   ve.getFirstPropertyValue('organizer')   || '',
+      timezone,
+      hasRrule,
     };
   });
 }
@@ -70,23 +295,30 @@ function filterEvents(events, lookaheadDays, referenceDate) {
 // ---- Fetch ----
 
 /**
- * Extract all VCALENDAR ICS blocks embedded in a CalDAV XML response.
- * Handles both raw text and &#13;-encoded carriage returns.
+ * Extract VCALENDAR ICS items embedded in a CalDAV REPORT XML response,
+ * pairing each with its ETag and href from the surrounding XML.
+ * Returns [{ ics, etag, href }].
  */
-function _extractIcsBlocks(xml) {
-  const blocks = [];
-  const re = /BEGIN:VCALENDAR[\s\S]*?END:VCALENDAR/g;
+function _extractIcsItems(xml) {
+  const items = [];
+  // Match both namespace-prefixed (D:response) and un-prefixed (response) tags
+  const responseRe = /<(?:[^:/>]+:)?response[^>]*>([\s\S]*?)<\/(?:[^:/>]+:)?response>/gi;
   let m;
-  while ((m = re.exec(xml)) !== null) {
-    blocks.push(m[0].replace(/&#13;/g, '\r'));
+  while ((m = responseRe.exec(xml)) !== null) {
+    const block = m[1];
+    const hrefM = block.match(/<(?:[^:/>]+:)?href[^>]*>([^<]+)<\/(?:[^:/>]+:)?href>/i);
+    const etagM = block.match(/<(?:[^:/>]+:)?getetag[^>]*>([^<]*)<\/(?:[^:/>]+:)?getetag>/i);
+    const icsM  = block.match(/BEGIN:VCALENDAR[\s\S]*?END:VCALENDAR/);
+    if (!icsM) continue;
+    items.push({
+      ics:  icsM[0].replace(/&#13;/g, '\r'),
+      etag: etagM ? etagM[1].trim() : null,
+      href: hrefM ? hrefM[1].trim() : null,
+    });
   }
-  return blocks;
+  return items;
 }
 
-/**
- * Fetch all events from a calendar account, without any date filtering.
- * Returns { events: Event[], error: string|null }.
- */
 // ---- CalDAV discovery helpers ----
 
 /** Extract the text inside the first occurrence of <*:tagName>...<href>...</href>...</*:tagName> */
@@ -166,7 +398,7 @@ async function _listCalendars(homeUrl, headers, signal) {
 
 /**
  * Resolve the exact calendar collection URL by display name or slug.
- * Falls back to _calendarUrl() if discovery fails.
+ * Falls back to _calendarUrlFallback() if discovery fails.
  * Returns { url, discovered: boolean, allCalendars?: [{name,url}] }.
  */
 async function _resolveCalendarUrl(account, headers, signal) {
@@ -288,8 +520,15 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
       if (res.status === 401) throw new Error('Authentication failed (HTTP 401)');
       if (!res.ok) throw new Error(`CalDAV error (HTTP ${res.status})`);
 
-      for (const block of _extractIcsBlocks(await res.text())) {
-        try { allEvents.push(...parseEvents(block)); } catch { /* skip malformed */ }
+      for (const { ics, etag, href } of _extractIcsItems(await res.text())) {
+        try {
+          const parsed = parseEvents(ics);
+          for (const ev of parsed) {
+            ev.etag = etag;
+            ev.href = href;
+            allEvents.push(ev);
+          }
+        } catch { /* skip malformed */ }
       }
     }
 
@@ -306,14 +545,41 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
  * Fetch events for an account, filtered to the lookahead window.
  * Returns { events: Event[], error: string|null } — never throws.
  */
-async function fetchCalendarAccount(account) {
+async function fetchCalendarAccount(account, { lookaheadDays } = {}) {
   try {
-    const days = account.lookaheadDays ?? 7;
+    const days = lookaheadDays ?? account.lookaheadDays ?? 7;
     const { events } = await fetchRawEvents(account, FETCH_TIMEOUT_MS, { lookaheadDays: days });
     return { events: filterEvents(events, days), error: null };
   } catch (err) {
     return { events: [], error: err.message };
   }
+}
+
+/**
+ * Resolve the CalDAV resource URL for a given event UID.
+ * Uses the conventional {collectionUrl}/{uid}.ics naming pattern.
+ * Exported so routes can reuse it without duplicating discovery logic.
+ */
+async function resolveEventUrl(account, uid, headers, signal) {
+  const hdrs = headers || {};
+  const sig  = signal  || new AbortController().signal;
+  const { url: calUrl } = await _resolveCalendarUrl(account, hdrs, sig);
+  const base = (calUrl || _calendarUrlFallback(account)).replace(/\/$/, '');
+  return `${base}/${encodeURIComponent(uid)}.ics`;
+}
+
+/**
+ * Resolve a CalDAV href (absolute path or full URL) to a full URL using the
+ * account's configured URL as the base. Returns null if resolution fails.
+ * Exported so routes can use it instead of reconstructing URLs from UIDs.
+ */
+function hrefToUrl(account, href) {
+  if (!href) return null;
+  try {
+    if (/^https?:\/\//i.test(href)) return href;
+    const origin = new URL(account.url).origin;
+    return new URL(href, origin).href;
+  } catch { return null; }
 }
 
 /**
@@ -385,7 +651,7 @@ async function testCalendarAccount(account) {
     const res = await fetch(match.url, {
       method:  'REPORT',
       headers: { ...headers, 'Content-Type': 'application/xml', 'Depth': '1' },
-      body:    _REPORT_BODY,
+      body:    _REPORT_BODY_ALL,
       signal:  controller.signal,
     });
     if (res.status === 401) return { ok: false, error: 'Authentication failed on calendar collection.' };
@@ -404,4 +670,15 @@ async function testCalendarAccount(account) {
   }
 }
 
-module.exports = { parseEvents, filterEvents, fetchRawEvents, fetchCalendarAccount, testCalendarAccount, clearCalendarUrlCache };
+module.exports = {
+  parseEvents,
+  filterEvents,
+  fetchRawEvents,
+  fetchCalendarAccount,
+  testCalendarAccount,
+  clearCalendarUrlCache,
+  buildIcs,
+  resolveEventUrl,
+  hrefToUrl,
+  _buildVTimezone, // exported for unit tests
+};

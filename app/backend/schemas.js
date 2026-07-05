@@ -135,8 +135,25 @@ const validateInboxCards = ajv.compile({
   ]
 });
 
+const validateCalendarEvent = ajv.compile({
+  type: 'object',
+  required: ['title', 'allDay', 'start', 'end'],
+  additionalProperties: false,
+  properties: {
+    title:       { type: 'string', minLength: 1, maxLength: 500 },
+    allDay:      { type: 'boolean' },
+    start:       { type: 'string' },
+    end:         { type: 'string' },
+    timezone:    { type: 'string', maxLength: 100 },
+    location:    { type: 'string', maxLength: 500 },
+    description: { type: 'string', maxLength: 10000 },
+    etag:        { type: 'string' },
+    href:        { type: 'string' },
+  },
+});
+
 function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, schemaError };

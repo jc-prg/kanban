@@ -86,7 +86,7 @@ test.describe('3.2 Board Overview', () => {
     await expect(page.locator('#overview')).toBeVisible();
 
     // The board we seeded should appear in the active grid
-    const boardLink = page.locator(`#boardGrid .board-card[href="/${BOARD_LIST}"]`);
+    const boardLink = page.locator(`#boardGrid .board-card[href="/board/${BOARD_LIST}"]`);
     await expect(boardLink).toBeVisible();
 
     // It should contain the board name
@@ -116,7 +116,7 @@ test.describe('3.2 Board Overview', () => {
 
     // Archived board must NOT appear in the active grid
     await expect(
-      page.locator(`#boardGrid .board-card[href="/${BOARD_ARCHIVED}"]`)
+      page.locator(`#boardGrid .board-card[href="/board/${BOARD_ARCHIVED}"]`)
     ).toBeHidden();
 
     // The archived section header should be visible (there is at least one archived board)
@@ -131,7 +131,7 @@ test.describe('3.2 Board Overview', () => {
     // Archived grid expands and the board is visible
     await expect(page.locator('#archivedGrid')).toBeVisible();
     await expect(
-      page.locator(`#archivedGrid .board-card[href="/${BOARD_ARCHIVED}"]`)
+      page.locator(`#archivedGrid .board-card[href="/board/${BOARD_ARCHIVED}"]`)
     ).toBeVisible();
   });
 

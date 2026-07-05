@@ -87,7 +87,7 @@
       <div class="dashboard-panel-body" id="dashboardMailPanel"></div>
     </div>
     <div class="dashboard-panel">
-      <div class="dashboard-panel-header">Calendar<span class="column-count" id="dashCalendarCount"></span></div>
+      <div class="dashboard-panel-header">Calendar<span style="flex:1"></span><button class="col-btn" id="dashCalendarMenuBtn" style="display:none" title="Calendar options">&#x22ee;</button><span class="column-count" id="dashCalendarCount"></span></div>
       <div class="dashboard-panel-body" id="dashboardCalendarPanel"></div>
     </div>
   </div>
@@ -235,6 +235,60 @@
   </div>
   <button class="ctx-item ctx-danger" id="mailCtxDelete"><span data-icon="close"></span>  Delete (trash)</button>
 </div>
+
+<dialog id="calEventModal" class="modal">
+  <div class="modal-header">
+    <span id="calEventModalTitle">New event</span>
+    <button class="modal-close-btn" id="calEventModalClose">✕</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-field" id="calEventAccountField">
+      <label class="modal-label" for="calEventAccount">Calendar</label>
+      <select id="calEventAccount" class="modal-input"></select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="calEventTitle">Title</label>
+      <input type="text" id="calEventTitle" class="modal-input" maxlength="500" autocomplete="off">
+    </div>
+    <div class="modal-field cal-event-allday-row">
+      <label class="modal-label"></label>
+      <label class="cal-event-allday-label"><input type="checkbox" id="calEventAllDay"> All day</label>
+    </div>
+    <div class="cal-event-time-row">
+      <div class="modal-field">
+        <label class="modal-label" for="calEventStartDate">Start</label>
+        <span class="cal-event-dt-pair">
+          <input type="date" id="calEventStartDate" class="modal-input cal-event-date-input">
+          <input type="time" id="calEventStartTime" class="modal-input cal-event-time-input">
+        </span>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="calEventEndDate">End</label>
+        <span class="cal-event-dt-pair">
+          <input type="date" id="calEventEndDate" class="modal-input cal-event-date-input">
+          <input type="time" id="calEventEndTime" class="modal-input cal-event-time-input">
+        </span>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="calEventLocation">Location</label>
+      <input type="text" id="calEventLocation" class="modal-input" maxlength="500" autocomplete="off">
+    </div>
+    <div class="modal-field cal-event-tz-row" id="calEventTzRow">
+      <label class="modal-label" for="calEventTimezone">Timezone</label>
+      <select id="calEventTimezone" class="modal-input"></select>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label" for="calEventDescription">Description</label>
+      <textarea id="calEventDescription" class="modal-input" rows="4"></textarea>
+    </div>
+    <p class="cal-event-error" id="calEventError" hidden></p>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" id="calEventCancelBtn">Cancel</button>
+    <button class="btn btn-primary" id="calEventSaveBtn">Save event</button>
+  </div>
+</dialog>
 
 <div id="modal" class="modal-backdrop" style="display:none">
   <div class="modal">
@@ -869,8 +923,19 @@
               </div>
 
               <div class="prompts-panel" data-panel="calendar">
+                <section id="calendar-accounts">
                 <div id="calendarAccountsList"></div>
                 <button class="btn" id="calendarAddBtn" style="margin:8px 0 0">+ Add account</button>
+                <div class="settings-field-row" style="margin-top:10px">
+                  <label class="settings-field-label" for="calGroupedToggle">Group events by account</label>
+                  <input type="checkbox" id="calGroupedToggle" checked>
+                </div>
+                </section>
+                <div class="settings-field-row" style="margin-top:16px">
+                  <label class="settings-field-label" for="dashDefaultTimezone">Default timezone for new events</label>
+                  <select id="dashDefaultTimezone" class="new-board-input"></select>
+                </div>
+                <p class="settings-item-desc">Leave blank to use browser timezone. Used as default when creating events in the dashboard.</p>
                 <div id="calendarAccountForm" class="calendar-account-form" style="display:none">
                   <input type="hidden" id="calEditId">
                   <div class="settings-field-row">

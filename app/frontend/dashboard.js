@@ -45,6 +45,42 @@ function _persistGroupState(key, collapsed) {
 _loadGroupState();
 // Map: "accountId\0uid" → event object — populated on each calendar render for instant detail view
 const _calEventMap      = new Map();
+// Map: accountId → current lookahead days (persisted in localStorage across reloads)
+const _calLookahead     = new Map();
+const _CAL_LOOKAHEAD_KEY = 'cal-lookahead';
+(function _loadCalLookahead() {
+  try {
+    const navType = performance.getEntriesByType?.('navigation')[0]?.type;
+    if (navType === 'reload') { localStorage.removeItem(_CAL_LOOKAHEAD_KEY); return; }
+    const stored = JSON.parse(localStorage.getItem(_CAL_LOOKAHEAD_KEY));
+    if (stored && typeof stored === 'object') {
+      for (const [k, v] of Object.entries(stored)) {
+        if (typeof v === 'number' && v > 0) _calLookahead.set(k, v);
+      }
+    }
+  } catch { /* ignore */ }
+})();
+function _setCalLookahead(accountId, days) {
+  _calLookahead.set(accountId, days);
+  try {
+    const obj = Object.fromEntries(_calLookahead);
+    localStorage.setItem(_CAL_LOOKAHEAD_KEY, JSON.stringify(obj));
+  } catch { /* ignore */ }
+}
+// Dashboard config: default timezone for new calendar events
+let _defaultTimezone    = '';
+// Raw calendar account configs from /api/dashboard/config — used to build per-account fetch URLs
+let _calAccountsConfig  = [];
+// Calendar display mode: true = grouped per account, false = unified chronological
+let _calGrouped         = true;
+// Last-rendered accounts list; used by the header context menu in ungrouped mode
+let _calAccountsMeta    = [];
+// Calendar event modal state
+let _calModalMode   = 'create'; // 'create' | 'edit'
+let _calModalAccId  = null;
+let _calModalUid    = null;
+let _calModalEtag   = null;
+let _calModalHref   = null;
 
 async function _dashPatchCard(board, cardId, patchFn) {
   const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
@@ -270,6 +306,24 @@ async function initDashboard() {
   document.getElementById('menuInbox').style.display = '';
 
   document.getElementById('dashboardRefreshBtn').addEventListener('click', loadDashboard);
+  document.getElementById('dashCalendarMenuBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    const accounts = _calAccountsMeta;
+    const items = [];
+    for (const acc of accounts) {
+      if ((acc.type || 'caldav') !== 'ical-url') {
+        items.push({ label: `New event \u2014 ${acc.label || acc.accountId}`, action: () => openCalEventModal(acc.accountId, null, acc) });
+      }
+    }
+    const lookaheads = accounts.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7));
+    const minDays = lookaheads.length ? Math.min(...lookaheads) : 7;
+    items.push(
+      { label: `Show +1 week (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(7) },
+      { label: `Show +1 month (now: ${minDays} days)`, action: () => _loadMoreCalEventsAll(30) },
+      { label: 'Edit accounts', action: () => openSettingsDialog('calendar-accounts') },
+    );
+    openContextMenu(e, items);
+  });
   document.getElementById('dashboardDetailClose').addEventListener('click', _closeDetail);
   document.getElementById('dashboardDetailFsBtn').addEventListener('click', () => {
     document.querySelector('#dashboardDetail .modal').classList.toggle('modal--fullscreen');
@@ -403,11 +457,14 @@ async function initDashboard() {
   try {
     const cfg = await fetch('/api/dashboard/config').then(r => r.json());
     applyDashboardPanelVisibility(cfg);
-    _dashRecentLimit = cfg.recentLimit || 10;
+    _dashRecentLimit   = cfg.recentLimit || 10;
+    _defaultTimezone   = cfg.defaultTimezone || '';
+    _calGrouped        = cfg.calendarGrouped !== false;
+    _calAccountsConfig = cfg.calendarAccounts || [];
     if (cfg.autoRefreshMs > 0) {
       _refreshTimer = setInterval(loadDashboard, cfg.autoRefreshMs);
-      window.addEventListener('pagehide', () => clearInterval(_refreshTimer), { once: true });
     }
+    window.addEventListener('pagehide', () => { clearInterval(_refreshTimer); }, { once: true });
   } catch { /* ignore */ }
 
   _initCardsDragDrop();
@@ -426,6 +483,32 @@ async function _reloadCardsPanel() {
 
 function _panelShown(id) {
   return document.getElementById(id).closest('.dashboard-panel').style.display !== 'none';
+}
+
+async function _fetchCalendarData() {
+  if (!_calLookahead.size || !_calAccountsConfig.length) {
+    const r = await fetch('/api/dashboard/calendar');
+    if (!r.ok) throw new Error();
+    return r.json();
+  }
+  const settled = await Promise.allSettled(
+    _calAccountsConfig.map(acc => {
+      const days = _calLookahead.get(acc.id) ?? (acc.lookaheadDays || 7);
+      return fetch(`/api/dashboard/calendar/${encodeURIComponent(acc.id)}?days=${days}`)
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed')))
+        .then(data => ({
+          accountId: acc.id, label: acc.label, type: acc.type || 'caldav',
+          color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null,
+          lookaheadDays: acc.lookaheadDays || 7,
+          ...data,
+        }));
+    })
+  );
+  return settled.map((r, i) => {
+    const acc = _calAccountsConfig[i];
+    const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
+    return r.status === 'fulfilled' ? r.value : { ...base, events: [], error: r.reason?.message || 'Failed to load' };
+  });
 }
 
 async function loadDashboard() {
@@ -452,7 +535,7 @@ async function loadDashboard() {
     ]).then(([d, a]) => _renderBoardsPanel(d, a).then(() => true)).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
     showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
-    showCalendar ? fetch('/api/dashboard/calendar').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+    showCalendar ? _fetchCalendarData().then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
   ]);
 
   const anyError = resolved.some((ok, i) => !ok && [showBoards, showCards, showMail, showCalendar][i]);
@@ -885,35 +968,7 @@ function _openMailDetail(accountId, msgId, webUrl) {
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load message.</p>'; });
 }
 
-function _renderCalendarPanel(accounts) {
-  const panel = document.getElementById('dashboardCalendarPanel');
-  const total = accounts.reduce((s, a) => s + (a.events?.length || 0), 0);
-  document.getElementById('dashCalendarCount').textContent = total || '';
-
-  if (!accounts.length) {
-    panel.innerHTML = '<p class="dashboard-empty">No calendar accounts configured.</p>';
-    return;
-  }
-
-  // Flatten events tagged with account info
-  const allEvents = [];
-  const errors    = [];
-  _calEventMap.clear();
-  for (const acc of accounts) {
-    if (acc.error) {
-      errors.push(`<div class="dashboard-source-error">\u26a0 ${escHtml(acc.label)}: ${escHtml(acc.error)}</div>`);
-      continue;
-    }
-    for (const ev of (acc.events || [])) {
-      const tagged = { ...ev, _label: acc.label, _accountId: acc.accountId, _webUrl: acc.webInterfaceUrl, _color: acc.color };
-      allEvents.push(tagged);
-      _calEventMap.set(`${acc.accountId}\0${ev.uid}`, tagged);
-    }
-  }
-
-  // Sort by start
-  allEvents.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
-
+function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
   const todayStr    = new Date().toISOString().slice(0, 10);
   const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
@@ -923,10 +978,16 @@ function _renderCalendarPanel(accounts) {
     return new Date(dateStr).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
-  // Group by day, expanding multi-day events across every day they span.
-  // All-day DTEND is exclusive in iCal, so subtract one day for those.
-  const groups = new Map(); // YYYY-MM-DD → ev[]
-  for (const ev of allEvents) {
+  function _fmtTime(ev, dayStr) {
+    if (ev.allDay) return '';
+    if (dayStr !== (ev.start || '').slice(0, 10)) return 'continues';
+    try { return new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+    catch { return ''; }
+  }
+
+  const groups = new Map();
+  const sorted = [...events].sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+  for (const ev of sorted) {
     const startDay = (ev.start || '').slice(0, 10);
     if (!startDay) continue;
     let endDay = startDay;
@@ -940,8 +1001,10 @@ function _renderCalendarPanel(accounts) {
         endDay = endDateStr;
       }
     }
-    let cur = new Date(startDay + 'T00:00:00Z');
-    const last = new Date(endDay + 'T00:00:00Z');
+    const effectiveStart = startDay < todayStr ? todayStr : startDay;
+    const effectiveEnd = maxDay && endDay > maxDay ? maxDay : endDay;
+    let cur = new Date(effectiveStart + 'T00:00:00Z');
+    const last = new Date(effectiveEnd + 'T00:00:00Z');
     while (cur <= last) {
       const dayStr = cur.toISOString().slice(0, 10);
       if (!groups.has(dayStr)) groups.set(dayStr, []);
@@ -950,35 +1013,168 @@ function _renderCalendarPanel(accounts) {
     }
   }
 
-  function _fmtTime(ev, dayStr) {
-    if (ev.allDay) return '';
-    if (dayStr !== (ev.start || '').slice(0, 10)) return 'continues';
-    try {
-      return new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch { return ''; }
-  }
-
-  const groupHtml = [...groups.entries()]
+  const now = new Date();
+  return [...groups.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([dayStr, evs]) => {
-      const day    = _dayLabel(dayStr);
-      const header = `<div class="dashboard-group-header">${escHtml(day)}</div>`;
-      const now = new Date();
-      const items  = evs.map(ev => {
-        const isPast = ev.end && new Date(ev.end) < now;
-        const colorStyle = ev._color ? ` style="--card-color:${escHtml(ev._color)}"` : '';
-        const metaHtml = `<div class="card-meta"><span class="card-date">${escHtml(_fmtTime(ev, dayStr))}</span><span class="dashboard-event-label">${escHtml(ev._label)}</span></div>`;
-        return `<div class="dashboard-event-item card${isPast ? ' card--done' : ''}" data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}"${colorStyle}>
-          <div class="card-body">
-            <div class="card-text">${escHtml(ev.title)}</div>
-            ${metaHtml}
-          </div>
+      const header = `<div class="dashboard-group-header">${escHtml(_dayLabel(dayStr))}</div>`;
+      const items = evs.map(ev => {
+        const isPast      = ev.end && new Date(ev.end) < now;
+        const evColor     = ev._color     || accColor;
+        const evAccountId = ev._accountId || accAccountId;
+        const evWebUrl    = ev._webUrl    || accWebUrl;
+        const colorStyle  = evColor ? ` style="--card-color:${escHtml(evColor)}"` : '';
+        const evStartDay  = (ev.start || '').slice(0, 10);
+        let evEndDay = evStartDay;
+        if (ev.end) {
+          const endDateStr = ev.end.slice(0, 10);
+          if (ev.allDay) {
+            const d = new Date(endDateStr + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() - 1);
+            evEndDay = d.toISOString().slice(0, 10);
+          } else {
+            evEndDay = endDateStr;
+          }
+        }
+        const isMultiday = evStartDay && evEndDay && evStartDay !== evEndDay;
+        const metaText   = isMultiday
+          ? `${fmtDate(evStartDay)} \u2192 ${fmtDate(evEndDay)}`
+          : _fmtTime(ev, dayStr);
+        const timeHtml   = `<div class="card-meta"><span class="card-date">${escHtml(metaText)}</span></div>`;
+        return `<div class="dashboard-event-item card${isPast ? ' card--done' : ''}${ev._provisional ? ' cal-event--provisional' : ''}" data-account-id="${escHtml(evAccountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(evWebUrl || '')}"${colorStyle}>
+          <div class="card-body"><div class="card-text">${escHtml(ev.title)}</div>${timeHtml}</div>
         </div>`;
       }).join('');
       return header + items;
     }).join('');
+}
 
-  panel.innerHTML = errors.join('') + (groupHtml || '<p class="dashboard-empty">No upcoming events.</p>');
+function _renderCalendarPanel(accounts) {
+  const panel   = document.getElementById('dashboardCalendarPanel');
+  const menuBtn = document.getElementById('dashCalendarMenuBtn');
+  const total   = accounts.reduce((s, a) => s + (a.events?.length || 0), 0);
+  document.getElementById('dashCalendarCount').textContent = total || '';
+
+  _calAccountsMeta = accounts;
+
+  if (!accounts.length) {
+    panel.innerHTML = '<p class="dashboard-empty">No calendar accounts configured.</p>';
+    menuBtn.style.display = 'none';
+    return;
+  }
+
+  // Tag all events in _calEventMap (needed in both modes for the detail panel)
+  _calEventMap.clear();
+  for (const acc of accounts) {
+    for (const ev of (acc.events || [])) {
+      _calEventMap.set(`${acc.accountId}\0${ev.uid}`, {
+        ...ev,
+        _label: acc.label, _accountId: acc.accountId,
+        _webUrl: acc.webInterfaceUrl, _color: acc.color,
+        _accountType: acc.type || 'caldav',
+      });
+    }
+  }
+
+  panel.innerHTML = '';
+
+  if (!_calGrouped) {
+    // ---- Unified chronological view ----
+    menuBtn.style.display = '';
+
+    const allEvents = [];
+    for (const acc of accounts) {
+      if (acc.error) continue;
+      for (const ev of (acc.events || [])) {
+        allEvents.push({ ...ev, _color: acc.color, _accountId: acc.accountId, _webUrl: acc.webInterfaceUrl || '' });
+      }
+    }
+
+    const errAccounts = accounts.filter(a => a.error);
+    if (errAccounts.length) {
+      for (const acc of errAccounts) {
+        panel.innerHTML += `<div class="dashboard-source-error">\u26a0 ${escHtml(acc.label || acc.accountId)}: ${escHtml(acc.error)}</div>`;
+      }
+    }
+
+    // Unified lookahead note (show max of all accounts)
+    const lookaheads = accounts.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7));
+    const maxLookahead = lookaheads.length ? Math.max(...lookaheads) : 7;
+    const maxDayUnified = new Date(); maxDayUnified.setDate(maxDayUnified.getDate() + maxLookahead - 1);
+    const groupsHtml = _calDayGroupsHtml(allEvents, '', '', '', maxDayUnified.toISOString().slice(0, 10));
+    panel.innerHTML += groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+
+    if (maxLookahead > 7) {
+      const noteEl = document.createElement('p');
+      noteEl.className = 'dash-cal-lookahead-note';
+      noteEl.textContent = `Showing next ${maxLookahead} days`;
+      panel.appendChild(noteEl);
+    }
+    return;
+  }
+
+  // ---- Grouped per-account view (default) ----
+  menuBtn.style.display = 'none';
+
+  for (const acc of accounts) {
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'dash-cal-account';
+    sectionEl.dataset.accountId = acc.accountId;
+
+    // Header with col-btn
+    const headerEl = document.createElement('div');
+    headerEl.className = 'dash-cal-account-header';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'dash-cal-account-label';
+    labelEl.textContent = acc.label || acc.accountId;
+    if (acc.color) labelEl.style.setProperty('--card-color', acc.color);
+    const accMenuBtn = document.createElement('button');
+    accMenuBtn.className = 'col-btn';
+    accMenuBtn.title = 'Calendar options';
+    accMenuBtn.dataset.accountId = acc.accountId;
+    accMenuBtn.textContent = '\u22ee';
+    headerEl.append(labelEl, accMenuBtn);
+    sectionEl.appendChild(headerEl);
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'dash-cal-account-body';
+
+    if (acc.error) {
+      bodyEl.innerHTML = `<div class="dashboard-source-error">\u26a0 ${escHtml(acc.error)}</div>`;
+    } else {
+      const lookahead = _calLookahead.get(acc.accountId) ?? (acc.lookaheadDays || 7);
+      const maxDayAcc = new Date(); maxDayAcc.setDate(maxDayAcc.getDate() + lookahead - 1);
+      const groupsHtml = _calDayGroupsHtml(acc.events || [], acc.color, acc.accountId, acc.webInterfaceUrl, maxDayAcc.toISOString().slice(0, 10));
+      bodyEl.innerHTML = groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+
+      // Lookahead note
+      const noteEl = document.createElement('p');
+      noteEl.className = 'dash-cal-lookahead-note';
+      if (_calLookahead.get(acc.accountId)) noteEl.textContent = `Showing next ${lookahead} days`;
+      else noteEl.hidden = true;
+      bodyEl.appendChild(noteEl);
+    }
+
+    sectionEl.appendChild(bodyEl);
+
+    // Col-btn click → context menu
+    accMenuBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const days = _calLookahead.get(acc.accountId) ?? (acc.lookaheadDays || 7);
+      const items = [];
+      if ((acc.type || 'caldav') !== 'ical-url') {
+        items.push({ label: 'New event', action: () => openCalEventModal(acc.accountId, null, acc) });
+      }
+      items.push(
+        { label: `Show +1 week (now: ${days} days)`,  action: () => _loadMoreCalEvents(acc.accountId, 7,  acc) },
+        { label: `Show +1 month (now: ${days} days)`, action: () => _loadMoreCalEvents(acc.accountId, 30, acc) },
+        { label: 'Edit accounts', action: () => openSettingsDialog('calendar-accounts') },
+      );
+      openContextMenu(e, items);
+    });
+
+    panel.appendChild(sectionEl);
+  }
 }
 
 // ---- Detail panel ----
@@ -1194,6 +1390,40 @@ function _openEventDetail(accountId, uid, webUrl) {
         iframe.style.height = Math.max(450, Math.min(natural, body.clientHeight)) + 'px';
       };
       iframe.addEventListener('load', resize);
+    }
+
+    // Edit / Delete footer — only for CalDAV accounts, hidden for iCal-URL or recurring events
+    const existingFooter = detail.querySelector('.dash-detail-footer');
+    if (existingFooter) existingFooter.remove();
+
+    const isReadOnly  = (ev._accountType || 'caldav') === 'ical-url';
+    const isRecurring = !!ev.hasRrule;
+
+    if (!isReadOnly) {
+      const footer = document.createElement('div');
+      footer.className = 'dash-detail-footer';
+
+      if (isRecurring) {
+        const note = document.createElement('span');
+        note.style.cssText = 'font-size:0.8rem;color:var(--text-muted);flex:1';
+        note.textContent = 'Recurring event \u2014 editing not supported.';
+        footer.appendChild(note);
+      } else {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-secondary';
+        deleteBtn.style.color = 'var(--danger)';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', () => _deleteCalEvent(ev._accountId, ev.uid, ev.etag, ev.href));
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn btn-primary';
+        editBtn.textContent = 'Edit';
+        editBtn.addEventListener('click', () => openCalEventModal(ev._accountId, ev));
+
+        footer.append(deleteBtn, editBtn);
+      }
+
+      detail.querySelector('.modal').appendChild(footer);
     }
   }
 
@@ -1421,3 +1651,415 @@ document.getElementById('mailCtxMoveWrap').addEventListener('mouseenter', async 
 });
 
 document.addEventListener('click', () => hideMailContextMenu());
+
+// ---- Calendar event write ----
+
+/** Populate a <select> with grouped IANA timezone options. */
+function _populateTzSelect(sel, selected) {
+  sel.innerHTML = '';
+  try {
+    const tzs = Intl.supportedValuesOf('timeZone');
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '\u2014 Browser default \u2014';
+    sel.appendChild(blank);
+    const groups = {};
+    for (const tz of tzs) {
+      const region = tz.includes('/') ? tz.split('/')[0] : 'Other';
+      if (!groups[region]) groups[region] = [];
+      groups[region].push(tz);
+    }
+    for (const [region, tzList] of Object.entries(groups).sort()) {
+      const og = document.createElement('optgroup');
+      og.label = region;
+      for (const tz of tzList) {
+        const opt = document.createElement('option');
+        opt.value = tz; opt.textContent = tz;
+        if (tz === selected) opt.selected = true;
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    }
+  } catch {
+    // Intl.supportedValuesOf not available — add a text input fallback
+    sel.innerHTML = `<option value="${escHtml(selected || '')}">${escHtml(selected || 'UTC')}</option>`;
+  }
+  if (selected) sel.value = selected;
+}
+
+/**
+ * Open the calendar event creation/edit modal.
+ * accountId + acc: create mode (acc is the account config object for type check).
+ * accountId + ev:  edit mode (ev is the cached event from _calEventMap).
+ */
+async function openCalEventModal(accountId, ev, acc) {
+  const modal      = document.getElementById('calEventModal');
+  const titleEl    = document.getElementById('calEventModalTitle');
+  const accField   = document.getElementById('calEventAccountField');
+  const accSel     = document.getElementById('calEventAccount');
+  const titleInput = document.getElementById('calEventTitle');
+  const allDayCb   = document.getElementById('calEventAllDay');
+  const startDate  = document.getElementById('calEventStartDate');
+  const startTime  = document.getElementById('calEventStartTime');
+  const endDate    = document.getElementById('calEventEndDate');
+  const endTime    = document.getElementById('calEventEndTime');
+  const locInput   = document.getElementById('calEventLocation');
+  const tzSel      = document.getElementById('calEventTimezone');
+  const tzRow      = document.getElementById('calEventTzRow');
+  const descInput  = document.getElementById('calEventDescription');
+  const errEl      = document.getElementById('calEventError');
+  const saveBtn    = document.getElementById('calEventSaveBtn');
+
+  errEl.hidden = true; errEl.textContent = '';
+  saveBtn.textContent = 'Save event'; saveBtn.disabled = false;
+
+  const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  if (ev) {
+    // Edit mode — fetch fresh event to get the current etag and href from the server
+    try {
+      const fresh = await fetch(
+        `/api/dashboard/calendar/${encodeURIComponent(ev._accountId || accountId)}/event/${encodeURIComponent(ev.uid)}`
+      ).then(r => r.ok ? r.json() : null);
+      if (fresh) ev = { ...ev, etag: fresh.etag, href: fresh.href };
+    } catch { /* fall back to cached values */ }
+
+    _calModalMode  = 'edit';
+    _calModalAccId = ev._accountId || accountId;
+    _calModalUid   = ev.uid;
+    _calModalEtag  = ev.etag || null;
+    _calModalHref  = ev.href || null;
+    titleEl.textContent = 'Edit event';
+    accField.style.display = 'none';
+
+    titleInput.value = ev.title || '';
+    allDayCb.checked = !!ev.allDay;
+    locInput.value   = ev.location || '';
+    descInput.value  = ev.description || '';
+
+    // Dates
+    const startDt  = ev.start ? new Date(ev.start) : new Date();
+    const endDt    = ev.end   ? new Date(ev.end)   : new Date(startDt.getTime() + 3600000);
+    const isoLocal = dt => {
+      const y = dt.getFullYear(), mo = dt.getMonth() + 1, d = dt.getDate();
+      const h = dt.getHours(), mi = dt.getMinutes();
+      return {
+        date: `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`,
+        time: `${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`,
+      };
+    };
+    if (ev.allDay) {
+      startDate.value = (ev.start || '').slice(0, 10);
+      endDate.value   = (ev.end   || '').slice(0, 10) || startDate.value;
+    } else {
+      const s = isoLocal(startDt), e = isoLocal(endDt);
+      startDate.value = s.date; startTime.value = s.time;
+      endDate.value   = e.date; endTime.value   = e.time;
+    }
+
+    const tz = ev.timezone || _defaultTimezone || browserTz;
+    _populateTzSelect(tzSel, tz);
+  } else {
+    // Create mode
+    _calModalMode  = 'create';
+    _calModalAccId = accountId;
+    _calModalUid   = null;
+    _calModalEtag  = null;
+    titleEl.textContent = 'New event';
+
+    // Populate account selector
+    accField.style.display = '';
+    accSel.innerHTML = '';
+    const allAccounts = _calAccountsMeta.filter(a => (a.type || 'caldav') !== 'ical-url');
+    for (const a of allAccounts) {
+      const opt = document.createElement('option');
+      opt.value = a.accountId; opt.textContent = a.label || a.accountId;
+      if (a.accountId === accountId) opt.selected = true;
+      accSel.appendChild(opt);
+    }
+
+    titleInput.value = '';
+    allDayCb.checked = false;
+    locInput.value   = '';
+    descInput.value  = '';
+
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const todayDate = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+    const startH = now.getHours() + 1;
+    startDate.value = todayDate; startTime.value = `${pad(startH % 24)}:00`;
+    endDate.value   = todayDate; endTime.value   = `${pad((startH + 1) % 24)}:00`;
+
+    _populateTzSelect(tzSel, _defaultTimezone || browserTz);
+  }
+
+  // Show/hide time fields based on all-day
+  const toggleAllDay = () => {
+    const ad = allDayCb.checked;
+    startTime.style.display = ad ? 'none' : '';
+    endTime.style.display   = ad ? 'none' : '';
+    tzRow.style.display     = ad ? 'none' : '';
+  };
+  allDayCb.onchange = toggleAllDay;
+  toggleAllDay();
+
+  modal.showModal();
+}
+
+async function _submitCalEvent() {
+  const allDayCb  = document.getElementById('calEventAllDay');
+  const startDate = document.getElementById('calEventStartDate');
+  const startTime = document.getElementById('calEventStartTime');
+  const endDate   = document.getElementById('calEventEndDate');
+  const endTime   = document.getElementById('calEventEndTime');
+  const errEl     = document.getElementById('calEventError');
+  const saveBtn   = document.getElementById('calEventSaveBtn');
+
+  const title    = document.getElementById('calEventTitle').value.trim();
+  const allDay   = allDayCb.checked;
+  const location = document.getElementById('calEventLocation').value.trim();
+  const timezone = allDay ? '' : (document.getElementById('calEventTimezone').value || '');
+  const desc     = document.getElementById('calEventDescription').value.trim();
+
+  if (!title) { errEl.textContent = 'Title is required.'; errEl.hidden = false; return; }
+  if (!startDate.value) { errEl.textContent = 'Start date is required.'; errEl.hidden = false; return; }
+
+  const start = allDay
+    ? startDate.value
+    : `${startDate.value}T${startTime.value || '00:00'}:00`;
+  const end = allDay
+    ? (endDate.value || startDate.value)
+    : `${endDate.value || startDate.value}T${endTime.value || '00:00'}:00`;
+
+  errEl.hidden = true;
+  saveBtn.textContent = 'Saving\u2026';
+  saveBtn.disabled = true;
+
+  const accountId = _calModalMode === 'edit'
+    ? _calModalAccId
+    : (document.getElementById('calEventAccount').value || _calModalAccId);
+
+  const body = { title, allDay, start, end };
+  if (location) body.location = location;
+  if (desc)     body.description = desc;
+  if (timezone) body.timezone = timezone;
+  if (_calModalMode === 'edit' && _calModalEtag) body.etag = _calModalEtag;
+  if (_calModalMode === 'edit' && _calModalHref) body.href = _calModalHref;
+
+  try {
+    let res;
+    if (_calModalMode === 'edit') {
+      res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(_calModalUid)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || `Error ${res.status}`;
+      errEl.hidden = false;
+      saveBtn.textContent = 'Save event'; saveBtn.disabled = false;
+      return;
+    }
+
+    document.getElementById('calEventModal').close();
+    await _refreshCalendarAccount(accountId);
+    _closeDetail();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+    saveBtn.textContent = 'Save event'; saveBtn.disabled = false;
+  }
+}
+
+async function _deleteCalEvent(accountId, uid, etag, href) {
+  // Fetch fresh event to get the current etag and href from the server
+  try {
+    const fresh = await fetch(
+      `/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(uid)}`
+    ).then(r => r.ok ? r.json() : null);
+    if (fresh) { etag = fresh.etag ?? etag; href = fresh.href ?? href; }
+  } catch { /* fall back to cached values */ }
+
+  const ok = await showConfirm('Delete this event?', { okLabel: 'Delete', danger: true });
+  if (!ok) return;
+
+  const headers = {};
+  if (etag) headers['If-Match'] = etag;
+  const qs = href ? `?href=${encodeURIComponent(href)}` : '';
+  try {
+    const res = await fetch(
+      `/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(uid)}${qs}`,
+      { method: 'DELETE', headers }
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      await showConfirm(data.error || `Delete failed (${res.status})`, { okLabel: 'OK', hideCancel: true });
+      return;
+    }
+    _closeDetail();
+    await _refreshCalendarAccount(accountId);
+  } catch (err) {
+    await showConfirm(err.message, { okLabel: 'OK', hideCancel: true });
+  }
+}
+
+async function _loadMoreCalEvents(accountId, extraDays, acc) {
+  const configured = acc?.lookaheadDays || 7;
+  const current    = _calLookahead.get(accountId) ?? configured;
+  const newDays    = Math.min(365, current + extraDays);
+
+  // Disable this account's col-btn during load
+  const btn = document.querySelector(`.dash-cal-account[data-account-id="${CSS.escape(accountId)}"] .col-btn`);
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}?days=${newDays}`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    _setCalLookahead(accountId, newDays);
+
+    // Merge new events for this account into _calEventMap
+    for (const key of [..._calEventMap.keys()]) {
+      if (key.startsWith(`${accountId}\0`)) _calEventMap.delete(key);
+    }
+    const freshAcc = { ...acc, ...data, accountId, events: data.events || [] };
+    for (const ev of freshAcc.events) {
+      _calEventMap.set(`${accountId}\0${ev.uid}`, {
+        ...ev,
+        _label: acc?.label, _accountId: accountId,
+        _webUrl: acc?.webInterfaceUrl, _color: acc?.color,
+        _accountType: acc?.type || 'caldav',
+      });
+    }
+
+    // Re-render just this account section
+    const sectionEl = document.querySelector(`.dash-cal-account[data-account-id="${CSS.escape(accountId)}"]`);
+    if (sectionEl) {
+      const bodyEl = sectionEl.querySelector('.dash-cal-account-body');
+      if (bodyEl) {
+        const groupsHtml = _calDayGroupsHtml(freshAcc.events, acc?.color, accountId, acc?.webInterfaceUrl);
+        bodyEl.innerHTML = groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+        const noteEl = document.createElement('p');
+        noteEl.className = 'dash-cal-lookahead-note';
+        noteEl.textContent = `Showing next ${newDays} days`;
+        bodyEl.appendChild(noteEl);
+      }
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function _loadMoreCalEventsAll(extraDays) {
+  const headerBtn = document.getElementById('dashCalendarMenuBtn');
+  if (headerBtn) headerBtn.disabled = true;
+
+  const accounts = _calAccountsMeta;
+  const fetches  = accounts.map(async acc => {
+    const configured = acc.lookaheadDays || 7;
+    const current    = _calLookahead.get(acc.accountId) ?? configured;
+    const newDays    = Math.min(365, current + extraDays);
+    _setCalLookahead(acc.accountId, newDays);
+    try {
+      const res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(acc.accountId)}?days=${newDays}`);
+      if (!res.ok) return acc;
+      const data = await res.json();
+      for (const key of [..._calEventMap.keys()]) {
+        if (key.startsWith(`${acc.accountId}\0`)) _calEventMap.delete(key);
+      }
+      const freshAcc = { ...acc, ...data, accountId: acc.accountId, events: data.events || [] };
+      for (const ev of freshAcc.events) {
+        _calEventMap.set(`${acc.accountId}\0${ev.uid}`, {
+          ...ev, _label: acc.label, _accountId: acc.accountId,
+          _webUrl: acc.webInterfaceUrl, _color: acc.color, _accountType: acc.type || 'caldav',
+        });
+      }
+      return freshAcc;
+    } catch { return acc; }
+  });
+
+  const freshAccounts = await Promise.all(fetches);
+  _renderCalendarPanel(freshAccounts);
+  if (headerBtn) headerBtn.disabled = false;
+}
+
+async function _refreshCalendarAccount(accountId) {
+  const days = _calLookahead.get(accountId);
+  const url  = days
+    ? `/api/dashboard/calendar/${encodeURIComponent(accountId)}?days=${days}`
+    : `/api/dashboard/calendar/${encodeURIComponent(accountId)}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    // Update _calEventMap for this account
+    for (const key of [..._calEventMap.keys()]) {
+      if (key.startsWith(`${accountId}\0`)) _calEventMap.delete(key);
+    }
+
+    // Find the existing section element to get account meta
+    const sectionEl = document.querySelector(`.dash-cal-account[data-account-id="${CSS.escape(accountId)}"]`);
+    const labelEl   = sectionEl?.querySelector('.dash-cal-account-label');
+    const accLabel  = labelEl?.textContent || '';
+    const accColor  = labelEl?.style.getPropertyValue('--card-color') || '';
+    const accWebUrl = sectionEl?.querySelector('[data-web-url]')?.dataset.webUrl || '';
+    const accType   = data.type || 'caldav';
+
+    for (const ev of (data.events || [])) {
+      _calEventMap.set(`${accountId}\0${ev.uid}`, {
+        ...ev,
+        _label: accLabel, _accountId: accountId,
+        _webUrl: accWebUrl, _color: accColor,
+        _accountType: accType,
+      });
+    }
+
+    // Re-render the body
+    if (sectionEl) {
+      const bodyEl = sectionEl.querySelector('.dash-cal-account-body');
+      if (bodyEl) {
+        const groupsHtml = _calDayGroupsHtml(data.events || [], accColor || null, accountId, accWebUrl || null);
+        bodyEl.innerHTML = groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+        const lookahead = _calLookahead.get(accountId);
+        if (lookahead) {
+          const noteEl = document.createElement('p');
+          noteEl.className = 'dash-cal-lookahead-note';
+          noteEl.textContent = `Showing next ${lookahead} days`;
+          bodyEl.appendChild(noteEl);
+        }
+      }
+    }
+  } catch { /* ignore — stale UI is better than a crash */ }
+}
+
+// ---- Calendar event modal wiring ----
+
+(function _initCalEventModal() {
+  const modal    = document.getElementById('calEventModal');
+  const closeBtn = document.getElementById('calEventModalClose');
+  const cancelBtn = document.getElementById('calEventCancelBtn');
+  const saveBtn  = document.getElementById('calEventSaveBtn');
+
+  closeBtn.addEventListener('click',  () => modal.close());
+  cancelBtn.addEventListener('click', () => modal.close());
+  saveBtn.addEventListener('click',   () => _submitCalEvent());
+
+  // Keyboard: Enter submits (except in textarea), Escape closes (native for dialog)
+  modal.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'SELECT') {
+      e.preventDefault();
+      _submitCalEvent();
+    }
+  });
+})();

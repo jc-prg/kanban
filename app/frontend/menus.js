@@ -1,3 +1,50 @@
+// ---- Generic context menu ----
+
+/**
+ * Show a lightweight dynamic context menu at the click location.
+ * items: [{ label, action } | { separator: true }]
+ */
+function openContextMenu(e, items) {
+  let menu = document.getElementById('_genericCtxMenu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = '_genericCtxMenu';
+    menu.className = 'context-menu';
+    document.body.appendChild(menu);
+  }
+  menu.innerHTML = items.map((item, i) =>
+    item.separator
+      ? `<div class="ctx-separator" data-idx="${i}"></div>`
+      : `<button class="ctx-item" data-idx="${i}">${escHtml(item.label)}</button>`
+  ).join('');
+
+  menu.querySelectorAll('[data-idx]').forEach(el => {
+    if (el.classList.contains('ctx-separator')) return;
+    el.addEventListener('click', ev => {
+      ev.stopPropagation();
+      menu.style.display = 'none';
+      items[+el.dataset.idx].action();
+    });
+  });
+
+  menu.style.display = 'block';
+  const x = e.clientX, y = e.clientY;
+  const mw = menu.offsetWidth || 160;
+  const mh = menu.offsetHeight || 40;
+  const edge = 4;
+  menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
+  menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
+
+  const close = ev => {
+    if (!menu.contains(ev.target)) {
+      menu.style.display = 'none';
+      document.removeEventListener('click', close, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close, true), 0);
+  e.stopPropagation();
+}
+
 // ---- Card context menu ----
 let ctxColId = null;
 let ctxCard  = null;

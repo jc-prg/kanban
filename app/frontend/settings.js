@@ -373,6 +373,33 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   };
 
   window.openSettings = openSettings;
+
+  /**
+   * Open the settings dialog and navigate to a specific section / account tab.
+   * section: 'calendar-accounts' | any settings-section id
+   */
+  window.openSettingsDialog = function openSettingsDialog(section) {
+    openSettings();
+    if (section === 'calendar-accounts') {
+      // Navigate to the Accounts section and activate the Calendar tab
+      selectSettingsSection('accountsSection');
+      const accountsSection = document.getElementById('accountsSection');
+      accountsSection.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
+      accountsSection.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
+      const calTab   = accountsSection.querySelector('.prompts-tab[data-tab="calendar"]');
+      const calPanel = accountsSection.querySelector('.prompts-panel[data-panel="calendar"]');
+      if (calTab)   calTab.classList.add('active');
+      if (calPanel) calPanel.classList.add('active');
+      // Scroll the calendar-accounts section into view
+      requestAnimationFrame(() => {
+        const anchor = document.getElementById('calendar-accounts');
+        if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    } else if (section) {
+      selectSettingsSection(section);
+    }
+  };
+
   function openSettings() {
     if (_isBoard) {
       document.getElementById('boardDescription').value = state.settings?.description || '';
@@ -1163,10 +1190,16 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   async function _saveCalendarConfig() {
     try {
       const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      const tzSel = document.getElementById('dashDefaultTimezone');
+      const defaultTimezone = tzSel ? tzSel.value : undefined;
+      const groupedEl = document.getElementById('calGroupedToggle');
+      const patch = { ...cfg, calendarAccounts: _calAccounts };
+      if (defaultTimezone !== undefined) patch.defaultTimezone = defaultTimezone;
+      if (groupedEl) patch.calendarGrouped = groupedEl.checked;
       await fetch('/api/dashboard/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...cfg, calendarAccounts: _calAccounts }),
+        body: JSON.stringify(patch),
       });
       flashIndicator(`${ICONS.done} saved`);
     } catch { flashIndicator(' error'); }
@@ -1176,6 +1209,40 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     try {
       const cfg = await fetch('/api/dashboard/config').then(r => r.json());
       _calAccounts = (cfg.calendarAccounts || []).map(a => ({ ...a }));
+
+      const groupedEl = document.getElementById('calGroupedToggle');
+      if (groupedEl) groupedEl.checked = cfg.calendarGrouped !== false;
+
+      // Populate defaultTimezone selector
+      const tzSel = document.getElementById('dashDefaultTimezone');
+      if (tzSel) {
+        tzSel.innerHTML = '';
+        const blankOpt = document.createElement('option');
+        blankOpt.value = ''; blankOpt.textContent = '\u2014 Browser timezone (default) \u2014';
+        tzSel.appendChild(blankOpt);
+        try {
+          const tzs = Intl.supportedValuesOf('timeZone');
+          const groups = {};
+          for (const tz of tzs) {
+            const region = tz.includes('/') ? tz.split('/')[0] : 'Other';
+            if (!groups[region]) groups[region] = [];
+            groups[region].push(tz);
+          }
+          for (const [region, tzList] of Object.entries(groups).sort()) {
+            const og = document.createElement('optgroup');
+            og.label = region;
+            for (const tz of tzList) {
+              const opt = document.createElement('option');
+              opt.value = tz; opt.textContent = tz;
+              og.appendChild(opt);
+            }
+            tzSel.appendChild(og);
+          }
+        } catch { /* Intl.supportedValuesOf not available */ }
+        tzSel.value = cfg.defaultTimezone || '';
+
+        tzSel.onchange = () => _saveCalendarConfig();
+      }
     } catch {
       _calAccounts = [];
     }
@@ -1183,6 +1250,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     _closeCalForm();
   }
 
+  document.getElementById('calGroupedToggle').addEventListener('change', _saveCalendarConfig);
   document.getElementById('calendarAddBtn').addEventListener('click', () => _openCalForm(-1));
   document.getElementById('calCancelAccountBtn').addEventListener('click', _closeCalForm);
 

@@ -5,7 +5,9 @@ const { writeRateLimit }                          = require('../auth');
 const { getDashboardConfig, saveDashboardConfig } = require('../global-db');
 const { getCouch }                                = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
-const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache } = require('../dashboard/calendar');
+const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
+        buildIcs, resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
+const { validateCalendarEvent, schemaError } = require('../schemas');
 const { fetchMailAccount, fetchMailMessage, testMailAccount,
         listMailFolders, markMailMessage, moveMailMessage, deleteMailMessage } = require('../dashboard/mail');
 
@@ -35,11 +37,36 @@ function mergePasswords(stored, incoming) {
       return acc;
     });
   }
-  return {
+  const merged = {
     ...incoming,
     mailAccounts:     mergeList(stored.mailAccounts,     incoming.mailAccounts),
     calendarAccounts: mergeList(stored.calendarAccounts, incoming.calendarAccounts),
   };
+  // Preserve defaultTimezone if not explicitly included in the incoming body
+  if (!('defaultTimezone' in incoming) && stored.defaultTimezone !== undefined) {
+    merged.defaultTimezone = stored.defaultTimezone;
+  }
+  return merged;
+}
+
+/** Build CalDAV Authorization header from account credentials. */
+function _calHeaders(account) {
+  const headers = {};
+  if (account.user && account.password) {
+    headers['Authorization'] = 'Basic ' + Buffer.from(`${account.user}:${account.password}`).toString('base64');
+  }
+  return headers;
+}
+
+/** Validate an IANA timezone string using Intl (Node 18+). Returns error message or null. */
+function _validateTz(tz) {
+  if (!tz) return null;
+  try {
+    const valid = Intl.supportedValuesOf('timeZone');
+    return valid.includes(tz) ? null : `Unknown timezone: ${tz}`;
+  } catch {
+    return null; // Node version without Intl.supportedValuesOf — skip validation
+  }
 }
 
 // ---- Helpers ----
@@ -132,8 +159,19 @@ router.get('/dashboard/recent', async (req, res) => {
 
 router.put('/dashboard/config', writeRateLimit, async (req, res) => {
   try {
+    // Validate defaultTimezone if explicitly provided
+    const tz = req.body.defaultTimezone;
+    if (tz !== undefined && tz !== '') {
+      const tzErr = _validateTz(tz);
+      if (tzErr) return res.status(400).json({ error: tzErr });
+    }
+
     const stored = await getDashboardConfig();
     const merged = mergePasswords(stored, req.body);
+
+    // Clear defaultTimezone if explicitly set to empty string
+    if (tz === '') delete merged.defaultTimezone;
+
     await saveDashboardConfig(merged);
     clearCalendarUrlCache();
     res.json({ ok: true });
@@ -239,11 +277,10 @@ router.get('/dashboard/data', async (req, res) => {
       const accounts = config.calendarAccounts || [];
       const settled  = await Promise.allSettled(accounts.map(acc => fetchCalendarAccount(acc)));
       return accounts.map((acc, i) => {
-        const r = settled[i];
-        if (r.status === 'fulfilled') {
-          return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, ...r.value };
-        }
-        return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, events: [], error: r.reason?.message || 'Unknown error' };
+        const r    = settled[i];
+        const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
+        if (r.status === 'fulfilled') return { ...base, ...r.value };
+        return { ...base, events: [], error: r.reason?.message || 'Unknown error' };
       });
     })();
 
@@ -422,10 +459,9 @@ router.get('/dashboard/calendar', async (req, res) => {
 
     const result = accounts.map((acc, i) => {
       const r = settled[i];
-      if (r.status === 'fulfilled') {
-        return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, ...r.value };
-      }
-      return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, events: [], error: r.reason?.message || 'Unknown error' };
+      const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
+      if (r.status === 'fulfilled') return { ...base, ...r.value };
+      return { ...base, events: [], error: r.reason?.message || 'Unknown error' };
     });
 
     res.json(result);
@@ -434,15 +470,20 @@ router.get('/dashboard/calendar', async (req, res) => {
   }
 });
 
-// GET /api/dashboard/calendar/:accountId — fetch one account's events
+// GET /api/dashboard/calendar/:accountId — fetch one account's events (supports ?days=n)
 router.get('/dashboard/calendar/:accountId', async (req, res) => {
   try {
     const config  = await getDashboardConfig();
     const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
     if (!account) return res.status(404).json({ error: 'Account not found' });
 
-    const result = await fetchCalendarAccount(account);
-    res.json(result);
+    // Optional ?days=n override — clamped to [1, 365]; non-numeric → use account default
+    let opts = {};
+    const daysParam = parseInt(req.query.days, 10);
+    if (!isNaN(daysParam)) opts.lookaheadDays = Math.min(365, Math.max(1, daysParam));
+
+    const result = await fetchCalendarAccount(account, opts);
+    res.json({ type: account.type || 'caldav', ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -462,6 +503,122 @@ router.get('/dashboard/calendar/:accountId/event/:uid', async (req, res) => {
     if (!event) return res.status(404).json({ error: 'Event not found' });
     res.json(event);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dashboard/calendar/:accountId/events — create a new event
+router.post('/dashboard/calendar/:accountId/events', writeRateLimit, async (req, res) => {
+  try {
+    const config  = await getDashboardConfig();
+    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+    if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
+
+    if (!validateCalendarEvent(req.body)) {
+      return res.status(400).json({ error: schemaError(validateCalendarEvent) });
+    }
+    const { start, end, timezone, allDay } = req.body;
+    if (new Date(end) < new Date(start)) return res.status(400).json({ error: 'end must be >= start' });
+    if (!allDay && timezone) {
+      const tzErr = _validateTz(timezone);
+      if (tzErr) return res.status(400).json({ error: tzErr });
+    }
+
+    const { ics, uid } = buildIcs(req.body);
+    const headers = _calHeaders(account);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const eventUrl = await resolveEventUrl(account, uid, headers, controller.signal);
+      const r = await fetch(eventUrl, {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'text/calendar; charset=utf-8', 'If-None-Match': '*' },
+        body:   ics,
+        signal: controller.signal,
+      });
+      if (r.status === 201 || r.status === 204) return res.json({ ok: true, uid });
+      const detail = await r.text().catch(() => '');
+      return res.status(502).json({ error: `CalDAV error (HTTP ${r.status})`, detail });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return res.status(502).json({ error: 'CalDAV request timed out' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/dashboard/calendar/:accountId/event/:uid — update an existing event
+router.put('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (req, res) => {
+  try {
+    const config  = await getDashboardConfig();
+    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+    if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
+
+    if (!validateCalendarEvent(req.body)) {
+      return res.status(400).json({ error: schemaError(validateCalendarEvent) });
+    }
+    const { start, end, timezone, allDay, etag, href } = req.body;
+    if (new Date(end) < new Date(start)) return res.status(400).json({ error: 'end must be >= start' });
+    if (!allDay && timezone) {
+      const tzErr = _validateTz(timezone);
+      if (tzErr) return res.status(400).json({ error: tzErr });
+    }
+
+    const uid = req.params.uid;
+    const { ics } = buildIcs(req.body, uid);
+    const headers = _calHeaders(account);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const eventUrl = hrefToUrl(account, href) || await resolveEventUrl(account, uid, headers, controller.signal);
+      const putHeaders = { ...headers, 'Content-Type': 'text/calendar; charset=utf-8' };
+      if (etag) putHeaders['If-Match'] = etag;
+      const r = await fetch(eventUrl, { method: 'PUT', headers: putHeaders, body: ics, signal: controller.signal });
+      if (r.status === 204 || r.status === 201) return res.json({ ok: true });
+      if (r.status === 412) return res.status(409).json({ error: 'Event was modified by someone else — please reload.' });
+      const detail = await r.text().catch(() => '');
+      return res.status(502).json({ error: `CalDAV error (HTTP ${r.status})`, detail });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return res.status(502).json({ error: 'CalDAV request timed out' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/dashboard/calendar/:accountId/event/:uid — delete an event
+router.delete('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (req, res) => {
+  try {
+    const config  = await getDashboardConfig();
+    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+    if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
+
+    const uid  = req.params.uid;
+    const etag = req.headers['if-match'] || null;
+    const href = req.query.href || null;
+    const headers = _calHeaders(account);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const eventUrl = hrefToUrl(account, href) || await resolveEventUrl(account, uid, headers, controller.signal);
+      const delHeaders = { ...headers };
+      if (etag) delHeaders['If-Match'] = etag;
+      const r = await fetch(eventUrl, { method: 'DELETE', headers: delHeaders, signal: controller.signal });
+      if (r.status === 204 || r.status === 200) return res.json({ ok: true });
+      if (r.status === 404) return res.status(404).json({ error: 'Event not found (already deleted?)' });
+      if (r.status === 412) return res.status(409).json({ error: 'Event was modified — please reload.' });
+      const detail = await r.text().catch(() => '');
+      return res.status(502).json({ error: `CalDAV error (HTTP ${r.status})`, detail });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return res.status(502).json({ error: 'CalDAV request timed out' });
     res.status(500).json({ error: err.message });
   }
 });
