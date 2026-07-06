@@ -1619,7 +1619,7 @@
   background: var(--bg-inset, rgba(0,0,0,0.1));
 }
 
-.recurring-toggle { cursor: pointer; margin-left: 10px; }
+.recurring-toggle { cursor: pointer; margin-left: 10px; margin-right: 15px; }
 
 .recurring-item-info {
   flex: 1;
