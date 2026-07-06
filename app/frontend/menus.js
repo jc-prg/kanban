@@ -5,6 +5,7 @@
  * items: [{ label, action } | { separator: true }]
  */
 function openContextMenu(e, items) {
+  _closeAllContextMenus();
   let menu = document.getElementById('_genericCtxMenu');
   if (!menu) {
     menu = document.createElement('div');
@@ -86,6 +87,7 @@ let ctxCard  = null;
 let _dashCtxBoard = null; // non-null when menu triggered from the dashboard
 
 function showContextMenu(x, y, colId, card) {
+  _closeAllContextMenus();
   ctxColId = colId;
   ctxCard  = card;
   _dashCtxBoard = null;
@@ -139,6 +141,7 @@ function hideContextMenu() {
 }
 
 function showDashboardContextMenu(x, y, board, card) {
+  _closeAllContextMenus();
   _dashCtxBoard = board;
   ctxColId = null;
   ctxCard  = card;
@@ -337,6 +340,7 @@ document.getElementById('ctxDelete').addEventListener('click', async () => {
 let ctxHeaderColId = null;
 
 function showColContextMenu(x, y, colId) {
+  _closeAllContextMenus();
   ctxHeaderColId = colId;
 
   const collapsed = colCollapsed.has(colId);
@@ -399,6 +403,15 @@ function hideColContextMenu() {
   document.getElementById('colCtxFilterColorRow').style.display = 'none';
   document.getElementById('colCtxFilterPriorityRow').style.display = 'none';
   ctxHeaderColId = null;
+}
+
+function _closeAllContextMenus() {
+  hideContextMenu();
+  hideColContextMenu();
+  const g = document.getElementById('_genericCtxMenu');
+  if (g) g.style.display = 'none';
+  const m = document.getElementById('mailContextMenu');
+  if (m) m.style.display = 'none';
 }
 
 function moveAllCards(fromColId, toColId) {

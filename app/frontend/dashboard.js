@@ -1640,6 +1640,7 @@ function _closeDetail() {
 // ---- Mail context menu ----
 
 function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
+  _closeAllContextMenus();
   _mailCtxAccountId = accountId;
   _mailCtxMsgId     = msgId;
   _mailCtxUnread    = !!unread;
