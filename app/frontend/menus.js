@@ -12,18 +12,46 @@ function openContextMenu(e, items) {
     menu.className = 'context-menu';
     document.body.appendChild(menu);
   }
-  menu.innerHTML = items.map((item, i) =>
-    item.separator
-      ? `<div class="ctx-separator" data-idx="${i}"></div>`
-      : `<button class="ctx-item" data-idx="${i}">${escHtml(item.label)}</button>`
-  ).join('');
+  menu.innerHTML = items.map((item, i) => {
+    if (item.separator) return `<div class="ctx-separator" data-idx="${i}"></div>`;
+    if (item.children) {
+      const childHtml = item.children.map((c, ci) =>
+        `<button class="ctx-item" data-pidx="${i}" data-cidx="${ci}">${c.labelHtml || escHtml(c.label)}</button>`
+      ).join('');
+      return `<div class="ctx-item ctx-submenu-trigger${item.action ? ' ctx-submenu-actionable' : ''}" data-idx="${i}">` +
+        `${item.labelHtml || escHtml(item.label)}<span class="ctx-arrow">\u203a</span>` +
+        `<div class="ctx-submenu">${childHtml}</div></div>`;
+    }
+    return `<button class="ctx-item${item.danger ? ' ctx-danger' : ''}" data-idx="${i}">${item.labelHtml || escHtml(item.label)}</button>`;
+  }).join('');
 
-  menu.querySelectorAll('[data-idx]').forEach(el => {
-    if (el.classList.contains('ctx-separator')) return;
+  menu.querySelectorAll('.ctx-item[data-idx]').forEach(el => {
+    const item = items[+el.dataset.idx];
+    if (!item || item.separator || item.children) return;
     el.addEventListener('click', ev => {
       ev.stopPropagation();
       menu.style.display = 'none';
-      items[+el.dataset.idx].action();
+      item.action();
+    });
+  });
+  // Submenu triggers with an action: click outside the submenu fires the action
+  menu.querySelectorAll('.ctx-submenu-actionable[data-idx]').forEach(el => {
+    const item = items[+el.dataset.idx];
+    el.addEventListener('click', ev => {
+      if (ev.target.closest('.ctx-submenu')) return;
+      ev.stopPropagation();
+      menu.style.display = 'none';
+      item.action();
+    });
+  });
+  // Child items inside submenus
+  menu.querySelectorAll('[data-pidx]').forEach(el => {
+    const child = items[+el.dataset.pidx]?.children?.[+el.dataset.cidx];
+    if (!child) return;
+    el.addEventListener('click', ev => {
+      ev.stopPropagation();
+      menu.style.display = 'none';
+      child.action();
     });
   });
 
@@ -34,6 +62,13 @@ function openContextMenu(e, items) {
   const edge = 4;
   menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
   menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
+
+  // Flip submenus to the left if there isn't enough room on the right
+  const menuRight = menu.getBoundingClientRect().right;
+  const subWidth  = 185 + edge; // matches .ctx-submenu min-width
+  menu.querySelectorAll('.ctx-submenu-trigger').forEach(trigger => {
+    trigger.classList.toggle('ctx-submenu-left', menuRight + subWidth > window.innerWidth);
+  });
 
   const close = ev => {
     if (!menu.contains(ev.target)) {

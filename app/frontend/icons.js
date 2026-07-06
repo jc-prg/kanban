@@ -79,6 +79,11 @@ function _svgCardInfo(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><line x1="6" y1="5.5" x2="6" y2="8.5"/><circle cx="6" cy="3.5" r="0.5" fill="currentColor" stroke="none"/></svg>`;
 }
 
+// Circle with plus — create / new item
+function _svgCreate(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><line x1="6" y1="3" x2="6" y2="9"/><line x1="3" y1="6" x2="9" y2="6"/></svg>`;
+}
+
 // Pencil — edit card or note
 function _svgEdit(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 1.5 L10.5 3.5 L3.5 10.5 L1 11 L1.5 8.5 Z"/><line x1="7" y1="3" x2="9" y2="5"/></svg>`;
@@ -159,6 +164,7 @@ const SVGICONS = {
   priority:     _svgPriority,
   colorPalette: _svgColorPalette,
   cardInfo:     _svgCardInfo,
+  create:       _svgCreate,
   edit:         _svgEdit,
   duplicate:    _svgDuplicate,
   description:  _svgDescription,
@@ -181,6 +187,7 @@ const ICON_REGISTRY = [
   { type: 'char', char: ICONS.done,         name: 'Done',           usage: 'Confirms action; marks card as done' },
   { type: 'char', char: ICONS.error,        name: 'Error',          usage: 'Save error or failed operation' },
   { type: 'char', char: ICONS.close,        name: 'Close / Delete', usage: 'Remove item; close dialog or viewer' },
+  { type: 'svg', svg: _svgCreate(16, 16),      name: 'Create / New',   usage: 'Create a new item (event, card, etc.)' },
   { type: 'svg', svg: _svgEdit(16, 16),        name: 'Edit',           usage: 'Open card or note for editing' },
   { type: 'svg', svg: _svgDuplicate(16, 16),   name: 'Duplicate',      usage: 'Create a copy of a card' },
   { type: 'svg', svg: _svgOpenLink(16, 16),    name: 'Open link',      usage: 'Open URL in a new browser tab' },

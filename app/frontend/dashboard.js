@@ -73,7 +73,8 @@ let _defaultTimezone    = '';
 let _calAccountsConfig  = [];
 // Calendar display mode: true = grouped per account, false = unified chronological
 let _calGrouped         = true;
-// Last-rendered accounts list; used by the header context menu in ungrouped mode
+// Last-rendered accounts lists; used by panel header context menus
+let _mailAccountsMeta   = [];
 let _calAccountsMeta    = [];
 // Calendar event modal state
 let _calModalMode   = 'create'; // 'create' | 'edit'
@@ -306,21 +307,53 @@ async function initDashboard() {
   document.getElementById('menuInbox').style.display = '';
 
   document.getElementById('dashboardRefreshBtn').addEventListener('click', loadDashboard);
+  document.getElementById('dashMailMenuBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    const accounts = _mailAccountsMeta;
+    const urlAccs  = accounts.filter(a => a.webInterfaceUrl);
+    const items    = [];
+    if (urlAccs.length === 1) {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open webmail`, action: () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer') });
+    } else if (urlAccs.length > 1) {
+      items.push({
+        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open webmail`,
+        action:    () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer'),
+        children:  urlAccs.map(a => ({ label: a.label || a.accountId, action: () => window.open(a.webInterfaceUrl, '_blank', 'noopener,noreferrer') })),
+      });
+    }
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('mail-accounts') });
+    openContextMenu(e, items);
+  });
   document.getElementById('dashCalendarMenuBtn').addEventListener('click', e => {
     e.stopPropagation();
     const accounts = _calAccountsMeta;
+    const caldavAccs = accounts.filter(a => (a.type || 'caldav') !== 'ical-url');
+    const urlAccs    = accounts.filter(a => a.webInterfaceUrl);
     const items = [];
-    for (const acc of accounts) {
-      if ((acc.type || 'caldav') !== 'ical-url') {
-        items.push({ label: `New event \u2014 ${acc.label || acc.accountId}`, action: () => openCalEventModal(acc.accountId, null, acc) });
-      }
+    if (caldavAccs.length === 1) {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`, action: () => openCalEventModal(caldavAccs[0].accountId, null, caldavAccs[0]) });
+    } else if (caldavAccs.length > 1) {
+      items.push({
+        labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`,
+        action:    () => openCalEventModal(caldavAccs[0].accountId, null, caldavAccs[0]),
+        children: caldavAccs.map(a => ({ label: a.label || a.accountId, action: () => openCalEventModal(a.accountId, null, a) })),
+      });
+    }
+    if (urlAccs.length === 1) {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open calendar`, action: () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer') });
+    } else if (urlAccs.length > 1) {
+      items.push({
+        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open calendar`,
+        action:    () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer'),
+        children:  urlAccs.map(a => ({ label: a.label || a.accountId, action: () => window.open(a.webInterfaceUrl, '_blank', 'noopener,noreferrer') })),
+      });
     }
     const lookaheads = accounts.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7));
     const minDays = lookaheads.length ? Math.min(...lookaheads) : 7;
     items.push(
-      { label: `Show +1 week (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(7) },
-      { label: `Show +1 month (now: ${minDays} days)`, action: () => _loadMoreCalEventsAll(30) },
-      { label: 'Edit accounts', action: () => openSettingsDialog('calendar-accounts') },
+      { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(7) },
+      { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${minDays} days)`, action: () => _loadMoreCalEventsAll(30) },
+      { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('calendar-accounts') },
     );
     openContextMenu(e, items);
   });
@@ -882,9 +915,13 @@ function _renderCardsPanel(groups) {
 }
 
 function _renderMailPanel(accounts) {
-  const panel = document.getElementById('dashboardMailPanel');
-  const total = accounts.reduce((s, a) => s + (a.messages?.length || 0), 0);
+  const panel   = document.getElementById('dashboardMailPanel');
+  const menuBtn = document.getElementById('dashMailMenuBtn');
+  const total   = accounts.reduce((s, a) => s + (a.messages?.length || 0), 0);
   document.getElementById('dashMailCount').textContent = total || '';
+
+  _mailAccountsMeta = accounts;
+  menuBtn.style.display = accounts.length ? '' : 'none';
 
   if (!accounts.length) {
     panel.innerHTML = '<p class="dashboard-empty">No mail accounts configured.</p>';
@@ -1198,12 +1235,12 @@ function _renderCalendarPanel(accounts) {
       const days = _calLookahead.get(acc.accountId) ?? (acc.lookaheadDays || 7);
       const items = [];
       if ((acc.type || 'caldav') !== 'ical-url') {
-        items.push({ label: 'New event', action: () => openCalEventModal(acc.accountId, null, acc) });
+        items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`, action: () => openCalEventModal(acc.accountId, null, acc) });
       }
       items.push(
-        { label: `Show +1 week (now: ${days} days)`,  action: () => _loadMoreCalEvents(acc.accountId, 7,  acc) },
-        { label: `Show +1 month (now: ${days} days)`, action: () => _loadMoreCalEvents(acc.accountId, 30, acc) },
-        { label: 'Edit accounts', action: () => openSettingsDialog('calendar-accounts') },
+        { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${days} days)`,  action: () => _loadMoreCalEvents(acc.accountId, 7,  acc) },
+        { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${days} days)`, action: () => _loadMoreCalEvents(acc.accountId, 30, acc) },
+        { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('calendar-accounts') },
       );
       openContextMenu(e, items);
     });
@@ -1363,15 +1400,15 @@ async function _openCardDetail(board, card) {
 }
 
 function _showCalEventContextMenu(e, accountId, uid, webUrl) {
-  const ev         = _calEventMap.get(`${accountId}\0${uid}`);
-  const isIcal     = (ev?._accountType || 'caldav') === 'ical-url';
+  const ev          = _calEventMap.get(`${accountId}\0${uid}`);
+  const isIcal      = (ev?._accountType || 'caldav') === 'ical-url';
   const isRecurring = !!ev?.hasRrule;
   const items = [
-    { label: 'Open',   action: () => _openEventDetail(accountId, uid, webUrl) },
+    { labelHtml: `<span class="ctx-icon">${SVGICONS.cardInfo()}</span>Open`,   action: () => _openEventDetail(accountId, uid, webUrl) },
   ];
   if (!isIcal && !isRecurring) {
-    items.push({ label: 'Edit',   action: () => openCalEventModal(accountId, ev) });
-    items.push({ label: 'Delete', action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href) });
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit`,             action: () => openCalEventModal(accountId, ev) });
+    items.push({ labelHtml: `<span class="ctx-icon">${ICONS.close}</span>Delete`, danger: true, action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href) });
   }
   openContextMenu(e, items);
 }
@@ -1764,14 +1801,7 @@ async function openCalEventModal(accountId, ev, acc) {
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   if (ev) {
-    // Edit mode — fetch fresh event to get the current etag and href from the server
-    try {
-      const fresh = await fetch(
-        `/api/dashboard/calendar/${encodeURIComponent(ev._accountId || accountId)}/event/${encodeURIComponent(ev.uid)}`
-      ).then(r => r.ok ? r.json() : null);
-      if (fresh) ev = { ...ev, etag: fresh.etag, href: fresh.href };
-    } catch { /* fall back to cached values */ }
-
+    // Edit mode — populate from cache immediately, fetch fresh etag/href in background
     _calModalMode  = 'edit';
     _calModalAccId = ev._accountId || accountId;
     _calModalUid   = ev.uid;
@@ -1784,6 +1814,14 @@ async function openCalEventModal(accountId, ev, acc) {
     allDayCb.checked = !!ev.allDay;
     locInput.value   = ev.location || '';
     descInput.value  = ev.description || '';
+
+    // Fetch fresh etag/href in background — disable save until ready
+    saveBtn.disabled = true; saveBtn.textContent = 'Loading\u2026';
+    fetch(`/api/dashboard/calendar/${encodeURIComponent(_calModalAccId)}/event/${encodeURIComponent(ev.uid)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(fresh => { if (fresh) { _calModalEtag = fresh.etag ?? _calModalEtag; _calModalHref = fresh.href ?? _calModalHref; } })
+      .catch(() => { /* keep cached values */ })
+      .finally(() => { if (modal.open) { saveBtn.disabled = false; saveBtn.textContent = 'Save event'; } });
 
     // Dates
     const startDt  = ev.start ? new Date(ev.start) : new Date();
@@ -1929,16 +1967,22 @@ async function _submitCalEvent() {
 }
 
 async function _deleteCalEvent(accountId, uid, etag, href) {
-  // Fetch fresh event to get the current etag and href from the server
+  // Show confirm immediately from cached data — no network wait
+  const ev      = _calEventMap.get(`${accountId}\0${uid}`);
+  const title   = ev?.title || 'this event';
+  const dateStr = ev?.start ? fmtDate(ev.start.slice(0, 10)) : '';
+  const msg     = dateStr ? `Delete \u201c${title}\u201d on ${dateStr}?` : `Delete \u201c${title}\u201d?`;
+
+  const ok = await showConfirm(msg, { okLabel: 'Delete', danger: true });
+  if (!ok) return;
+
+  // Fetch fresh etag/href now that user has confirmed
   try {
     const fresh = await fetch(
       `/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(uid)}`
     ).then(r => r.ok ? r.json() : null);
     if (fresh) { etag = fresh.etag ?? etag; href = fresh.href ?? href; }
   } catch { /* fall back to cached values */ }
-
-  const ok = await showConfirm('Delete this event?', { okLabel: 'Delete', danger: true });
-  if (!ok) return;
 
   const headers = {};
   if (etag) headers['If-Match'] = etag;

@@ -380,20 +380,20 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
    */
   window.openSettingsDialog = function openSettingsDialog(section) {
     openSettings();
-    if (section === 'calendar-accounts') {
-      // Navigate to the Accounts section and activate the Calendar tab
+    if (section === 'calendar-accounts' || section === 'mail-accounts') {
+      const tab  = section === 'mail-accounts' ? 'mail' : 'calendar';
+      const anchor = section === 'mail-accounts' ? 'mail-accounts' : 'calendar-accounts';
       selectSettingsSection('accountsSection');
       const accountsSection = document.getElementById('accountsSection');
       accountsSection.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
       accountsSection.querySelectorAll('.prompts-panel').forEach(p => p.classList.remove('active'));
-      const calTab   = accountsSection.querySelector('.prompts-tab[data-tab="calendar"]');
-      const calPanel = accountsSection.querySelector('.prompts-panel[data-panel="calendar"]');
-      if (calTab)   calTab.classList.add('active');
-      if (calPanel) calPanel.classList.add('active');
-      // Scroll the calendar-accounts section into view
+      const selTab   = accountsSection.querySelector(`.prompts-tab[data-tab="${tab}"]`);
+      const selPanel = accountsSection.querySelector(`.prompts-panel[data-panel="${tab}"]`);
+      if (selTab)   selTab.classList.add('active');
+      if (selPanel) selPanel.classList.add('active');
       requestAnimationFrame(() => {
-        const anchor = document.getElementById('calendar-accounts');
-        if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const el = document.getElementById(anchor);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     } else if (section) {
       selectSettingsSection(section);
@@ -1116,8 +1116,9 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   // ---- Calendar accounts (global / dashboard view) ----
 
-  let _calAccounts = [];   // in-memory list while settings modal is open
-  let _calEditIdx  = -1;   // index of account being edited, -1 = new
+  let _calAccounts  = [];   // in-memory list while settings modal is open
+  let _calEditIdx   = -1;   // index of account being edited, -1 = new
+  let _calDragIdx   = null;
   let _calColor    = COLORS[0];
 
   function _renderCalColorRow() {
@@ -1140,7 +1141,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       return;
     }
     list.innerHTML = _calAccounts.map((acc, i) => `
-      <div class="calendar-account-row">
+      <div class="calendar-account-row cs-source-row" draggable="true" data-cal-idx="${i}">
+        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
         <div class="calendar-account-info">
           <strong>${escHtml(acc.label || '(no label)')}</strong>
           <span class="settings-item-desc">${escHtml(acc.type === 'ical-url' ? 'iCal URL' : 'CalDAV')} · ${escHtml(acc.url || '')}</span>
@@ -1157,6 +1159,35 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     list.querySelectorAll('[data-cal-del]').forEach(btn => {
       btn.addEventListener('click', () => {
         _calAccounts.splice(parseInt(btn.dataset.calDel, 10), 1);
+        _renderCalendarList();
+        _saveCalendarConfig();
+      });
+    });
+
+    list.querySelectorAll('.cs-source-row').forEach(row => {
+      const i = parseInt(row.dataset.calIdx, 10);
+      row.addEventListener('dragstart', e => {
+        _calDragIdx = i;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.classList.add('cs-row-dragging'), 0);
+      });
+      row.addEventListener('dragend', () => {
+        _calDragIdx = null;
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-dragging', 'cs-row-drag-over'));
+      });
+      row.addEventListener('dragover', e => {
+        if (_calDragIdx === null || _calDragIdx === i) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        list.querySelectorAll('.cs-source-row').forEach(r => r.classList.remove('cs-row-drag-over'));
+        row.classList.add('cs-row-drag-over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('cs-row-drag-over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        if (_calDragIdx === null || _calDragIdx === i) return;
+        const [moved] = _calAccounts.splice(_calDragIdx, 1);
+        _calAccounts.splice(i, 0, moved);
         _renderCalendarList();
         _saveCalendarConfig();
       });

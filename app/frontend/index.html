@@ -83,7 +83,7 @@
       <div class="dashboard-panel-body" id="dashboardCardsPanel"></div>
     </div>
     <div class="dashboard-panel">
-      <div class="dashboard-panel-header">Mail<span class="column-count" id="dashMailCount"></span></div>
+      <div class="dashboard-panel-header">Mail<span style="flex:1"></span><button class="col-btn" id="dashMailMenuBtn" style="display:none" title="Mail options">&#x22ee;</button><span class="column-count" id="dashMailCount"></span></div>
       <div class="dashboard-panel-body" id="dashboardMailPanel"></div>
     </div>
     <div class="dashboard-panel">
@@ -926,16 +926,19 @@
                 <section id="calendar-accounts">
                 <div id="calendarAccountsList"></div>
                 <button class="btn" id="calendarAddBtn" style="margin:8px 0 0">+ Add account</button>
-                <div class="settings-field-row" style="margin-top:10px">
+                <div class="settings-field-row" style="margin-top:30px">
                   <label class="settings-field-label" for="calGroupedToggle">Group events by account</label>
-                  <input type="checkbox" id="calGroupedToggle" checked>
+                  <label class="settings-toggle">
+                    <input type="checkbox" id="calGroupedToggle" checked>
+                    <span class="settings-toggle-track"></span>
+                  </label>
                 </div>
-                </section>
                 <div class="settings-field-row" style="margin-top:16px">
                   <label class="settings-field-label" for="dashDefaultTimezone">Default timezone for new events</label>
                   <select id="dashDefaultTimezone" class="new-board-input"></select>
                 </div>
                 <p class="settings-item-desc">Leave blank to use browser timezone. Used as default when creating events in the dashboard.</p>
+                </section>
                 <div id="calendarAccountForm" class="calendar-account-form" style="display:none">
                   <input type="hidden" id="calEditId">
                   <div class="settings-field-row">

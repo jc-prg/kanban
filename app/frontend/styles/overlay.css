@@ -28,14 +28,15 @@
   box-sizing: border-box;
 }
 
-.ctx-item > span[data-icon] {
+.ctx-item > span[data-icon],
+.ctx-item > .ctx-icon {
   display: flex;
   justify-content: center;
   align-items: center;
   width: 18px;
   flex-shrink: 0;
   text-align: center;
-  margin-right: 3px;
+  margin-right: 6px;
 }
 
 .ctx-item:hover { background: var(--surface2); }
@@ -1098,6 +1099,15 @@
 
 .settings-field-row .new-board-input {
   flex: 1;
+}
+
+#calendar-accounts .settings-field-label {
+  width: 40%;
+}
+
+#dashDefaultTimezone {
+  width: 40%;
+  max-width: 200px;
 }
 
 .settings-webdav-actions {
