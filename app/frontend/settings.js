@@ -240,6 +240,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       btn.className = 'settings-nav-item';
       btn.textContent = section.dataset.settingsLabel;
       btn.dataset.target = section.id;
+      btn.dataset.keywords = section.dataset.settingsKeywords || '';
       btn.addEventListener('click', () => selectSettingsSection(section.id));
       navList.appendChild(btn);
     });
@@ -256,7 +257,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     const q = this.value.toLowerCase().trim();
     let firstMatch = null;
     document.querySelectorAll('.settings-nav-item').forEach(btn => {
-      const match = !q || btn.textContent.toLowerCase().includes(q);
+      const match = !q || btn.textContent.toLowerCase().includes(q) || (btn.dataset.keywords || '').toLowerCase().includes(q);
       btn.style.display = match ? '' : 'none';
       if (match && !firstMatch) firstMatch = btn.dataset.target;
     });
@@ -417,9 +418,11 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     if (_isBoard) {
       loadWebdavSettings();
       loadWebhookSettings();
+      if (typeof renderRecurringList === 'function') renderRecurringList();
     }
     if (!_isBoard) { loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); }
     document.getElementById('colorPaletteSection').style.display = _isBoard ? 'none' : '';
+    document.getElementById('recurringSection').style.display    = _isBoard ? ''     : 'none';
     buildSettingsNav();
     backdrop.style.display = 'flex';
   }
@@ -1648,6 +1651,7 @@ async function afterAuth() {
   // Prime WebDAV and webhook config at startup (board-only)
   if (API_BASE && typeof loadWebdavSettings  === 'function') await loadWebdavSettings();
   if (API_BASE && typeof loadWebhookSettings === 'function') await loadWebhookSettings();
+  if (API_BASE && typeof loadRecurringTasks  === 'function') await loadRecurringTasks();
   if (BOARD_NAME === 'focus') { await initDashboard(); return; }
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {

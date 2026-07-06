@@ -8,6 +8,7 @@ const { initDb }                          = require('./db');
 const { initGlobalDb }                    = require('./global-db');
 const { authenticate }                    = require('./auth');
 const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize } = require('./backup');
+const { initRecurring } = require('./recurring');
 
 const app = express();
 
@@ -73,6 +74,7 @@ app.use('/api', require('./routes/notes'));
 app.use('/api', require('./routes/attachments'));
 app.use('/api', require('./routes/dashboard'));
 app.use('/api', require('./routes/webdav-accounts'));
+app.use('/api', require('./routes/recurring'));
 
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
 app.get('/focus',              (req, res) => res.sendFile(SPA_HTML));
@@ -89,5 +91,6 @@ initDb()
     runBackup();        setInterval(runBackup,        BACKUP_INTERVAL_MS);
     runPromptsBackup(); setInterval(runPromptsBackup, BACKUP_INTERVAL_MS);
     refreshDbSize();    setInterval(refreshDbSize,    DB_SIZE_INTERVAL_MS);
+    initRecurring();
   })
   .catch(err => { console.error('Failed to initialize:', err.message); process.exit(1); });

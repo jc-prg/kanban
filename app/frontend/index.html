@@ -551,7 +551,16 @@
       </nav>
       <div class="settings-content" id="settingsContent">
 
-        <div class="settings-section" id="boardRenameSection" data-settings-label="Board" style="display:none">
+        <!--
+          SETTINGS SECTIONS
+          Each section carries two data attributes used by the settings search:
+            data-settings-label    — the nav item text (always searched)
+            data-settings-keywords — space-separated synonyms (invisible; also searched)
+          When adding a new section, add relevant synonyms so users can find it
+          even when they don't know the exact section name.
+        -->
+
+        <div class="settings-section" id="boardRenameSection" data-settings-label="Board" data-settings-keywords="rename title description name" style="display:none">
           <div class="settings-section-title">
             <span>Board</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -566,7 +575,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="dbSection" data-settings-label="Database">
+        <div class="settings-section" id="dbSection" data-settings-label="Database" data-settings-keywords="couchdb fauxton admin documents storage nosql query backup size">
           <div class="settings-section-title">
             <span>Database</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -582,7 +591,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="importSection" data-settings-label="Behavior" style="display:none">
+        <div class="settings-section" id="importSection" data-settings-label="Behavior" data-settings-keywords="import inbox date collapse persist auto-save autosave interval timer tracked columns overview done dates edit" style="display:none">
           <div class="settings-section-title">
             <span>Behavior</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -655,7 +664,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="webdavSection" data-settings-label="WebDAV Notes">
+        <div class="settings-section" id="webdavSection" data-settings-label="WebDAV Notes" data-settings-keywords="nextcloud sync dav notes files server account subfolder cloud storage">
           <div class="settings-section-title">
             <span>WebDAV Notes</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -691,7 +700,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="webhookSection" data-settings-label="Webhook">
+        <div class="settings-section" id="webhookSection" data-settings-label="Webhook" data-settings-keywords="trigger http request automation n8n integration button deploy url post get">
           <div class="settings-section-title">
             <span>Webhook</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -731,7 +740,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="dashboardSection" data-settings-label="Focus" style="display:none">
+        <div class="settings-section" id="dashboardSection" data-settings-label="Focus" data-settings-keywords="dashboard refresh panels mail calendar cards boards recent auto-refresh" style="display:none">
           <div class="settings-section-title">
             <span>Focus</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -795,7 +804,103 @@
           </div>
         </div>
 
-        <div class="settings-section" id="accountsSection" data-settings-label="Sources" style="display:none">
+        <div class="settings-section" id="recurringSection" data-settings-label="Recurring tasks" style="display:none">
+          <div class="settings-section-title">
+            <span>Recurring tasks</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="recurring-header">
+              <p class="settings-item-desc">Automatically create a card on a schedule.</p>
+              <button class="btn" id="addRecurringBtn">+ Add task</button>
+            </div>
+            <ul id="recurringList" class="recurring-list"></ul>
+            <div id="recurringForm" class="recurring-form" hidden>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtCardText">Card text *</label>
+                <input id="rtCardText" class="new-board-input" type="text" maxlength="300" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtCardDesc">Description</label>
+                <textarea id="rtCardDesc" class="new-board-input recurring-desc-input" rows="2" spellcheck="false"></textarea>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label">Color</label>
+                <div id="rtColorRow" class="recurring-color-row"></div>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label">Priority</label>
+                <div id="rtPriorityRow" class="recurring-priority-row"></div>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtCardLink">Link</label>
+                <input id="rtCardLink" class="new-board-input" type="url" maxlength="2000" placeholder="https://…" autocomplete="off">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtTargetColumn">Target column</label>
+                <select id="rtTargetColumn" class="new-board-input"></select>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtType">Repeats</label>
+                <select id="rtType" class="new-board-input">
+                  <option value="daily">Daily</option>
+                  <option value="weekly" selected>Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtInterval">Every</label>
+                <div class="recurring-interval-row">
+                  <input id="rtInterval" class="new-board-input recurring-number-input" type="number" min="1" max="365" value="1">
+                  <span id="rtIntervalUnit" class="recurring-interval-unit">week(s)</span>
+                </div>
+              </div>
+              <div class="settings-field-row" id="rtDaysRow">
+                <label class="settings-field-label">On</label>
+                <div id="rtDaysOfWeek" class="recurring-days-row">
+                  <button type="button" class="recurring-day-btn" data-day="1">Mon</button>
+                  <button type="button" class="recurring-day-btn" data-day="2">Tue</button>
+                  <button type="button" class="recurring-day-btn" data-day="3">Wed</button>
+                  <button type="button" class="recurring-day-btn" data-day="4">Thu</button>
+                  <button type="button" class="recurring-day-btn" data-day="5">Fri</button>
+                  <button type="button" class="recurring-day-btn" data-day="6">Sat</button>
+                  <button type="button" class="recurring-day-btn" data-day="0">Sun</button>
+                </div>
+              </div>
+              <div class="settings-field-row" id="rtDayOfMonthRow" style="display:none">
+                <label class="settings-field-label" for="rtDayOfMonth">Day of month</label>
+                <input id="rtDayOfMonth" class="new-board-input recurring-number-input" type="number" min="1" max="31" value="1">
+              </div>
+              <div class="settings-field-row" id="rtMonthRow" style="display:none">
+                <label class="settings-field-label" for="rtMonth">Month</label>
+                <select id="rtMonth" class="new-board-input">
+                  <option value="1">January</option><option value="2">February</option>
+                  <option value="3">March</option><option value="4">April</option>
+                  <option value="5">May</option><option value="6">June</option>
+                  <option value="7">July</option><option value="8">August</option>
+                  <option value="9">September</option><option value="10">October</option>
+                  <option value="11">November</option><option value="12">December</option>
+                </select>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtStartDate">Start date *</label>
+                <input id="rtStartDate" class="new-board-input" type="date">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="rtEndDate">End date</label>
+                <input id="rtEndDate" class="new-board-input" type="date">
+              </div>
+              <div id="rtFormError" class="recurring-form-error" hidden></div>
+              <div class="settings-webdav-actions">
+                <button class="btn" id="rtCancelBtn">Cancel</button>
+                <button class="btn btn-accent" id="rtSaveBtn">Save task</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section" id="accountsSection" data-settings-label="Sources" data-settings-keywords="calendar caldav ical imap mail email cards columns board webdav nextcloud accounts add account" style="display:none">
           <div class="settings-section-title">
             <span>Sources</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -999,7 +1104,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="apiKeySection" data-settings-label="API Access">
+        <div class="settings-section" id="apiKeySection" data-settings-label="API Access" data-settings-keywords="api key token authentication bearer external access env header rest">
           <div class="settings-section-title">
             <span>API Access</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1016,7 +1121,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="colorPaletteSection" data-settings-label="Color Palette">
+        <div class="settings-section" id="colorPaletteSection" data-settings-label="Color Palette" data-settings-keywords="colors theme customise customize swatches cards accounts">
           <div class="settings-section-title">
             <span>Color palette</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1027,7 +1132,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="iconLibrarySection" data-settings-label="Icon Library">
+        <div class="settings-section" id="iconLibrarySection" data-settings-label="Icon Library" data-settings-keywords="icons emoji symbols svg reference browse">
           <div class="settings-section-title">
             <span>Icon library</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1037,7 +1142,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="promptsSection" data-settings-label="Prompts">
+        <div class="settings-section" id="promptsSection" data-settings-label="Prompts" data-settings-keywords="ai llm search profile criteria include exclude radius geocoding location filter jobs">
           <div class="settings-section-title">
             <span>Prompts</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1071,7 +1176,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="boardExportSection" data-settings-label="Export & Import" style="display:none">
+        <div class="settings-section" id="boardExportSection" data-settings-label="Export & Import" data-settings-keywords="json backup download upload restore notes zip transfer" style="display:none">
           <div class="settings-section-title">
             <span>Export &amp; Import</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1083,7 +1188,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="archiveSection" data-settings-label="Visibility" style="display:none">
+        <div class="settings-section" id="archiveSection" data-settings-label="Visibility" data-settings-keywords="archive hide show overview active hidden" style="display:none">
           <div class="settings-section-title">
             <span>Visibility</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1102,7 +1207,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="boardDeleteSection" data-settings-label="Danger zone" style="display:none">
+        <div class="settings-section" id="boardDeleteSection" data-settings-label="Danger zone" data-settings-keywords="delete remove permanently destroy reset" style="display:none">
           <div class="settings-section-title">
             <span>Danger zone</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1112,7 +1217,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="aboutSection" data-settings-label="About" style="display:none">
+        <div class="settings-section" id="aboutSection" data-settings-label="About" data-settings-keywords="version branch github repository info changelog release" style="display:none">
           <div class="settings-section-title">
             <span>About</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1263,6 +1368,7 @@
 <script src="/search.js"></script>
 <script src="/analytics.js"></script>
 <script src="/dashboard.js"></script>
+<script src="/recurring.js"></script>
 <script src="/init.js"></script>
 </body>
 </html>

@@ -8,6 +8,8 @@ const GLOBAL_DB_MODULE   = path.resolve(__dirname, '../../backend/global-db.js')
 const DASHBOARD_ROUTE    = path.resolve(__dirname, '../../backend/routes/dashboard.js')
 const CALENDAR_MODULE    = path.resolve(__dirname, '../../backend/dashboard/calendar.js')
 const MAIL_MODULE        = path.resolve(__dirname, '../../backend/dashboard/mail.js')
+const RECURRING_MODULE   = path.resolve(__dirname, '../../backend/recurring.js')
+const RECURRING_ROUTE    = path.resolve(__dirname, '../../backend/routes/recurring.js')
 
 /**
  * Creates a test Express app.
@@ -82,6 +84,7 @@ function createApp(dbMock) {
   app.use('/api', require('../../backend/routes/notes'))
   app.use('/api', require('../../backend/routes/attachments'))
   app.use('/api', require('../../backend/routes/dashboard'))
+  app.use('/api', require('../../backend/routes/recurring'))
 
   return app
 }
@@ -106,6 +109,8 @@ function clearAppCache() {
     DASHBOARD_ROUTE,
     CALENDAR_MODULE,
     MAIL_MODULE,
+    RECURRING_MODULE,
+    RECURRING_ROUTE,
   ]
   toDelete.forEach(p => { delete require.cache[p] })
 }
