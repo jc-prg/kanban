@@ -489,6 +489,7 @@ function openModal(colId) {
   _updateLinkBtn();
   document.getElementById('modalTitle').textContent      = 'Add Card';
   document.getElementById('modalSubmitBtn').textContent  = 'Add Card';
+  document.getElementById('modalAddCloseBtn').style.display = 'none';
   resetCardSections();
   renderColorRow();
   renderPriorityRow();
@@ -521,6 +522,7 @@ function openEditModal(colId, card) {
   _updateLinkBtn();
   document.getElementById('modalTitle').textContent     = 'Edit Card';
   document.getElementById('modalSubmitBtn').textContent = 'Save';
+  document.getElementById('modalAddCloseBtn').style.display = 'none';
   document.getElementById('modalDeleteBtn').style.display = '';
   resetCardSections();
   renderColorRow();
@@ -553,6 +555,7 @@ function closeModal() {
   document.getElementById('modalStatusMsg').style.display     = 'none';
   document.getElementById('modalGoBoardBtn').style.display    = 'none';
   document.getElementById('modalDeleteBtn').style.display     = 'none';
+  document.getElementById('modalAddCloseBtn').style.display   = 'none';
   setCardSection('cardNotePagesSection', 'cardToggleNotePages', false);
   const noteToggle = document.getElementById('cardToggleNotePages');
   if (noteToggle) noteToggle.style.display = 'none';
@@ -595,7 +598,8 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
   _updateLinkBtn();
   modalOriginalData = null;
   document.getElementById('modalTitle').textContent     = 'Add to Inbox';
-  document.getElementById('modalSubmitBtn').textContent = 'Add to Inbox';
+  document.getElementById('modalSubmitBtn').textContent = 'Add + Next';
+  document.getElementById('modalAddCloseBtn').style.display = '';
   document.getElementById('modalStatusMsg').style.display  = 'none';
   document.getElementById('modalGoBoardBtn').style.display = 'none';
   renderColorRow();
@@ -647,7 +651,7 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
   document.getElementById('modal').style.display = 'flex';
 }
 
-async function submitInboxCard() {
+async function submitInboxCard(closeAfter = false) {
   document.getElementById('modalGoBoardBtn').style.display = 'none';
   const board  = document.getElementById('modalBoardSelect').value;
   const column = document.getElementById('modalColumnSelect').value;
@@ -710,19 +714,23 @@ async function submitInboxCard() {
 
     if (added) {
       if (_inboxOnSuccess) { _inboxOnSuccess(); _inboxOnSuccess = null; }
-      showModalStatus('Card added.', false);
-      document.getElementById('cardText').value  = '';
-      setEditorValue('cardDesc', '');
-      document.getElementById('cardLink').value  = '';
-      document.getElementById('cardStart').value = '';
-      document.getElementById('cardEnd').value   = '';
-      _updateLinkBtn();
-      selectedColor = COLORS[0]; selectedPriority = 0;
-      renderColorRow(); renderPriorityRow();
-      const goBtn = document.getElementById('modalGoBoardBtn');
-      goBtn.href = `/board/${encodeURIComponent(board)}`;
-      goBtn.style.display = '';
-      document.getElementById('cardText').focus();
+      if (closeAfter) {
+        closeModal();
+      } else {
+        showModalStatus('Card added.', false);
+        document.getElementById('cardText').value  = '';
+        setEditorValue('cardDesc', '');
+        document.getElementById('cardLink').value  = '';
+        document.getElementById('cardStart').value = '';
+        document.getElementById('cardEnd').value   = '';
+        _updateLinkBtn();
+        selectedColor = COLORS[0]; selectedPriority = 0;
+        renderColorRow(); renderPriorityRow();
+        const goBtn = document.getElementById('modalGoBoardBtn');
+        goBtn.href = `/board/${encodeURIComponent(board)}`;
+        goBtn.style.display = '';
+        document.getElementById('cardText').focus();
+      }
     }
   } catch (e) {
     showModalStatus(e.message || 'Failed to add card.', true);
@@ -771,6 +779,8 @@ function selectPriority(p) {
   selectedPriority = p;
   renderPriorityRow();
 }
+
+document.getElementById('modalAddCloseBtn').addEventListener('click', () => submitInboxCard(true));
 
 let _backdropMousedown = false;
 document.getElementById('modal').addEventListener('mousedown', e => {
