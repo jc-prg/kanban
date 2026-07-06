@@ -582,7 +582,7 @@ function submitCard() {
   closeModal();
 }
 
-async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null) {
+async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null, preselectedColumn = null) {
   _inboxOnSuccess = onSuccess;
   modalMode = 'inbox';
   selectedColor    = COLORS[0];
@@ -641,6 +641,7 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
   }
   colSelect.innerHTML = '<option value="__inbox__">INBOX*</option>';
   await _loadColumns(select.value);
+  if (preselectedColumn) colSelect.value = preselectedColumn;
   select.onchange = () => _loadColumns(select.value);
 
   document.getElementById('modal').style.display = 'flex';

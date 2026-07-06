@@ -531,6 +531,72 @@ async function initDashboard() {
     }
   });
 
+  // Card group header right-click context menu
+  let _dashGroupCtxBoard  = null;
+  let _dashGroupCtxColumn = null;
+
+  function _hideDashGroupCtxMenu() {
+    document.getElementById('dashGroupContextMenu').style.display = 'none';
+    _dashGroupCtxBoard  = null;
+    _dashGroupCtxColumn = null;
+  }
+
+  function _showDashGroupCtxMenu(x, y, board, column) {
+    _dashGroupCtxBoard  = board;
+    _dashGroupCtxColumn = column;
+    const key        = `${board}\0${column}`;
+    const isCollapsed = _collapsedGroups.has(key);
+    const toggleIcon  = document.getElementById('dashGroupCtxToggle').querySelector('[data-icon]');
+    toggleIcon.dataset.icon = isCollapsed ? 'expand' : 'collapse';
+    toggleIcon.textContent  = ICONS[isCollapsed ? 'expand' : 'collapse'];
+    document.getElementById('dashGroupCtxToggleLabel').textContent = isCollapsed ? '  Open' : '  Close';
+    const menu = document.getElementById('dashGroupContextMenu');
+    menu.style.display = 'block';
+    const mw = menu.offsetWidth  || 140;
+    const mh = menu.offsetHeight || 60;
+    const edge = 4;
+    menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
+    menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
+  }
+
+  document.getElementById('dashboardCardsPanel').addEventListener('contextmenu', e => {
+    const hdr = e.target.closest('.dashboard-group-header--collapsible');
+    if (!hdr) return;
+    e.preventDefault();
+    _showDashGroupCtxMenu(e.clientX, e.clientY, hdr.dataset.board, hdr.dataset.column);
+  });
+
+  document.getElementById('dashGroupCtxToggle').addEventListener('click', () => {
+    const board = _dashGroupCtxBoard, column = _dashGroupCtxColumn;
+    _hideDashGroupCtxMenu();
+    if (!board || !column) return;
+    const key   = `${board}\0${column}`;
+    const group = document.querySelector(`.dashboard-card-group[data-board="${CSS.escape(board)}"][data-column="${CSS.escape(column)}"]`);
+    if (!group) return;
+    if (_collapsedGroups.has(key)) {
+      _collapsedGroups.delete(key);
+      group.classList.remove('dashboard-card-group--collapsed');
+      _persistGroupState(key, false);
+    } else {
+      _collapsedGroups.add(key);
+      group.classList.add('dashboard-card-group--collapsed');
+      _persistGroupState(key, true);
+    }
+  });
+
+  document.getElementById('dashGroupCtxAddCard').addEventListener('click', () => {
+    const board = _dashGroupCtxBoard, column = _dashGroupCtxColumn;
+    _hideDashGroupCtxMenu();
+    if (!board) return;
+    openInboxModal(board, null, null, column);
+  });
+
+  document.addEventListener('click', e => {
+    if (!document.getElementById('dashGroupContextMenu').contains(e.target)) {
+      _hideDashGroupCtxMenu();
+    }
+  }, true);
+
   // Mobile accordion: clicking a panel header opens it and closes others
   const _dashPanels = document.querySelectorAll('.dashboard-grid .dashboard-panel');
   _dashPanels.forEach(panel => {
