@@ -86,7 +86,7 @@ function renderRecurringList() {
   }
   list.innerHTML = _recurringTasks.map(t => {
     const isOn = t.enabled !== false;
-    const desc = _describeRecurrence(t) + ' · next: ' + _formatNextDue(t);
+    const desc = _describeRecurrence(t) + ' · next: ' + _formatNextDue(t) + ' · → ' + t.targetColumn;
     return `<li class="recurring-item" data-id="${escHtml(t.id)}">
       <button class="recurring-toggle ${isOn ? 'recurring-toggle--on' : 'recurring-toggle--off'}"
               title="${isOn ? 'Disable' : 'Enable'}">${isOn ? '●' : '○'}</button>
