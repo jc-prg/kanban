@@ -32,3 +32,16 @@ document.addEventListener('keydown', e => {
   _hScrollTarget = Math.max(0, Math.min(max, _hScrollTarget));
   if (!_hScrollRafId) _hScrollRafId = requestAnimationFrame(_hScrollStep);
 });
+
+document.addEventListener('wheel', e => {
+  const wrapper = document.querySelector('.board-wrapper');
+  if (!wrapper) return;
+  if (e.target !== wrapper) return;
+  const max = wrapper.scrollWidth - wrapper.clientWidth;
+  if (max <= 0) return;
+  e.preventDefault();
+  if (!_hScrollRafId) _hScrollTarget = wrapper.scrollLeft;
+  _hScrollTarget += e.deltaY !== 0 ? e.deltaY : e.deltaX;
+  _hScrollTarget = Math.max(0, Math.min(max, _hScrollTarget));
+  if (!_hScrollRafId) _hScrollRafId = requestAnimationFrame(_hScrollStep);
+}, { passive: false });
