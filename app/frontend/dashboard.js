@@ -1661,8 +1661,12 @@ function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
   const mw   = menu.offsetWidth  || 160;
   const mh   = menu.offsetHeight || 40;
   const edge = 4;
-  menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
-  menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
+  const menuLeft = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge));
+  const menuTop  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge));
+  menu.style.left = menuLeft + 'px';
+  menu.style.top  = menuTop  + 'px';
+  const moveWrap = document.getElementById('mailCtxMoveWrap');
+  moveWrap.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
 }
 
 function hideMailContextMenu() {
