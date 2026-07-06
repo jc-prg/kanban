@@ -88,8 +88,10 @@ function renderRecurringList() {
     const isOn = t.enabled !== false;
     const desc = _describeRecurrence(t) + ' · next: ' + _formatNextDue(t) + ' · → ' + t.targetColumn;
     return `<li class="recurring-item" data-id="${escHtml(t.id)}">
-      <button class="recurring-toggle ${isOn ? 'recurring-toggle--on' : 'recurring-toggle--off'}"
-              title="${isOn ? 'Disable' : 'Enable'}">${isOn ? '●' : '○'}</button>
+      <label class="settings-toggle recurring-toggle" title="${isOn ? 'Disable' : 'Enable'}">
+        <input type="checkbox" class="recurring-toggle-chk"${isOn ? ' checked' : ''}>
+        <span class="settings-toggle-track"></span>
+      </label>
       <div class="recurring-item-info">
         <div class="recurring-item-text">${escHtml(t.card.text)}</div>
         <div class="recurring-item-meta">${escHtml(desc)}</div>
@@ -385,13 +387,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btn) btn.classList.toggle('recurring-day-btn--selected');
   });
 
-  // List: toggle / edit / delete / run
+  // List: toggle (change event on checkbox)
+  list.addEventListener('change', e => {
+    const chk = e.target.closest('.recurring-toggle-chk');
+    if (!chk) return;
+    const item = chk.closest('.recurring-item');
+    if (item) _toggleRecurringTask(item.dataset.id);
+  });
+
+  // List: edit / delete / run
   list.addEventListener('click', e => {
     const item = e.target.closest('.recurring-item');
     if (!item) return;
     const id = item.dataset.id;
-    if (e.target.closest('.recurring-toggle'))      _toggleRecurringTask(id);
-    else if (e.target.closest('.recurring-edit-btn'))   {
+    if (e.target.closest('.recurring-edit-btn'))   {
       const task = _recurringTasks.find(t => t.id === id);
       if (task) openRecurringForm(task);
     }

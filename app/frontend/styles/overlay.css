@@ -1619,19 +1619,7 @@
   background: var(--bg-inset, rgba(0,0,0,0.1));
 }
 
-.recurring-toggle {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 1rem;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  padding: 0 2px;
-  transition: color 0.15s;
-}
-
-.recurring-toggle--on  { color: var(--accent); }
-.recurring-toggle--off { color: var(--text-muted); opacity: 0.5; }
+.recurring-toggle { cursor: pointer; }
 
 .recurring-item-info {
   flex: 1;
