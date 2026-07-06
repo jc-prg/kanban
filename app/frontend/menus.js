@@ -342,8 +342,7 @@ function showColContextMenu(x, y, colId) {
   const collapsed = colCollapsed.has(colId);
   const toggleIcon = document.getElementById('colCtxToggleContent').querySelector('[data-icon]');
   const toggleKey = collapsed ? 'expand' : 'collapse';
-  toggleIcon.dataset.icon = toggleKey;
-  toggleIcon.textContent = ICONS[toggleKey];
+  setIcon(toggleIcon, toggleKey);
   document.getElementById('colCtxToggleLabel').textContent = `  ${collapsed ? 'Show content' : 'Hide content'}`;
 
   const hideWhenCollapsed = display => ['colCtxSettings','colCtxFilterBy','colCtxDeleteCards','colCtxPrint'].forEach(id =>

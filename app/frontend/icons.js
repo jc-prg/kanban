@@ -247,6 +247,13 @@ function renderIconLibrary() {
   }).join('');
 }
 
+// ---- Update a single [data-icon] element dynamically ----
+function setIcon(el, key) {
+  el.dataset.icon = key;
+  if (key in ICONS)         el.textContent = ICONS[key];
+  else if (key in SVGICONS) el.innerHTML   = SVGICONS[key]();
+}
+
 // ---- Init: fill [data-icon] placeholders in static HTML ----
 function initIcons() {
   document.querySelectorAll('[data-icon]').forEach(el => {

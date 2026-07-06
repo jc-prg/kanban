@@ -21,6 +21,8 @@ const _collapsedGroups  = new Set(); // keyed by "board\0column"
 const _seededGroups     = new Set(); // groups already seeded from config
 let _dashRecentLimit    = 10;
 
+const _PANEL_FAILED  = '<p class="dashboard-empty">Failed to load.</p>';
+
 const _DASH_STATE_KEY = 'dash-group-state';
 function _loadGroupState() {
   try {
@@ -374,7 +376,7 @@ async function initDashboard() {
     items.push(
       { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(7) },
       { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${minDays} days)`, action: () => _loadMoreCalEventsAll(30) },
-      { labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _fetchCalendarData().then(_renderCalendarPanel).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; }) },
+      { labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _fetchCalendarData().then(_renderCalendarPanel).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = _PANEL_FAILED; }) },
       { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('calendar-accounts') },
     );
     openContextMenu(e, items);
@@ -532,104 +534,56 @@ async function initDashboard() {
   });
 
   // Card group header right-click context menu
-  let _dashGroupCtxBoard  = null;
-  let _dashGroupCtxColumn = null;
-
-  function _hideDashGroupCtxMenu() {
-    document.getElementById('dashGroupContextMenu').style.display = 'none';
-    _dashGroupCtxBoard  = null;
-    _dashGroupCtxColumn = null;
-  }
-
-  function _showDashGroupCtxMenu(x, y, board, column) {
-    _dashGroupCtxBoard  = board;
-    _dashGroupCtxColumn = column;
-    const key        = `${board}\0${column}`;
-    const isCollapsed = _collapsedGroups.has(key);
-    const toggleIcon  = document.getElementById('dashGroupCtxToggle').querySelector('[data-icon]');
-    toggleIcon.dataset.icon = isCollapsed ? 'expand' : 'collapse';
-    toggleIcon.textContent  = ICONS[isCollapsed ? 'expand' : 'collapse'];
-    document.getElementById('dashGroupCtxToggleLabel').textContent = isCollapsed ? '  Open' : '  Close';
-    const menu = document.getElementById('dashGroupContextMenu');
-    menu.style.display = 'block';
-    const mw = menu.offsetWidth  || 140;
-    const mh = menu.offsetHeight || 60;
-    const edge = 4;
-    menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
-    menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
-  }
-
   document.getElementById('dashboardCardsPanel').addEventListener('contextmenu', e => {
     const hdr = e.target.closest('.dashboard-group-header--collapsible');
     if (!hdr) return;
     e.preventDefault();
-    _showDashGroupCtxMenu(e.clientX, e.clientY, hdr.dataset.board, hdr.dataset.column);
+    const board  = hdr.dataset.board;
+    const column = hdr.dataset.column;
+    const key    = `${board}\0${column}`;
+    const isCollapsed = _collapsedGroups.has(key);
+    openContextMenu(e, [
+      {
+        labelHtml: `<span class="ctx-icon">${ICONS[isCollapsed ? 'expand' : 'collapse']}</span>${isCollapsed ? 'Open' : 'Close'}`,
+        action: () => {
+          const group = document.querySelector(`.dashboard-card-group[data-board="${CSS.escape(board)}"][data-column="${CSS.escape(column)}"]`);
+          if (!group) return;
+          if (_collapsedGroups.has(key)) {
+            _collapsedGroups.delete(key);
+            group.classList.remove('dashboard-card-group--collapsed');
+            _persistGroupState(key, false);
+          } else {
+            _collapsedGroups.add(key);
+            group.classList.add('dashboard-card-group--collapsed');
+            _persistGroupState(key, true);
+          }
+        },
+      },
+      {
+        labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>Add card`,
+        action: () => openInboxModal(board, null, null, column),
+      },
+    ]);
   });
-
-  document.getElementById('dashGroupCtxToggle').addEventListener('click', () => {
-    const board = _dashGroupCtxBoard, column = _dashGroupCtxColumn;
-    _hideDashGroupCtxMenu();
-    if (!board || !column) return;
-    const key   = `${board}\0${column}`;
-    const group = document.querySelector(`.dashboard-card-group[data-board="${CSS.escape(board)}"][data-column="${CSS.escape(column)}"]`);
-    if (!group) return;
-    if (_collapsedGroups.has(key)) {
-      _collapsedGroups.delete(key);
-      group.classList.remove('dashboard-card-group--collapsed');
-      _persistGroupState(key, false);
-    } else {
-      _collapsedGroups.add(key);
-      group.classList.add('dashboard-card-group--collapsed');
-      _persistGroupState(key, true);
-    }
-  });
-
-  document.getElementById('dashGroupCtxAddCard').addEventListener('click', () => {
-    const board = _dashGroupCtxBoard, column = _dashGroupCtxColumn;
-    _hideDashGroupCtxMenu();
-    if (!board) return;
-    openInboxModal(board, null, null, column);
-  });
-
-  document.addEventListener('click', e => {
-    if (!document.getElementById('dashGroupContextMenu').contains(e.target)) {
-      _hideDashGroupCtxMenu();
-    }
-  }, true);
 
   // Board item right-click context menu
-  function _hideDashBoardItemCtxMenu() {
-    document.getElementById('dashBoardItemContextMenu').style.display = 'none';
-  }
-
-  function _showDashBoardItemCtxMenu(x, y, boardName) {
-    const openEl     = document.getElementById('dashBoardItemCtxOpen');
-    const settingsEl = document.getElementById('dashBoardItemCtxSettings');
-    openEl.href     = `/board/${encodeURIComponent(boardName)}`;
-    settingsEl.href = `/board/${encodeURIComponent(boardName)}#settings`;
-    const menu = document.getElementById('dashBoardItemContextMenu');
-    menu.style.display = 'block';
-    const mw = menu.offsetWidth  || 160;
-    const mh = menu.offsetHeight || 60;
-    const edge = 4;
-    menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
-    menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
-  }
-
   document.getElementById('dashboardBoardsPanel').addEventListener('contextmenu', e => {
     const item = e.target.closest('.dashboard-board-item');
     if (!item) return;
     e.preventDefault();
     const name = decodeURIComponent(item.href.split('/board/')[1] || '');
     if (!name) return;
-    _showDashBoardItemCtxMenu(e.clientX, e.clientY, name);
+    openContextMenu(e, [
+      {
+        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`,
+        action: () => { window.location.href = `/board/${encodeURIComponent(name)}`; },
+      },
+      {
+        labelHtml: `<span class="ctx-icon">${ICONS.moreOptions}</span>Board settings`,
+        action: () => { window.location.href = `/board/${encodeURIComponent(name)}#settings`; },
+      },
+    ]);
   });
-
-  document.addEventListener('click', e => {
-    if (!document.getElementById('dashBoardItemContextMenu').contains(e.target)) {
-      _hideDashBoardItemCtxMenu();
-    }
-  }, true);
 
   // Mobile accordion: clicking a panel header opens it and closes others
   const _dashPanels = document.querySelectorAll('.dashboard-grid .dashboard-panel');
@@ -662,15 +616,18 @@ async function initDashboard() {
   await loadDashboard();
 }
 
-async function _reloadCardsPanel() {
+async function _reloadPanel(url, renderFn, panelId) {
   try {
-    const res = await fetch('/api/dashboard/cards');
+    const res = await fetch(url);
     if (!res.ok) throw new Error('Failed');
-    _renderCardsPanel(await res.json());
+    renderFn(await res.json());
   } catch {
-    document.getElementById('dashboardCardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
+    document.getElementById(panelId).innerHTML = _PANEL_FAILED;
   }
 }
+
+function _reloadCardsPanel() { return _reloadPanel('/api/dashboard/cards', _renderCardsPanel, 'dashboardCardsPanel'); }
+function _reloadMailPanel()  { return _reloadPanel('/api/dashboard/mail',  _renderMailPanel,  'dashboardMailPanel');  }
 
 function _panelShown(id) {
   return document.getElementById(id).closest('.dashboard-panel').style.display !== 'none';
@@ -723,10 +680,10 @@ async function loadDashboard() {
     showBoards   ? Promise.all([
       fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
       (() => { const d = new Date(); d.setDate(d.getDate() + _dashAchOffset); return fetch(`/api/achievements/today?date=${d.toISOString().slice(0,10)}`).then(r => r.ok ? r.json() : null).catch(() => null); })(),
-    ]).then(([d, a]) => _renderBoardsPanel(d, a).then(() => true)).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
-    showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
-    showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
-    showCalendar ? _fetchCalendarData().then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; return false; }) : true,
+    ]).then(([d, a]) => _renderBoardsPanel(d, a).then(() => true)).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = _PANEL_FAILED; return false; }) : true,
+    showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = _PANEL_FAILED; return false; }) : true,
+    showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = _PANEL_FAILED; return false; }) : true,
+    showCalendar ? _fetchCalendarData().then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = _PANEL_FAILED; return false; }) : true,
   ]);
 
   const anyError = resolved.some((ok, i) => !ok && [showBoards, showCards, showMail, showCalendar][i]);
@@ -1708,16 +1665,6 @@ function hideMailContextMenu() {
   _mailCtxAccountId = null;
   _mailCtxMsgId     = null;
   _mailCtxUnread    = false;
-}
-
-async function _reloadMailPanel() {
-  try {
-    const res = await fetch('/api/dashboard/mail');
-    if (!res.ok) throw new Error('Failed');
-    _renderMailPanel(await res.json());
-  } catch {
-    document.getElementById('dashboardMailPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>';
-  }
 }
 
 function _populateFolderList(folders, listEl) {
