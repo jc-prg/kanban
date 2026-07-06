@@ -323,6 +323,7 @@ async function initDashboard() {
         children:  boards.map(b => ({ label: b, action: () => window.open(`/board/${encodeURIComponent(b)}`, '_blank', 'noopener,noreferrer') })),
       });
     }
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _reloadCardsPanel() });
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit sources`, action: () => openSettingsDialog('card-sources') });
     openContextMenu(e, items);
   });
@@ -340,6 +341,7 @@ async function initDashboard() {
         children:  urlAccs.map(a => ({ label: a.label || a.accountId, action: () => window.open(a.webInterfaceUrl, '_blank', 'noopener,noreferrer') })),
       });
     }
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _reloadMailPanel() });
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('mail-accounts') });
     openContextMenu(e, items);
   });
@@ -372,6 +374,7 @@ async function initDashboard() {
     items.push(
       { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(7) },
       { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${minDays} days)`, action: () => _loadMoreCalEventsAll(30) },
+      { labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _fetchCalendarData().then(_renderCalendarPanel).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = '<p class="dashboard-empty">Failed to load.</p>'; }) },
       { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('calendar-accounts') },
     );
     openContextMenu(e, items);
