@@ -212,11 +212,14 @@ function schedulesSave() {
       let r;
       const headers = { 'Content-Type': 'application/json' };
       if (boardEtag) headers['If-Match'] = boardEtag;
+      let sentState;
       if (baseState) {
         const patch = buildPatch(baseState, state);
         if (!Object.keys(patch).length) { showSaved(); return; }
+        sentState = JSON.parse(JSON.stringify(state));
         r = await fetch(API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
       } else {
+        sentState = JSON.parse(JSON.stringify(state));
         r = await fetch(API, { method: 'PUT', headers, body: JSON.stringify(state) });
       }
       if (r.status === 409) {
@@ -231,7 +234,7 @@ function schedulesSave() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const newEtag = r.headers.get('ETag');
       if (newEtag) boardEtag = newEtag;
-      baseState = JSON.parse(JSON.stringify(state));
+      baseState = sentState;
       showSaved();
     } catch (e) {
       showSaveError();
