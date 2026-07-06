@@ -123,9 +123,8 @@ function render() {
     });
 
     colEl.innerHTML = `
-      <div class="column-header">
+      <div class="column-header" style="--col-color:${color}">
         <div class="col-drag-handle" draggable="true" title="Drag to reorder">${ICONS.dragHandle}</div>
-        <div class="column-dot" style="background:${color}"></div>
         <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
         <button class="col-btn" title="Column options" style="margin-left:auto">${ICONS.moreOptions}</button>
         ${(colColorFilter[col.id] || colDupFilter.has(col.id) || colPriorityFilter[col.id]) ? `<span class="col-filter-icon" title="Filter active — click to clear">${SVGICONS.filter(15, 15)}</span>` : ''}

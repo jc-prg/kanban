@@ -38,7 +38,7 @@
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface2) 92%, var(--accent));
   flex-shrink: 0;
   font-family: 'Syne', sans-serif;
   font-weight: 700;

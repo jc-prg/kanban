@@ -32,14 +32,7 @@
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.column-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
+  background: color-mix(in srgb, var(--surface) 85%, var(--col-color));
 }
 
 .column-title {
@@ -74,12 +67,19 @@
 
 .column-count {
   font-size: 0.7rem;
-  color: var(--text-muted);
-  background: var(--surface2);
+  color: #383850;
+  background: color-mix(in srgb, #b8b8cc 88%, var(--col-color));
   border-radius: 4px;
   padding: 2px 6px;
   min-width: 22px;
   text-align: center;
+}
+
+@media (prefers-color-scheme: light) {
+  .column-count {
+    color: var(--text-muted);
+    background: var(--surface2);
+  }
 }
 
 .col-drag-handle {
@@ -195,4 +195,10 @@
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-glow);
+}
+
+@media (prefers-color-scheme: light) {
+  .column-header {
+    background: color-mix(in srgb, var(--surface2) 85%, var(--col-color));
+  }
 }
