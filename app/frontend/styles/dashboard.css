@@ -29,7 +29,8 @@
   overflow: hidden;
 }
 
-.dashboard-panel-header .column-count { margin-left: auto; }
+.dashboard-panel-header .column-count { margin-left: auto; background: #bbb; color: #333; }
+.dashboard-panel-header .col-btn { font-size: 0.85rem; }
 .dashboard-panel-header:hover .col-btn { opacity: 0.55; }
 
 .dashboard-panel-header {
