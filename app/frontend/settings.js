@@ -134,6 +134,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     document.getElementById('archiveSection').style.display = '';
     document.getElementById('boardDeleteSection').style.display = '';
     document.getElementById('boardExportSection').style.display = '';
+    document.getElementById('menuRecurring').style.display = '';
     document.getElementById('dbSection').style.display = 'none';
     document.getElementById('apiKeySection').style.display = 'none';
     document.getElementById('promptsSection').style.display = 'none';
@@ -1349,6 +1350,11 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     resultEl.style.display = '';
     btn.disabled    = false;
     btn.textContent = 'Test connection';
+  });
+
+  document.getElementById('menuRecurring').addEventListener('click', () => {
+    hideMenu();
+    openSettingsDialog('recurringSection');
   });
 
   document.getElementById('menuSettings').addEventListener('click', () => {
