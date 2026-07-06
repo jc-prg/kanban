@@ -312,7 +312,7 @@ function _extractIcsItems(xml) {
     if (!icsM) continue;
     items.push({
       ics:  icsM[0].replace(/&#13;/g, '\r'),
-      etag: etagM ? etagM[1].trim() : null,
+      etag: etagM ? etagM[1].trim().replace(/&quot;/g, '"').replace(/&amp;/g, '&') : null,
       href: hrefM ? hrefM[1].trim() : null,
     });
   }

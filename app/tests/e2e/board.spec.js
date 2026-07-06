@@ -96,12 +96,12 @@ test.describe('3.3 Column & card CRUD', () => {
     // Wait for autosave debounce + network round-trip
     await page.waitForTimeout(1200);
     await page.reload();
-    await expect(page.locator('.column-title').first()).toHaveValue('Renamed Column');
+    await expect(page.locator('.column-title').first()).toHaveValue('RENAMED COLUMN');
   });
 
   // E-B-3 ------------------------------------------------------------------
   test('E-B-3: delete column via context menu → column removed', async ({ page }) => {
-    await page.click('.col-btn');
+    await page.locator('.column .col-btn').first().click();
     await expect(page.locator('#colContextMenu')).toBeVisible();
     await page.hover('#colCtxSettings');
     await page.click('#colCtxDelete');

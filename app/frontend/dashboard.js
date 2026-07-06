@@ -329,12 +329,47 @@ async function initDashboard() {
     document.querySelector('#dashboardDetail .modal').classList.toggle('modal--fullscreen');
   });
 
-  // Calendar event click → detail panel
+  // Calendar event click → detail panel (skipped on touch; handled by touchend below)
   document.getElementById('dashboardCalendarPanel').addEventListener('click', e => {
     const item = e.target.closest('[data-uid]');
     if (!item) return;
+    if (lastInputWasTouch) return;
     _openEventDetail(item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
   });
+
+  // Calendar event right-click → context menu
+  document.getElementById('dashboardCalendarPanel').addEventListener('contextmenu', e => {
+    const item = e.target.closest('[data-uid]');
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    _showCalEventContextMenu(e, item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
+  });
+
+  // Calendar event touch: single tap → open detail, double tap → context menu
+  { let _calTap = null; let _calTouchMoved = false;
+    const _calPanel = document.getElementById('dashboardCalendarPanel');
+    _calPanel.addEventListener('touchstart', () => { _calTouchMoved = false; }, { passive: true });
+    _calPanel.addEventListener('touchmove',  () => { _calTouchMoved = true;  }, { passive: true });
+    _calPanel.addEventListener('touchend', e => {
+      if (_calTouchMoved) return;
+      const item = e.target.closest('[data-uid]');
+      if (!item) return;
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      if (_calTap && _calTap.el === item) {
+        clearTimeout(_calTap.timer);
+        _calTap = null;
+        _showCalEventContextMenu({ clientX: t.clientX, clientY: t.clientY },
+          item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
+      } else {
+        clearTimeout(_calTap?.timer);
+        _calTap = { el: item, timer: setTimeout(() => {
+          _calTap = null;
+          _openEventDetail(item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
+        }, 280) };
+      }
+    }, { passive: false }); }
 
   // Mail message click → detail panel (skipped on touch; handled by touchend below)
   document.getElementById('dashboardMailPanel').addEventListener('click', e => {
@@ -1327,6 +1362,20 @@ async function _openCardDetail(board, card) {
   }
 }
 
+function _showCalEventContextMenu(e, accountId, uid, webUrl) {
+  const ev         = _calEventMap.get(`${accountId}\0${uid}`);
+  const isIcal     = (ev?._accountType || 'caldav') === 'ical-url';
+  const isRecurring = !!ev?.hasRrule;
+  const items = [
+    { label: 'Open',   action: () => _openEventDetail(accountId, uid, webUrl) },
+  ];
+  if (!isIcal && !isRecurring) {
+    items.push({ label: 'Edit',   action: () => openCalEventModal(accountId, ev) });
+    items.push({ label: 'Delete', action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href) });
+  }
+  openContextMenu(e, items);
+}
+
 function _openEventDetail(accountId, uid, webUrl) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
@@ -2008,13 +2057,13 @@ async function _refreshCalendarAccount(accountId) {
       if (key.startsWith(`${accountId}\0`)) _calEventMap.delete(key);
     }
 
-    // Find the existing section element to get account meta
+    // Look up account meta from the last-rendered accounts list (reliable in both grouped and ungrouped mode)
+    const accMeta   = _calAccountsMeta.find(a => a.accountId === accountId) || {};
+    const accLabel  = accMeta.label || '';
+    const accColor  = accMeta.color || '';
+    const accWebUrl = accMeta.webInterfaceUrl || '';
+    const accType   = data.type || accMeta.type || 'caldav';
     const sectionEl = document.querySelector(`.dash-cal-account[data-account-id="${CSS.escape(accountId)}"]`);
-    const labelEl   = sectionEl?.querySelector('.dash-cal-account-label');
-    const accLabel  = labelEl?.textContent || '';
-    const accColor  = labelEl?.style.getPropertyValue('--card-color') || '';
-    const accWebUrl = sectionEl?.querySelector('[data-web-url]')?.dataset.webUrl || '';
-    const accType   = data.type || 'caldav';
 
     for (const ev of (data.events || [])) {
       _calEventMap.set(`${accountId}\0${ev.uid}`, {
@@ -2025,14 +2074,33 @@ async function _refreshCalendarAccount(accountId) {
       });
     }
 
-    // Re-render the body
-    if (sectionEl) {
+    const lookahead = _calLookahead.get(accountId) ?? (data.lookaheadDays || 7);
+    const maxDayD = new Date(); maxDayD.setDate(maxDayD.getDate() + lookahead - 1);
+    const maxDay  = maxDayD.toISOString().slice(0, 10);
+
+    if (!_calGrouped) {
+      // Unified view — rebuild the whole panel from the updated _calEventMap
+      const allEvents = [..._calEventMap.values()];
+      const panel = document.getElementById('dashboardCalendarPanel');
+      const maxLookahead = Math.max(..._calAccountsMeta.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7)));
+      const maxDayAllD = new Date(); maxDayAllD.setDate(maxDayAllD.getDate() + maxLookahead - 1);
+      const groupsHtml = _calDayGroupsHtml(allEvents, '', '', '', maxDayAllD.toISOString().slice(0, 10));
+      // Replace only the day-group content (keep any error banners at the top)
+      const errBanners = [...panel.querySelectorAll('.dashboard-source-error')].map(el => el.outerHTML).join('');
+      panel.innerHTML = errBanners + (groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>');
+      if (maxLookahead > 7) {
+        const noteEl = document.createElement('p');
+        noteEl.className = 'dash-cal-lookahead-note';
+        noteEl.textContent = `Showing next ${maxLookahead} days`;
+        panel.appendChild(noteEl);
+      }
+    } else if (sectionEl) {
+      // Grouped view — update just this account's section
       const bodyEl = sectionEl.querySelector('.dash-cal-account-body');
       if (bodyEl) {
-        const groupsHtml = _calDayGroupsHtml(data.events || [], accColor || null, accountId, accWebUrl || null);
+        const groupsHtml = _calDayGroupsHtml(data.events || [], accColor || null, accountId, accWebUrl || null, maxDay);
         bodyEl.innerHTML = groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
-        const lookahead = _calLookahead.get(accountId);
-        if (lookahead) {
+        if (_calLookahead.get(accountId)) {
           const noteEl = document.createElement('p');
           noteEl.className = 'dash-cal-lookahead-note';
           noteEl.textContent = `Showing next ${lookahead} days`;
