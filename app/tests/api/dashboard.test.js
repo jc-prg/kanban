@@ -27,6 +27,8 @@ function _defaultConfig() {
 const globalDbMock = {
   getDashboardConfig:  async () => JSON.parse(JSON.stringify(_storedConfig ?? _defaultConfig())),
   saveDashboardConfig: async (data) => { _storedConfig = JSON.parse(JSON.stringify(data)) },
+  getMailAccount:      async (id) => { const c = _storedConfig ?? _defaultConfig(); return (c.mailAccounts || []).find(a => a.id === id) || null; },
+  getCalAccount:       async (id) => { const c = _storedConfig ?? _defaultConfig(); return (c.calendarAccounts || []).find(a => a.id === id) || null; },
   initGlobalDb:        async () => {},
   getGlobalDb:         () => ({}),
 }

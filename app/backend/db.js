@@ -67,10 +67,25 @@ async function loadNotesData(db) {
   }
 }
 
-async function saveNotesData(db, data) {
+async function upsertDoc(db, id, data) {
   let rev;
-  try { ({ _rev: rev } = await db.get(NOTES_DOC_ID)); } catch (e) { /* new doc */ }
-  return db.insert({ _id: NOTES_DOC_ID, ...(rev ? { _rev: rev } : {}), ...sanitize(data) });
+  try { ({ _rev: rev } = await db.get(id)); } catch { /* new doc */ }
+  return db.insert({ _id: id, ...(rev ? { _rev: rev } : {}), ...sanitize(data) });
+}
+
+async function saveNotesData(db, data) {
+  return upsertDoc(db, NOTES_DOC_ID, data);
+}
+
+function withHandler(handler) {
+  return async (req, res) => {
+    try {
+      await handler(req, res);
+    } catch (err) {
+      console.error(err.message);
+      res.status(500).json({ error: err.message });
+    }
+  };
 }
 
 function withBoard(handler) {
@@ -126,6 +141,6 @@ module.exports = {
   validBoardName, getBoardDb,
   loadBoardData, saveBoardData,
   loadNotesData, saveNotesData,
-  withBoard, withExistingBoard,
+  upsertDoc, withHandler, withBoard, withExistingBoard,
   initDb,
 };

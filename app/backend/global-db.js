@@ -1,5 +1,5 @@
 'use strict';
-const { getCouch } = require('./db');
+const { getCouch, upsertDoc } = require('./db');
 
 const GLOBAL_DB_NAME      = 'jc-config-dashboard';
 const DASHBOARD_CONFIG_ID = 'dashboard-config';
@@ -50,13 +50,7 @@ async function getDashboardConfig() {
 }
 
 async function saveDashboardConfig(data) {
-  let rev;
-  try { ({ _rev: rev } = await globalDb.get(DASHBOARD_CONFIG_ID)); } catch (e) { /* new doc */ }
-  return globalDb.insert({
-    _id: DASHBOARD_CONFIG_ID,
-    ...(rev ? { _rev: rev } : {}),
-    ...data,
-  });
+  return upsertDoc(globalDb, DASHBOARD_CONFIG_ID, data);
 }
 
 const WEBDAV_ACCOUNTS_ID = 'accounts';
@@ -72,13 +66,17 @@ async function getWebdavAccounts() {
 }
 
 async function saveWebdavAccounts(accounts) {
-  let rev;
-  try { ({ _rev: rev } = await webdavDb.get(WEBDAV_ACCOUNTS_ID)); } catch { /* new doc */ }
-  return webdavDb.insert({
-    _id: WEBDAV_ACCOUNTS_ID,
-    ...(rev ? { _rev: rev } : {}),
-    accounts,
-  });
+  return upsertDoc(webdavDb, WEBDAV_ACCOUNTS_ID, { accounts });
 }
 
-module.exports = { getGlobalDb, getWebdavDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts };
+async function getMailAccount(accountId) {
+  const config = await getDashboardConfig();
+  return (config.mailAccounts || []).find(a => a.id === accountId) || null;
+}
+
+async function getCalAccount(accountId) {
+  const config = await getDashboardConfig();
+  return (config.calendarAccounts || []).find(a => a.id === accountId) || null;
+}
+
+module.exports = { getGlobalDb, getWebdavDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount };

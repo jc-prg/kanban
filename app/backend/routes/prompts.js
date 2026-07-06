@@ -2,7 +2,7 @@ const express      = require('express');
 const { execSync } = require('child_process');
 const router  = express.Router();
 const { writeRateLimit } = require('../auth');
-const { getPromptsDb }   = require('../db');
+const { getPromptsDb, upsertDoc } = require('../db');
 const { API_KEY }        = require('../config');
 const { version, repository } = require('../../package.json');
 
@@ -23,9 +23,7 @@ async function loadPrompts() {
 }
 
 async function savePrompts(data) {
-  let rev;
-  try { ({ _rev: rev } = await getPromptsDb().get(PROMPTS_DOC_ID)); } catch (e) { /* new doc */ }
-  await getPromptsDb().insert({ _id: PROMPTS_DOC_ID, ...(rev ? { _rev: rev } : {}), ...data });
+  await upsertDoc(getPromptsDb(), PROMPTS_DOC_ID, data);
 }
 
 router.get('/settings', (req, res) => {

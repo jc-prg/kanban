@@ -2,8 +2,8 @@
 const express = require('express');
 const router  = express.Router();
 const { writeRateLimit }                          = require('../auth');
-const { getDashboardConfig, saveDashboardConfig } = require('../global-db');
-const { getCouch }                                = require('../db');
+const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount } = require('../global-db');
+const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
         buildIcs, resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
@@ -113,81 +113,109 @@ function _cardLastEdited(card) {
 
 // ---- Routes ----
 
-router.get('/dashboard/config', async (req, res) => {
-  try {
-    const config = await getDashboardConfig();
-    res.json(stripPasswords(config));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/dashboard/config', withHandler(async (req, res) => {
+  const config = await getDashboardConfig();
+  res.json(stripPasswords(config));
+}));
 
-router.get('/dashboard/recent', async (req, res) => {
-  try {
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    const couch = getCouch();
-    const allDbs = await couch.db.list();
-    const boardNames = allDbs.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
-    const items = [];
-    await Promise.allSettled(boardNames.map(async board => {
-      const db = couch.use(DB_PREFIX + board);
-      const [boardRes, notesRes] = await Promise.allSettled([db.get(DOC_ID), db.get(NOTES_DOC_ID)]);
-      if (boardRes.status === 'fulfilled') {
-        const doc = boardRes.value;
-        if (!doc.settings?.archived) {
-          for (const col of doc.columns || []) {
-            for (const card of col.cards || []) {
-              if ((card.text || '').startsWith('#')) continue;
-              items.push({ type: 'card', id: card.id, title: card.text || '', board, context: col.title, at: _cardLastEdited(card), color: card.color || '' });
-            }
+router.get('/dashboard/recent', withHandler(async (req, res) => {
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+  const couch = getCouch();
+  const allDbs = await couch.db.list();
+  const boardNames = allDbs.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
+  const items = [];
+  await Promise.allSettled(boardNames.map(async board => {
+    const db = couch.use(DB_PREFIX + board);
+    const [boardRes, notesRes] = await Promise.allSettled([db.get(DOC_ID), db.get(NOTES_DOC_ID)]);
+    if (boardRes.status === 'fulfilled') {
+      const doc = boardRes.value;
+      if (!doc.settings?.archived) {
+        for (const col of doc.columns || []) {
+          for (const card of col.cards || []) {
+            if ((card.text || '').startsWith('#')) continue;
+            items.push({ type: 'card', id: card.id, title: card.text || '', board, context: col.title, at: _cardLastEdited(card), color: card.color || '' });
           }
         }
       }
-      if (notesRes.status === 'fulfilled') {
-        for (const page of _flattenPages(notesRes.value.items)) {
-          if (!page.lastModified) continue;
-          items.push({ type: 'note', id: page.id, title: page.title || '', board, context: 'notes', at: page.lastModified });
-        }
-      }
-    }));
-    items.sort((a, b) => (b.at > a.at ? 1 : b.at < a.at ? -1 : 0));
-    res.json(items.slice(0, limit));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/dashboard/config', writeRateLimit, async (req, res) => {
-  try {
-    // Validate defaultTimezone if explicitly provided
-    const tz = req.body.defaultTimezone;
-    if (tz !== undefined && tz !== '') {
-      const tzErr = _validateTz(tz);
-      if (tzErr) return res.status(400).json({ error: tzErr });
     }
+    if (notesRes.status === 'fulfilled') {
+      for (const page of _flattenPages(notesRes.value.items)) {
+        if (!page.lastModified) continue;
+        items.push({ type: 'note', id: page.id, title: page.title || '', board, context: 'notes', at: page.lastModified });
+      }
+    }
+  }));
+  items.sort((a, b) => (b.at > a.at ? 1 : b.at < a.at ? -1 : 0));
+  res.json(items.slice(0, limit));
+}));
 
-    const stored = await getDashboardConfig();
-    const merged = mergePasswords(stored, req.body);
-
-    // Clear defaultTimezone if explicitly set to empty string
-    if (tz === '') delete merged.defaultTimezone;
-
-    await saveDashboardConfig(merged);
-    clearCalendarUrlCache();
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+router.put('/dashboard/config', writeRateLimit, withHandler(async (req, res) => {
+  // Validate defaultTimezone if explicitly provided
+  const tz = req.body.defaultTimezone;
+  if (tz !== undefined && tz !== '') {
+    const tzErr = _validateTz(tz);
+    if (tzErr) return res.status(400).json({ error: tzErr });
   }
-});
 
-router.get('/dashboard/cards', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
+  const stored = await getDashboardConfig();
+  const merged = mergePasswords(stored, req.body);
+
+  // Clear defaultTimezone if explicitly set to empty string
+  if (tz === '') delete merged.defaultTimezone;
+
+  await saveDashboardConfig(merged);
+  clearCalendarUrlCache();
+  res.json({ ok: true });
+}));
+
+router.get('/dashboard/cards', withHandler(async (req, res) => {
+  const config  = await getDashboardConfig();
+  const couch   = getCouch();
+  const sources = config.cardSources || [];
+
+  const notesMap = await _fetchNotesMap(couch, [...new Set(sources.map(s => s.board))]);
+
+  const settled = await Promise.allSettled(
+    sources.map(async source => {
+      const db  = couch.use(DB_PREFIX + source.board);
+      const doc = await db.get(DOC_ID);
+      const cols = (doc.columns || []).filter(col =>
+        !source.columns?.length || source.columns.includes(col.title)
+      );
+      const linkedCards = notesMap.get(source.board) || new Set();
+      return cols.map(col => ({
+        sourceId:           source.id,
+        board:              source.board,
+        column:             col.title,
+        initiallyCollapsed: source.collapsed || false,
+        cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
+          id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
+          hasLinkedNotes: linkedCards.has(id),
+        })),
+        error: null,
+      }));
+    })
+  );
+
+  const result = sources.flatMap((source, i) => {
+    const r = settled[i];
+    if (r.status === 'fulfilled') return r.value;
+    return [{ sourceId: source.id, board: source.board, column: null, cards: [], error: r.reason?.message || 'Unknown error' }];
+  });
+
+  res.json(result);
+}));
+
+// ---- Combined data endpoint ----
+
+// GET /api/dashboard/data — fetch all sources in parallel, return combined result
+router.get('/dashboard/data', withHandler(async (req, res) => {
+  const config = await getDashboardConfig();
+
+  const cardsPromise = (async () => {
     const couch   = getCouch();
     const sources = config.cardSources || [];
-
     const notesMap = await _fetchNotesMap(couch, [...new Set(sources.map(s => s.board))]);
-
     const settled = await Promise.allSettled(
       sources.map(async source => {
         const db  = couch.use(DB_PREFIX + source.board);
@@ -197,9 +225,9 @@ router.get('/dashboard/cards', async (req, res) => {
         );
         const linkedCards = notesMap.get(source.board) || new Set();
         return cols.map(col => ({
-          sourceId:           source.id,
-          board:              source.board,
-          column:             col.title,
+          sourceId:          source.id,
+          board:             source.board,
+          column:            col.title,
           initiallyCollapsed: source.collapsed || false,
           cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
             id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
@@ -209,309 +237,207 @@ router.get('/dashboard/cards', async (req, res) => {
         }));
       })
     );
-
-    const result = sources.flatMap((source, i) => {
+    return sources.flatMap((source, i) => {
       const r = settled[i];
       if (r.status === 'fulfilled') return r.value;
       return [{ sourceId: source.id, board: source.board, column: null, cards: [], error: r.reason?.message || 'Unknown error' }];
     });
+  })();
 
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---- Combined data endpoint ----
-
-// GET /api/dashboard/data — fetch all sources in parallel, return combined result
-router.get('/dashboard/data', async (req, res) => {
-  try {
-    const config = await getDashboardConfig();
-
-    const cardsPromise = (async () => {
-      const couch   = getCouch();
-      const sources = config.cardSources || [];
-      const notesMap = await _fetchNotesMap(couch, [...new Set(sources.map(s => s.board))]);
-      const settled = await Promise.allSettled(
-        sources.map(async source => {
-          const db  = couch.use(DB_PREFIX + source.board);
-          const doc = await db.get(DOC_ID);
-          const cols = (doc.columns || []).filter(col =>
-            !source.columns?.length || source.columns.includes(col.title)
-          );
-          const linkedCards = notesMap.get(source.board) || new Set();
-          return cols.map(col => ({
-            sourceId:          source.id,
-            board:             source.board,
-            column:            col.title,
-            initiallyCollapsed: source.collapsed || false,
-            cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
-              id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
-              hasLinkedNotes: linkedCards.has(id),
-            })),
-            error: null,
-          }));
-        })
-      );
-      return sources.flatMap((source, i) => {
-        const r = settled[i];
-        if (r.status === 'fulfilled') return r.value;
-        return [{ sourceId: source.id, board: source.board, column: null, cards: [], error: r.reason?.message || 'Unknown error' }];
-      });
-    })();
-
-    const mailPromise = (async () => {
-      const accounts = config.mailAccounts || [];
-      const settled  = await Promise.allSettled(accounts.map(acc => fetchMailAccount(acc)));
-      return accounts.map((acc, i) => {
-        const r = settled[i];
-        if (r.status === 'fulfilled') {
-          return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: r.value, error: null };
-        }
-        return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: [], error: r.reason?.message || 'Unknown error' };
-      });
-    })();
-
-    const calendarPromise = (async () => {
-      const accounts = config.calendarAccounts || [];
-      const settled  = await Promise.allSettled(accounts.map(acc => fetchCalendarAccount(acc)));
-      return accounts.map((acc, i) => {
-        const r    = settled[i];
-        const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
-        if (r.status === 'fulfilled') return { ...base, ...r.value };
-        return { ...base, events: [], error: r.reason?.message || 'Unknown error' };
-      });
-    })();
-
-    const [cards, mail, calendar] = await Promise.all([cardsPromise, mailPromise, calendarPromise]);
-    res.json({ cards, mail, calendar, fetchedAt: new Date().toISOString() });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---- Mail routes ----
-
-// GET /api/dashboard/mail — aggregate all mail accounts
-router.get('/dashboard/mail', async (req, res) => {
-  try {
-    const config   = await getDashboardConfig();
+  const mailPromise = (async () => {
     const accounts = config.mailAccounts || [];
-
-    const settled = await Promise.allSettled(accounts.map(acc => fetchMailAccount(acc)));
-
-    const result = accounts.map((acc, i) => {
+    const settled  = await Promise.allSettled(accounts.map(acc => fetchMailAccount(acc)));
+    return accounts.map((acc, i) => {
       const r = settled[i];
       if (r.status === 'fulfilled') {
         return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: r.value, error: null };
       }
       return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: [], error: r.reason?.message || 'Unknown error' };
     });
+  })();
 
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/dashboard/mail/:accountId — fetch one account's messages
-router.get('/dashboard/mail/:accountId', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
-
-    try {
-      const messages = await fetchMailAccount(account);
-      res.json({ messages, error: null });
-    } catch (err) {
-      res.json({ messages: [], error: err.message });
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/dashboard/mail/:accountId/message/:uid — fetch one full message
-router.get('/dashboard/mail/:accountId/message/:uid', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
-
-    let msg;
-    try {
-      msg = await fetchMailMessage(account, req.params.uid);
-    } catch (err) {
-      return res.status(502).json({ error: err.message });
-    }
-    if (!msg) return res.status(404).json({ error: 'Message not found' });
-    res.json(msg);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/dashboard/mail/:accountId/test — test IMAP connectivity
-router.post('/dashboard/mail/:accountId/test', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
-
-    const result = await testMailAccount(account);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/dashboard/mail/:accountId/folders — list IMAP folders
-router.get('/dashboard/mail/:accountId/folders', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
-
-    try {
-      const folders = await listMailFolders(account);
-      res.json({ folders });
-    } catch (err) {
-      res.status(502).json({ error: err.message });
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread
-router.patch('/dashboard/mail/:accountId/message/:uid', writeRateLimit, async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
-
-    const { seen } = req.body;
-    if (typeof seen !== 'boolean') return res.status(400).json({ error: 'seen must be boolean' });
-
-    try {
-      await markMailMessage(account, req.params.uid, seen);
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(502).json({ error: err.message });
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/dashboard/mail/:accountId/message/:uid/move — move to folder
-router.post('/dashboard/mail/:accountId/message/:uid/move', writeRateLimit, async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
-
-    const { folder } = req.body;
-    if (!folder || typeof folder !== 'string') return res.status(400).json({ error: 'folder is required' });
-
-    try {
-      await moveMailMessage(account, req.params.uid, folder);
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(502).json({ error: err.message });
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE /api/dashboard/mail/:accountId/message/:uid — move to trash
-router.delete('/dashboard/mail/:accountId/message/:uid', writeRateLimit, async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.mailAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
-
-    try {
-      await deleteMailMessage(account, req.params.uid);
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(502).json({ error: err.message });
-    }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---- Calendar routes ----
-
-// GET /api/dashboard/calendar — fetch all configured calendar accounts (aggregated)
-router.get('/dashboard/calendar', async (req, res) => {
-  try {
-    const config   = await getDashboardConfig();
+  const calendarPromise = (async () => {
     const accounts = config.calendarAccounts || [];
-
-    const settled = await Promise.allSettled(
-      accounts.map(acc => fetchCalendarAccount(acc))
-    );
-
-    const result = accounts.map((acc, i) => {
-      const r = settled[i];
+    const settled  = await Promise.allSettled(accounts.map(acc => fetchCalendarAccount(acc)));
+    return accounts.map((acc, i) => {
+      const r    = settled[i];
       const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
       if (r.status === 'fulfilled') return { ...base, ...r.value };
       return { ...base, events: [], error: r.reason?.message || 'Unknown error' };
     });
+  })();
 
-    res.json(result);
+  const [cards, mail, calendar] = await Promise.all([cardsPromise, mailPromise, calendarPromise]);
+  res.json({ cards, mail, calendar, fetchedAt: new Date().toISOString() });
+}));
+
+// ---- Mail routes ----
+
+// GET /api/dashboard/mail — aggregate all mail accounts
+router.get('/dashboard/mail', withHandler(async (req, res) => {
+  const config   = await getDashboardConfig();
+  const accounts = config.mailAccounts || [];
+
+  const settled = await Promise.allSettled(accounts.map(acc => fetchMailAccount(acc)));
+
+  const result = accounts.map((acc, i) => {
+    const r = settled[i];
+    if (r.status === 'fulfilled') {
+      return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: r.value, error: null };
+    }
+    return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: [], error: r.reason?.message || 'Unknown error' };
+  });
+
+  res.json(result);
+}));
+
+// GET /api/dashboard/mail/:accountId — fetch one account's messages
+router.get('/dashboard/mail/:accountId', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  try {
+    const messages = await fetchMailAccount(account);
+    res.json({ messages, error: null });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.json({ messages: [], error: err.message });
   }
-});
+}));
+
+// GET /api/dashboard/mail/:accountId/message/:uid — fetch one full message
+router.get('/dashboard/mail/:accountId/message/:uid', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  let msg;
+  try {
+    msg = await fetchMailMessage(account, req.params.uid);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  if (!msg) return res.status(404).json({ error: 'Message not found' });
+  res.json(msg);
+}));
+
+// POST /api/dashboard/mail/:accountId/test — test IMAP connectivity
+router.post('/dashboard/mail/:accountId/test', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  const result = await testMailAccount(account);
+  res.json(result);
+}));
+
+// GET /api/dashboard/mail/:accountId/folders — list IMAP folders
+router.get('/dashboard/mail/:accountId/folders', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  try {
+    const folders = await listMailFolders(account);
+    res.json({ folders });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread
+router.patch('/dashboard/mail/:accountId/message/:uid', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  const { seen } = req.body;
+  if (typeof seen !== 'boolean') return res.status(400).json({ error: 'seen must be boolean' });
+
+  try {
+    await markMailMessage(account, req.params.uid, seen);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// POST /api/dashboard/mail/:accountId/message/:uid/move — move to folder
+router.post('/dashboard/mail/:accountId/message/:uid/move', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  const { folder } = req.body;
+  if (!folder || typeof folder !== 'string') return res.status(400).json({ error: 'folder is required' });
+
+  try {
+    await moveMailMessage(account, req.params.uid, folder);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// DELETE /api/dashboard/mail/:accountId/message/:uid — move to trash
+router.delete('/dashboard/mail/:accountId/message/:uid', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  try {
+    await deleteMailMessage(account, req.params.uid);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// ---- Calendar routes ----
+
+// GET /api/dashboard/calendar — fetch all configured calendar accounts (aggregated)
+router.get('/dashboard/calendar', withHandler(async (req, res) => {
+  const config   = await getDashboardConfig();
+  const accounts = config.calendarAccounts || [];
+
+  const settled = await Promise.allSettled(
+    accounts.map(acc => fetchCalendarAccount(acc))
+  );
+
+  const result = accounts.map((acc, i) => {
+    const r = settled[i];
+    const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
+    if (r.status === 'fulfilled') return { ...base, ...r.value };
+    return { ...base, events: [], error: r.reason?.message || 'Unknown error' };
+  });
+
+  res.json(result);
+}));
 
 // GET /api/dashboard/calendar/:accountId — fetch one account's events (supports ?days=n)
-router.get('/dashboard/calendar/:accountId', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
+router.get('/dashboard/calendar/:accountId', withHandler(async (req, res) => {
+  const account = await getCalAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
 
-    // Optional ?days=n override — clamped to [1, 365]; non-numeric → use account default
-    let opts = {};
-    const daysParam = parseInt(req.query.days, 10);
-    if (!isNaN(daysParam)) opts.lookaheadDays = Math.min(365, Math.max(1, daysParam));
+  // Optional ?days=n override — clamped to [1, 365]; non-numeric → use account default
+  let opts = {};
+  const daysParam = parseInt(req.query.days, 10);
+  if (!isNaN(daysParam)) opts.lookaheadDays = Math.min(365, Math.max(1, daysParam));
 
-    const result = await fetchCalendarAccount(account, opts);
-    res.json({ type: account.type || 'caldav', ...result });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  const result = await fetchCalendarAccount(account, opts);
+  res.json({ type: account.type || 'caldav', ...result });
+}));
 
 // GET /api/dashboard/calendar/:accountId/event/:uid — fetch one event's full fields
-router.get('/dashboard/calendar/:accountId/event/:uid', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
+router.get('/dashboard/calendar/:accountId/event/:uid', withHandler(async (req, res) => {
+  const account = await getCalAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
 
-    const { events, error } = await fetchRawEvents(account).catch(err => ({ events: [], error: err.message }));
-    if (error) return res.status(502).json({ error });
+  const { events, error } = await fetchRawEvents(account).catch(err => ({ events: [], error: err.message }));
+  if (error) return res.status(502).json({ error });
 
-    const event = events.find(e => e.uid === req.params.uid);
-    if (!event) return res.status(404).json({ error: 'Event not found' });
-    res.json(event);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  const event = events.find(e => e.uid === req.params.uid);
+  if (!event) return res.status(404).json({ error: 'Event not found' });
+  res.json(event);
+}));
 
 // POST /api/dashboard/calendar/:accountId/events — create a new event
 router.post('/dashboard/calendar/:accountId/events', writeRateLimit, async (req, res) => {
   try {
-    const config  = await getDashboardConfig();
-    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
+    const account = await getCalAccount(req.params.accountId);
     if (!account) return res.status(404).json({ error: 'Account not found' });
     if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
 
@@ -552,8 +478,7 @@ router.post('/dashboard/calendar/:accountId/events', writeRateLimit, async (req,
 // PUT /api/dashboard/calendar/:accountId/event/:uid — update an existing event
 router.put('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (req, res) => {
   try {
-    const config  = await getDashboardConfig();
-    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
+    const account = await getCalAccount(req.params.accountId);
     if (!account) return res.status(404).json({ error: 'Account not found' });
     if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
 
@@ -593,8 +518,7 @@ router.put('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (r
 // DELETE /api/dashboard/calendar/:accountId/event/:uid — delete an event
 router.delete('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (req, res) => {
   try {
-    const config  = await getDashboardConfig();
-    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
+    const account = await getCalAccount(req.params.accountId);
     if (!account) return res.status(404).json({ error: 'Account not found' });
     if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
 
@@ -624,18 +548,13 @@ router.delete('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async
 });
 
 // POST /api/dashboard/calendar/:accountId/test — test connectivity
-router.post('/dashboard/calendar/:accountId/test', async (req, res) => {
-  try {
-    const config  = await getDashboardConfig();
-    const account = (config.calendarAccounts || []).find(a => a.id === req.params.accountId);
-    if (!account) return res.status(404).json({ error: 'Account not found' });
+router.post('/dashboard/calendar/:accountId/test', withHandler(async (req, res) => {
+  const account = await getCalAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
 
-    const result = await testCalendarAccount(account);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  const result = await testCalendarAccount(account);
+  res.json(result);
+}));
 
 // Attach helpers for unit tests
 router.stripPasswords = stripPasswords;

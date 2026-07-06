@@ -17,13 +17,21 @@ const MAIL_MODULE        = path.resolve(__dirname, '../../backend/dashboard/mail
  *   require.cache so subsequent require('../db') calls inside routes get the
  *   mock instead of the real CouchDB client.
  */
+// Minimal withHandler for tests — mirrors the real implementation in db.js
+function _withHandler(handler) {
+  return async (req, res) => {
+    try { await handler(req, res); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  };
+}
+
 function createApp(dbMock) {
   if (dbMock) {
     require.cache[DB_MODULE] = {
       id:       DB_MODULE,
       filename: DB_MODULE,
       loaded:   true,
-      exports:  dbMock,
+      exports:  { withHandler: _withHandler, ...dbMock },
       children: [],
       paths:    [],
     }
@@ -36,6 +44,8 @@ function createApp(dbMock) {
       exports: {
         getDashboardConfig:  async () => ({ mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }),
         saveDashboardConfig: async () => ({ ok: true }),
+        getMailAccount:      async () => null,
+        getCalAccount:       async () => null,
         initGlobalDb:        async () => {},
         getGlobalDb:         () => ({}),
         getWebdavDb:         () => ({

@@ -16,6 +16,8 @@ const {
   _titleToSlug, _updateChildWdPaths,
 } = require('../webdav-notes');
 
+const EMPTY_NOTES = { items: [], schemaVersion: 2 };
+
 // ---------------------------------------------------------------------------
 // WebDAV config — stored globally in jc-config-webdav, keyed by board name
 // Per-board doc format (new): { enabled, accountId, subfolder }
@@ -223,7 +225,7 @@ router.get('/:board/notes', withExistingBoard(async (req, res, db) => {
       _rev = rev;
       data = normalizeNotes(raw);
     } catch (err) {
-      if (err.statusCode === 404) { data = { items: [], schemaVersion: 2 }; }
+      if (err.statusCode === 404) { data = { ...EMPTY_NOTES }; }
       else throw err;
     }
 
@@ -278,7 +280,7 @@ router.patch('/:board/notes', writeRateLimit, withBoard(async (req, res, db) => 
     currentRev = _rev;
     notes = normalizeNotes(raw);
   } catch (err) {
-    if (err.statusCode === 404) { notes = { items: [], schemaVersion: 2 }; }
+    if (err.statusCode === 404) { notes = { ...EMPTY_NOTES }; }
     else throw err;
   }
   const ifMatch = req.headers['if-match'];
@@ -369,7 +371,7 @@ async function _loadNotes(db) {
     const { _id, _rev, ...raw } = await db.get(NOTES_DOC_ID);
     return normalizeNotes(raw);
   } catch (err) {
-    if (err.statusCode === 404) return { items: [], schemaVersion: 2 };
+    if (err.statusCode === 404) return { ...EMPTY_NOTES };
     throw err;
   }
 }
