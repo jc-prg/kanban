@@ -1101,7 +1101,8 @@
   flex: 1;
 }
 
-#calendar-accounts .settings-field-label {
+#calendar-accounts .settings-field-label,
+[data-panel="cardsources"] .settings-field-label {
   width: 40%;
 }
 

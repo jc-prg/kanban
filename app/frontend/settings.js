@@ -380,9 +380,9 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
    */
   window.openSettingsDialog = function openSettingsDialog(section) {
     openSettings();
-    if (section === 'calendar-accounts' || section === 'mail-accounts') {
-      const tab  = section === 'mail-accounts' ? 'mail' : 'calendar';
-      const anchor = section === 'mail-accounts' ? 'mail-accounts' : 'calendar-accounts';
+    if (section === 'calendar-accounts' || section === 'mail-accounts' || section === 'card-sources') {
+      const tab    = section === 'mail-accounts' ? 'mail' : section === 'card-sources' ? 'cardsources' : 'calendar';
+      const anchor = section === 'mail-accounts' ? 'mail-accounts' : section === 'card-sources' ? 'cardSourcesList' : 'calendar-accounts';
       selectSettingsSection('accountsSection');
       const accountsSection = document.getElementById('accountsSection');
       accountsSection.querySelectorAll('.prompts-tab').forEach(t => t.classList.remove('active'));
@@ -768,19 +768,19 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   }
 
   async function _loadCsColumns(boardName, selectedCols) {
-    const colsList = document.getElementById('csColumnsList');
-    colsList.innerHTML = '<span class="settings-item-desc">Loading…</span>';
+    const sel = document.getElementById('csColumn');
+    sel.innerHTML = '<option value="">Loading…</option>';
     try {
       const data = await fetch(`/api/${encodeURIComponent(boardName)}/all-columns`).then(r => r.ok ? r.json() : null);
-      if (!data) { colsList.innerHTML = '<span class="settings-item-desc">Could not load columns.</span>'; return; }
+      if (!data) { sel.innerHTML = '<option value="">Could not load columns</option>'; return; }
       const titles = Object.keys(data);
-      if (!titles.length) { colsList.innerHTML = '<span class="settings-item-desc">No columns found.</span>'; return; }
-      colsList.innerHTML = titles.map(t => {
-        const checked = selectedCols.includes(t) ? ' checked' : '';
-        return `<label><input type="checkbox" value="${escHtml(t)}"${checked}> ${escHtml(t)}</label>`;
-      }).join('');
+      if (!titles.length) { sel.innerHTML = '<option value="">No columns found</option>'; return; }
+      const selected = selectedCols[0] || '';
+      sel.innerHTML = titles.map(t =>
+        `<option value="${escHtml(t)}"${t === selected ? ' selected' : ''}>${escHtml(t)}</option>`
+      ).join('');
     } catch {
-      colsList.innerHTML = '<span class="settings-item-desc">Could not load columns.</span>';
+      sel.innerHTML = '<option value="">Could not load columns</option>';
     }
   }
 
@@ -806,7 +806,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
     const board = boardSel.value;
     if (board) await _loadCsColumns(board, cs.columns || []);
-    else document.getElementById('csColumnsList').innerHTML = '<span class="settings-item-desc">Select a board first.</span>';
+    else document.getElementById('csColumn').innerHTML = '<option value="">Select a board first</option>';
   }
 
   function _closeCsForm() {
@@ -817,10 +817,13 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
   async function _saveCardSourcesConfig() {
     try {
       const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+      const groupedEl = document.getElementById('cardGroupedToggle');
+      const patch = { ...cfg, cardSources: _cardSources };
+      if (groupedEl) patch.cardGrouped = groupedEl.checked;
       await fetch('/api/dashboard/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...cfg, cardSources: _cardSources }),
+        body: JSON.stringify(patch),
       });
       flashIndicator(`${ICONS.done} saved`);
     } catch { flashIndicator(' error'); }
@@ -842,6 +845,8 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     try {
       const cfg = await fetch('/api/dashboard/config').then(r => r.json());
       _cardSources = (cfg.cardSources || []).map(cs => ({ ...cs }));
+      const groupedEl = document.getElementById('cardGroupedToggle');
+      if (groupedEl) groupedEl.checked = cfg.cardGrouped !== false;
       const sel = document.getElementById('dashboardAutoRefresh');
       const ms  = cfg.autoRefreshMs || 0;
       // Select the closest matching option
@@ -901,21 +906,23 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     });
   });
 
+  document.getElementById('cardGroupedToggle').addEventListener('change', _saveCardSourcesConfig);
   document.getElementById('cardSourcesAddBtn').addEventListener('click', () => _openCsForm(-1));
   document.getElementById('csCancelBtn').addEventListener('click', _closeCsForm);
 
   document.getElementById('csBoard').addEventListener('change', () => {
     const board = document.getElementById('csBoard').value;
+    const sel = document.getElementById('csColumn');
     if (board) _loadCsColumns(board, []);
-    else document.getElementById('csColumnsList').innerHTML = '<span class="settings-item-desc">Select a board first.</span>';
+    else sel.innerHTML = '<option value="">Select a board first</option>';
   });
 
   document.getElementById('csSaveBtn').addEventListener('click', () => {
     const id      = document.getElementById('csEditId').value || ('cs-' + Math.random().toString(36).slice(2, 10));
     const board   = document.getElementById('csBoard').value;
     if (!board) return;
-    const columns   = [...document.getElementById('csColumnsList').querySelectorAll('input[type=checkbox]:checked')]
-      .map(cb => cb.value);
+    const colVal  = document.getElementById('csColumn').value;
+    const columns = colVal ? [colVal] : [];
     const collapsed = document.getElementById('csCollapsed').checked;
     const cs = { id, board, columns, ...(collapsed ? { collapsed: true } : {}) };
     if (_csEditIdx >= 0) {

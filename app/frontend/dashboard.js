@@ -71,9 +71,12 @@ function _setCalLookahead(accountId, days) {
 let _defaultTimezone    = '';
 // Raw calendar account configs from /api/dashboard/config — used to build per-account fetch URLs
 let _calAccountsConfig  = [];
-// Calendar display mode: true = grouped per account, false = unified chronological
+/// Calendar display mode: true = grouped per account, false = unified chronological
 let _calGrouped         = true;
+// Cards display mode: true = grouped by board, false = flat list
+let _cardGrouped        = true;
 // Last-rendered accounts lists; used by panel header context menus
+let _cardSourcesMeta    = [];   // unique boards from last-rendered card sources
 let _mailAccountsMeta   = [];
 let _calAccountsMeta    = [];
 // Calendar event modal state
@@ -307,6 +310,22 @@ async function initDashboard() {
   document.getElementById('menuInbox').style.display = '';
 
   document.getElementById('dashboardRefreshBtn').addEventListener('click', loadDashboard);
+  document.getElementById('dashCardsMenuBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    const boards = _cardSourcesMeta;
+    const items  = [];
+    if (boards.length === 1) {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`, action: () => window.open(`/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer') });
+    } else if (boards.length > 1) {
+      items.push({
+        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`,
+        action:    () => window.open(`/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer'),
+        children:  boards.map(b => ({ label: b, action: () => window.open(`/board/${encodeURIComponent(b)}`, '_blank', 'noopener,noreferrer') })),
+      });
+    }
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit sources`, action: () => openSettingsDialog('card-sources') });
+    openContextMenu(e, items);
+  });
   document.getElementById('dashMailMenuBtn').addEventListener('click', e => {
     e.stopPropagation();
     const accounts = _mailAccountsMeta;
@@ -528,6 +547,7 @@ async function initDashboard() {
     _dashRecentLimit   = cfg.recentLimit || 10;
     _defaultTimezone   = cfg.defaultTimezone || '';
     _calGrouped        = cfg.calendarGrouped !== false;
+    _cardGrouped       = cfg.cardGrouped !== false;
     _calAccountsConfig = cfg.calendarAccounts || [];
     if (cfg.autoRefreshMs > 0) {
       _refreshTimer = setInterval(loadDashboard, cfg.autoRefreshMs);
@@ -818,16 +838,22 @@ async function _renderBoardsPanel(boards, achievements) {
 }
 
 function _renderCardsPanel(groups) {
-  const panel = document.getElementById('dashboardCardsPanel');
+  const panel   = document.getElementById('dashboardCardsPanel');
+  const menuBtn = document.getElementById('dashCardsMenuBtn');
   _dashCardMap.clear();
   const total = groups.reduce((s, g) => s + (g.cards?.filter(c => !c.text?.startsWith('#')).length || 0), 0);
   document.getElementById('dashCardsCount').textContent = total || '';
+  _cardSourcesMeta = [...new Set(groups.filter(g => !g.error).map(g => g.board))];
+  menuBtn.style.display = groups.length ? '' : 'none';
   if (!groups.length) {
     panel.innerHTML = '<p class="dashboard-empty">No card sources configured.</p>';
     return;
   }
   const today = new Date().toISOString().slice(0, 10);
-  panel.innerHTML = groups.map(group => {
+  const warnD = new Date(); warnD.setDate(warnD.getDate() + 2);
+  const warnDate = warnD.toISOString().slice(0, 10);
+
+  function renderOneGroup(group) {
     if (group.error) {
       return `<div class="dashboard-source-error">\u26a0 ${escHtml(group.board)}: ${escHtml(group.error)}</div>`;
     }
@@ -842,14 +868,15 @@ function _renderCardsPanel(groups) {
     const collapsed     = _collapsedGroups.has(groupKey);
     const visibleCards  = group.cards.filter(c => !c.text?.startsWith('#'));
     const cardCount     = visibleCards.length;
-    const warnD = new Date(); warnD.setDate(warnD.getDate() + 2);
-    const warnDate      = warnD.toISOString().slice(0, 10);
     const hasOverdue    = visibleCards.some(c => !c.done && c.endDate && c.endDate < today);
     const hasWarning    = !hasOverdue && visibleCards.some(c => !c.done && c.endDate && c.endDate >= today && c.endDate <= warnDate);
     const countClass    = hasOverdue ? ' dash-group-count--overdue' : hasWarning ? ' dash-group-count--warning' : '';
+    const headerLabel   = _cardGrouped
+      ? `\xb7 ${escHtml(group.column)}`
+      : `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}`;
     const groupHeader =
       `<div class="dashboard-group-header dashboard-group-header--collapsible" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}">` +
-      `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}` +
+      headerLabel +
       `<span class="dash-group-right"><span class="column-count dash-group-count${countClass}">${cardCount}</span><span class="dashboard-boards-chevron">\u203a</span></span></div>`;
     const collapsedClass = collapsed ? ' dashboard-card-group--collapsed' : '';
     const groupAttrs = `class="dashboard-card-group${collapsedClass}" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}"`;
@@ -911,7 +938,22 @@ function _renderCardsPanel(groups) {
       </div>`;
     }).join('');
     return `<div ${groupAttrs}>${groupHeader}${items}</div>`;
-  }).join('');
+  }
+
+  if (_cardGrouped) {
+    const boardMap = new Map();
+    groups.forEach(g => {
+      if (!boardMap.has(g.board)) boardMap.set(g.board, []);
+      boardMap.get(g.board).push(g);
+    });
+    panel.innerHTML = [...boardMap.entries()].map(([board, bGroups]) => {
+      const boardHeader = `<div class="dashboard-group-header dashboard-group-header--board">` +
+        `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(board)}">${escHtml(board)}</a></div>`;
+      return `<div class="dashboard-board-group">${boardHeader}${bGroups.map(renderOneGroup).join('')}</div>`;
+    }).join('');
+  } else {
+    panel.innerHTML = groups.map(renderOneGroup).join('');
+  }
 }
 
 function _renderMailPanel(accounts) {

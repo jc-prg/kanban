@@ -79,7 +79,7 @@
       <div class="dashboard-panel-body" id="dashboardBoardsPanel"></div>
     </div>
     <div class="dashboard-panel">
-      <div class="dashboard-panel-header">Cards<span class="column-count" id="dashCardsCount"></span></div>
+      <div class="dashboard-panel-header">Cards<span style="flex:1"></span><button class="col-btn" id="dashCardsMenuBtn" style="display:none" title="Cards options">&#x22ee;</button><span class="column-count" id="dashCardsCount"></span></div>
       <div class="dashboard-panel-body" id="dashboardCardsPanel"></div>
     </div>
     <div class="dashboard-panel">
@@ -735,10 +735,6 @@
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
           </div>
           <div class="settings-section-body">
-            <div class="prompts-tabs">
-              <button class="prompts-tab active" data-tab="general">General</button>
-              <button class="prompts-tab" data-tab="cardsources">Card Sources</button>
-            </div>
             <div class="prompts-panels">
 
               <div class="prompts-panel active" data-panel="general">
@@ -793,19 +789,44 @@
                 </div>
               </div>
 
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section" id="accountsSection" data-settings-label="Sources" style="display:none">
+          <div class="settings-section-title">
+            <span>Sources</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="prompts-tabs">
+              <button class="prompts-tab active" data-tab="calendar">Calendar</button>
+              <button class="prompts-tab" data-tab="cardsources">Cards</button>
+              <button class="prompts-tab" data-tab="mail">Mail</button>
+              <button class="prompts-tab" data-tab="webdav">WebDAV</button>
+            </div>
+            <div class="prompts-panels">
+
               <div class="prompts-panel" data-panel="cardsources">
                 <p class="settings-item-desc" style="margin-bottom:8px">Board columns to show in the Focus cards panel.</p>
                 <div id="cardSourcesList"></div>
                 <button class="btn" id="cardSourcesAddBtn" style="margin:8px 0 0">+ Add source</button>
+                <div class="settings-field-row" style="margin-top:30px">
+                  <label class="settings-field-label" for="cardGroupedToggle">Group sources by board</label>
+                  <label class="settings-toggle">
+                    <input type="checkbox" id="cardGroupedToggle" checked>
+                    <span class="settings-toggle-track"></span>
+                  </label>
+                </div>
                 <div id="cardSourcesForm" class="calendar-account-form" style="display:none">
                   <input type="hidden" id="csEditId">
                   <div class="settings-field-row">
                     <label class="settings-field-label" for="csBoard">Board</label>
                     <select id="csBoard" class="new-board-input"></select>
                   </div>
-                  <div class="settings-field-row" style="align-items:flex-start">
-                    <label class="settings-field-label" style="padding-top:4px">Columns</label>
-                    <div id="csColumnsList" class="cs-columns-list"></div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="csColumn">Column</label>
+                    <select id="csColumn" class="new-board-input"></select>
                   </div>
                   <div class="settings-field-row">
                     <label class="settings-field-label" for="csCollapsed">Initially collapsed</label>
@@ -818,24 +839,7 @@
                 </div>
               </div>
 
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-section" id="accountsSection" data-settings-label="Accounts" style="display:none">
-          <div class="settings-section-title">
-            <span>Accounts</span>
-            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
-          </div>
-          <div class="settings-section-body">
-            <div class="prompts-tabs">
-              <button class="prompts-tab active" data-tab="webdav">WebDAV</button>
-              <button class="prompts-tab" data-tab="mail">Mail</button>
-              <button class="prompts-tab" data-tab="calendar">Calendar</button>
-            </div>
-            <div class="prompts-panels">
-
-              <div class="prompts-panel active" data-panel="webdav">
+              <div class="prompts-panel" data-panel="webdav">
                 <div id="webdavAccountsList"></div>
                 <button class="btn" id="webdavAccountAddBtn" style="margin:8px 0 0">+ Add account</button>
                 <div id="webdavAccountForm" class="calendar-account-form" style="display:none">
@@ -922,7 +926,7 @@
                 </div>
               </div>
 
-              <div class="prompts-panel" data-panel="calendar">
+              <div class="prompts-panel active" data-panel="calendar">
                 <section id="calendar-accounts">
                 <div id="calendarAccountsList"></div>
                 <button class="btn" id="calendarAddBtn" style="margin:8px 0 0">+ Add account</button>

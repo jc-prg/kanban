@@ -92,7 +92,8 @@
 }
 
 .dashboard-panel-body > .dashboard-group-header:first-child,
-.dashboard-panel-body > .dashboard-card-group:first-child > .dashboard-group-header {
+.dashboard-panel-body > .dashboard-card-group:first-child > .dashboard-group-header,
+.dashboard-panel-body > .dashboard-board-group:first-child > .dashboard-group-header {
   border-top: none;
 }
 
@@ -102,6 +103,19 @@
 
 .dashboard-card-group + .dashboard-card-group {
   margin-top: 10px;
+}
+
+.dashboard-board-group + .dashboard-board-group {
+  margin-top: 14px;
+}
+
+.dashboard-board-group > .dashboard-card-group:first-of-type > .dashboard-group-header {
+  border-top: none;
+}
+
+.dashboard-group-header--board {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .dashboard-group-board-link {
