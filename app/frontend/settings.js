@@ -1623,6 +1623,9 @@ function handleUrlHash() {
       const card = col.cards.find(c => c.id === cardId);
       if (card) { openEditModal(col.id, card); return; }
     }
+  } else if (hash === 'settings') {
+    history.replaceState(null, '', location.pathname + location.search);
+    openSettings();
   } else if (hash.startsWith('note:')) {
     const noteId = hash.slice(5);
     if (findNotePage(noteId, notesState.items || notesState.pages || [])) {

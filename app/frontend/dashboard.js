@@ -597,6 +597,40 @@ async function initDashboard() {
     }
   }, true);
 
+  // Board item right-click context menu
+  function _hideDashBoardItemCtxMenu() {
+    document.getElementById('dashBoardItemContextMenu').style.display = 'none';
+  }
+
+  function _showDashBoardItemCtxMenu(x, y, boardName) {
+    const openEl     = document.getElementById('dashBoardItemCtxOpen');
+    const settingsEl = document.getElementById('dashBoardItemCtxSettings');
+    openEl.href     = `/board/${encodeURIComponent(boardName)}`;
+    settingsEl.href = `/board/${encodeURIComponent(boardName)}#settings`;
+    const menu = document.getElementById('dashBoardItemContextMenu');
+    menu.style.display = 'block';
+    const mw = menu.offsetWidth  || 160;
+    const mh = menu.offsetHeight || 60;
+    const edge = 4;
+    menu.style.left = Math.max(edge, Math.min(x, window.innerWidth  - mw - edge)) + 'px';
+    menu.style.top  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge)) + 'px';
+  }
+
+  document.getElementById('dashboardBoardsPanel').addEventListener('contextmenu', e => {
+    const item = e.target.closest('.dashboard-board-item');
+    if (!item) return;
+    e.preventDefault();
+    const name = decodeURIComponent(item.href.split('/board/')[1] || '');
+    if (!name) return;
+    _showDashBoardItemCtxMenu(e.clientX, e.clientY, name);
+  });
+
+  document.addEventListener('click', e => {
+    if (!document.getElementById('dashBoardItemContextMenu').contains(e.target)) {
+      _hideDashBoardItemCtxMenu();
+    }
+  }, true);
+
   // Mobile accordion: clicking a panel header opens it and closes others
   const _dashPanels = document.querySelectorAll('.dashboard-grid .dashboard-panel');
   _dashPanels.forEach(panel => {
