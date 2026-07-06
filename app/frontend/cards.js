@@ -556,6 +556,7 @@ function closeModal() {
   document.getElementById('modalGoBoardBtn').style.display    = 'none';
   document.getElementById('modalDeleteBtn').style.display     = 'none';
   document.getElementById('modalAddCloseBtn').style.display   = 'none';
+  document.getElementById('modalSubmitBtn').classList.add('btn-accent');
   setCardSection('cardNotePagesSection', 'cardToggleNotePages', false);
   const noteToggle = document.getElementById('cardToggleNotePages');
   if (noteToggle) noteToggle.style.display = 'none';
@@ -598,7 +599,9 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
   _updateLinkBtn();
   modalOriginalData = null;
   document.getElementById('modalTitle').textContent     = 'Add to Inbox';
-  document.getElementById('modalSubmitBtn').textContent = 'Add + Next';
+  const _inboxSubmitBtn = document.getElementById('modalSubmitBtn');
+  _inboxSubmitBtn.textContent = 'Add + Next';
+  _inboxSubmitBtn.classList.remove('btn-accent');
   document.getElementById('modalAddCloseBtn').style.display = '';
   document.getElementById('modalStatusMsg').style.display  = 'none';
   document.getElementById('modalGoBoardBtn').style.display = 'none';
