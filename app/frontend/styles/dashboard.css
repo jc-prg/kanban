@@ -149,6 +149,12 @@
 
 .dash-group-right .dashboard-boards-chevron { margin-left: 0; }
 
+.dash-group-right .column-count:not(.dash-group-count--overdue):not(.dash-group-count--warning) {
+  color: inherit;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: inherit;
+}
+
 .dash-group-count { display: inline; color: var(--text-muted); }
 .dashboard-card-group--collapsed .dash-group-count { display: inline; }
 .dash-group-count--overdue  { display: inline; color: #ef4444; font-weight: 600; background: #ef444422; border-radius: 4px; padding: 1px 5px; }
