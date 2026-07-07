@@ -216,7 +216,9 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
   function selectSettingsSection(id) {
     document.querySelectorAll('#settingsContent > .settings-section').forEach(s => {
-      s.classList.toggle('settings-section--active', s.id === id);
+      const active = s.id === id;
+      s.classList.toggle('settings-section--active', active);
+      if (active) s.classList.remove('settings-section--collapsed');
     });
     document.querySelectorAll('.settings-nav-item').forEach(btn => {
       btn.classList.toggle('settings-nav-item--active', btn.dataset.target === id);
@@ -291,88 +293,6 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
       input.placeholder = 'failed to load';
     }
   }
-
-  window.openStatsDialog = async function () {
-    const el = document.getElementById('statsContent');
-    el.innerHTML = '<span class="card-info-loading">Loading…</span>';
-    document.getElementById('statsBackdrop').style.display = 'flex';
-
-    function fmtSize(b) {
-      if (b < 1024) return b + ' B';
-      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-      return (b / (1024 * 1024)).toFixed(1) + ' MB';
-    }
-
-    let rows;
-
-    if (!BOARD_NAME) {
-      // Overview: aggregate across all boards
-      let boards = [];
-      try {
-        const r = await fetch('/api/boards');
-        if (r.ok) boards = await r.json();
-      } catch {}
-      const active   = boards.filter(b => !b.archived);
-      const archived = boards.filter(b =>  b.archived);
-      const totalCards      = boards.reduce((s, b) => s + (b.totalCards      || 0), 0);
-      const inboxCount      = boards.reduce((s, b) => s + (b.inboxCount      || 0), 0);
-      const todoCount       = boards.reduce((s, b) => s + (b.todoCount       || 0), 0);
-      const inProgressCount = boards.reduce((s, b) => s + (b.inProgressCount || 0), 0);
-
-      const totalAttachSize = boards.reduce((s, b) => s + (b.attachSize || 0), 0);
-
-      let dbSize = 0;
-      try {
-        const r = await fetch('/api/db-size');
-        if (r.ok) ({ size: dbSize } = await r.json());
-      } catch {}
-
-      rows = [
-        ['Boards',         active.length],
-        ['Archived',       archived.length],
-        ['Total cards',    totalCards],
-        ['Attachments',    fmtSize(totalAttachSize)],
-        ['Database size',  fmtSize(dbSize)],
-        null, // separator
-        ['Inbox',          inboxCount],
-        ['Todo',           todoCount],
-        ['In progress',    inProgressCount],
-      ];
-    } else {
-      // Board view: show stats for this board only
-      const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.filter(card => !card.text?.startsWith('#')).length, 0);
-
-      const notesItems = typeof notesState !== 'undefined' ? (notesState.items || notesState.pages || []) : [];
-      function countItems(items) {
-        let n = 0;
-        for (const it of items) { if (it.type === 'folder') n += countItems(it.children || []); else n++; }
-        return n;
-      }
-      const totalPages = countItems(notesItems);
-
-      let attachCount = 0, attachSize = 0;
-      try {
-        const r = await fetch(`${API_BASE}/attachment-stats`);
-        if (r.ok) ({ count: attachCount, size: attachSize } = await r.json());
-      } catch {}
-
-      rows = [
-        ['Board',       BOARD_NAME],
-        ['Cards',       totalCards],
-        ['Note pages',  totalPages],
-        ['Attachments', attachCount],
-        ['Total size',  fmtSize(attachSize)],
-      ];
-    }
-
-    el.innerHTML = `<table class="card-info-table"><tbody>${
-      rows.map((row, i) => {
-        if (row === null) return '';
-        const sep = (i > 0 && rows[i - 1] === null) ? ' class="stats-sep"' : '';
-        return `<tr${sep}><th>${row[0]}</th><td>${row[1]}</td></tr>`;
-      }).join('')
-    }</tbody></table>`;
-  };
 
   window.openSettings = openSettings;
 
@@ -1687,7 +1607,6 @@ async function initOverview() {
   document.querySelector('.board-area').style.display = 'none';
   document.getElementById('saveIndicator').closest('.header-actions').style.display = 'none';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
-  document.getElementById('menuInbox').style.display = '';
   document.getElementById('menuFindCard').style.display = 'none';
   document.getElementById('dashboardBtn').style.display = '';
   document.getElementById('overview').style.display = 'flex';
@@ -1790,20 +1709,19 @@ function makeBoardCard({ name, description, columnBadges = [], archived = false 
 }
 
 function renderBoardGrid(boards) {
-  const grid         = document.getElementById('boardGrid');
-  const newBoardItem = grid.querySelector('.new-board-item');
-  grid.querySelectorAll('.board-card, .board-grid-empty').forEach(el => el.remove());
+  const grid     = document.getElementById('boardGrid');
+  grid.innerHTML = '';
 
   const active   = boards.filter(b => !b.archived);
   const archived = boards.filter(b =>  b.archived);
 
   if (active.length) {
-    active.forEach(b => grid.insertBefore(makeBoardCard(b), newBoardItem));
+    active.forEach(b => grid.appendChild(makeBoardCard(b)));
   } else {
     const p = document.createElement('p');
     p.className = 'board-grid-empty';
-    p.textContent = 'No boards yet — create one below.';
-    grid.insertBefore(p, newBoardItem);
+    p.textContent = 'No boards yet.';
+    grid.appendChild(p);
   }
 
   const section      = document.getElementById('archivedSection');
@@ -1823,6 +1741,14 @@ document.getElementById('archivedSectionBtn')?.addEventListener('click', () => {
   const open = grid.style.display === '';
   grid.style.display = open ? 'none' : '';
   icon.textContent   = open ? ICONS.expand : ICONS.collapse;
+});
+
+document.getElementById('newBoardSectionBtn')?.addEventListener('click', () => {
+  const content = document.getElementById('newBoardContent');
+  const icon    = document.getElementById('newBoardSectionIcon');
+  const open    = content.style.display === '';
+  content.style.display = open ? 'none' : '';
+  icon.textContent      = open ? ICONS.expand : ICONS.collapse;
 });
 
 document.getElementById('newBoardBtn').addEventListener('click', async () => {
@@ -1863,6 +1789,10 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
 
   async function toggleBoardMenu(e) {
     e.preventDefault();
+    if (window.location.pathname === '/focus') {
+      window.location.href = '/';
+      return;
+    }
     if (menu.classList.contains('open')) {
       menu.classList.remove('open');
       btn.classList.remove('open');

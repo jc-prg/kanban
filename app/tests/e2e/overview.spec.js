@@ -98,6 +98,8 @@ test.describe('3.2 Board Overview', () => {
     await page.goto('/');
     await expect(page.locator('#overview')).toBeVisible();
 
+    await page.click('#newBoardSectionBtn');
+    await expect(page.locator('#newBoardContent')).toBeVisible();
     await page.fill('#newBoardInput', BOARD_CREATE);
     await page.click('#newBoardBtn');
 

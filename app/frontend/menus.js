@@ -724,15 +724,6 @@ document.addEventListener('keydown', e => {
   document.addEventListener('click', closeMenu);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
 
-  if (BOARD_NAME) {
-    const menuInbox = document.getElementById('menuInbox');
-    menuInbox.addEventListener('click', e => {
-      e.preventDefault();
-      closeMenu();
-      openInboxModal(BOARD_NAME);
-    });
-  }
-
   document.getElementById('menuWebhook').addEventListener('click', async () => {
     closeMenu();
     const btn = document.getElementById('menuWebhook');
@@ -757,8 +748,6 @@ document.addEventListener('keydown', e => {
 
   document.getElementById('menuFindCard').addEventListener('click', () => { closeMenu(); openSearch(); });
   document.getElementById('menuAnalytics').addEventListener('click', () => { closeMenu(); if (API) openAnalytics(); else openAchievementHistory(); });
-document.getElementById('menuStatistics').addEventListener('click', () => { closeMenu(); openStatsDialog(); });
-  document.getElementById('statsCloseBtn').addEventListener('click', () => { document.getElementById('statsBackdrop').style.display = 'none'; });
   document.getElementById('menuLogout').addEventListener('click', async () => {
     closeMenu();
     await fetch('/api/auth/logout', { method: 'POST' });

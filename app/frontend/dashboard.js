@@ -305,12 +305,10 @@ async function initDashboard() {
   document.getElementById('dashboardRefreshBtn').style.display = '';
 
   // Match overview menu: hide board-specific items; Inbox/Analyze/Settings stay visible
-  ['menuFindCard', 'menuWebhook', 'menuDashboardSettings'].forEach(id => {
+  ['menuWebhook', 'menuDashboardSettings'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  document.getElementById('menuInbox').style.display = '';
-
   document.getElementById('dashboardRefreshBtn').addEventListener('click', loadDashboard);
   document.getElementById('dashCardsMenuBtn').addEventListener('click', e => {
     e.stopPropagation();

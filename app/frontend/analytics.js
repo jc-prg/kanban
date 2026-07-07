@@ -9,6 +9,91 @@
   // ---- Analysis definitions ----
   const ANALYSES = [
     {
+      id: 'statistics',
+      label: 'Overview',
+      params: [],
+      hideColumns: true,
+      autoRun: true,
+      runAsync: async function (el) {
+        el.innerHTML = '<span class="card-info-loading">Loading…</span>';
+
+        function fmtSize(b) {
+          if (b < 1024) return b + ' B';
+          if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+          return (b / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        let rows;
+        if (!BOARD_NAME) {
+          let boards = [];
+          try {
+            const r = await fetch('/api/boards');
+            if (r.ok) boards = await r.json();
+          } catch {}
+          const active   = boards.filter(b => !b.archived);
+          const archived = boards.filter(b =>  b.archived);
+          const totalCards      = boards.reduce((s, b) => s + (b.totalCards      || 0), 0);
+          const inboxCount      = boards.reduce((s, b) => s + (b.inboxCount      || 0), 0);
+          const todoCount       = boards.reduce((s, b) => s + (b.todoCount       || 0), 0);
+          const inProgressCount = boards.reduce((s, b) => s + (b.inProgressCount || 0), 0);
+          const totalAttachSize = boards.reduce((s, b) => s + (b.attachSize      || 0), 0);
+          let dbSize = 0;
+          try {
+            const r = await fetch('/api/db-size');
+            if (r.ok) ({ size: dbSize } = await r.json());
+          } catch {}
+          rows = [
+            ['Boards',        active.length],
+            ['Archived',      archived.length],
+            ['Total cards',   totalCards],
+            ['Attachments',   fmtSize(totalAttachSize)],
+            ['Database size', fmtSize(dbSize)],
+            null,
+            ['Inbox',         inboxCount],
+            ['Todo',          todoCount],
+            ['In progress',   inProgressCount],
+          ];
+        } else {
+          const totalCards = (state.columns || []).reduce((s, c) => s + c.cards.filter(card => !card.text?.startsWith('#')).length, 0);
+          const notesItems = typeof notesState !== 'undefined' ? (notesState.items || notesState.pages || []) : [];
+          function countItems(items) {
+            let n = 0;
+            for (const it of items) { if (it.type === 'folder') n += countItems(it.children || []); else n++; }
+            return n;
+          }
+          const totalPages = countItems(notesItems);
+          let webDavEnabled = false;
+          try {
+            const r = await fetch(`${API_BASE}/webdav-config`);
+            if (r.ok) ({ enabled: webDavEnabled } = await r.json());
+          } catch {}
+          const notesBackend = webDavEnabled ? 'WebDAV' : 'DB';
+          let attachCount = 0, attachSize = 0;
+          try {
+            const r = await fetch(`${API_BASE}/attachment-stats`);
+            if (r.ok) ({ count: attachCount, size: attachSize } = await r.json());
+          } catch {}
+          rows = [
+            ['Board',       BOARD_NAME],
+            ['Cards',       totalCards],
+            ['Note pages',  `${totalPages} (${notesBackend})`],
+            ['Attachments', attachCount],
+            ['Total size',  fmtSize(attachSize)],
+          ];
+        }
+
+        el.innerHTML = `<table class="card-info-table"><tbody>${
+          rows.map((row, i) => {
+            if (row === null) return '';
+            const sep = (i > 0 && rows[i - 1] === null) ? ' class="stats-sep"' : '';
+            return `<tr${sep}><th>${row[0]}</th><td>${row[1]}</td></tr>`;
+          }).join('')
+        }</tbody></table>`;
+      },
+      run: function () { return null; },
+      renderResult: function () {},
+    },
+    {
       id: 'word-freq',
       label: 'Most used words in card title',
       params: [
@@ -950,11 +1035,16 @@
   }
 
   // ---- Run ----
-  function runAnalysis() {
+  async function runAnalysis() {
     const analysis = getAnalysis();
-    const cards    = analysis.id === 'moved-to-column' ? state.columns.flatMap(c => c.cards) : getFilteredCards();
-    const results  = analysis.run(cards, getParams());
     const el       = document.getElementById('analyticsResults');
+    if (analysis.runAsync) {
+      document.getElementById('analyticsCardCount').textContent = '';
+      await analysis.runAsync(el);
+      return;
+    }
+    const cards   = analysis.id === 'moved-to-column' ? state.columns.flatMap(c => c.cards) : getFilteredCards();
+    const results = analysis.run(cards, getParams());
     analysis.renderResult(results, el);
     const n = cards.length;
     document.getElementById('analyticsCardCount').textContent =
@@ -962,6 +1052,11 @@
   }
 
   // ---- Open / close ----
+  function updateColFilterVisibility() {
+    const colGroup = document.querySelector('#analyticsBackdrop .search-col-group');
+    if (colGroup) colGroup.style.display = getAnalysis().hideColumns ? 'none' : '';
+  }
+
   window.openAnalytics = function () {
     if (!API) return;
     selColumns.clear();
@@ -971,11 +1066,13 @@
       `<option value="${escHtml(a.id)}">${escHtml(a.label)}</option>`
     ).join('');
 
+    updateColFilterVisibility();
     renderColumnFilter();
     renderParamFields();
     document.getElementById('analyticsResults').innerHTML = '';
     document.getElementById('analyticsCardCount').textContent = '';
     document.getElementById('analyticsBackdrop').style.display = 'flex';
+    if (getAnalysis().autoRun) runAnalysis();
   };
 
   window.closeAnalytics = function () {
@@ -985,9 +1082,11 @@
   // ---- Event wiring ----
   document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('analyticsType').addEventListener('change', () => {
+      updateColFilterVisibility();
       renderParamFields();
       document.getElementById('analyticsResults').innerHTML = '';
       document.getElementById('analyticsCardCount').textContent = '';
+      if (getAnalysis().autoRun) runAnalysis();
     });
     document.getElementById('analyticsRunBtn').addEventListener('click', runAnalysis);
     document.getElementById('analyticsBackdrop').addEventListener('click', e => {

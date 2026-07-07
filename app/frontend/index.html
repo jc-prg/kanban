@@ -45,10 +45,8 @@
     </div>
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
     <div class="header-dropdown" id="headerDropdown">
-      <a class="header-dd-item" id="menuInbox" href="/inbox">Inbox</a>
-      <button class="header-dd-item" id="menuFindCard">Find</button>
-      <button class="header-dd-item" id="menuAnalytics">Analyze</button>
-      <button class="header-dd-item" id="menuStatistics">Statistics</button>
+<button class="header-dd-item" id="menuFindCard">Find</button>
+      <button class="header-dd-item" id="menuAnalytics">Statistics</button>
       <button class="header-dd-item" id="menuWebhook" style="display:none"></button>
       <button class="header-dd-item" id="menuRecurring" style="display:none">Recurring tasks</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
@@ -124,22 +122,26 @@
       </div>
     </div>
     <p class="overview-label">Boards</p>
-    <div id="boardGrid" class="board-grid">
-      <div class="new-board-item">
-        <p class="overview-label">Create Board</p>
-        <div class="new-board-row">
-          <input id="newBoardInput" class="new-board-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off">
-          <button id="newBoardBtn" class="btn btn-accent">+ new board</button>
-        </div>
-        <p id="newBoardError" class="new-board-error" style="display:none"></p>
-      </div>
-    </div>
+    <div id="boardGrid" class="board-grid"></div>
     <div id="archivedSection" style="display:none">
       <button class="archived-section-header" id="archivedSectionBtn">
         <span class="overview-label" style="margin-bottom:0">Archived</span>
         <span id="archivedSectionIcon"><span data-icon="expand"></span></span>
       </button>
       <div id="archivedGrid" class="board-grid" style="display:none"></div>
+    </div>
+    <div id="newBoardSection">
+      <button class="archived-section-header" id="newBoardSectionBtn">
+        <span class="overview-label" style="margin-bottom:0">Create board</span>
+        <span id="newBoardSectionIcon"><span data-icon="expand"></span></span>
+      </button>
+      <div id="newBoardContent" class="new-board-item" style="display:none">
+        <div class="new-board-row">
+          <input id="newBoardInput" class="new-board-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off">
+          <button id="newBoardBtn" class="btn btn-accent">+ new board</button>
+        </div>
+        <p id="newBoardError" class="new-board-error" style="display:none"></p>
+      </div>
     </div>
   </div>
 </div>
@@ -498,7 +500,7 @@
 
 <div id="analyticsBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal analytics-modal">
-    <h2>Analyze</h2>
+    <h2>Statistics</h2>
     <div class="modal-field">
       <label>Analysis type</label>
       <select id="analyticsType" class="analytics-select"></select>
@@ -528,16 +530,6 @@
     <div id="achHistoryChart" class="ach-history-chart"></div>
     <div class="modal-actions">
       <button class="btn btn-accent" onclick="closeAchievementHistory()">Close</button>
-    </div>
-  </div>
-</div>
-
-<div id="statsBackdrop" class="modal-backdrop" style="display:none">
-  <div class="modal card-info-modal">
-    <h2>Statistics</h2>
-    <div id="statsContent" class="card-info-content"></div>
-    <div class="modal-actions">
-      <button class="btn btn-accent" id="statsCloseBtn">Close</button>
     </div>
   </div>
 </div>
@@ -750,54 +742,60 @@
             <div class="prompts-panels">
 
               <div class="prompts-panel active" data-panel="general">
-                <div class="settings-field-row">
-                  <label class="settings-field-label" for="dashboardAutoRefresh">Auto-refresh</label>
-                  <select id="dashboardAutoRefresh" class="new-board-input" style="width:auto;flex:none">
-                    <option value="0">Off</option>
-                    <option value="60000">1 min</option>
-                    <option value="300000">5 min</option>
-                    <option value="900000">15 min</option>
-                    <option value="1800000">30 min</option>
-                  </select>
-                </div>
-                <div class="settings-field-row">
-                  <label class="settings-field-label" for="dashRecentLimit">Last edited</label>
-                  <select id="dashRecentLimit" class="new-board-input" style="width:auto;flex:none">
-                    <option value="5">5</option>
-                    <option value="10">10</option>
-                    <option value="15">15</option>
-                    <option value="20">20</option>
-                    <option value="30">30</option>
-                    <option value="50">50</option>
-                  </select>
-                </div>
-                <div class="settings-field-row">
-                  <span class="settings-field-label">Boards</span>
-                  <label class="settings-toggle">
-                    <input type="checkbox" id="dashPanelBoards" checked>
-                    <span class="settings-toggle-track"></span>
-                  </label>
-                </div>
-                <div class="settings-field-row">
-                  <span class="settings-field-label">Cards</span>
-                  <label class="settings-toggle">
-                    <input type="checkbox" id="dashPanelCards" checked>
-                    <span class="settings-toggle-track"></span>
-                  </label>
-                </div>
-                <div class="settings-field-row">
-                  <span class="settings-field-label">Mail</span>
-                  <label class="settings-toggle">
-                    <input type="checkbox" id="dashPanelMail" checked>
-                    <span class="settings-toggle-track"></span>
-                  </label>
-                </div>
-                <div class="settings-field-row">
-                  <span class="settings-field-label">Calendar</span>
-                  <label class="settings-toggle">
-                    <input type="checkbox" id="dashPanelCalendar" checked>
-                    <span class="settings-toggle-track"></span>
-                  </label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;align-items:start">
+                  <div>
+                    <div class="settings-field-row">
+                      <label class="settings-field-label" for="dashboardAutoRefresh">Auto-refresh</label>
+                      <select id="dashboardAutoRefresh" class="new-board-input" style="width:auto;flex:none">
+                        <option value="0">Off</option>
+                        <option value="60000">1 min</option>
+                        <option value="300000">5 min</option>
+                        <option value="900000">15 min</option>
+                        <option value="1800000">30 min</option>
+                      </select>
+                    </div>
+                    <div class="settings-field-row">
+                      <label class="settings-field-label" for="dashRecentLimit">Last edited</label>
+                      <select id="dashRecentLimit" class="new-board-input" style="width:auto;flex:none">
+                        <option value="5">5</option>
+                        <option value="10">10</option>
+                        <option value="15">15</option>
+                        <option value="20">20</option>
+                        <option value="30">30</option>
+                        <option value="50">50</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="settings-field-row">
+                      <span class="settings-field-label">Boards</span>
+                      <label class="settings-toggle">
+                        <input type="checkbox" id="dashPanelBoards" checked>
+                        <span class="settings-toggle-track"></span>
+                      </label>
+                    </div>
+                    <div class="settings-field-row">
+                      <span class="settings-field-label">Cards</span>
+                      <label class="settings-toggle">
+                        <input type="checkbox" id="dashPanelCards" checked>
+                        <span class="settings-toggle-track"></span>
+                      </label>
+                    </div>
+                    <div class="settings-field-row">
+                      <span class="settings-field-label">Mail</span>
+                      <label class="settings-toggle">
+                        <input type="checkbox" id="dashPanelMail" checked>
+                        <span class="settings-toggle-track"></span>
+                      </label>
+                    </div>
+                    <div class="settings-field-row">
+                      <span class="settings-field-label">Calendar</span>
+                      <label class="settings-toggle">
+                        <input type="checkbox" id="dashPanelCalendar" checked>
+                        <span class="settings-toggle-track"></span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
 
