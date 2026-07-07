@@ -404,6 +404,17 @@
   margin: 6px 10px;
 }
 
+.cal-event--allday {
+  background: color-mix(in srgb, var(--card-color, var(--accent)) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--card-color, var(--accent)) 35%, transparent);
+  padding-left: 10px;
+}
+.cal-event--allday::before { display: none; }
+.cal-event--allday .card-body { text-align: center; }
+.cal-event--allday:hover {
+  background: color-mix(in srgb, var(--card-color, var(--accent)) 32%, var(--surface2));
+}
+
 .dashboard-event-label {
   font-size: 0.65rem;
   color: var(--text-muted);

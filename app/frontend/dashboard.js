@@ -1162,7 +1162,11 @@ function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
   }
 
   const groups = new Map();
-  const sorted = [...events].sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+  // All-day events first within each day, then by start time
+  const sorted = [...events].sort((a, b) => {
+    if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+    return (a.start || '').localeCompare(b.start || '');
+  });
   for (const ev of sorted) {
     const startDay = (ev.start || '').slice(0, 10);
     if (!startDay) continue;
@@ -1216,8 +1220,10 @@ function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
         const metaText   = isMultiday
           ? `${fmtDate(evStartDay)} \u2192 ${fmtDate(evEndDay)}`
           : _fmtTime(ev, dayStr);
-        const timeHtml   = `<div class="card-meta"><span class="card-date">${escHtml(metaText)}</span></div>`;
-        return `<div class="dashboard-event-item card${isPast ? ' card--done' : ''}${ev._provisional ? ' cal-event--provisional' : ''}" data-account-id="${escHtml(evAccountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(evWebUrl || '')}"${colorStyle}>
+        // All-day events: show date range as tooltip, keep the element single-line
+        const tooltipAttr = ev.allDay && metaText ? ` title="${escHtml(metaText)}"` : '';
+        const timeHtml    = (!ev.allDay && metaText) ? `<div class="card-meta"><span class="card-date">${escHtml(metaText)}</span></div>` : '';
+        return `<div class="dashboard-event-item card${isPast ? ' card--done' : ''}${ev.allDay ? ' cal-event--allday' : ''}${ev._provisional ? ' cal-event--provisional' : ''}" data-account-id="${escHtml(evAccountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(evWebUrl || '')}"${colorStyle}${tooltipAttr}>
           <div class="card-body"><div class="card-text">${escHtml(ev.title)}</div>${timeHtml}</div>
         </div>`;
       }).join('');
