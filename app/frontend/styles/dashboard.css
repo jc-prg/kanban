@@ -322,6 +322,30 @@
   }
 }
 
+/* Landscape phone: 2×2 grid, full-page scroll instead of per-panel scroll */
+@media (max-width: 900px) and (max-height: 500px) {
+  #dashboard {
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    flex: unset;
+    overflow: visible;
+    align-content: start;
+  }
+
+  .dashboard-panel {
+    overflow: visible;
+  }
+
+  .dashboard-panel-body {
+    overflow: visible;
+    flex: unset;
+  }
+}
+
 @media (max-width: 600px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
