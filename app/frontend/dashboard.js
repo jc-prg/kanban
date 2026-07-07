@@ -1153,8 +1153,12 @@ function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
   function _fmtTime(ev, dayStr) {
     if (ev.allDay) return '';
     if (dayStr !== (ev.start || '').slice(0, 10)) return 'continues';
-    try { return new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
-    catch { return ''; }
+    try {
+      const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (!ev.end) return startStr;
+      const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return `${startStr} \u2013 ${endStr}`;
+    } catch { return ''; }
   }
 
   const groups = new Map();
@@ -1499,6 +1503,97 @@ async function _openCardDetail(board, card) {
   }
 }
 
+/**
+ * Parse the UNTIL value from an RRULE string into a localised date string.
+ * UNTIL can be a date-only value ("20261231") or a UTC datetime ("20261231T235959Z").
+ */
+function _parseUntilRRule(untilStr) {
+  if (!untilStr) return null;
+  try {
+    const d = untilStr.length === 8
+      ? new Date(Date.UTC(+untilStr.slice(0, 4), +untilStr.slice(4, 6) - 1, +untilStr.slice(6, 8)))
+      : new Date(untilStr.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?/, '$1-$2-$3T$4:$5:$6Z'));
+    return isNaN(d) ? untilStr : d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch { return untilStr; }
+}
+
+/**
+ * Convert a raw RRULE value string (e.g. "FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2")
+ * into a human-readable recurrence description.
+ * seriesStart is the ISO date/datetime string for the first occurrence (DTSTART).
+ */
+function _formatRRule(rruleStr, seriesStart) {
+  if (!rruleStr) return 'Recurring event';
+  const parts = {};
+  for (const seg of rruleStr.split(';')) {
+    const i = seg.indexOf('=');
+    if (i > 0) parts[seg.slice(0, i).toUpperCase()] = seg.slice(i + 1);
+  }
+  const freq     = parts.FREQ || '';
+  const interval = parseInt(parts.INTERVAL || '1', 10) || 1;
+  const count    = parts.COUNT ? parseInt(parts.COUNT, 10) : null;
+  const until    = parts.UNTIL ? _parseUntilRRule(parts.UNTIL) : null;
+  const byday    = parts.BYDAY    ? parts.BYDAY.split(',')    : [];
+  const bymonthday = parts.BYMONTHDAY ? parts.BYMONTHDAY.split(',').map(Number) : [];
+  const bymonth  = parts.BYMONTH  ? parts.BYMONTH.split(',').map(Number)  : [];
+
+  const DAY_NAMES  = { SU: 'Sun', MO: 'Mon', TU: 'Tue', WE: 'Wed', TH: 'Thu', FR: 'Fri', SA: 'Sat' };
+  const MON_NAMES  = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  function ordinal(n) {
+    if (n === -1) return 'last';
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = Math.abs(n) % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+
+  let str = '';
+  if (freq === 'DAILY') {
+    str = interval === 1 ? 'Every day' : `Every ${interval} days`;
+  } else if (freq === 'WEEKLY') {
+    str = interval === 1 ? 'Every week' : `Every ${interval} weeks`;
+    if (byday.length) {
+      const names = byday.map(d => {
+        const m = d.match(/^[+-]?\d*(SU|MO|TU|WE|TH|FR|SA)$/);
+        return m ? (DAY_NAMES[m[1]] || m[1]) : d;
+      });
+      str += ' on ' + names.join(', ');
+    }
+  } else if (freq === 'MONTHLY') {
+    str = interval === 1 ? 'Every month' : `Every ${interval} months`;
+    if (bymonthday.length) {
+      str += ' on the ' + bymonthday.map(ordinal).join(', ');
+    } else if (byday.length) {
+      const m = byday[0].match(/^([+-]?\d+)(SU|MO|TU|WE|TH|FR|SA)$/);
+      if (m) str += ` on the ${ordinal(parseInt(m[1], 10))} ${DAY_NAMES[m[2]] || m[2]}`;
+    }
+  } else if (freq === 'YEARLY') {
+    str = interval === 1 ? 'Every year' : `Every ${interval} years`;
+    if (bymonth.length && bymonthday.length) str += ` on ${MON_NAMES[bymonth[0]]} ${bymonthday[0]}`;
+    else if (bymonth.length) str += ` in ${MON_NAMES[bymonth[0]]}`;
+  } else if (freq === 'HOURLY') {
+    str = interval === 1 ? 'Every hour' : `Every ${interval} hours`;
+  } else {
+    str = 'Recurring';
+  }
+
+  if (count)        str += `, ${count} time${count !== 1 ? 's' : ''}`;
+  else if (until)   str += `, until ${until}`;
+
+  if (seriesStart) {
+    try {
+      const d = new Date(seriesStart);
+      if (!isNaN(d)) {
+        const dateStr    = d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const weekdayStr = d.toLocaleDateString([], { weekday: 'long' });
+        str += `, started ${dateStr} (${weekdayStr})`;
+      }
+    } catch { /* ignore */ }
+  }
+
+  return str;
+}
+
 function _showCalEventContextMenu(e, accountId, uid, webUrl) {
   const ev          = _calEventMap.get(`${accountId}\0${uid}`);
   const isIcal      = (ev?._accountType || 'caldav') === 'ical-url';
@@ -1546,10 +1641,11 @@ function _openEventDetail(accountId, uid, webUrl) {
         : '';
       rows.push(['When', escHtml(startStr + endStr)]);
     }
-    if (ev.location)  rows.push(['Where',    escHtml(ev.location)]);
-    if (ev.status)    rows.push(['Status',   escHtml(ev.status)]);
-    if (ev.organizer) rows.push(['Organiser',escHtml(ev.organizer)]);
-    if (ev._label)    rows.push(['Calendar', escHtml(ev._label)]);
+    if (ev.location)  rows.push(['Where',      escHtml(ev.location)]);
+    if (ev.status)    rows.push(['Status',     escHtml(ev.status)]);
+    if (ev.organizer) rows.push(['Organiser',  escHtml(ev.organizer)]);
+    if (ev._label)    rows.push(['Calendar',   escHtml(ev._label)]);
+    if (ev.hasRrule)  rows.push(['Recurrence', escHtml(_formatRRule(ev.rruleStr || null, ev.seriesStart || ev.start))]);
     body.innerHTML = `<table class="dashboard-detail-table">${
       rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
     }</table>`;

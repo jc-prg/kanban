@@ -245,31 +245,142 @@ function buildIcs(event, uid) {
 
 /**
  * Parse an ICS string and return an array of event objects.
+ * When windowStart/windowEnd (Date objects) are provided, recurring events
+ * (RRULE) are expanded into individual occurrences that overlap the window
+ * instead of returning only the master event.
  * Exported for unit tests.
  */
-function parseEvents(icsString) {
+function parseEvents(icsString, { windowStart, windowEnd } = {}) {
   const jcal    = ICAL.parse(icsString);
   const vcal    = new ICAL.Component(jcal);
   const vevents = vcal.getAllSubcomponents('vevent');
-  return vevents.map(ve => {
-    const ev          = new ICAL.Event(ve);
+
+  // Separate master events from exception overrides (those with RECURRENCE-ID)
+  const masters    = [];
+  const exceptions = new Map(); // uid → [ICAL.Event, ...]
+
+  for (const ve of vevents) {
+    const ev = new ICAL.Event(ve);
+    if (ve.getFirstProperty('recurrence-id')) {
+      if (!exceptions.has(ev.uid)) exceptions.set(ev.uid, []);
+      exceptions.get(ev.uid).push(ev);
+    } else {
+      masters.push({ ev, ve });
+    }
+  }
+
+  const result  = [];
+  const expand  = !!(windowStart && windowEnd);
+  const wStart  = expand ? ICAL.Time.fromJSDate(windowStart, true) : null;
+  const wEnd    = expand ? ICAL.Time.fromJSDate(windowEnd,   true) : null;
+  const masterUids = new Set(masters.map(m => m.ev.uid));
+
+  for (const { ev, ve } of masters) {
     const dtStartProp = ve.getFirstProperty('dtstart');
     const timezone    = (dtStartProp && dtStartProp.getParameter('tzid')) || null;
     const hasRrule    = !!ve.getFirstProperty('rrule');
-    return {
-      uid:         ev.uid         || '',
-      title:       ev.summary     || '(no title)',
-      start:       _icalTimeToString(ev.startDate),
-      end:         _icalTimeToString(ev.endDate),
-      allDay:      ev.startDate ? ev.startDate.isDate : false,
-      location:    ve.getFirstPropertyValue('location')    || '',
-      description: ve.getFirstPropertyValue('description') || '',
-      status:      ve.getFirstPropertyValue('status')      || '',
-      organizer:   ve.getFirstPropertyValue('organizer')   || '',
-      timezone,
-      hasRrule,
-    };
-  });
+    const rruleStr    = hasRrule
+      ? (() => { try { return ve.getFirstProperty('rrule').getFirstValue().toString(); } catch { return null; } })()
+      : null;
+
+    if (hasRrule && expand && ev.startDate) {
+      // Register exceptions so the iterator skips deleted / uses modified occurrences
+      for (const exc of (exceptions.get(ev.uid) || [])) {
+        try { ev.relateException(exc); } catch { /* ignore mismatched exceptions */ }
+      }
+
+      try {
+        // Iterate from the original DTSTART — passing a custom start time to
+        // iterator() replaces the RRULE base date and shifts the day-of-week
+        // pattern, producing wrong occurrence dates.
+        // We skip occurrences whose end falls before the window instead.
+        const iter  = ev.iterator();
+        let   next;
+        let   count = 0;
+        while ((next = iter.next()) && count++ < 5000) {
+          if (next.compare(wEnd) >= 0) break;
+          const details = ev.getOccurrenceDetails(next);
+          const occEnd  = details.endDate || details.startDate;
+          if (occEnd.compare(wStart) <= 0) continue; // ends before window — skip
+          const occItem = details.item; // ICAL.Event (override or master)
+          const occVe   = occItem.component;
+          result.push({
+            uid:         ev.uid              || '',
+            title:       occItem.summary     || '(no title)',
+            start:       _icalTimeToString(details.startDate),
+            end:         _icalTimeToString(details.endDate),
+            allDay:      details.startDate ? details.startDate.isDate : false,
+            location:    occVe.getFirstPropertyValue('location')    || '',
+            description: occVe.getFirstPropertyValue('description') || '',
+            status:      occVe.getFirstPropertyValue('status')      || '',
+            organizer:   occVe.getFirstPropertyValue('organizer')   || '',
+            timezone,
+            hasRrule,
+            rruleStr,
+            seriesStart: _icalTimeToString(ev.startDate),
+          });
+        }
+      } catch {
+        // Fall back to the master event on any expansion error
+        result.push({
+          uid:         ev.uid         || '',
+          title:       ev.summary     || '(no title)',
+          start:       _icalTimeToString(ev.startDate),
+          end:         _icalTimeToString(ev.endDate),
+          allDay:      ev.startDate ? ev.startDate.isDate : false,
+          location:    ve.getFirstPropertyValue('location')    || '',
+          description: ve.getFirstPropertyValue('description') || '',
+          status:      ve.getFirstPropertyValue('status')      || '',
+          organizer:   ve.getFirstPropertyValue('organizer')   || '',
+          timezone,
+          hasRrule,
+          rruleStr,
+          seriesStart: _icalTimeToString(ev.startDate),
+        });
+      }
+    } else {
+      result.push({
+        uid:         ev.uid         || '',
+        title:       ev.summary     || '(no title)',
+        start:       _icalTimeToString(ev.startDate),
+        end:         _icalTimeToString(ev.endDate),
+        allDay:      ev.startDate ? ev.startDate.isDate : false,
+        location:    ve.getFirstPropertyValue('location')    || '',
+        description: ve.getFirstPropertyValue('description') || '',
+        status:      ve.getFirstPropertyValue('status')      || '',
+        organizer:   ve.getFirstPropertyValue('organizer')   || '',
+        timezone,
+        hasRrule,
+        rruleStr,
+      });
+    }
+  }
+
+  // Orphaned exception overrides (RECURRENCE-ID present, no matching master VEVENT):
+  // treat each as a standalone single event
+  for (const [uid, excs] of exceptions) {
+    if (masterUids.has(uid)) continue;
+    for (const exc of excs) {
+      const excVe       = exc.component;
+      const dtStartProp = excVe.getFirstProperty('dtstart');
+      const timezone    = (dtStartProp && dtStartProp.getParameter('tzid')) || null;
+      result.push({
+        uid:         exc.uid         || '',
+        title:       exc.summary     || '(no title)',
+        start:       _icalTimeToString(exc.startDate),
+        end:         _icalTimeToString(exc.endDate),
+        allDay:      exc.startDate ? exc.startDate.isDate : false,
+        location:    excVe.getFirstPropertyValue('location')    || '',
+        description: excVe.getFirstPropertyValue('description') || '',
+        status:      excVe.getFirstPropertyValue('status')      || '',
+        organizer:   excVe.getFirstPropertyValue('organizer')   || '',
+        timezone,
+        hasRrule: false,
+      });
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -496,11 +607,20 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
   try {
     let allEvents = [];
 
+    // Compute the time window for recurring-event expansion when lookaheadDays is known
+    const parseOpts = (() => {
+      if (lookaheadDays == null) return {};
+      const now         = new Date();
+      const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      const windowEnd   = new Date(windowStart.getTime() + lookaheadDays * 86_400_000);
+      return { windowStart, windowEnd };
+    })();
+
     if (type === 'ical-url') {
       const res = await fetch(url, { headers, signal: controller.signal });
       if (res.status === 401) throw new Error('Authentication failed (HTTP 401)');
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-      allEvents = parseEvents(await res.text());
+      allEvents = parseEvents(await res.text(), parseOpts);
     } else {
       // Resolve the correct calendar collection URL via CalDAV discovery (cached after first call)
       const { url: calUrl } = await _resolveCalendarUrl(account, headers, controller.signal);
@@ -522,7 +642,7 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
 
       for (const { ics, etag, href } of _extractIcsItems(await res.text())) {
         try {
-          const parsed = parseEvents(ics);
+          const parsed = parseEvents(ics, parseOpts);
           for (const ev of parsed) {
             ev.etag = etag;
             ev.href = href;
