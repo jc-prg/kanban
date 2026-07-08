@@ -2,7 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 const { writeRateLimit }                          = require('../auth');
-const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount } = require('../global-db');
+const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder } = require('../global-db');
 const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
@@ -269,6 +269,21 @@ router.get('/dashboard/data', withHandler(async (req, res) => {
 
   const [cards, mail, calendar] = await Promise.all([cardsPromise, mailPromise, calendarPromise]);
   res.json({ cards, mail, calendar, fetchedAt: new Date().toISOString() });
+}));
+
+// ---- Mail recent folders ----
+
+// GET /api/dashboard/mail-recent-folders — returns { [accountId]: [path, ...] }
+router.get('/dashboard/mail-recent-folders', withHandler(async (req, res) => {
+  res.json(await getRecentFolders());
+}));
+
+// POST /api/dashboard/mail/:accountId/recent-folders — record a used folder
+router.post('/dashboard/mail/:accountId/recent-folders', writeRateLimit, withHandler(async (req, res) => {
+  const { folder } = req.body;
+  if (!folder || typeof folder !== 'string') return res.status(400).json({ error: 'folder is required' });
+  await addRecentFolder(req.params.accountId, folder);
+  res.json({ ok: true });
 }));
 
 // ---- Mail routes ----

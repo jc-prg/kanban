@@ -79,4 +79,23 @@ async function getCalAccount(accountId) {
   return (config.calendarAccounts || []).find(a => a.id === accountId) || null;
 }
 
-module.exports = { getGlobalDb, getWebdavDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount };
+const RECENT_FOLDERS_ID = 'mail-recent-folders';
+
+async function getRecentFolders() {
+  try {
+    const { _id, _rev, ...data } = await globalDb.get(RECENT_FOLDERS_ID);
+    return data;
+  } catch (err) {
+    if (err.statusCode === 404) return {};
+    throw err;
+  }
+}
+
+async function addRecentFolder(accountId, folder) {
+  const current = await getRecentFolders();
+  const list = Array.isArray(current[accountId]) ? current[accountId] : [];
+  current[accountId] = [folder, ...list.filter(f => f !== folder)].slice(0, 3);
+  return upsertDoc(globalDb, RECENT_FOLDERS_ID, current);
+}
+
+module.exports = { getGlobalDb, getWebdavDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder };

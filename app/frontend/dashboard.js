@@ -14,6 +14,8 @@ let _dashAchOffset  = 0;
 
 // Map: accountId → folders array (cached per session)
 const _folderCache = new Map();
+// Recent folders per account, loaded from server on init and updated on move
+let _serverRecentFolders = {};
 
 // Map: cardId → { card, board } — populated on each render for context menu
 const _dashCardMap      = new Map();
@@ -595,15 +597,19 @@ async function initDashboard() {
   // Default: Boards panel open (only has visual effect on mobile)
   document.getElementById('dashboardBoardsPanel').closest('.dashboard-panel').classList.add('dashboard-panel--open');
 
-  // Fetch config first: apply panel visibility before loading any data
+  // Fetch config + recent folders in parallel before loading any data
   try {
-    const cfg = await fetch('/api/dashboard/config').then(r => r.json());
+    const [cfg, recentFolders] = await Promise.all([
+      fetch('/api/dashboard/config').then(r => r.json()),
+      fetch('/api/dashboard/mail-recent-folders').then(r => r.ok ? r.json() : {}).catch(() => {}),
+    ]);
     applyDashboardPanelVisibility(cfg);
-    _dashRecentLimit   = cfg.recentLimit || 10;
-    _defaultTimezone   = cfg.defaultTimezone || '';
-    _calGrouped        = cfg.calendarGrouped !== false;
-    _cardGrouped       = cfg.cardGrouped !== false;
-    _calAccountsConfig = cfg.calendarAccounts || [];
+    _dashRecentLimit       = cfg.recentLimit || 10;
+    _defaultTimezone       = cfg.defaultTimezone || '';
+    _calGrouped            = cfg.calendarGrouped !== false;
+    _cardGrouped           = cfg.cardGrouped !== false;
+    _calAccountsConfig     = cfg.calendarAccounts || [];
+    _serverRecentFolders   = recentFolders || {};
     if (cfg.autoRefreshMs > 0) {
       _refreshTimer = setInterval(loadDashboard, cfg.autoRefreshMs);
     }
@@ -1768,22 +1774,51 @@ function hideMailContextMenu() {
   _mailCtxUnread    = false;
 }
 
+function _getRecentFolders(accountId) {
+  const list = _serverRecentFolders[accountId];
+  return Array.isArray(list) ? list : [];
+}
+
+function _addRecentFolder(accountId, folder) {
+  const current = _getRecentFolders(accountId);
+  _serverRecentFolders[accountId] = [folder, ...current.filter(f => f !== folder)].slice(0, 3);
+  // Persist to server (fire & forget)
+  fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/recent-folders`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }
+  ).catch(() => {});
+}
+
+function _makeFolderBtn(path, label) {
+  const btn = document.createElement('button');
+  btn.className = 'ctx-item';
+  btn.dataset.folder = path;
+  btn.textContent = label;
+  btn.addEventListener('click', () => {
+    const accountId = _mailCtxAccountId;
+    const msgId     = _mailCtxMsgId;
+    hideMailContextMenu();
+    if (accountId && msgId) _mailMove(accountId, msgId, path);
+  });
+  return btn;
+}
+
 function _populateFolderList(folders, listEl) {
   if (!folders.length) {
     listEl.innerHTML = '<p class="ctx-folder-loading">No folders found.</p>';
     return;
   }
-  listEl.innerHTML = folders
-    .map(f => `<button class="ctx-item" data-folder="${escHtml(f.path)}">${escHtml(f.name || f.path)}</button>`)
-    .join('');
-  listEl.querySelectorAll('[data-folder]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const accountId = _mailCtxAccountId;
-      const msgId     = _mailCtxMsgId;
-      hideMailContextMenu();
-      if (accountId && msgId) _mailMove(accountId, msgId, btn.dataset.folder);
-    });
-  });
+  listEl.innerHTML = '';
+  const folderMap = Object.fromEntries(folders.map(f => [f.path, f.name || f.path]));
+  const recents = _getRecentFolders(_mailCtxAccountId)
+    .filter(path => path in folderMap);
+  if (recents.length) {
+    recents.forEach(path => listEl.appendChild(_makeFolderBtn(path, folderMap[path])));
+    const sep = document.createElement('div');
+    sep.className = 'ctx-separator';
+    listEl.appendChild(sep);
+  }
+  folders.forEach(f => listEl.appendChild(_makeFolderBtn(f.path, f.name || f.path)));
+  listEl.scrollTop = 0;
 }
 
 async function _mailToggleRead(accountId, msgId, unread) {
@@ -1843,6 +1878,7 @@ async function _mailMove(accountId, msgId, folder) {
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder }) }
     );
     if (!res.ok) throw new Error('Failed');
+    _addRecentFolder(accountId, folder);
   } catch {
     _reloadMailPanel();
   }
