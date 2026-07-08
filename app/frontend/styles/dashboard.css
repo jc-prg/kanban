@@ -408,6 +408,14 @@
   min-width: 0;
 }
 
+.dashboard-mail-attach {
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 .dashboard-mail-body {
   font-size: 0.80rem;
   white-space: pre-wrap;
@@ -526,6 +534,33 @@
   padding: 4px 0;
   vertical-align: top;
   word-break: break-word;
+}
+
+.dash-addr-toggle {
+  color: var(--text-muted);
+  font-size: 0.8em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.dash-addr-toggle:hover {
+  color: var(--text);
+}
+
+.dash-attachment-link {
+  display: inline-block;
+  margin: 2px 6px 2px 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.8em;
+  text-decoration: none;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.dash-attachment-link:hover {
+  background: var(--surface2);
 }
 
 /* ---- Calendar accounts settings ---- */

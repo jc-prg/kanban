@@ -230,7 +230,11 @@
 
 <div id="mailContextMenu" class="context-menu" style="display:none">
   <a class="ctx-item ctx-item--link" id="mailCtxWebmail" href="#" target="_blank" rel="noopener noreferrer" style="display:none"><span data-icon="openLink"></span>  Open webmail</a>
-  <button class="ctx-item" id="mailCtxCreateCard"><span data-icon="edit"></span>  Create card…</button>
+  <div class="ctx-submenu-trigger ctx-item" id="mailCtxCreateCardWrap">
+    <span data-icon="edit"></span>  Create card…
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
+    <div class="ctx-submenu" id="mailCtxBoardList"></div>
+  </div>
   <button class="ctx-item" id="mailCtxToggleRead"><span data-icon="done"></span>  <span id="mailCtxToggleReadLabel">Mark as read</span></button>
   <div class="ctx-submenu-trigger ctx-item" id="mailCtxMoveWrap">
     <span data-icon="moveTo"></span>  Move to folder

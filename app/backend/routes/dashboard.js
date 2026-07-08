@@ -8,7 +8,7 @@ const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
         buildIcs, resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
 const { validateCalendarEvent, schemaError } = require('../schemas');
-const { fetchMailAccount, fetchMailMessage, testMailAccount,
+const { fetchMailAccount, fetchMailMessage, fetchMailAttachment, testMailAccount,
         listMailFolders, markMailMessage, moveMailMessage, deleteMailMessage } = require('../dashboard/mail');
 
 // ---- Password utilities (also exported for unit tests) ----
@@ -332,6 +332,27 @@ router.get('/dashboard/mail/:accountId/message/:uid', withHandler(async (req, re
   }
   if (!msg) return res.status(404).json({ error: 'Message not found' });
   res.json(msg);
+}));
+
+// GET /api/dashboard/mail/:accountId/message/:uid/attachment/:part — download attachment
+router.get('/dashboard/mail/:accountId/message/:uid/attachment/:part', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  const { part } = req.params;
+  if (!/^[\d.]+$/.test(part)) return res.status(400).json({ error: 'Invalid part' });
+
+  let att;
+  try {
+    att = await fetchMailAttachment(account, req.params.uid, part);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  if (!att) return res.status(404).json({ error: 'Attachment not found' });
+
+  res.setHeader('Content-Type', att.type || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(att.name)}`);
+  res.send(att.data);
 }));
 
 // POST /api/dashboard/mail/:accountId/test — test IMAP connectivity

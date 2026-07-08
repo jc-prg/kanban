@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cardToggleAttachments')?.addEventListener('click', () => toggleCardSection('cardAttachmentsSection','cardToggleAttachments'));
 
   document.getElementById('cardAttachInput')?.addEventListener('change', e => {
-    if (editCardId) _handleCardAttachUpload(editCardId, e.target.files);
+    const aid = _activeCardId(); if (aid) _handleCardAttachUpload(aid, e.target.files);
     e.target.value = '';
   });
 
@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let _cardFileDragDepth = 0;
   const _cardModalEl = document.getElementById('modal');
   _cardModalEl.addEventListener('dragenter', e => {
-    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    if (!_activeCardId() || !_cardAttachBase()) return;
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
     if (++_cardFileDragDepth === 1) _cardModalEl.classList.add('modal--file-drag');
@@ -83,23 +83,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   _cardModalEl.addEventListener('dragover', e => {
-    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    if (!_activeCardId() || !_cardAttachBase()) return;
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
   });
   _cardModalEl.addEventListener('drop', e => {
     _cardFileDragDepth = 0;
     _cardModalEl.classList.remove('modal--file-drag');
-    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    const aid = _activeCardId();
+    if (!aid || !_cardAttachBase()) return;
     const files = e.dataTransfer?.files;
     if (!files?.length) return;
     e.preventDefault();
     e.stopPropagation();
-    _handleCardAttachUpload(editCardId, files);
+    _handleCardAttachUpload(aid, files);
   });
   // Paste image upload: paste an image from clipboard into the card modal
   _cardModalEl.addEventListener('paste', e => {
-    if (modalMode !== 'edit' || !editCardId || !CARD_ATTACH_API) return;
+    const aid = _activeCardId();
+    if (!aid || !_cardAttachBase()) return;
     const items = Array.from(e.clipboardData?.items || []);
     const imageItems = items.filter(it => it.kind === 'file' && it.type.startsWith('image/'));
     if (!imageItems.length) return;
@@ -108,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const ext = it.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
       return new File([it.getAsFile()], `pasted-${Date.now()}.${ext}`, { type: it.type });
     });
-    _handleCardAttachUpload(editCardId, files);
+    _handleCardAttachUpload(aid, files);
   });
 
   createMarkdownEditor('cardDesc', {
@@ -144,6 +146,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ---- Card attachment constants & helpers ----
 const CARD_ATTACH_API = API_BASE ? `${API_BASE}/cards/attachments` : null;
+
+// Temp card used in inbox mode for pre-upload before the card is saved
+let _inboxTempCardId = null;
+let _inboxTempBoard  = null;
+let _inboxTempTimer  = null;
+
+// Returns the attachment API base for whichever context is currently active
+function _cardAttachBase() {
+  if (modalMode === 'inbox' && _inboxTempBoard)
+    return `/api/${encodeURIComponent(_inboxTempBoard)}/cards/attachments`;
+  return CARD_ATTACH_API;
+}
+// Returns the active card ID (edit cardId or inbox temp ID)
+function _activeCardId() {
+  return modalMode === 'inbox' ? _inboxTempCardId : editCardId;
+}
+
+function _cancelInboxTempTimer() {
+  if (_inboxTempTimer) { clearTimeout(_inboxTempTimer); _inboxTempTimer = null; }
+}
+async function _deleteInboxTempAttachments(board, cardId) {
+  if (!board || !cardId) return;
+  try {
+    const api  = `/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(cardId)}`;
+    const list = await fetch(api).then(r => r.ok ? r.json() : []);
+    await Promise.all(list.map(f =>
+      fetch(`${api}/${encodeURIComponent(f.name)}`, { method: 'DELETE' }).catch(() => {})
+    ));
+  } catch {}
+}
+function _scheduleInboxCleanup(board, cardId, delayMs = 60 * 60 * 1000) {
+  _cancelInboxTempTimer();
+  if (!delayMs) { _deleteInboxTempAttachments(board, cardId); return; }
+  _inboxTempTimer = setTimeout(() => _deleteInboxTempAttachments(board, cardId), delayMs);
+}
 
 let cardAttachMap = new Map(); // cardId → attachment count (null = unknown, number = known)
 
@@ -181,9 +218,9 @@ async function _openInNewTab(url) {
 // ---- Card attachment functions ----
 async function loadCardAttachments(cardId) {
   const list = document.getElementById('cardAttachList');
-  if (!list || !CARD_ATTACH_API) return;
+  if (!list || !_cardAttachBase()) return;
   try {
-    const r = await fetch(`${CARD_ATTACH_API}/${cardId}`);
+    const r = await fetch(`${_cardAttachBase()}/${cardId}`);
     renderCardAttachments(cardId, r.ok ? await r.json() : []);
   } catch { renderCardAttachments(cardId, []); }
 }
@@ -206,7 +243,7 @@ function renderCardAttachments(cardId, files) {
   }
   for (const f of files) {
     const ft  = _attachType(f.name);
-    const url = `${CARD_ATTACH_API}/${cardId}/${encodeURIComponent(f.name)}`;
+    const url = `${_cardAttachBase()}/${cardId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
     const icon = (ft === 'image' || ft === 'svg') ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
@@ -229,7 +266,7 @@ function renderCardAttachments(cardId, files) {
     item.querySelector('[data-act="download"]').addEventListener('click',   () => _downloadAttachment(url, f.name));
     item.querySelector('[data-act="delete"]').addEventListener('click', async () => {
       if (!await showConfirm(`Delete "${f.name}"?`, { okLabel: 'Delete', danger: true })) return;
-      await fetch(`${CARD_ATTACH_API}/${cardId}/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
+      await fetch(`${_cardAttachBase()}/${cardId}/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
       loadCardAttachments(cardId);
     });
     list.appendChild(item);
@@ -243,7 +280,7 @@ function _appendAttachMd(taId, name, prefix = 'attachment:') {
 }
 
 async function _handleCardAttachUpload(cardId, fileList) {
-  if (!CARD_ATTACH_API || !fileList.length) return;
+  if (!_cardAttachBase() || !fileList.length) return;
   const label = document.querySelector('label[for="cardAttachInput"]');
   const input = document.getElementById('cardAttachInput');
   if (label) label.textContent = 'Uploading…';
@@ -252,7 +289,7 @@ async function _handleCardAttachUpload(cardId, fileList) {
     for (const file of Array.from(fileList)) {
       const fd = new FormData();
       fd.append('file', file);
-      const r = await fetch(`${CARD_ATTACH_API}/${cardId}`, { method: 'POST', body: fd });
+      const r = await fetch(`${_cardAttachBase()}/${cardId}`, { method: 'POST', body: fd });
       if (r.ok) {
         _appendAttachMd('cardDesc', (await r.json()).name);
       } else {
@@ -272,9 +309,10 @@ function _insertCardAttachMd(name, type) {
   insertAtCursor('cardDesc', md);
 }
 
-async function resolveCardAttachments(container, cardId = editCardId) {
-  if (!cardId || !CARD_ATTACH_API) return;
-  const base = `${CARD_ATTACH_API}/${cardId}`;
+async function resolveCardAttachments(container, cardId = null) {
+  const id = cardId ?? _activeCardId();
+  if (!id || !_cardAttachBase()) return;
+  const base = `${_cardAttachBase()}/${id}`;
   for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
     const fn = img.getAttribute('src').slice('attachment:'.length);
     try {
@@ -424,7 +462,7 @@ function resetCardSections() {
   setCardSection('cardDateSection',     'cardToggleDate',     wide);
   setCardSection('cardPrioritySection', 'cardTogglePriority', wide);
   setCardSection('cardColorSection',    'cardToggleColor',    wide);
-  const canAttach = modalMode === 'edit' && !!editCardId && !!CARD_ATTACH_API;
+  const canAttach = !!_activeCardId() && !!_cardAttachBase();
   const attachToggle = document.getElementById('cardToggleAttachments');
   if (attachToggle) attachToggle.style.display = canAttach ? '' : 'none';
   setCardSection('cardAttachmentsSection', 'cardToggleAttachments', canAttach && wide);
@@ -546,6 +584,14 @@ function openEditModal(colId, card) {
 
 function closeModal() {
   _inboxOnSuccess = null;
+  // Clean up inbox temp attachments immediately on close (card was not saved)
+  if (_inboxTempCardId && _inboxTempBoard) {
+    const _b = _inboxTempBoard, _id = _inboxTempCardId;
+    _cancelInboxTempTimer();
+    _deleteInboxTempAttachments(_b, _id);
+  }
+  _inboxTempCardId = null;
+  _inboxTempBoard  = null;
   _exitCardFullscreen();
   _stopCardAutoSave();
   if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;
@@ -586,8 +632,16 @@ function submitCard() {
   closeModal();
 }
 
-async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null, preselectedColumn = null) {
+async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null, preselectedColumn = null, existingTempCardId = null) {
   _inboxOnSuccess = onSuccess;
+  // Set up a fresh temp card ID for inbox attachments; cancel any leftover cleanup timer
+  _cancelInboxTempTimer();
+  if (_inboxTempCardId && _inboxTempBoard && _inboxTempCardId !== existingTempCardId) {
+    // Previous unsaved temp — clean up now (shouldn't normally happen, but be safe)
+    _deleteInboxTempAttachments(_inboxTempBoard, _inboxTempCardId);
+  }
+  _inboxTempCardId = existingTempCardId || uid();
+  _inboxTempBoard  = preselectedBoard || null;
   modalMode = 'inbox';
   selectedColor    = COLORS[0];
   selectedPriority = 0;
@@ -649,7 +703,28 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
   colSelect.innerHTML = '<option value="__inbox__">INBOX*</option>';
   await _loadColumns(select.value);
   if (preselectedColumn) colSelect.value = preselectedColumn;
-  select.onchange = () => _loadColumns(select.value);
+  select.onchange = () => {
+    const newBoard = select.value;
+    if (_inboxTempBoard && _inboxTempBoard !== newBoard && _inboxTempCardId) {
+      // Delete old board's temp attachments immediately and start fresh
+      _scheduleInboxCleanup(_inboxTempBoard, _inboxTempCardId, 0);
+      _inboxTempCardId = uid();
+    }
+    _inboxTempBoard = newBoard || null;
+    if (_inboxTempCardId && _inboxTempBoard) {
+      _scheduleInboxCleanup(_inboxTempBoard, _inboxTempCardId);
+      loadCardAttachments(_inboxTempCardId);
+    }
+    resetCardSections();
+    _loadColumns(newBoard);
+  };
+
+  // Show attachment section if a board is already selected
+  resetCardSections();
+  if (_inboxTempCardId && _inboxTempBoard) {
+    _scheduleInboxCleanup(_inboxTempBoard, _inboxTempCardId);
+    loadCardAttachments(_inboxTempCardId);
+  }
 
   document.getElementById('modal').style.display = 'flex';
 }
@@ -701,7 +776,7 @@ async function submitInboxCard(closeAfter = false) {
     }
 
     const today   = new Date().toISOString().slice(0, 10);
-    const newCard = { ...cardData, id: uid(), created: today };
+    const newCard = { ...cardData, id: _inboxTempCardId || uid(), created: today };
     col.cards = [newCard, ...(col.cards || [])];
 
     const patchBody = newColumnCreated
@@ -716,10 +791,18 @@ async function submitInboxCard(closeAfter = false) {
     const added = true;
 
     if (added) {
-      if (_inboxOnSuccess) { _inboxOnSuccess(); _inboxOnSuccess = null; }
+      // The temp card ID is now a real card — clear it before calling onSuccess/closeModal
+      _cancelInboxTempTimer();
+      const savedCardId = _inboxTempCardId;
+      _inboxTempCardId  = null;
+      if (_inboxOnSuccess) { _inboxOnSuccess(board, savedCardId); _inboxOnSuccess = null; }
       if (closeAfter) {
         closeModal();
       } else {
+        // Prepare a fresh temp ID for the next card
+        _inboxTempCardId = uid();
+        _inboxTempBoard  = board;
+        _scheduleInboxCleanup(_inboxTempBoard, _inboxTempCardId);
         showModalStatus('Card added.', false);
         document.getElementById('cardText').value  = '';
         setEditorValue('cardDesc', '');
@@ -729,6 +812,7 @@ async function submitInboxCard(closeAfter = false) {
         _updateLinkBtn();
         selectedColor = COLORS[0]; selectedPriority = 0;
         renderColorRow(); renderPriorityRow();
+        loadCardAttachments(_inboxTempCardId);
         const goBtn = document.getElementById('modalGoBoardBtn');
         goBtn.href = `/board/${encodeURIComponent(board)}`;
         goBtn.style.display = '';

@@ -7,7 +7,7 @@ const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES }
 const { initDb }                          = require('./db');
 const { initGlobalDb }                    = require('./global-db');
 const { authenticate }                    = require('./auth');
-const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize } = require('./backup');
+const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize, runOrphanAttachmentCleanup } = require('./backup');
 const { initRecurring } = require('./recurring');
 
 const app = express();
@@ -88,9 +88,10 @@ initDb()
   .then(() => {
     checkDataDirectories();
     app.listen(PORT, () => console.log(`Kanban server running at http://${HOST}:${PORT}`));
-    runBackup();        setInterval(runBackup,        BACKUP_INTERVAL_MS);
-    runPromptsBackup(); setInterval(runPromptsBackup, BACKUP_INTERVAL_MS);
-    refreshDbSize();    setInterval(refreshDbSize,    DB_SIZE_INTERVAL_MS);
+    runBackup();                    setInterval(runBackup,                    BACKUP_INTERVAL_MS);
+    runPromptsBackup();             setInterval(runPromptsBackup,             BACKUP_INTERVAL_MS);
+    refreshDbSize();                setInterval(refreshDbSize,                DB_SIZE_INTERVAL_MS);
+    runOrphanAttachmentCleanup();   setInterval(runOrphanAttachmentCleanup,   60 * 60 * 1000);
     initRecurring();
   })
   .catch(err => { console.error('Failed to initialize:', err.message); process.exit(1); });

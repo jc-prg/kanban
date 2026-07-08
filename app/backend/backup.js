@@ -71,4 +71,48 @@ function checkDataDirectories() {
   }
 }
 
-module.exports = { getDbSizeBytes, refreshDbSize, runBackup, runPromptsBackup, checkDataDirectories };
+/**
+ * Delete card attachment directories that have no matching card in the board document.
+ * Only removes directories older than GRACE_MS (60 min) to give the browser time to
+ * save the card after uploading — including across browser crashes / tab closes.
+ */
+async function runOrphanAttachmentCleanup() {
+  if (!ATTACHMENTS_DIR || !fs.existsSync(ATTACHMENTS_DIR)) return;
+  const GRACE_MS = 60 * 60 * 1000;
+  const now      = Date.now();
+  try {
+    const couch      = getCouch();
+    const all        = await couch.db.list();
+    const boardNames = all.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
+
+    for (const boardName of boardNames) {
+      const boardDir = path.join(ATTACHMENTS_DIR, boardName);
+      if (!fs.existsSync(boardDir)) continue;
+
+      // Collect all real card IDs for this board
+      let cardIds;
+      try {
+        const db = couch.use(DB_PREFIX + boardName);
+        const data = await loadBoardData(db);
+        cardIds = new Set((data.columns || []).flatMap(col => (col.cards || []).map(c => c.id)));
+      } catch { continue; }
+
+      // Scan for card attachment dirs (id-<hex>) not owned by any card
+      let entries;
+      try { entries = fs.readdirSync(boardDir, { withFileTypes: true }); } catch { continue; }
+
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !/^id-[a-z0-9]{1,12}$/.test(entry.name)) continue;
+        if (cardIds.has(entry.name)) continue;
+        const dirPath = path.join(boardDir, entry.name);
+        try {
+          if (now - fs.statSync(dirPath).mtimeMs < GRACE_MS) continue;
+          fs.rmSync(dirPath, { recursive: true, force: true });
+          console.log(`Cleaned up orphan card attachments: ${boardName}/${entry.name}`);
+        } catch {}
+      }
+    }
+  } catch (err) { console.error('Orphan attachment cleanup failed:', err.message); }
+}
+
+module.exports = { getDbSizeBytes, refreshDbSize, runBackup, runPromptsBackup, checkDataDirectories, runOrphanAttachmentCleanup };

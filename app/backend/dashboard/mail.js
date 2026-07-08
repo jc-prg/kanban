@@ -56,18 +56,21 @@ async function fetchMailAccount(account) {
     const msgs  = [];
 
     for await (const msg of client.fetch(`${start}:*`, {
-      uid:       true,
-      envelope:  true,
-      bodyParts: ['text'],
-      flags:     true,
+      uid:           true,
+      envelope:      true,
+      bodyParts:     ['text'],
+      bodyStructure: true,
+      flags:         true,
     })) {
+      const { attachments } = _findBodyParts(msg.bodyStructure);
       msgs.push({
-        id:      String(msg.uid),
-        subject: msg.envelope?.subject || '(no subject)',
-        from:    _fmtAddr(msg.envelope?.from?.[0]),
-        date:    _fmtDate(msg.envelope?.date),
-        preview: _preview(msg.bodyParts?.get('text')),
-        unread:  !msg.flags?.has('\\Seen'),
+        id:             String(msg.uid),
+        subject:        msg.envelope?.subject || '(no subject)',
+        from:           _fmtAddr(msg.envelope?.from?.[0]),
+        date:           _fmtDate(msg.envelope?.date),
+        preview:        _preview(msg.bodyParts?.get('text')),
+        unread:         !msg.flags?.has('\\Seen'),
+        hasAttachments: attachments.length > 0,
       });
     }
 
@@ -88,16 +91,22 @@ async function fetchMailAccount(account) {
  */
 function _findBodyParts(struct) {
   let text = null, html = null;
+  const attachments = [];
   function visit(node, isRoot) {
     if (!node) return;
     // Root single-part messages have no .part set; IMAP section '1' covers them.
     const part = node.part || (isRoot && !node.childNodes ? '1' : null);
     if (node.type === 'text/plain' && !text && part) text = { part, encoding: (node.encoding || '7bit').toLowerCase() };
     if (node.type === 'text/html'  && !html && part) html = { part, encoding: (node.encoding || '7bit').toLowerCase() };
+    const name = node.dispositionParameters?.filename || node.parameters?.name;
+    if (part && name) {
+      attachments.push({ part, name, type: node.type || 'application/octet-stream', encoding: (node.encoding || 'base64').toLowerCase() });
+    }
     (node.childNodes || []).forEach(c => visit(c, false));
   }
   visit(struct, true);
-  return { textPart: text, htmlPart: html };
+  const bodyParts = new Set([text?.part, html?.part].filter(Boolean));
+  return { textPart: text, htmlPart: html, attachments: attachments.filter(a => !bodyParts.has(a.part)) };
 }
 
 function _decodePart(buf, encoding) {
@@ -146,7 +155,7 @@ async function fetchMailMessage(account, uid) {
 
     if (!meta) return null;
 
-    const { textPart, htmlPart } = _findBodyParts(meta.bodyStructure);
+    const { textPart, htmlPart, attachments } = _findBodyParts(meta.bodyStructure);
     const partKeys = [...new Set([textPart?.part, htmlPart?.part].filter(Boolean))];
 
     // Step 2: fetch discovered body parts; fall back to BODY[TEXT] on any error
@@ -180,8 +189,43 @@ async function fetchMailMessage(account, uid) {
       date:        _fmtDate(meta.envelope?.date),
       bodyHtml,
       body,
-      attachments: [],   // read-only; names only, no download
+      attachments: attachments.map(a => ({ name: a.name, part: a.part, type: a.type })),
     };
+  } finally {
+    lock.release();
+    await client.logout();
+  }
+}
+
+// ---- Fetch one attachment ----
+
+/**
+ * Fetch a single attachment part by UID and IMAP part number.
+ * Returns { data: Buffer, name, type } or null if not found.
+ */
+async function fetchMailAttachment(account, uid, part) {
+  const { folder = 'INBOX' } = account;
+  const client = _makeClient(account);
+  await client.connect();
+  const lock = await client.getMailboxLock(folder);
+  try {
+    const meta = await client.fetchOne(String(uid), { bodyStructure: true }, { uid: true });
+    if (!meta) return null;
+    const { attachments } = _findBodyParts(meta.bodyStructure);
+    const att = attachments.find(a => a.part === part);
+    if (!att) return null;
+
+    const msg = await client.fetchOne(String(uid), { bodyParts: [part] }, { uid: true });
+    const buf = msg?.bodyParts?.get(part);
+    if (!buf) return null;
+
+    let data;
+    if (att.encoding === 'base64') {
+      data = Buffer.from(buf.toString('ascii').replace(/\s+/g, ''), 'base64');
+    } else {
+      data = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+    }
+    return { data, name: att.name, type: att.type };
   } finally {
     lock.release();
     await client.logout();
@@ -279,6 +323,7 @@ async function deleteMailMessage(account, uid) {
 module.exports = {
   fetchMailAccount,
   fetchMailMessage,
+  fetchMailAttachment,
   testMailAccount,
   listMailFolders,
   markMailMessage,

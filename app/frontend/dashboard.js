@@ -1047,16 +1047,21 @@ function _renderMailPanel(accounts) {
     const colorStyle = acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : '';
     const items = acc.messages.map(msg => {
       const dateStr = msg.date ? (() => {
-        const d = new Date(msg.date);
+        const d   = new Date(msg.date);
+        const now = new Date();
+        const hh  = String(d.getHours()).padStart(2, '0');
+        const mi  = String(d.getMinutes()).padStart(2, '0');
+        const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        if (isToday) return `${hh}:${mi}`;
         const dd = String(d.getDate()).padStart(2, '0');
         const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const hh = String(d.getHours()).padStart(2, '0');
-        const mi = String(d.getMinutes()).padStart(2, '0');
         return `${dd}.${mm}. ${hh}:${mi}`;
       })() : '';
+      const fromStr = msg.from ? (msg.from.match(/^(.+?)\s*<[^>]+>$/) || [])[1]?.trim() || msg.from : '';
       const metaParts = [];
-      if (msg.from) metaParts.push(`<span class="dashboard-mail-from">${escHtml(msg.from)}</span>`);
-      if (dateStr)  metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
+      if (msg.hasAttachments) metaParts.push(`<span class="dashboard-mail-attach" title="Has attachments">${_svgAttachment(11, 11)}</span>`);
+      if (fromStr) metaParts.push(`<span class="dashboard-mail-from">${escHtml(fromStr)}</span>`);
+      if (dateStr) metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
       return `<div class="dashboard-mail-item card"${colorStyle}
           data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-unread="${msg.unread ? '1' : '0'}" data-web-url="${escHtml(acc.webInterfaceUrl || '')}">
@@ -1069,6 +1074,38 @@ function _renderMailPanel(accounts) {
 
     return header + items;
   }).join('');
+}
+
+function _splitAddresses(str) {
+  const parts = [];
+  let current = '', inQuote = false, inAngle = false;
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+    if      (c === '"')                      { inQuote = !inQuote; current += c; }
+    else if (c === '<')                      { inAngle = true;     current += c; }
+    else if (c === '>')                      { inAngle = false;    current += c; }
+    else if (c === ',' && !inQuote && !inAngle) {
+      parts.push(current.trim()); current = '';
+      if (str[i + 1] === ' ') i++;
+    } else { current += c; }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function _fmtAddress(addr) {
+  const m = addr.match(/^"?([^"<]+?)"?\s*<([^>]+)>$/);
+  if (m) return `<a href="mailto:${escHtml(m[2].trim())}">${escHtml(m[1].trim())}</a>`;
+  if (addr.includes('@')) return `<a href="mailto:${escHtml(addr)}">${escHtml(addr)}</a>`;
+  return escHtml(addr);
+}
+
+function _foldAddresses(str) {
+  const addrs = _splitAddresses(str).map(_fmtAddress);
+  if (addrs.length <= 3) return addrs.join(', ');
+  const shown  = addrs.slice(0, 3).join(', ');
+  const hidden = addrs.slice(3).join(', ');
+  return `${shown}<span class="dash-addr-ellipsis">, \u2026</span><span class="dash-addr-rest" hidden>, ${hidden}</span> <a href="#" class="dash-addr-toggle">more</a>`;
 }
 
 function _openMailDetail(accountId, msgId, webUrl) {
@@ -1099,14 +1136,32 @@ function _openMailDetail(accountId, msgId, webUrl) {
       document.getElementById('dashboardDetailTitle').textContent = msg.subject;
 
       const rows = [];
-      if (msg.from)    rows.push(['From',    escHtml(msg.from)]);
-      if (msg.to)      rows.push(['To',      escHtml(msg.to)]);
-      if (msg.cc)      rows.push(['Cc',      escHtml(msg.cc)]);
+      if (msg.from)    rows.push(['From',    _foldAddresses(msg.from)]);
+      if (msg.to)      rows.push(['To',      _foldAddresses(msg.to)]);
+      if (msg.cc)      rows.push(['Cc',      _foldAddresses(msg.cc)]);
       if (msg.date)    rows.push(['Date',    escHtml(new Date(msg.date).toLocaleString())]);
+      if (msg.attachments?.length) {
+        const base = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
+        const links = msg.attachments.map(a =>
+          `<a href="${escHtml(base + encodeURIComponent(a.part))}" download="${escHtml(a.name)}" class="dash-attachment-link">${escHtml(a.name)}</a>`
+        ).join('');
+        rows.push(['Attachments', links]);
+      }
 
       body.innerHTML = `<table class="dashboard-detail-table">${
         rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
       }</table>`;
+
+      body.querySelectorAll('.dash-addr-toggle').forEach(a => {
+        a.addEventListener('click', e => {
+          e.preventDefault();
+          const rest     = a.previousElementSibling;
+          const ellipsis = rest.previousElementSibling;
+          rest.hidden     = !rest.hidden;
+          ellipsis.hidden = !ellipsis.hidden;
+          a.textContent = rest.hidden ? 'more' : 'less';
+        });
+      });
 
       if (msg.bodyHtml) {
         const iframe = document.createElement('iframe');
@@ -1763,8 +1818,9 @@ function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
   const menuTop  = Math.max(edge, Math.min(y, window.innerHeight - mh - edge));
   menu.style.left = menuLeft + 'px';
   menu.style.top  = menuTop  + 'px';
-  const moveWrap = document.getElementById('mailCtxMoveWrap');
-  moveWrap.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
+  const toLeft = menuLeft + mw + 160 > window.innerWidth - edge;
+  document.getElementById('mailCtxMoveWrap').classList.toggle('ctx-submenu-left', toLeft);
+  document.getElementById('mailCtxCreateCardWrap').classList.toggle('ctx-submenu-left', toLeft);
 }
 
 function hideMailContextMenu() {
@@ -1884,10 +1940,11 @@ async function _mailMove(accountId, msgId, folder) {
   }
 }
 
-async function _createCardFromMail(accountId, msgId) {
+async function _createCardFromMail(accountId, msgId, boardName = null) {
   let prefill = { text: '', description: '' };
+  let msg = null;
   try {
-    const msg = await fetch(
+    msg = await fetch(
       `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`
     ).then(r => r.ok ? r.json() : null);
 
@@ -1919,17 +1976,86 @@ async function _createCardFromMail(accountId, msgId) {
     }
   } catch { /* proceed with empty prefill */ }
 
-  await openInboxModal(null, prefill, () => _mailDelete(accountId, msgId));
+  const attachments = msg?.attachments || [];
+
+  // If the target board is already known, pre-upload to a temp card ID so the
+  // inbox modal shows the attachments immediately (background — modal opens in parallel).
+  let preTempCardId = null;
+  if (boardName && attachments.length) {
+    preTempCardId = uid();
+    _uploadMailAttachmentsToCard(accountId, msgId, attachments, boardName, preTempCardId)
+      .then(() => { if (typeof _inboxTempCardId !== 'undefined' && _inboxTempCardId === preTempCardId) loadCardAttachments(preTempCardId); });
+  }
+
+  await openInboxModal(boardName, prefill, async (board, cardId) => {
+    _mailDelete(accountId, msgId);
+    // Re-upload only if board was changed (new cardId differs from pre-uploaded temp)
+    if (attachments.length && board && cardId && cardId !== preTempCardId) {
+      await _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId);
+    }
+  }, null, preTempCardId);
+}
+
+async function _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId) {
+  const base = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
+  for (const att of attachments) {
+    try {
+      const blob = await fetch(base + encodeURIComponent(att.part)).then(r => r.ok ? r.blob() : null);
+      if (!blob) continue;
+      const form = new FormData();
+      form.append('file', blob, att.name);
+      await fetch(`/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(cardId)}`, {
+        method: 'POST', body: form,
+      });
+    } catch { /* skip failed attachment */ }
+  }
 }
 
 document.getElementById('mailCtxWebmail').addEventListener('click', () => hideMailContextMenu());
 
-document.getElementById('mailCtxCreateCard').addEventListener('click', async () => {
-  const accountId = _mailCtxAccountId;
-  const msgId     = _mailCtxMsgId;
-  hideMailContextMenu();
-  if (accountId && msgId) await _createCardFromMail(accountId, msgId);
-});
+{ // Create card — click opens inbox modal; submenu lets user pick a board directly
+  let _boardListCache = null;
+
+  document.getElementById('mailCtxCreateCardWrap').addEventListener('click', async e => {
+    // Ignore clicks that originated from inside the submenu (board buttons)
+    if (e.target.closest('.ctx-submenu')) return;
+    const accountId = _mailCtxAccountId;
+    const msgId     = _mailCtxMsgId;
+    hideMailContextMenu();
+    if (accountId && msgId) await _createCardFromMail(accountId, msgId);
+  });
+
+  document.getElementById('mailCtxCreateCardWrap').addEventListener('mouseenter', async () => {
+    const listEl = document.getElementById('mailCtxBoardList');
+    if (_boardListCache) { _populateBoardList(_boardListCache, listEl); return; }
+    listEl.innerHTML = '<p class="ctx-folder-loading">Loading\u2026</p>';
+    try {
+      const boards = await fetch('/api/boards').then(r => r.json());
+      _boardListCache = boards.filter(b => !b.archived);
+      _populateBoardList(_boardListCache, listEl);
+    } catch {
+      listEl.innerHTML = '<p class="ctx-folder-loading">Failed to load.</p>';
+    }
+  });
+}
+
+function _populateBoardList(boards, listEl) {
+  if (!boards.length) { listEl.innerHTML = '<p class="ctx-folder-loading">No boards.</p>'; return; }
+  listEl.innerHTML = '';
+  boards.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'ctx-item';
+    btn.textContent = b.name;
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const accountId = _mailCtxAccountId;
+      const msgId     = _mailCtxMsgId;
+      hideMailContextMenu();
+      if (accountId && msgId) await _createCardFromMail(accountId, msgId, b.name);
+    });
+    listEl.appendChild(btn);
+  });
+}
 
 document.getElementById('mailCtxToggleRead').addEventListener('click', async () => {
   const accountId = _mailCtxAccountId;
