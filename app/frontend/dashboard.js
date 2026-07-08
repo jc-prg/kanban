@@ -1988,6 +1988,7 @@ async function _createCardFromMail(accountId, msgId, boardName = null) {
   }
 
   await openInboxModal(boardName, prefill, async (board, cardId) => {
+    _mailToggleRead(accountId, msgId, true);
     // Re-upload only if board was changed (new cardId differs from pre-uploaded temp)
     if (attachments.length && board && cardId && cardId !== preTempCardId) {
       await _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId);
