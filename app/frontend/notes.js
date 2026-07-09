@@ -544,7 +544,7 @@ function _renderFolderItem(folder, container, depth) {
     `<div class="notes-item-btns">` +
       (depth < 2 ? `<button class="notes-item-btn notes-item-btn--add-folder" title="Add subfolder">${_svgFolder(10, 10)}</button>` : '') +
       `<button class="notes-item-btn notes-item-btn--add" title="Add page to folder">+</button>` +
-      `<button class="notes-item-btn notes-item-btn--del" title="Delete folder">${ICONS.close}</button>` +
+      `<button class="notes-item-btn notes-item-btn--del" title="Delete folder">${_svgDelete()}</button>` +
     `</div>`;
 
   el.querySelector('.notes-toggle-btn').addEventListener('click', async e => {
@@ -623,7 +623,7 @@ function _renderPageItem(page, container, depth) {
       (indicators ? `<span class="notes-item-indicators">${indicators}</span>` : '') +
     `</span>` +
     `<div class="notes-item-btns">` +
-      `<button class="notes-item-btn notes-item-btn--del" title="Delete page">${ICONS.close}</button>` +
+      `<button class="notes-item-btn notes-item-btn--del" title="Delete page">${_svgDelete()}</button>` +
     `</div>`;
 
   el.querySelector('.notes-item-title').addEventListener('click', () => openNoteModal(page.id));
@@ -1081,7 +1081,7 @@ function renderLinkedCards(ids) {
         `<span class="note-mini-card-text${isGone ? ' note-mini-card-text--gone' : ''}" title="${escHtml(text)}">${escHtml(text)}</span>` +
       `</div>` +
       attachBadge +
-      `<button class="note-mini-card-remove" title="Unlink card">${ICONS.close}</button>`;
+      `<button class="note-mini-card-remove" title="Unlink card">${_svgClose()}</button>`;
 
     if (card && col) {
       mini.querySelector('.note-mini-card-body').addEventListener('click', () => { closeNoteModal(); openEditModal(col.id, card); });
@@ -1363,17 +1363,17 @@ function renderAttachments(pageId, files) {
     const url = `${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = (ft === 'image' || ft === 'svg') ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
+    const icon = (ft === 'image' || ft === 'svg') ? _svgFileImage() : ft === 'pdf' ? _svgFilePdf() : ft === 'html' ? _svgFileWeb() : _svgAttachment();
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
       `<span class="note-attach-size">${_fmtSize(f.size)}</span>` +
       `<div class="note-attach-btns">` +
-        (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">⛶</button>` : '') +
-        (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">⛶</button>` : '') +
+        (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">${_svgFullscreen()}</button>` : '') +
+        (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">${_svgOpenLink()}</button>` : '') +
         `<button class="note-attach-btn" data-act="insert"   title="Insert in description">⌅</button>` +
-        `<button class="note-attach-btn" data-act="download" title="Download">${ICONS.download}</button>` +
-        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">${ICONS.close}</button>` +
+        `<button class="note-attach-btn" data-act="download" title="Download">${_svgDownload()}</button>` +
+        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">${_svgDelete()}</button>` +
       `</div>`;
 
     if (ft === 'image' || ft === 'pdf')

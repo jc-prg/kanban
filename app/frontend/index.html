@@ -66,8 +66,8 @@
         <span id="dashboardDetailTitle" class="dashboard-detail-title"></span>
         <a class="modal-fs-btn" id="dashboardDetailEditBtn" href="#" title="Edit card" style="position:static;opacity:0.55;display:none"><span data-icon="edit"></span></a>
         <a class="modal-fs-btn" id="dashboardDetailWebUrl" href="#" target="_blank" rel="noopener noreferrer" title="Open in Webmail" style="position:static;opacity:0.55;display:none">&#x2197;</a>
-        <button class="modal-fs-btn" id="dashboardDetailFsBtn" title="Full screen" style="position:static;opacity:0.55">⛶</button>
-        <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close">✕</button>
+        <button class="modal-fs-btn" id="dashboardDetailFsBtn" title="Full screen" style="position:static;opacity:0.55"><span data-icon="fullscreen"></span></button>
+        <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close"><span data-icon="close"></span></button>
       </div>
       <div class="dashboard-detail-body" id="dashboardDetailBody"></div>
     </div>
@@ -183,11 +183,11 @@
     </div>
   </div>
   <div class="ctx-item ctx-submenu-trigger" id="colCtxDeleteCards">
-    <span data-icon="close"></span>  Delete cards
+    <span data-icon="delete"></span>  Delete cards
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="colCtxDeleteCardsSubmenu">
       <button class="ctx-item ctx-danger" id="colCtxDeleteDuplicates"><span data-icon="duplicate"></span>  Delete duplicates</button>
-      <button class="ctx-item ctx-danger" id="colCtxDeleteAll"><span data-icon="close"></span>  Delete all cards</button>
+      <button class="ctx-item ctx-danger" id="colCtxDeleteAll"><span data-icon="delete"></span>  Delete all cards</button>
       <button class="ctx-item ctx-danger" id="colCtxDeleteByColor"><span data-icon="color"></span>  By color</button>
       <div class="ctx-color-row" id="colCtxDeleteColorRow" style="display:none"></div>
       <button class="ctx-item ctx-danger" id="colCtxDeleteByDate"><span data-icon="date"></span>  By creation date</button>
@@ -203,7 +203,7 @@
       <div class="ctx-color-row" id="colCtxColorRow" style="display:none"></div>
       <button class="ctx-item" id="colCtxActions"><span data-icon="actions"></span>  Column actions</button>
       <div class="ctx-actions-row" id="colCtxActionsRow" style="display:none"></div>
-      <button class="ctx-item ctx-danger" id="colCtxDelete"><span data-icon="close"></span>  Delete column</button>
+      <button class="ctx-item ctx-danger" id="colCtxDelete"><span data-icon="delete"></span>  Delete column</button>
     </div>
   </div>
 </div>
@@ -225,7 +225,7 @@
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="ctxMoveSubmenu"></div>
   </div>
-  <button class="ctx-item ctx-danger" id="ctxDelete"><span data-icon="close"></span>  Delete</button>
+  <button class="ctx-item ctx-danger" id="ctxDelete"><span data-icon="delete"></span>  Delete</button>
 </div>
 
 <div id="mailContextMenu" class="context-menu" style="display:none">
@@ -241,13 +241,13 @@
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="mailCtxFolderList"></div>
   </div>
-  <button class="ctx-item ctx-danger" id="mailCtxDelete"><span data-icon="close"></span>  Delete (trash)</button>
+  <button class="ctx-item ctx-danger" id="mailCtxDelete"><span data-icon="delete"></span>  Delete (trash)</button>
 </div>
 
 <dialog id="calEventModal" class="modal">
   <div class="modal-header">
     <span id="calEventModalTitle">New event</span>
-    <button class="modal-close-btn" id="calEventModalClose">✕</button>
+    <button class="modal-close-btn" id="calEventModalClose"><span data-icon="close"></span></button>
   </div>
   <div class="modal-body">
     <div class="modal-field" id="calEventAccountField">
@@ -300,7 +300,7 @@
 
 <div id="modal" class="modal-backdrop" style="display:none">
   <div class="modal">
-    <button class="modal-fs-btn" id="cardFullscreenBtn" title="Enter full screen" onclick="toggleCardFullscreen()">⛶</button>
+    <button class="modal-fs-btn" id="cardFullscreenBtn" title="Enter full screen" onclick="toggleCardFullscreen()"><span data-icon="fullscreen"></span></button>
     <h2 id="modalTitle" style="display:none">Add Card</h2>
     <div class="modal-field" id="modalBoardField" style="display:none">
       <label>Board / Column</label>
@@ -1243,7 +1243,7 @@
 
 <div id="noteModal" class="modal-backdrop" style="display:none">
   <div class="modal note-modal">
-    <button class="modal-fs-btn" id="noteFullscreenBtn" title="Enter full screen" onclick="toggleNoteFullscreen()">⛶</button>
+    <button class="modal-fs-btn" id="noteFullscreenBtn" title="Enter full screen" onclick="toggleNoteFullscreen()"><span data-icon="fullscreen"></span></button>
     <div id="noteModalLoading" class="note-modal-loading" style="display:none">
       <span class="note-modal-loading-text">Loading…</span>
     </div>

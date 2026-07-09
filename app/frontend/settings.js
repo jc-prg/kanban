@@ -467,7 +467,7 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
         </div>
         <div class="calendar-account-actions">
           <button class="btn btn--icon" data-wda-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
-          <button class="btn btn--icon" data-wda-del="${i}" title="Delete">${ICONS.close}</button>
+          <button class="btn btn--icon" data-wda-del="${i}" title="Delete">${_svgDelete()}</button>
         </div>
       </div>`).join('');
 
@@ -638,14 +638,14 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     }
     list.innerHTML = _cardSources.map((cs, i) => `
       <div class="calendar-account-row cs-source-row" draggable="true" data-cs-idx="${i}">
-        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
+        <span class="cs-drag-handle" title="Drag to reorder">${_svgDragHandle()}</span>
         <div class="calendar-account-info">
           <strong>${escHtml(cs.board || '(no board)')}</strong>
           <span class="settings-item-desc">${escHtml((cs.columns || []).join(', ') || 'all columns')}</span>
         </div>
         <div class="calendar-account-actions">
           <button class="btn btn--icon" data-cs-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
-          <button class="btn btn--icon" data-cs-del="${i}" title="Delete">${ICONS.close}</button>
+          <button class="btn btn--icon" data-cs-del="${i}" title="Delete">${_svgDelete()}</button>
         </div>
       </div>`).join('');
 
@@ -887,14 +887,14 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     }
     list.innerHTML = _mailAccounts.map((acc, i) => `
       <div class="calendar-account-row cs-source-row" draggable="true" data-mail-idx="${i}">
-        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
+        <span class="cs-drag-handle" title="Drag to reorder">${_svgDragHandle()}</span>
         <div class="calendar-account-info">
           <strong>${escHtml(acc.label || '(no label)')}</strong>
           <span class="settings-item-desc">${escHtml(acc.host || '')}:${escHtml(String(acc.port || 993))} · ${escHtml(acc.user || '')}</span>
         </div>
         <div class="calendar-account-actions">
           <button class="btn btn--icon" data-mail-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
-          <button class="btn btn--icon" data-mail-del="${i}" title="Delete">${ICONS.close}</button>
+          <button class="btn btn--icon" data-mail-del="${i}" title="Delete">${_svgDelete()}</button>
         </div>
       </div>`).join('');
 
@@ -1073,14 +1073,14 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
     }
     list.innerHTML = _calAccounts.map((acc, i) => `
       <div class="calendar-account-row cs-source-row" draggable="true" data-cal-idx="${i}">
-        <span class="cs-drag-handle" title="Drag to reorder">${ICONS.dragHandle}</span>
+        <span class="cs-drag-handle" title="Drag to reorder">${_svgDragHandle()}</span>
         <div class="calendar-account-info">
           <strong>${escHtml(acc.label || '(no label)')}</strong>
           <span class="settings-item-desc">${escHtml(acc.type === 'ical-url' ? 'iCal URL' : 'CalDAV')} · ${escHtml(acc.url || '')}</span>
         </div>
         <div class="calendar-account-actions">
           <button class="btn btn--icon" data-cal-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
-          <button class="btn btn--icon" data-cal-del="${i}" title="Delete">${ICONS.close}</button>
+          <button class="btn btn--icon" data-cal-del="${i}" title="Delete">${_svgDelete()}</button>
         </div>
       </div>`).join('');
 

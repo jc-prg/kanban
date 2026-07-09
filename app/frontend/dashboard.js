@@ -588,7 +588,7 @@ async function initDashboard() {
         action: () => { window.location.href = `/board/${encodeURIComponent(name)}`; },
       },
       {
-        labelHtml: `<span class="ctx-icon">${ICONS.moreOptions}</span>Board settings`,
+        labelHtml: `<span class="ctx-icon">${_svgMoreOptions()}</span>Board settings`,
         action: () => { window.location.href = `/board/${encodeURIComponent(name)}#settings`; },
       },
     ]);
@@ -1711,7 +1711,7 @@ function _showCalEventContextMenu(e, accountId, uid, webUrl) {
   ];
   if (!isIcal && !isRecurring) {
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit`,             action: () => openCalEventModal(accountId, ev) });
-    items.push({ labelHtml: `<span class="ctx-icon">${ICONS.close}</span>Delete`, danger: true, action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href) });
+    items.push({ labelHtml: `<span class="ctx-icon">${_svgDelete()}</span>Delete`, danger: true, action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href) });
   }
   openContextMenu(e, items);
 }

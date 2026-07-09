@@ -3,14 +3,14 @@ function enhanceMarkdownPreview(container) {
   container.querySelectorAll('pre').forEach(pre => {
     const btn = document.createElement('button');
     btn.className = 'md-copy-btn';
-    btn.textContent = ICONS.copyCode;
+    btn.innerHTML = _svgDuplicate();
     btn.title = 'Copy code';
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const text = (pre.querySelector('code') || pre).textContent;
       navigator.clipboard.writeText(text).then(() => {
         btn.textContent = ICONS.done;
-        setTimeout(() => { btn.textContent = ICONS.copyCode; }, 1500);
+        setTimeout(() => { btn.innerHTML = _svgDuplicate(); }, 1500);
       });
     });
     pre.appendChild(btn);
@@ -246,17 +246,17 @@ function renderCardAttachments(cardId, files) {
     const url = `${_cardAttachBase()}/${cardId}/${encodeURIComponent(f.name)}`;
     const item = document.createElement('div');
     item.className = 'note-attach-item';
-    const icon = (ft === 'image' || ft === 'svg') ? ICONS.fileImage : ft === 'pdf' ? ICONS.filePdf : ft === 'html' ? ICONS.fileWeb : ICONS.fileGeneric;
+    const icon = (ft === 'image' || ft === 'svg') ? _svgFileImage() : ft === 'pdf' ? _svgFilePdf() : ft === 'html' ? _svgFileWeb() : _svgAttachment();
     item.innerHTML =
       `<span class="note-attach-icon">${icon}</span>` +
       `<span class="note-attach-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>` +
       `<span class="note-attach-size">${_fmtSize(f.size)}</span>` +
       `<div class="note-attach-btns">` +
-        (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">⛶</button>` : '') +
-        (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">⛶</button>` : '') +
+        (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">${_svgFullscreen()}</button>` : '') +
+        (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">${_svgOpenLink()}</button>` : '') +
         `<button class="note-attach-btn" data-act="insert"   title="Insert in description">⌅</button>` +
-        `<button class="note-attach-btn" data-act="download" title="Download">${ICONS.download}</button>` +
-        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">${ICONS.close}</button>` +
+        `<button class="note-attach-btn" data-act="download" title="Download">${_svgDownload()}</button>` +
+        `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">${_svgDelete()}</button>` +
       `</div>`;
     if (ft === 'image' || ft === 'pdf')
       item.querySelector('[data-act="view"]').addEventListener('click',     () => openAttachmentViewer(url, f.name, ft));

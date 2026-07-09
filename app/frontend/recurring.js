@@ -98,7 +98,7 @@ function renderRecurringList() {
       </div>
       <button class="recurring-item-btn recurring-run-btn"    title="Run now">▷</button>
       <button class="recurring-item-btn recurring-edit-btn"   title="Edit">✎</button>
-      <button class="recurring-item-btn recurring-delete-btn" title="Delete">✕</button>
+      <button class="recurring-item-btn recurring-delete-btn" title="Delete">${_svgDelete()}</button>
     </li>`;
   }).join('');
 }

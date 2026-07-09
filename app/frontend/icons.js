@@ -4,30 +4,14 @@
 // All unicode/emoji icons used in the UI. Reference these instead of hardcoding chars.
 const ICONS = {
   // Navigation & UI chrome
-  menu:         '☰',
   collapse:     '▾',
   expand:       '▸',
   submenuArrow: '›',
-  moreOptions:  '⋮',
-  dragHandle:   '⠿',
 
   // Actions
   done:         '✓',
   error:        '✗',
-  close:        '✕',
-  download:     '↓',
-  copyCode:     '⧉',
-  fullscreen:   '⛶',
 
-  // Properties
-  color:        '◉',
-  checkbox:     '☐',
-
-  // File types (attachment lists)
-  fileImage:    '🖼',
-  filePdf:      '📄',
-  fileWeb:      '🌐',
-  fileGeneric:  '📎',
 };
 
 // ---- SVG icon builders ----
@@ -89,7 +73,7 @@ function _svgEdit(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 1.5 L10.5 3.5 L3.5 10.5 L1 11 L1.5 8.5 Z"/><line x1="7" y1="3" x2="9" y2="5"/></svg>`;
 }
 
-// Two overlapping rectangles — duplicate / copy
+// Two overlapping rectangles — duplicate / copy / copy code
 function _svgDuplicate(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="0.5" width="8.5" height="8.5" rx="1.3"/><rect x="0.5" y="3" width="8.5" height="8.5" rx="1.3" fill="var(--surface)"/></svg>`;
 }
@@ -144,6 +128,81 @@ function _svgFolder(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 5h10v5.5a.8.8 0 0 1-.8.8H1.8a.8.8 0 0 1-.8-.8V5z"/><path d="M1 5V3.5a.8.8 0 0 1 .8-.8h2.7L6 5"/></svg>`;
 }
 
+// Four corner brackets — fullscreen / expand to fill
+function _svgFullscreen(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 4.5V1H4.5"/><path d="M7.5 1H11V4.5"/><path d="M11 7.5V11H7.5"/><path d="M4.5 11H1V7.5"/></svg>`;
+}
+
+// Empty square — insert task checkbox in description
+function _svgCheckbox(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="10.6" height="10.6" rx="1.8"/></svg>`;
+}
+
+// Three vertical dots — more options / context menu
+function _svgMoreOptions(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="currentColor" aria-hidden="true"><circle cx="6" cy="2.5" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="6" cy="9.5" r="1.2"/></svg>`;
+}
+
+// Floppy disk — save
+function _svgSave(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="10.6" height="10.6" rx="1.3"/><rect x="3" y="0.7" width="4.5" height="3.3"/><rect x="2.5" y="6.5" width="7" height="3.5" rx="0.5"/></svg>`;
+}
+
+// Upward arrow with baseline — upload file
+function _svgUpload(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="8" x2="6" y2="1"/><polyline points="3,3.5 6,1 9,3.5"/><line x1="2" y1="11" x2="10" y2="11"/></svg>`;
+}
+
+// Diagonal X — close dialog or dismiss viewer
+function _svgClose(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>`;
+}
+
+// Trash can — delete item, attachment, or card
+function _svgDelete(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="1" y1="3.5" x2="11" y2="3.5"/><path d="M4.5 3.5V2.2h3V3.5"/><path d="M2.2 3.5L2.8 10.5H9.2L9.8 3.5"/><line x1="5" y1="5.5" x2="5" y2="9"/><line x1="7" y1="5.5" x2="7" y2="9"/></svg>`;
+}
+
+// Ring with inner dot (bullseye) — change card or column color
+function _svgColor(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><circle cx="6" cy="6" r="2" fill="currentColor" stroke="none"/></svg>`;
+}
+
+// Landscape frame with mountain and sun — image file attachment
+function _svgFileImage(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="8.6" rx="1.3"/><polyline points="0.7,7.5 3.5,4.5 6.5,7 8.5,5 11.3,7.5"/><circle cx="3.8" cy="4.3" r="1" fill="currentColor" stroke="none"/></svg>`;
+}
+
+// Folded document with dense lines — PDF file attachment
+function _svgFilePdf(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.5h6.5l3 3v6.5H1z"/><path d="M7.5 1.5V4.5h3"/><line x1="2.5" y1="6.5" x2="8.5" y2="6.5"/><line x1="2.5" y1="8.5" x2="8.5" y2="8.5"/><line x1="2.5" y1="10.5" x2="6.5" y2="10.5"/></svg>`;
+}
+
+// Angle brackets with slash — HTML / web file attachment
+function _svgFileWeb(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4,3 1.5,6 4,9"/><polyline points="8,3 10.5,6 8,9"/><line x1="6.5" y1="2" x2="5.5" y2="10"/></svg>`;
+}
+
+// Downward arrow with baseline — download file
+function _svgDownload(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="1" x2="6" y2="8"/><polyline points="3,5.5 6,8.5 9,5.5"/><line x1="2" y1="11" x2="10" y2="11"/></svg>`;
+}
+
+// 2×3 dot grid — drag handle for reordering
+function _svgDragHandle(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="currentColor" aria-hidden="true"><circle cx="4" cy="3" r="1"/><circle cx="8" cy="3" r="1"/><circle cx="4" cy="6" r="1"/><circle cx="8" cy="6" r="1"/><circle cx="4" cy="9" r="1"/><circle cx="8" cy="9" r="1"/></svg>`;
+}
+
+// Three horizontal lines — hamburger / header menu
+function _svgMenu(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><line x1="1.5" y1="3" x2="10.5" y2="3"/><line x1="1.5" y1="6" x2="10.5" y2="6"/><line x1="1.5" y1="9" x2="10.5" y2="9"/></svg>`;
+}
+
+// Envelope — email / mail account
+function _svgEmail(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="2.5" width="10.6" height="7.5" rx="1.2"/><polyline points="0.7,2.5 6,7 11.3,2.5"/></svg>`;
+}
+
 // Arrow leaving a box — open external link in a new tab
 function _svgOpenLink(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 1.5H2.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V7"/><path d="M7.5 1.5h3v3"/><line x1="5.5" y1="6.5" x2="10.5" y2="1.5"/></svg>`;
@@ -155,6 +214,22 @@ function _svgNetworkFolder(w = 12, h = 12) {
 }
 
 const SVGICONS = {
+  close:          _svgClose,
+  delete:         _svgDelete,
+  color:          _svgColor,
+  fileImage:      _svgFileImage,
+  filePdf:        _svgFilePdf,
+  fileWeb:        _svgFileWeb,
+  fileGeneric:    _svgAttachment,
+  fullscreen:     _svgFullscreen,
+  checkbox:       _svgCheckbox,
+  moreOptions:    _svgMoreOptions,
+  save:           _svgSave,
+  upload:         _svgUpload,
+  download:       _svgDownload,
+  dragHandle:     _svgDragHandle,
+  menu:           _svgMenu,
+  email:          _svgEmail,
   attachment:   _svgAttachment,
   link:         _svgLink,
   noteDoc:      _svgNoteDoc,
@@ -186,28 +261,31 @@ const ICON_REGISTRY = [
   // Character icons
   { type: 'char', char: ICONS.done,         name: 'Done',           usage: 'Confirms action; marks card as done' },
   { type: 'char', char: ICONS.error,        name: 'Error',          usage: 'Save error or failed operation' },
-  { type: 'char', char: ICONS.close,        name: 'Close / Delete', usage: 'Remove item; close dialog or viewer' },
+  { type: 'svg', svg: _svgClose(16, 16),       name: 'Close',          usage: 'Close a dialog or attachment viewer' },
+  { type: 'svg', svg: _svgDelete(16, 16),      name: 'Delete',         usage: 'Delete item, attachment, card, or column' },
   { type: 'svg', svg: _svgCreate(16, 16),      name: 'Create / New',   usage: 'Create a new item (event, card, etc.)' },
   { type: 'svg', svg: _svgEdit(16, 16),        name: 'Edit',           usage: 'Open card or note for editing' },
-  { type: 'svg', svg: _svgDuplicate(16, 16),   name: 'Duplicate',      usage: 'Create a copy of a card' },
+  { type: 'svg', svg: _svgDuplicate(16, 16),   name: 'Duplicate / Copy', usage: 'Duplicate a card; copy code block to clipboard' },
   { type: 'svg', svg: _svgOpenLink(16, 16),    name: 'Open link',      usage: 'Open URL in a new browser tab' },
-  { type: 'char', char: ICONS.download,     name: 'Download',       usage: 'Download an attachment file' },
-  { type: 'char', char: ICONS.fullscreen,   name: 'Full screen',    usage: 'Toggle distraction-free full screen mode in card/note modal' },
+  { type: 'svg', svg: _svgDownload(16, 16),    name: 'Download',       usage: 'Download an attachment file' },
+  { type: 'svg', svg: _svgUpload(16, 16),      name: 'Upload',         usage: 'Upload a file attachment' },
+  { type: 'svg', svg: _svgSave(16, 16),        name: 'Save',           usage: 'Save changes' },
+  { type: 'svg', svg: _svgFullscreen(16, 16),  name: 'Full screen',    usage: 'Toggle distraction-free full screen mode in card/note modal' },
   { type: 'svg', svg: _svgMoveTo(16, 16),      name: 'Move to',        usage: 'Move card(s) to another column' },
-  { type: 'char', char: ICONS.menu,         name: 'Menu',           usage: 'Open the header dropdown menu' },
+  { type: 'svg', svg: _svgMenu(16, 16),        name: 'Menu',           usage: 'Open the header dropdown menu' },
   { type: 'svg', svg: _svgDescription(16, 16), name: 'Description',    usage: 'Card has a text description' },
-  { type: 'char', char: ICONS.moreOptions,  name: 'More options',   usage: 'Open column context menu' },
-  { type: 'char', char: ICONS.dragHandle,   name: 'Drag handle',    usage: 'Grab to reorder columns' },
+  { type: 'svg', svg: _svgMoreOptions(16, 16), name: 'More options',   usage: 'Open column context menu' },
+  { type: 'svg', svg: _svgDragHandle(16, 16),  name: 'Drag handle',    usage: 'Grab to reorder columns' },
   { type: 'char', char: ICONS.collapse,     name: 'Collapse',       usage: 'Collapse column or tree item' },
   { type: 'char', char: ICONS.expand,       name: 'Expand',         usage: 'Expand column or tree item' },
-  { type: 'char', char: ICONS.color,        name: 'Color picker',   usage: 'Change card or column color' },
+  { type: 'svg', svg: _svgColor(16, 16),       name: 'Color picker',   usage: 'Change card or column color' },
   { type: 'svg', svg: _svgActions(16, 16),      name: 'Actions',        usage: 'Column automation triggers' },
   { type: 'char', char: ICONS.submenuArrow, name: 'Submenu arrow',  usage: 'Indicates a nested submenu' },
-  { type: 'char', char: ICONS.checkbox,     name: 'Checkbox',       usage: 'Insert task checkbox in description' },
-  { type: 'char', char: ICONS.fileImage,    name: 'Image file',     usage: 'Image attachment (jpg, png, gif, …)' },
-  { type: 'char', char: ICONS.filePdf,      name: 'PDF file',       usage: 'PDF document attachment' },
-  { type: 'char', char: ICONS.fileWeb,      name: 'Web / HTML file',usage: 'HTML or web file attachment' },
-  { type: 'char', char: ICONS.fileGeneric,  name: 'Generic file',   usage: 'Any other file attachment type' },
+  { type: 'svg', svg: _svgCheckbox(16, 16),    name: 'Checkbox',       usage: 'Insert task checkbox in description' },
+  { type: 'svg', svg: _svgFileImage(16, 16),   name: 'Image file',     usage: 'Image attachment (jpg, png, gif, …)' },
+  { type: 'svg', svg: _svgFilePdf(16, 16),     name: 'PDF file',       usage: 'PDF document attachment' },
+  { type: 'svg', svg: _svgFileWeb(16, 16),     name: 'Web / HTML file',usage: 'HTML or web file attachment' },
+  { type: 'svg', svg: _svgAttachment(16, 16),  name: 'Generic file',   usage: 'Any other file attachment type' },
   // SVG icons
   { type: 'svg', svg: _svgAttachment(16, 16),   name: 'Attachment',      usage: 'Card or note has file attachments' },
   { type: 'svg', svg: _svgLink(16, 16),         name: 'Link (chain)',     usage: 'URL link on a note page' },
@@ -226,6 +304,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgFilter(16, 16),        name: 'Filter',           usage: 'Filter duplicates in a column' },
   { type: 'svg', svg: _svgPrint(16, 16),         name: 'Print',            usage: 'Print a card or column' },
   { type: 'svg', svg: _svgDashboard(16, 16),    name: 'Dashboard',        usage: 'Navigate to the dashboard view' },
+  { type: 'svg', svg: _svgEmail(16, 16),        name: 'Email',            usage: 'Mail account / email message' },
 ];
 
 // ---- Render icon library grid ----
