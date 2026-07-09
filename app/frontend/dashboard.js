@@ -71,6 +71,12 @@ function _setCalLookahead(accountId, days) {
     localStorage.setItem(_CAL_LOOKAHEAD_KEY, JSON.stringify(obj));
   } catch { /* ignore */ }
 }
+
+const _CAL_GROUPED_KEY = 'cal-grouped';
+function _setCalGrouped(val) {
+  _calGrouped = val;
+  try { localStorage.setItem(_CAL_GROUPED_KEY, String(val)); } catch { /* ignore */ }
+}
 // Dashboard config: default timezone for new calendar events
 let _defaultTimezone    = '';
 // Raw calendar account configs from /api/dashboard/config — used to build per-account fetch URLs
@@ -374,8 +380,11 @@ async function initDashboard() {
     const lookaheads = accounts.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7));
     const minDays = lookaheads.length ? Math.min(...lookaheads) : 7;
     items.push(
-      { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(7) },
-      { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${minDays} days)`, action: () => _loadMoreCalEventsAll(30) },
+      { labelHtml: `<span class="ctx-icon">${_calGrouped ? ICONS.done : '\u00a0\u00a0'}</span>Group by account`, action: () => { _setCalGrouped(!_calGrouped); _renderCalendarPanel(_calAccountsMeta); } },
+      { separator: true },
+      { labelHtml: `<span class="ctx-icon">${SVGICONS.date()}</span>Today`,          action: () => _resetCalToToday() },
+      { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${minDays} days)`,   action: () => _loadMoreCalEventsAll(7) },
+      { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(30) },
       { labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _fetchCalendarData().then(_renderCalendarPanel).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = _PANEL_FAILED; }) },
       { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('calendar-accounts') },
     );
@@ -607,6 +616,7 @@ async function initDashboard() {
     _dashRecentLimit       = cfg.recentLimit || 10;
     _defaultTimezone       = cfg.defaultTimezone || '';
     _calGrouped            = cfg.calendarGrouped !== false;
+    try { const s = localStorage.getItem(_CAL_GROUPED_KEY); if (s !== null) _calGrouped = s === 'true'; } catch { /* ignore */ }
     _cardGrouped           = cfg.cardGrouped !== false;
     _calAccountsConfig     = cfg.calendarAccounts || [];
     _serverRecentFolders   = recentFolders || {};
@@ -630,7 +640,25 @@ async function _reloadPanel(url, renderFn, panelId) {
   }
 }
 
-function _reloadCardsPanel() { return _reloadPanel('/api/dashboard/cards', _renderCardsPanel, 'dashboardCardsPanel'); }
+async function _reloadBoardsPanel() {
+  if (!_panelShown('dashboardBoardsPanel')) return;
+  try {
+    const d = new Date();
+    d.setDate(d.getDate() + _dashAchOffset);
+    const [boards, ach] = await Promise.all([
+      fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetch(`/api/achievements/today?date=${d.toISOString().slice(0, 10)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    await _renderBoardsPanel(boards, ach);
+  } catch {
+    document.getElementById('dashboardBoardsPanel').innerHTML = _PANEL_FAILED;
+  }
+}
+
+function _reloadCardsPanel() {
+  _reloadBoardsPanel();
+  return _reloadPanel('/api/dashboard/cards', _renderCardsPanel, 'dashboardCardsPanel');
+}
 function _reloadMailPanel()  { return _reloadPanel('/api/dashboard/mail',  _renderMailPanel,  'dashboardMailPanel');  }
 
 function _panelShown(id) {
@@ -675,10 +703,10 @@ async function loadDashboard() {
   const showMail     = _panelShown('dashboardMailPanel');
   const showCalendar = _panelShown('dashboardCalendarPanel');
 
-  if (showBoards)   { document.getElementById('dashboardBoardsPanel').innerHTML = loadingHtml;   document.getElementById('dashBoardsCount').textContent   = ''; }
-  if (showCards)    { document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;     document.getElementById('dashCardsCount').textContent     = ''; }
-  if (showMail)     { document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;      document.getElementById('dashMailCount').textContent      = ''; }
-  if (showCalendar) { document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;  document.getElementById('dashCalendarCount').textContent  = ''; }
+  if (showBoards)   { document.getElementById('dashboardBoardsPanel').innerHTML = loadingHtml;   document.getElementById('dashBoardsCount').textContent   = 0; }
+  if (showCards)    { document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;     document.getElementById('dashCardsCount').textContent     = 0; }
+  if (showMail)     { document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;      document.getElementById('dashMailCount').textContent      = 0; }
+  if (showCalendar) { document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;  document.getElementById('dashCalendarCount').textContent  = 0; }
 
   const resolved = await Promise.all([
     showBoards   ? Promise.all([
@@ -805,7 +833,7 @@ async function _renderBoardsPanel(boards, achievements) {
   const panel = document.getElementById('dashboardBoardsPanel');
   const active   = boards.filter(b => !b.archived);
   const archived = boards.filter(b =>  b.archived);
-  document.getElementById('dashBoardsCount').textContent = active.length || '';
+  document.getElementById('dashBoardsCount').textContent = active.length;
 
   let html = '<div class="dashboard-group-header">Active boards</div>';
   html += active.length
@@ -906,7 +934,7 @@ function _renderCardsPanel(groups) {
   const menuBtn = document.getElementById('dashCardsMenuBtn');
   _dashCardMap.clear();
   const total = groups.reduce((s, g) => s + (g.cards?.filter(c => !c.text?.startsWith('#')).length || 0), 0);
-  document.getElementById('dashCardsCount').textContent = total || '';
+  document.getElementById('dashCardsCount').textContent = total;
   _cardSourcesMeta = [...new Set(groups.filter(g => !g.error).map(g => g.board))];
   menuBtn.style.display = groups.length ? '' : 'none';
   if (!groups.length) {
@@ -1024,7 +1052,7 @@ function _renderMailPanel(accounts) {
   const panel   = document.getElementById('dashboardMailPanel');
   const menuBtn = document.getElementById('dashMailMenuBtn');
   const total   = accounts.reduce((s, a) => s + (a.messages?.length || 0), 0);
-  document.getElementById('dashMailCount').textContent = total || '';
+  document.getElementById('dashMailCount').textContent = total;
 
   _mailAccountsMeta = accounts;
   menuBtn.style.display = accounts.length ? '' : 'none';
@@ -1112,6 +1140,7 @@ function _openMailDetail(accountId, msgId, webUrl) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
+  detail.querySelector('.dash-detail-footer')?.remove();
   document.getElementById('dashboardDetailEditBtn').style.display = 'none';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   body.innerHTML = '';
@@ -1142,15 +1171,24 @@ function _openMailDetail(accountId, msgId, webUrl) {
       if (msg.date)    rows.push(['Date',    escHtml(new Date(msg.date).toLocaleString())]);
       if (msg.attachments?.length) {
         const base = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
-        const links = msg.attachments.map(a =>
-          `<a href="${escHtml(base + encodeURIComponent(a.part))}" download="${escHtml(a.name)}" class="dash-attachment-link">${escHtml(a.name)}</a>`
-        ).join('');
+        const links = msg.attachments.map(a => {
+          const ft = _attachType(a.name);
+          const ftAttr = (ft === 'image' || ft === 'pdf') ? ` data-ft="${ft}" data-name="${escHtml(a.name)}"` : '';
+          return `<a href="${escHtml(base + encodeURIComponent(a.part))}" download="${escHtml(a.name)}" class="dash-attachment-link"${ftAttr}>${escHtml(a.name)}</a>`;
+        }).join('');
         rows.push(['Attachments', links]);
       }
 
       body.innerHTML = `<table class="dashboard-detail-table">${
         rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
       }</table>`;
+
+      body.querySelectorAll('.dash-attachment-link[data-ft]').forEach(a => {
+        a.addEventListener('click', e => {
+          e.preventDefault();
+          openAttachmentViewer(a.href, a.dataset.name, a.dataset.ft);
+        });
+      });
 
       body.querySelectorAll('.dash-addr-toggle').forEach(a => {
         a.addEventListener('click', e => {
@@ -1296,7 +1334,7 @@ function _renderCalendarPanel(accounts) {
   const panel   = document.getElementById('dashboardCalendarPanel');
   const menuBtn = document.getElementById('dashCalendarMenuBtn');
   const total   = accounts.reduce((s, a) => s + (a.events?.length || 0), 0);
-  document.getElementById('dashCalendarCount').textContent = total || '';
+  document.getElementById('dashCalendarCount').textContent = total;
 
   _calAccountsMeta = accounts;
 
@@ -1321,9 +1359,10 @@ function _renderCalendarPanel(accounts) {
 
   panel.innerHTML = '';
 
+  menuBtn.style.display = '';
+
   if (!_calGrouped) {
     // ---- Unified chronological view ----
-    menuBtn.style.display = '';
 
     const allEvents = [];
     for (const acc of accounts) {
@@ -1345,7 +1384,7 @@ function _renderCalendarPanel(accounts) {
     const maxLookahead = lookaheads.length ? Math.max(...lookaheads) : 7;
     const maxDayUnified = new Date(); maxDayUnified.setDate(maxDayUnified.getDate() + maxLookahead - 1);
     const groupsHtml = _calDayGroupsHtml(allEvents, '', '', '', maxDayUnified.toISOString().slice(0, 10));
-    panel.innerHTML += groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+    panel.innerHTML += groupsHtml || _calEmptyMsg(maxLookahead);
 
     if (maxLookahead > 7) {
       const noteEl = document.createElement('p');
@@ -1357,7 +1396,6 @@ function _renderCalendarPanel(accounts) {
   }
 
   // ---- Grouped per-account view (default) ----
-  menuBtn.style.display = 'none';
 
   for (const acc of accounts) {
     const sectionEl = document.createElement('div');
@@ -1388,7 +1426,7 @@ function _renderCalendarPanel(accounts) {
       const lookahead = _calLookahead.get(acc.accountId) ?? (acc.lookaheadDays || 7);
       const maxDayAcc = new Date(); maxDayAcc.setDate(maxDayAcc.getDate() + lookahead - 1);
       const groupsHtml = _calDayGroupsHtml(acc.events || [], acc.color, acc.accountId, acc.webInterfaceUrl, maxDayAcc.toISOString().slice(0, 10));
-      bodyEl.innerHTML = groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+      bodyEl.innerHTML = groupsHtml || _calEmptyMsg(lookahead);
 
       // Lookahead note
       const noteEl = document.createElement('p');
@@ -1400,20 +1438,17 @@ function _renderCalendarPanel(accounts) {
 
     sectionEl.appendChild(bodyEl);
 
-    // Col-btn click → context menu
+    // Col-btn click → per-account context menu (grouped mode only)
     accMenuBtn.addEventListener('click', e => {
       e.stopPropagation();
-      const days = _calLookahead.get(acc.accountId) ?? (acc.lookaheadDays || 7);
       const items = [];
       if ((acc.type || 'caldav') !== 'ical-url') {
         items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`, action: () => openCalEventModal(acc.accountId, null, acc) });
       }
-      items.push(
-        { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${days} days)`,  action: () => _loadMoreCalEvents(acc.accountId, 7,  acc) },
-        { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${days} days)`, action: () => _loadMoreCalEvents(acc.accountId, 30, acc) },
-        { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('calendar-accounts') },
-      );
-      openContextMenu(e, items);
+      if (acc.webInterfaceUrl) {
+        items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open calendar`, action: () => window.open(acc.webInterfaceUrl, '_blank', 'noopener,noreferrer') });
+      }
+      if (items.length) openContextMenu(e, items);
     });
 
     panel.appendChild(sectionEl);
@@ -1458,6 +1493,7 @@ async function _openCardDetail(board, card) {
   const body      = document.getElementById('dashboardDetailBody');
   const editBtn   = document.getElementById('dashboardDetailEditBtn');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
+  detail.querySelector('.dash-detail-footer')?.remove();
 
   document.getElementById('dashboardDetailTitle').textContent = card.text || '';
   editBtn.href = `/board/${encodeURIComponent(board)}#card:${encodeURIComponent(card.id)}`;
@@ -1907,11 +1943,26 @@ async function _mailToggleRead(accountId, msgId, unread) {
   }
 }
 
-async function _mailDelete(accountId, msgId) {
-  const item = document.querySelector(
+function _mailRemoveItem(accountId, msgId) {
+  const panel = document.getElementById('dashboardMailPanel');
+  const item  = panel?.querySelector(
     `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
   );
-  item?.remove();
+  if (!item) return;
+  const afterItem = item.nextElementSibling;
+  item.remove();
+  if (!panel.querySelector(`.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"]`)) {
+    const empty = document.createElement('p');
+    empty.className = 'dashboard-empty';
+    empty.textContent = 'No messages.';
+    afterItem ? panel.insertBefore(empty, afterItem) : panel.appendChild(empty);
+  }
+  const total = panel.querySelectorAll('.dashboard-mail-item').length;
+  document.getElementById('dashMailCount').textContent = total;
+}
+
+async function _mailDelete(accountId, msgId) {
+  _mailRemoveItem(accountId, msgId);
   try {
     const res = await fetch(
       `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`,
@@ -1924,10 +1975,7 @@ async function _mailDelete(accountId, msgId) {
 }
 
 async function _mailMove(accountId, msgId, folder) {
-  const item = document.querySelector(
-    `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
-  );
-  item?.remove();
+  _mailRemoveItem(accountId, msgId);
   try {
     const res = await fetch(
       `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/move`,
@@ -2399,7 +2447,7 @@ async function _loadMoreCalEvents(accountId, extraDays, acc) {
       const bodyEl = sectionEl.querySelector('.dash-cal-account-body');
       if (bodyEl) {
         const groupsHtml = _calDayGroupsHtml(freshAcc.events, acc?.color, accountId, acc?.webInterfaceUrl);
-        bodyEl.innerHTML = groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+        bodyEl.innerHTML = groupsHtml || _calEmptyMsg(newDays);
         const noteEl = document.createElement('p');
         noteEl.className = 'dash-cal-lookahead-note';
         noteEl.textContent = `Showing next ${newDays} days`;
@@ -2409,6 +2457,42 @@ async function _loadMoreCalEvents(accountId, extraDays, acc) {
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+function _calEmptyMsg(days) {
+  return days === 1
+    ? '<p class="dashboard-empty">No events today.</p>'
+    : `<p class="dashboard-empty">No upcoming events in the next ${days} day${days !== 1 ? 's' : ''}.</p>`;
+}
+
+async function _resetCalToToday() {
+  const headerBtn = document.getElementById('dashCalendarMenuBtn');
+  if (headerBtn) headerBtn.disabled = true;
+
+  const accounts = _calAccountsMeta;
+  const fetches  = accounts.map(async acc => {
+    _setCalLookahead(acc.accountId, 1);
+    try {
+      const res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(acc.accountId)}?days=1`);
+      if (!res.ok) return acc;
+      const data = await res.json();
+      for (const key of [..._calEventMap.keys()]) {
+        if (key.startsWith(`${acc.accountId}\0`)) _calEventMap.delete(key);
+      }
+      const freshAcc = { ...acc, ...data, accountId: acc.accountId, events: data.events || [] };
+      for (const ev of freshAcc.events) {
+        _calEventMap.set(`${acc.accountId}\0${ev.uid}`, {
+          ...ev, _label: acc.label, _accountId: acc.accountId,
+          _webUrl: acc.webInterfaceUrl, _color: acc.color, _accountType: acc.type || 'caldav',
+        });
+      }
+      return freshAcc;
+    } catch { return acc; }
+  });
+
+  const freshAccounts = await Promise.all(fetches);
+  _renderCalendarPanel(freshAccounts);
+  if (headerBtn) headerBtn.disabled = false;
 }
 
 async function _loadMoreCalEventsAll(extraDays) {
@@ -2490,7 +2574,7 @@ async function _refreshCalendarAccount(accountId) {
       const groupsHtml = _calDayGroupsHtml(allEvents, '', '', '', maxDayAllD.toISOString().slice(0, 10));
       // Replace only the day-group content (keep any error banners at the top)
       const errBanners = [...panel.querySelectorAll('.dashboard-source-error')].map(el => el.outerHTML).join('');
-      panel.innerHTML = errBanners + (groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>');
+      panel.innerHTML = errBanners + (groupsHtml || _calEmptyMsg(maxLookahead));
       if (maxLookahead > 7) {
         const noteEl = document.createElement('p');
         noteEl.className = 'dash-cal-lookahead-note';
@@ -2502,7 +2586,7 @@ async function _refreshCalendarAccount(accountId) {
       const bodyEl = sectionEl.querySelector('.dash-cal-account-body');
       if (bodyEl) {
         const groupsHtml = _calDayGroupsHtml(data.events || [], accColor || null, accountId, accWebUrl || null, maxDay);
-        bodyEl.innerHTML = groupsHtml || '<p class="dashboard-empty">No upcoming events.</p>';
+        bodyEl.innerHTML = groupsHtml || _calEmptyMsg(lookahead);
         if (_calLookahead.get(accountId)) {
           const noteEl = document.createElement('p');
           noteEl.className = 'dash-cal-lookahead-note';
