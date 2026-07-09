@@ -1063,7 +1063,7 @@ function _renderMailPanel(accounts) {
   }
 
   panel.innerHTML = accounts.map(acc => {
-    const header = `<div class="dashboard-group-header">${escHtml(acc.label)}</div>`;
+    const header = `<div class="dashboard-group-header"><strong>${escHtml(acc.label)}</strong></div>`;
 
     if (acc.error) {
       return header + `<div class="dashboard-source-error">\u26a0 ${escHtml(acc.error)}</div>`;
@@ -1384,6 +1384,10 @@ function _renderCalendarPanel(accounts) {
     const maxLookahead = lookaheads.length ? Math.max(...lookaheads) : 7;
     const maxDayUnified = new Date(); maxDayUnified.setDate(maxDayUnified.getDate() + maxLookahead - 1);
     const groupsHtml = _calDayGroupsHtml(allEvents, '', '', '', maxDayUnified.toISOString().slice(0, 10));
+    if (!groupsHtml) {
+      const labels = accounts.filter(a => !a.error).map(a => `<strong>${escHtml(a.label || a.accountId)}</strong>`).join(', ');
+      if (labels) panel.innerHTML += `<div class="dashboard-group-header">${labels}</div>`;
+    }
     panel.innerHTML += groupsHtml || _calEmptyMsg(maxLookahead);
 
     if (maxLookahead > 7) {
@@ -1428,12 +1432,13 @@ function _renderCalendarPanel(accounts) {
       const groupsHtml = _calDayGroupsHtml(acc.events || [], acc.color, acc.accountId, acc.webInterfaceUrl, maxDayAcc.toISOString().slice(0, 10));
       bodyEl.innerHTML = groupsHtml || _calEmptyMsg(lookahead);
 
-      // Lookahead note
-      const noteEl = document.createElement('p');
-      noteEl.className = 'dash-cal-lookahead-note';
-      if (_calLookahead.get(acc.accountId)) noteEl.textContent = `Showing next ${lookahead} days`;
-      else noteEl.hidden = true;
-      bodyEl.appendChild(noteEl);
+      // Lookahead note — only when there are events to show
+      if (groupsHtml && _calLookahead.get(acc.accountId)) {
+        const noteEl = document.createElement('p');
+        noteEl.className = 'dash-cal-lookahead-note';
+        noteEl.textContent = `Showing next ${lookahead} days`;
+        bodyEl.appendChild(noteEl);
+      }
     }
 
     sectionEl.appendChild(bodyEl);
