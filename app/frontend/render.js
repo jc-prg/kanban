@@ -224,7 +224,7 @@ function render() {
       const warnDate0 = warnD0.toISOString().slice(0, 10);
       const isOverdue = !card.done && card.endDate && card.endDate < today0;
       const isWarning = !card.done && !isOverdue && card.endDate && card.endDate >= today0 && card.endDate <= warnDate0;
-      cardEl.className = 'card' + (card.done ? ' card--done' : '') + (isLabel ? ' card--label' : '') + (isOverdue ? ' card--overdue' : '');
+      cardEl.className = 'card' + (card.done ? ' card--done' : '') + (isLabel ? ' card--label' : '') + (isOverdue ? ' card--overdue' : '') + (selectedCards.has(card.id) ? ' card--selected' : '');
       cardEl.dataset.cardId = card.id;
       cardEl.draggable = true;
       cardEl.style.setProperty('--card-color', card.color || color);
@@ -297,6 +297,21 @@ function render() {
       cardEl.addEventListener('click', e => {
         if (e.target.closest('.card-link-badge')) return;
         if (lastInputWasTouch) return;
+        if (e.shiftKey) {
+          e.stopPropagation();
+          if (selectedCards.has(card.id)) {
+            selectedCards.delete(card.id);
+            cardEl.classList.remove('card--selected');
+          } else {
+            selectedCards.set(card.id, col.id);
+            cardEl.classList.add('card--selected');
+          }
+          return;
+        }
+        if (selectedCards.size > 0) {
+          clearSelection();
+          return;
+        }
         openEditModal(col.id, card);
       });
 
@@ -304,7 +319,12 @@ function render() {
         e.preventDefault();
         e.stopPropagation();
         if (lastInputWasTouch) return;
-        showContextMenu(e.clientX, e.clientY, col.id, card);
+        if (selectedCards.size >= 2 && selectedCards.has(card.id)) {
+          showMultiSelectContextMenu(e.clientX, e.clientY);
+        } else {
+          clearSelection();
+          showContextMenu(e.clientX, e.clientY, col.id, card);
+        }
       });
 
       cardEl.addEventListener('dragstart', e => { e.stopPropagation(); onDragStart(e, col.id, card.id); });
@@ -316,9 +336,22 @@ function render() {
         clearTimeout(touchLongPressTimer);
         touchLongPressTimer = setTimeout(() => {
           if (!touchPending) return;
-          const ghost = spawnGhost(touchPending.el, touchPending.sx, touchPending.sy);
-          touchPending.el.classList.add('dragging');
-          touchDrag = { type: 'card', colId: touchPending.colId, cardId: touchPending.cardId, sourceEl: touchPending.el, ghost };
+          const _tColId = touchPending.colId, _tCardId = touchPending.cardId;
+          const _selColIds = new Set(selectedCards.values());
+          const _isMultiTouch = selectedCards.size >= 2 && selectedCards.has(_tCardId) && _selColIds.size === 1 && [..._selColIds][0] === _tColId;
+          const _multiIds = _isMultiTouch ? [...selectedCards.keys()] : null;
+          const ghost = _isMultiTouch
+            ? spawnMultiGhost(touchPending.el, _multiIds.length, touchPending.sx, touchPending.sy)
+            : spawnGhost(touchPending.el, touchPending.sx, touchPending.sy);
+          if (_multiIds) {
+            for (const id of _multiIds) {
+              const el = document.querySelector(`[data-card-id="${id}"]`);
+              if (el) el.classList.add('dragging');
+            }
+          } else {
+            touchPending.el.classList.add('dragging');
+          }
+          touchDrag = { type: 'card', colId: _tColId, cardId: _tCardId, sourceEl: touchPending.el, ghost, multiIds: _multiIds };
           touchPending = null;
           touchLongPressTimer = null;
         }, 500);

@@ -120,6 +120,7 @@ const colCollapsed    = new Set(); // colIds whose content is hidden
 const colColorFilter  = {}; // colId → color string (active filter) or undefined
 const colDupFilter      = new Set(); // colIds with duplicate filter active
 const colPriorityFilter = {};        // colId → priority number (1–5)
+const selectedCards     = new Map(); // cardId → colId (multi-select state)
 
 // ---- State ----
 let state        = { columns: [] };

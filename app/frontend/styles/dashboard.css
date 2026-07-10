@@ -29,7 +29,7 @@
   overflow: hidden;
 }
 
-.dashboard-panel-header .column-count { margin-left: auto; background: color-mix(in srgb, white 20%, color-mix(in srgb, var(--surface2) 92%, var(--accent))); color: var(--text); }
+.dashboard-panel-header .column-count { margin-left: auto; background: color-mix(in srgb, white 20%, color-mix(in srgb, var(--surface2) 92%, var(--accent))); color: var(--text); font-weight: normal; }
 
 @media (prefers-color-scheme: light) {
   .dashboard-panel-header .column-count { background: color-mix(in srgb, white 35%, color-mix(in srgb, var(--surface2) 92%, var(--accent))); }

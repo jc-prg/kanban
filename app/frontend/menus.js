@@ -336,6 +336,108 @@ document.getElementById('ctxDelete').addEventListener('click', async () => {
   }
 });
 
+// ---- Multi-select ----
+
+function clearSelection() {
+  if (selectedCards.size === 0) return;
+  selectedCards.clear();
+  document.querySelectorAll('.card--selected').forEach(el => el.classList.remove('card--selected'));
+}
+
+function showMultiSelectContextMenu(x, y) {
+  const count = selectedCards.size;
+  const now = new Date().toISOString();
+  const snapshot = [...selectedCards.entries()]; // freeze selection at menu-open time
+
+  function applyBulk(fn) {
+    for (const [cardId, colId] of snapshot) {
+      const col = state.columns.find(c => c.id === colId);
+      const card = col?.cards.find(c => c.id === cardId);
+      if (card) fn(card, col);
+    }
+    selectedCards.clear();
+    render();
+    schedulesSave();
+  }
+
+  const colorChildren = COLORS.map(c => ({
+    labelHtml: `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${c};margin-right:6px;flex-shrink:0;vertical-align:middle"></span>`,
+    action: () => applyBulk(card => { card.color = c; card.lastModified = now; }),
+  }));
+
+  const priorityChildren = PRIORITY_LABELS.map((label, i) => {
+    const color = PRIORITY_COLORS[i];
+    const dot = color
+      ? `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${color};margin-right:6px;flex-shrink:0;vertical-align:middle"></span>`
+      : `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--border);margin-right:6px;flex-shrink:0;vertical-align:middle"></span>`;
+    return {
+      labelHtml: `${dot}${escHtml(label)}`,
+      action: () => applyBulk(card => {
+        if (i === 0) delete card.priority; else card.priority = i;
+        card.lastModified = now;
+      }),
+    };
+  });
+
+  const moveToChildren = state.columns.map(targetCol => ({
+    label: targetCol.title,
+    action: () => {
+      const toMove = snapshot.filter(([, fromColId]) => fromColId !== targetCol.id);
+      for (const [cardId, fromColId] of toMove) {
+        const fromCol = state.columns.find(c => c.id === fromColId);
+        const toCol   = state.columns.find(c => c.id === targetCol.id);
+        if (!fromCol || !toCol) continue;
+        const card = fromCol.cards.find(c => c.id === cardId);
+        if (!card) continue;
+        recordMove(card, fromCol.title, toCol.title);
+        applyColumnActions(card, toCol);
+        card.lastModified = now;
+        fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
+        toCol.cards.unshift(card);
+      }
+      selectedCards.clear();
+      render();
+      schedulesSave();
+    },
+  }));
+
+  const items = [
+    {
+      labelHtml: `<span class="ctx-icon">${ICONS.done}</span>  Mark as done`,
+      action: () => applyBulk(card => { card.done = true; card.doneAt = now; card.lastModified = now; }),
+    },
+    {
+      labelHtml: `<span class="ctx-icon">${SVGICONS.color()}</span>  Change color`,
+      children: colorChildren,
+    },
+    {
+      labelHtml: `<span class="ctx-icon">${SVGICONS.priority()}</span>  Set priority`,
+      children: priorityChildren,
+    },
+    ...(moveToChildren.length ? [{
+      labelHtml: `<span class="ctx-icon">${SVGICONS.moveTo()}</span>  Move to`,
+      children: moveToChildren,
+    }] : []),
+    { separator: true },
+    {
+      labelHtml: `<span class="ctx-icon">${SVGICONS.delete()}</span>  Delete`,
+      danger: true,
+      action: async () => {
+        if (!await showConfirm(`Delete ${count} selected card(s)?`, { okLabel: 'Delete', danger: true })) return;
+        for (const [cardId, colId] of snapshot) {
+          const col = state.columns.find(c => c.id === colId);
+          if (col) col.cards = col.cards.filter(c => c.id !== cardId);
+        }
+        selectedCards.clear();
+        render();
+        schedulesSave();
+      },
+    },
+  ];
+
+  openContextMenu({ clientX: x, clientY: y, stopPropagation: () => {} }, items);
+}
+
 // ---- Column context menu ----
 let ctxHeaderColId = null;
 
@@ -705,9 +807,9 @@ document.getElementById('colCtxPrint').addEventListener('click', () => {
   printColumn(colId);
 });
 
-document.addEventListener('click', () => { hideContextMenu(); hideColContextMenu(); });
+document.addEventListener('click', () => { hideContextMenu(); hideColContextMenu(); clearSelection(); });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { hideContextMenu(); hideColContextMenu(); closeCardInfo(); }
+  if (e.key === 'Escape') { hideContextMenu(); hideColContextMenu(); closeCardInfo(); clearSelection(); }
 });
 
 // ---- Header menu ----

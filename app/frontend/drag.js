@@ -66,12 +66,68 @@ function onColDrop(e, toColId) {
 }
 
 // ---- Card drag & drop ----
+
+// Build a stacked-cards visual element for multi-drag feedback.
+// Returns the wrapper element (caller must append/remove from DOM).
+function _buildStackedWrapper(sourceEl, count, rect) {
+  const stackCount = Math.min(count - 1, 2);
+  const w = rect.width, h = rect.height;
+  const pad = stackCount * 5;
+
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = `position:fixed;width:${w + pad}px;height:${h + pad}px;pointer-events:none;transition:none;`;
+
+  // Backing cards rendered behind (largest index = furthest back)
+  for (let i = stackCount; i >= 1; i--) {
+    const back = document.createElement('div');
+    back.style.cssText = `position:absolute;left:${i * 5}px;top:${i * 5}px;width:${w}px;height:${h}px;`
+      + `background:var(--surface2);border:1px solid var(--border);border-radius:8px;`
+      + `box-shadow:0 4px 12px rgba(0,0,0,0.3);`;
+    wrapper.appendChild(back);
+  }
+
+  // Front card clone
+  const clone = sourceEl.cloneNode(true);
+  Object.assign(clone.style, { position: 'absolute', left: '0', top: '0', width: w + 'px', margin: '0' });
+  wrapper.appendChild(clone);
+
+  // Count badge on the top-right corner of the front card
+  const badge = document.createElement('div');
+  badge.style.cssText = `position:absolute;top:-11px;left:${w - 15}px;width:30px;height:30px;z-index:10;`
+    + `background:var(--accent);color:#fff;border-radius:50%;`
+    + `display:flex;align-items:center;justify-content:center;`
+    + `font-size:1.05rem;font-weight:700;font-family:system-ui,sans-serif;`;
+  badge.textContent = count;
+  wrapper.appendChild(badge);
+
+  return wrapper;
+}
+
 function onDragStart(e, colId, cardId) {
-  dragState = { colId, cardId };
+  // Multi-select drag: only when all selected cards are from this same column
+  const selColIds = new Set(selectedCards.values());
+  const isMultiDrag = selectedCards.size >= 2 && selectedCards.has(cardId) && selColIds.size === 1 && [...selColIds][0] === colId;
+  dragState = isMultiDrag
+    ? { colId, cardId, multiIds: [...selectedCards.keys()] }
+    : { colId, cardId };
   e.dataTransfer.effectAllowed = 'move';
+
+  if (isMultiDrag) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const img = _buildStackedWrapper(e.currentTarget, dragState.multiIds.length, rect);
+    img.style.top  = '0';
+    img.style.left = `${-(rect.width + 50)}px`; // off-screen so it doesn't flash
+    document.body.appendChild(img);
+    e.dataTransfer.setDragImage(img, e.clientX - rect.left, e.clientY - rect.top);
+    setTimeout(() => img.remove(), 0);
+  }
+
   setTimeout(() => {
-    const el = document.querySelector(`[data-card-id="${cardId}"]`);
-    if (el) el.classList.add('dragging');
+    const ids = dragState.multiIds || [cardId];
+    for (const id of ids) {
+      const el = document.querySelector(`[data-card-id="${id}"]`);
+      if (el) el.classList.add('dragging');
+    }
   }, 0);
 }
 
@@ -117,23 +173,39 @@ function showDropIndicator(cardsEl, clientY) {
 function onDrop(e, toColId) {
   if (!dragState) return;
   e.preventDefault();
-  const { colId: fromColId, cardId } = dragState;
+  const { colId: fromColId, cardId, multiIds } = dragState;
 
   const fromCol = state.columns.find(c => c.id === fromColId);
   const toCol   = state.columns.find(c => c.id === toColId);
   if (!fromCol || !toCol) return;
 
-  const card = fromCol.cards.find(c => c.id === cardId);
-  if (!card) return;
-
-  fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
-  const cardsEl = document.querySelector(`[data-col-id="${toColId}"] .cards`);
-  toCol.cards.splice(getDropIndex(cardsEl, e.clientY), 0, card);
-
-  if (fromColId !== toColId) {
-    recordMove(card, fromCol.title, toCol.title);
-    applyColumnActions(card, toCol);
-    card.lastModified = new Date().toISOString();
+  if (multiIds && fromColId !== toColId) {
+    // Multi-card drop — preserve relative source order, insert at drop position
+    const cardsToMove = fromCol.cards.filter(c => multiIds.includes(c.id));
+    if (!cardsToMove.length) return;
+    fromCol.cards = fromCol.cards.filter(c => !multiIds.includes(c.id));
+    const cardsEl = document.querySelector(`[data-col-id="${toColId}"] .cards`);
+    const dropIdx = getDropIndex(cardsEl, e.clientY);
+    const now = new Date().toISOString();
+    for (const card of cardsToMove) {
+      recordMove(card, fromCol.title, toCol.title);
+      applyColumnActions(card, toCol);
+      card.lastModified = now;
+    }
+    toCol.cards.splice(dropIdx, 0, ...cardsToMove);
+    selectedCards.clear();
+  } else if (!multiIds) {
+    // Single card drop
+    const card = fromCol.cards.find(c => c.id === cardId);
+    if (!card) return;
+    fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
+    const cardsEl = document.querySelector(`[data-col-id="${toColId}"] .cards`);
+    toCol.cards.splice(getDropIndex(cardsEl, e.clientY), 0, card);
+    if (fromColId !== toColId) {
+      recordMove(card, fromCol.title, toCol.title);
+      applyColumnActions(card, toCol);
+      card.lastModified = new Date().toISOString();
+    }
   }
 
   const _scrolls = saveColScrolls();
@@ -167,10 +239,27 @@ function spawnGhost(sourceEl, touchX, touchY) {
   return { el, dx: touchX - rect.left, dy: touchY - rect.top };
 }
 
+function spawnMultiGhost(sourceEl, count, touchX, touchY) {
+  const rect = sourceEl.getBoundingClientRect();
+  const wrapper = _buildStackedWrapper(sourceEl, count, rect);
+  Object.assign(wrapper.style, {
+    left: rect.left + 'px',
+    top:  rect.top  + 'px',
+    zIndex: '9999',
+    opacity: '0.92',
+  });
+  // Apply the same animated lift to the front clone as spawnGhost does
+  const clone = wrapper.querySelector('.card') || wrapper.lastElementChild;
+  if (clone) Object.assign(clone.style, { transform: 'scale(1.03) rotate(0.5deg)', boxShadow: '0 16px 48px rgba(0,0,0,0.55)' });
+  document.body.appendChild(wrapper);
+  return { el: wrapper, dx: touchX - rect.left, dy: touchY - rect.top };
+}
+
 function endTouchDrag() {
   if (!touchDrag) return;
   touchDrag.ghost.el.remove();
-  touchDrag.sourceEl.classList.remove('dragging', 'dragging-col');
+  document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+  touchDrag.sourceEl.classList.remove('dragging-col');
   document.querySelectorAll('.drag-over, .col-drop-left, .col-drop-right')
     .forEach(e => e.classList.remove('drag-over', 'col-drop-left', 'col-drop-right'));
   document.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
@@ -246,22 +335,44 @@ document.addEventListener('touchend', e => {
     const colEl = under?.closest('.column');
     if (colEl) {
       const toColId = colEl.dataset.colId;
-      const { colId: fromColId, cardId } = touchDrag;
+      const { colId: fromColId, cardId, multiIds } = touchDrag;
       const fromCol = state.columns.find(c => c.id === fromColId);
       const toCol   = state.columns.find(c => c.id === toColId);
-      const card    = fromCol?.cards.find(c => c.id === cardId);
-      if (fromCol && toCol && card) {
-        fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
-        toCol.cards.splice(getDropIndex(colEl.querySelector('.cards'), t.clientY), 0, card);
-        if (fromColId !== toColId) {
-          recordMove(card, fromCol.title, toCol.title);
-          applyColumnActions(card, toCol);
-          card.lastModified = new Date().toISOString();
+      if (fromCol && toCol) {
+        if (multiIds && fromColId !== toColId) {
+          const cardsToMove = fromCol.cards.filter(c => multiIds.includes(c.id));
+          if (cardsToMove.length) {
+            fromCol.cards = fromCol.cards.filter(c => !multiIds.includes(c.id));
+            const dropIdx = getDropIndex(colEl.querySelector('.cards'), t.clientY);
+            const now = new Date().toISOString();
+            for (const card of cardsToMove) {
+              recordMove(card, fromCol.title, toCol.title);
+              applyColumnActions(card, toCol);
+              card.lastModified = now;
+            }
+            toCol.cards.splice(dropIdx, 0, ...cardsToMove);
+            selectedCards.clear();
+            const _scrolls = saveColScrolls();
+            render();
+            restoreColScrolls(_scrolls);
+            schedulesSave();
+          }
+        } else if (!multiIds) {
+          const card = fromCol.cards.find(c => c.id === cardId);
+          if (card) {
+            fromCol.cards = fromCol.cards.filter(c => c.id !== cardId);
+            toCol.cards.splice(getDropIndex(colEl.querySelector('.cards'), t.clientY), 0, card);
+            if (fromColId !== toColId) {
+              recordMove(card, fromCol.title, toCol.title);
+              applyColumnActions(card, toCol);
+              card.lastModified = new Date().toISOString();
+            }
+            const _scrolls = saveColScrolls();
+            render();
+            restoreColScrolls(_scrolls);
+            schedulesSave();
+          }
         }
-        const _scrolls = saveColScrolls();
-        render();
-        restoreColScrolls(_scrolls);
-        schedulesSave();
       }
     }
   } else {
