@@ -1141,6 +1141,10 @@ function _openMailDetail(accountId, msgId, webUrl) {
   const body      = document.getElementById('dashboardDetailBody');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
   detail.querySelector('.dash-detail-footer')?.remove();
+  const _mailAccColor = _mailAccountsMeta.find(a => a.accountId === accountId)?.color;
+  const _mailTitlebar = detail.querySelector('.dashboard-detail-titlebar');
+  if (_mailAccColor) _mailTitlebar.style.setProperty('--detail-accent', _mailAccColor);
+  else _mailTitlebar.style.removeProperty('--detail-accent');
   document.getElementById('dashboardDetailEditBtn').style.display = 'none';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   body.innerHTML = '';
@@ -1500,6 +1504,9 @@ async function _openCardDetail(board, card) {
   const editBtn   = document.getElementById('dashboardDetailEditBtn');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
   detail.querySelector('.dash-detail-footer')?.remove();
+  const _cardTitlebar = detail.querySelector('.dashboard-detail-titlebar');
+  if (card.color) _cardTitlebar.style.setProperty('--detail-accent', card.color);
+  else _cardTitlebar.style.removeProperty('--detail-accent');
 
   document.getElementById('dashboardDetailTitle').textContent = card.text || '';
   editBtn.href = `/board/${encodeURIComponent(board)}#card:${encodeURIComponent(card.id)}`;
@@ -1740,6 +1747,9 @@ function _openEventDetail(accountId, uid, webUrl) {
 
   function _renderEventDetail(ev) {
     document.getElementById('dashboardDetailTitle').textContent = ev.title;
+    const titlebar = detail.querySelector('.dashboard-detail-titlebar');
+    if (ev._color) titlebar.style.setProperty('--detail-accent', ev._color);
+    else titlebar.style.removeProperty('--detail-accent');
     const rows = [];
     if (ev.start) {
       const startStr = ev.allDay
@@ -1750,7 +1760,13 @@ function _openEventDetail(accountId, uid, webUrl) {
         : '';
       rows.push(['When', escHtml(startStr + endStr)]);
     }
-    if (ev.location)  rows.push(['Where',      escHtml(ev.location)]);
+    if (ev.location) {
+      const locSafe = safeLink(ev.location);
+      const locHtml = locSafe
+        ? `<a href="${locSafe}" target="_blank" rel="noopener noreferrer">${escHtml(ev.location)}</a>`
+        : escHtml(ev.location);
+      rows.push(['Where', locHtml]);
+    }
     if (ev.status)    rows.push(['Status',     escHtml(ev.status)]);
     if (ev.organizer) rows.push(['Organiser',  escHtml(ev.organizer)]);
     if (ev._label)    rows.push(['Calendar',   escHtml(ev._label)]);
