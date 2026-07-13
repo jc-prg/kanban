@@ -1319,8 +1319,9 @@ function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
         const metaText   = isMultiday
           ? `${fmtDate(evStartDay)} \u2192 ${fmtDate(evEndDay)}`
           : _fmtTime(ev, dayStr);
-        // All-day events: show date range as tooltip, keep the element single-line
-        const tooltipAttr = ev.allDay && metaText ? ` title="${escHtml(metaText)}"` : '';
+        // All-day events: show full title + date range as tooltip, keep the element single-line
+        const allDayTooltip = ev.allDay ? (metaText ? `${ev.title}\n${metaText}` : ev.title) : '';
+        const tooltipAttr = allDayTooltip ? ` data-tooltip="${escHtml(allDayTooltip)}"` : '';
         const timeHtml    = (!ev.allDay && metaText) ? `<div class="card-meta"><span class="card-date">${escHtml(metaText)}</span></div>` : '';
         return `<div class="dashboard-event-item card${isPast ? ' card--done' : ''}${ev.allDay ? ' cal-event--allday' : ''}${ev._provisional ? ' cal-event--provisional' : ''}" data-account-id="${escHtml(evAccountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(evWebUrl || '')}"${colorStyle}${tooltipAttr}>
           <div class="card-body"><div class="card-text">${escHtml(ev.title)}</div>${timeHtml}</div>

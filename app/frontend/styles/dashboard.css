@@ -453,6 +453,29 @@
 }
 .cal-event--allday::before { display: none; }
 .cal-event--allday .card-body { text-align: center; }
+.cal-event--allday .card-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-event--allday[data-tooltip] { position: relative; }
+.cal-event--allday[data-tooltip]:hover { z-index: 201; }
+.cal-event--allday[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 90%;
+  background: rgb(0 0 0 / 80%);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+  z-index: 200;
+  pointer-events: none;
+}
 .cal-event--allday:hover {
   background: color-mix(in srgb, var(--card-color, var(--accent)) 32%, var(--surface2));
 }
