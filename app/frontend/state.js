@@ -125,8 +125,10 @@ const selectedCards     = new Map(); // cardId → colId (multi-select state)
 // ---- State ----
 let state        = { columns: [] };
 let baseState    = null; // snapshot from last server load — the merge ancestor
-let saveTimer    = null;
-let boardEtag    = null;
+let saveTimer       = null;
+let boardEtag       = null;
+let _boardSaving    = false;
+let _boardSavePending = false;
 
 // ---- Data load ----
 async function load() {
@@ -205,10 +207,12 @@ function persistCollapseState() {
 
 function schedulesSave() {
   if (!API) return;
+  if (_boardSaving) { _boardSavePending = true; return; }
   clearTimeout(saveTimer);
   showSaving();
   saveTimer = setTimeout(async () => {
     saveTimer = null;
+    _boardSaving = true;
     try {
       let r;
       const headers = { 'Content-Type': 'application/json' };
@@ -239,6 +243,9 @@ function schedulesSave() {
       showSaved();
     } catch (e) {
       showSaveError();
+    } finally {
+      _boardSaving = false;
+      if (_boardSavePending) { _boardSavePending = false; schedulesSave(); }
     }
   }, 600);
 }

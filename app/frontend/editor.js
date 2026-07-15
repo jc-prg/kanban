@@ -195,6 +195,10 @@ function _renderPreview(entry, text) {
   const raw = window.marked ? window.marked.parse(text) : text.replace(/\n/g, '<br>');
   const opts = Object.assign({ ADD_ATTR: ['target'] }, entry.sanitizeOpts);
   el.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(raw, opts) : raw;
+  el.querySelectorAll('a[href^="http://"], a[href^="https://"]').forEach(a => {
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+  });
   if (window.buildToc) window.buildToc(el);
   if (entry.onPreview) entry.onPreview(el);
   _annotateBlocks(el, text);
@@ -304,7 +308,6 @@ function createMarkdownEditor(id, { onChange, onPreview, sanitizeOpts } = {}) {
           ...historyKeymap,
           { key: 'Ctrl-b', run: v => { _wrapSel(v, '**', '**');     return true; } },
           { key: 'Ctrl-i', run: v => { _wrapSel(v, '*', '*');       return true; } },
-          { key: 'Ctrl-u', run: v => { _wrapSel(v, '<u>', '</u>');  return true; } },
           { key: 'Ctrl-m', run: v => { _wrapSel(v, '==', '==');     return true; } },
           ...defaultKeymap,
         ]),
@@ -407,6 +410,43 @@ function focusEditor(id) {
   _activateEditor(id);
 }
 
+function isEditorActive(id) {
+  const entry = _editors.get(id);
+  return entry ? entry.editorWrap.style.display !== 'none' : false;
+}
+
+function scrollEditorToTop(id) {
+  const entry = _editors.get(id);
+  if (!entry) return;
+  if (entry.editorWrap.style.display !== 'none') {
+    entry.view.scrollDOM.scrollTop = 0;
+  } else {
+    entry.preview.scrollTop = 0;
+  }
+}
+
+function appendToEditor(id, text) {
+  const entry = _editors.get(id);
+  if (entry) {
+    _activateEditor(id);
+    const doc = entry.view.state.doc;
+    const end = doc.length;
+    const lastChar = end > 0 ? doc.sliceString(end - 1, end) : '';
+    const insert = (end > 0 && lastChar !== '\n') ? '\n' + text : text;
+    entry.view.dispatch({
+      changes: { from: end, to: end, insert },
+      selection: { anchor: end + insert.length },
+    });
+    entry.view.focus();
+    return;
+  }
+  const el = document.getElementById(id);
+  if (el) {
+    const prefix = el.value.length > 0 && !el.value.endsWith('\n') ? '\n' : '';
+    el.value += prefix + text;
+  }
+}
+
 function applyEditorFormat(id, action) {
   const entry = _editors.get(id);
   if (!entry) return;
@@ -441,6 +481,22 @@ function applyEditorFormat(id, action) {
   if (action === 'subpages')      return _insertBlock(view, '[subpages]', 10);
 }
 
+// Ctrl+U (underline) — handled in capture phase so browsers cannot intercept it
+// as "View Page Source" before CodeMirror's own keymap runs.
+document.addEventListener('keydown', e => {
+  if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === 'u')) return;
+  for (const entry of _editors.values()) {
+    if (entry.editorWrap.style.display === 'none') continue;          // preview mode, not editing
+    if (!entry.editorWrap.contains(document.activeElement)) continue; // editor not focused
+    const backdrop = entry.editorWrap.closest('.modal-backdrop');
+    if (backdrop?.style.display === 'none') continue;                 // modal not open
+    e.preventDefault();
+    e.stopPropagation();
+    _wrapSel(entry.view, '<u>', '</u>');
+    return;
+  }
+}, { capture: true });
+
 // Arrow-key scrolling for the preview pane when the editor is not active
 document.addEventListener('keydown', e => {
   if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
@@ -461,3 +517,6 @@ window.setEditorValue       = setEditorValue;
 window.insertAtCursor       = insertAtCursor;
 window.focusEditor          = focusEditor;
 window.applyEditorFormat    = applyEditorFormat;
+window.isEditorActive       = isEditorActive;
+window.appendToEditor       = appendToEditor;
+window.scrollEditorToTop    = scrollEditorToTop;

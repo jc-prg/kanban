@@ -605,6 +605,16 @@
   margin-top: 20px;
 }
 
+.btn-icon {
+  display: none;
+  align-items: center;
+}
+
+@media (max-width: 500px) {
+  .modal-actions .btn-label { display: none; }
+  .modal-actions .btn-icon  { display: inline-flex; }
+}
+
 .modal-autosave-wrap {
   display: grid;
   align-items: center;
@@ -1478,6 +1488,11 @@
   opacity: 0.6;
 }
 
+.modal--fullscreen .desc-scroll-top {
+  display: inline-flex;
+  align-items: center;
+}
+
 @media (min-width: 1200px) {
   #modal .modal {
     width: min(1140px, 92vw);
@@ -1507,6 +1522,7 @@
   .modal-col-side {
     display: flex;
     flex-direction: column;
+    gap: 11px;
     width: 350px;
     flex-shrink: 0;
     overflow-y: auto;

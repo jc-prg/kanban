@@ -69,24 +69,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // File drag-and-drop upload: drag files from OS file manager onto the card modal
   let _cardFileDragDepth = 0;
+  let _cardDragAtCursor = false;
   const _cardModalEl = document.getElementById('modal');
   _cardModalEl.addEventListener('dragenter', e => {
     if (!_activeCardId() || !_cardAttachBase()) return;
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
-    if (++_cardFileDragDepth === 1) _cardModalEl.classList.add('modal--file-drag');
-  });
+    if (++_cardFileDragDepth === 1) {
+      _cardDragAtCursor = isEditorActive('cardDesc');
+      _cardModalEl.classList.add('modal--file-drag');
+    }
+  }, {capture: true});
   _cardModalEl.addEventListener('dragleave', () => {
     if (--_cardFileDragDepth <= 0) {
       _cardFileDragDepth = 0;
+      _cardDragAtCursor = false;
       _cardModalEl.classList.remove('modal--file-drag');
     }
-  });
+  }, {capture: true});
   _cardModalEl.addEventListener('dragover', e => {
     if (!_activeCardId() || !_cardAttachBase()) return;
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
-  });
+    e.stopPropagation();
+  }, {capture: true});
   _cardModalEl.addEventListener('drop', e => {
     _cardFileDragDepth = 0;
     _cardModalEl.classList.remove('modal--file-drag');
@@ -96,8 +102,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!files?.length) return;
     e.preventDefault();
     e.stopPropagation();
-    _handleCardAttachUpload(aid, files);
-  });
+    _handleCardAttachUpload(aid, files, _cardDragAtCursor);
+    _cardDragAtCursor = false;
+  }, {capture: true});
   // Paste image upload: paste an image from clipboard into the card modal
   _cardModalEl.addEventListener('paste', e => {
     const aid = _activeCardId();
@@ -273,13 +280,14 @@ function renderCardAttachments(cardId, files) {
   }
 }
 
-function _appendAttachMd(taId, name, prefix = 'attachment:') {
+function _appendAttachMd(taId, name, prefix = 'attachment:', atCursor = false) {
   const ft = _attachType(name);
   const md = (ft === 'image' || ft === 'svg') ? `![${name}](${prefix}${name})` : `[${name}](${prefix}${name})`;
-  insertAtCursor(taId, md);
+  if (atCursor) insertAtCursor(taId, md);
+  else appendToEditor(taId, md);
 }
 
-async function _handleCardAttachUpload(cardId, fileList) {
+async function _handleCardAttachUpload(cardId, fileList, atCursor = false) {
   if (!_cardAttachBase() || !fileList.length) return;
   const label = document.querySelector('label[for="cardAttachInput"]');
   const input = document.getElementById('cardAttachInput');
@@ -291,7 +299,7 @@ async function _handleCardAttachUpload(cardId, fileList) {
       fd.append('file', file);
       const r = await fetch(`${_cardAttachBase()}/${cardId}`, { method: 'POST', body: fd });
       if (r.ok) {
-        _appendAttachMd('cardDesc', (await r.json()).name);
+        _appendAttachMd('cardDesc', (await r.json()).name, 'attachment:', atCursor);
       } else {
         const data = await r.json().catch(() => ({}));
         await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
@@ -526,7 +534,7 @@ function openModal(colId) {
   document.getElementById('modalPrintBtn').style.display = 'none';
   _updateLinkBtn();
   document.getElementById('modalTitle').textContent      = 'Add Card';
-  document.getElementById('modalSubmitBtn').textContent  = 'Add Card';
+  document.querySelector('#modalSubmitBtn .btn-label').textContent  = 'Add Card';
   document.getElementById('modalAddCloseBtn').style.display = 'none';
   resetCardSections();
   renderColorRow();
@@ -559,7 +567,7 @@ function openEditModal(colId, card) {
   setModalDone(card.done || false);
   _updateLinkBtn();
   document.getElementById('modalTitle').textContent     = 'Edit Card';
-  document.getElementById('modalSubmitBtn').textContent = 'Save';
+  document.querySelector('#modalSubmitBtn .btn-label').textContent = 'Save';
   document.getElementById('modalAddCloseBtn').style.display = 'none';
   document.getElementById('modalDeleteBtn').style.display = '';
   resetCardSections();
@@ -934,7 +942,7 @@ function saveCardInPlace() {
       document.getElementById('cardDoneBtn').style.display = '';
       document.getElementById('cardInfoBtn').style.display = '';
       document.getElementById('modalTitle').textContent     = 'Edit Card';
-      document.getElementById('modalSubmitBtn').textContent = 'Save';
+      document.querySelector('#modalSubmitBtn .btn-label').textContent = 'Save';
       document.getElementById('modalDeleteBtn').style.display = '';
       history.replaceState(null, '', '#card:' + card.id);
     }

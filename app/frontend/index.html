@@ -339,6 +339,7 @@
               <span class="note-tb-sep"></span>
               <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
             </div>
+            <button class="note-tb-btn desc-scroll-top" title="Scroll to top" onclick="scrollEditorToTop('cardDesc')">↑ top</button>
           </div>
           <div id="cardDesc-mount" class="cm-mount"></div>
           <textarea id="cardDesc" style="display:none" placeholder="Optional details…"></textarea>
@@ -410,11 +411,11 @@
         <span id="modalSavedMsg" class="modal-saved-msg"></span>
       </div>
       <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
-      <button class="btn" id="modalPrintBtn" style="display:none" onclick="printCardFromModal()">Print</button>
-      <button class="btn" onclick="tryCloseModal()">Close</button>
-      <button class="btn btn-danger" id="modalDeleteBtn" style="display:none" onclick="deleteCardFromModal()">Delete</button>
-      <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()">Add Card</button>
-      <button class="btn btn-accent" id="modalAddCloseBtn" style="display:none">Add &amp; Close</button>
+      <button class="btn" id="modalPrintBtn" style="display:none" onclick="printCardFromModal()"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" onclick="tryCloseModal()"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-danger" id="modalDeleteBtn" style="display:none" onclick="deleteCardFromModal()"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()"><span class="btn-label">Add Card</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-accent" id="modalAddCloseBtn" style="display:none"><span class="btn-label">Add &amp; Close</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
     </div>
   </div>
 </div>
@@ -1273,6 +1274,7 @@
               <span class="note-tb-sep"></span>
               <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
             </div>
+            <button class="note-tb-btn desc-scroll-top" title="Scroll to top" onclick="scrollEditorToTop('notePageDesc')">↑ top</button>
           </div>
           <div id="notePageDesc-mount" class="cm-mount"></div>
           <textarea id="notePageDesc" style="display:none" placeholder="Write notes in markdown…"></textarea>
@@ -1336,10 +1338,10 @@
         <label class="modal-autosave-label" id="noteAutoSaveLabel"><input type="checkbox" id="noteAutoSave"> Auto-save</label>
         <span id="noteModalSavedMsg" class="modal-saved-msg"></span>
       </div>
-      <button class="btn" id="noteModalPrintBtn" onclick="printNote(noteModalPageId)">Print</button>
-      <button class="btn" id="noteModalCancelBtn">Close</button>
-      <button class="btn btn-danger" id="noteModalDeleteBtn">Delete</button>
-      <button class="btn btn-accent" id="noteModalSaveBtn">Save</button>
+      <button class="btn" id="noteModalPrintBtn" onclick="printNote(noteModalPageId)"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="noteModalCancelBtn"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-danger" id="noteModalDeleteBtn"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-accent" id="noteModalSaveBtn"><span class="btn-label">Save</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
     </div>
   </div>
 </div>

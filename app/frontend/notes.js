@@ -18,7 +18,9 @@ function _startNoteAutoSave() {
 let notesState     = { items: [], schemaVersion: 2 };
 let baseNotesState = null; // snapshot from last server load/save — used for patch diffing
 let notesEtag      = null;
-let notesSaveTimer = null;
+let notesSaveTimer    = null;
+let _notesSaving      = false;
+let _notesSavePending = false;
 const NOTES_API        = API_BASE ? `${API_BASE}/notes`             : null;
 const NOTES_ATTACH_API = API_BASE ? `${API_BASE}/notes/attachments` : null;
 const NOTES_PAGES_API  = API_BASE ? `${API_BASE}/notes/pages`       : null;
@@ -180,10 +182,12 @@ function buildNotesPatch(base, current) {
 }
 
 function scheduleSaveNotes() {
+  if (_notesSaving) { _notesSavePending = true; return; }
   clearTimeout(notesSaveTimer);
   notesSaveTimer = setTimeout(async () => {
     notesSaveTimer = null;
     if (!NOTES_API) return;
+    _notesSaving = true;
     try {
       let r;
       const headers = { 'Content-Type': 'application/json' };
@@ -210,6 +214,10 @@ function scheduleSaveNotes() {
       if (newEtag) notesEtag = newEtag;
       baseNotesState = JSON.parse(JSON.stringify(notesState));
     } catch (e) { console.error('Notes save failed:', e.message); }
+    finally {
+      _notesSaving = false;
+      if (_notesSavePending) { _notesSavePending = false; scheduleSaveNotes(); }
+    }
   }, 600);
 }
 
@@ -850,8 +858,10 @@ function closeNoteModal() {
   _pendingNewPage = null;
 }
 
+let _noteSubmitSaving = false;
+
 async function submitNote() {
-  if (!noteModalPageId) return;
+  if (!noteModalPageId || _noteSubmitSaving) return;
   let page = findNotePage(noteModalPageId, notesState.items);
   if (!page && _pendingNewPage?.page.id === noteModalPageId) page = _pendingNewPage.page;
   if (!page) return;
@@ -861,9 +871,16 @@ async function submitNote() {
   const newLink  = document.getElementById('notePageLink').value.trim();
 
   const saveBtn = document.getElementById('noteModalSaveBtn');
-  if (saveBtn) { saveBtn.textContent = 'Saving…'; saveBtn.disabled = true; }
+  const saveBtnLabel = saveBtn?.querySelector('.btn-label');
+  if (saveBtnLabel) saveBtnLabel.textContent = 'Saving…';
+  if (saveBtn) saveBtn.disabled = true;
+  _noteSubmitSaving = true;
   try { await _submitNote(newTitle, newDesc, newLink, page); }
-  finally { if (saveBtn) { saveBtn.textContent = 'Save'; saveBtn.disabled = false; } }
+  finally {
+    _noteSubmitSaving = false;
+    if (saveBtnLabel) saveBtnLabel.textContent = 'Save';
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 async function _submitNote(newTitle, newDesc, newLink, page) {
@@ -1391,7 +1408,7 @@ function renderAttachments(pageId, files) {
   }
 }
 
-async function _handleAttachUpload(pageId, fileList) {
+async function _handleAttachUpload(pageId, fileList, atCursor = false) {
   if (!NOTES_ATTACH_API || !fileList.length) return;
   const label = document.querySelector('label[for="noteAttachInput"]');
   const input = document.getElementById('noteAttachInput');
@@ -1403,7 +1420,7 @@ async function _handleAttachUpload(pageId, fileList) {
       fd.append('file', file);
       const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
       if (r.ok) {
-        _appendAttachMd('notePageDesc', (await r.json()).name, `_attachments/${pageId}_`);
+        _appendAttachMd('notePageDesc', (await r.json()).name, `_attachments/${pageId}_`, atCursor);
       } else {
         const data = await r.json().catch(() => ({}));
         await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
@@ -1829,25 +1846,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // File drag-and-drop upload: drag files from OS file manager onto the note modal
   let _noteFileDragDepth = 0;
+  let _noteDragAtCursor = false;
   const _noteModalEl = document.getElementById('noteModal');
   if (_noteModalEl) {
     _noteModalEl.addEventListener('dragenter', e => {
       if (!noteModalPageId || !NOTES_ATTACH_API) return;
       if (!e.dataTransfer?.types.includes('Files')) return;
       e.preventDefault();
-      if (++_noteFileDragDepth === 1) _noteModalEl.classList.add('modal--file-drag');
-    });
+      if (++_noteFileDragDepth === 1) {
+        _noteDragAtCursor = isEditorActive('notePageDesc');
+        _noteModalEl.classList.add('modal--file-drag');
+      }
+    }, {capture: true});
     _noteModalEl.addEventListener('dragleave', () => {
       if (--_noteFileDragDepth <= 0) {
         _noteFileDragDepth = 0;
+        _noteDragAtCursor = false;
         _noteModalEl.classList.remove('modal--file-drag');
       }
-    });
+    }, {capture: true});
     _noteModalEl.addEventListener('dragover', e => {
       if (!noteModalPageId || !NOTES_ATTACH_API) return;
       if (!e.dataTransfer?.types.includes('Files')) return;
       e.preventDefault();
-    });
+      e.stopPropagation();
+    }, {capture: true});
     _noteModalEl.addEventListener('drop', e => {
       _noteFileDragDepth = 0;
       _noteModalEl.classList.remove('modal--file-drag');
@@ -1856,8 +1879,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!files?.length) return;
       e.preventDefault();
       e.stopPropagation();
-      _handleAttachUpload(noteModalPageId, files);
-    });
+      _handleAttachUpload(noteModalPageId, files, _noteDragAtCursor);
+      _noteDragAtCursor = false;
+    }, {capture: true});
     // Paste image upload: paste an image from clipboard into the note modal
     _noteModalEl.addEventListener('paste', e => {
       if (!noteModalPageId || !NOTES_ATTACH_API) return;

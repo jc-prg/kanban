@@ -377,6 +377,10 @@
   flex-shrink: 0;
 }
 
+.desc-scroll-top {
+  display: none;
+}
+
 .note-tb-btn {
   background: none;
   border: 1px solid transparent;
