@@ -176,7 +176,7 @@ function _buildVTimezone(tzid) {
  * Returns { ics: string, uid: string }.
  */
 function buildIcs(event, uid) {
-  const { title, allDay, start, end, location, description, timezone } = event;
+  const { title, allDay, start, end, location, description, timezone, rrule } = event;
 
   const startMs = new Date(start).getTime();
   const endMs   = new Date(end).getTime();
@@ -232,6 +232,7 @@ function buildIcs(event, uid) {
   }
 
   lines.push(_icsFold(`SUMMARY:${_icsEscape(title)}`));
+  if (rrule)       lines.push(_icsFold(`RRULE:${rrule}`));
   if (location)    lines.push(_icsFold(`LOCATION:${_icsEscape(location)}`));
   if (description) lines.push(_icsFold(`DESCRIPTION:${_icsEscape(description)}`));
 
@@ -868,6 +869,18 @@ function patchMasterIcs(masterIcs, event) {
     else master.addPropertyWithValue('description', description);
   } else if (descProp) {
     master.removeProperty('description');
+  }
+
+  // RRULE (only updated when caller explicitly provides the field)
+  if ('rrule' in event) {
+    const existingRrule = master.getFirstProperty('rrule');
+    if (event.rrule) {
+      const rruleVal = ICAL.Recur.fromString(event.rrule);
+      if (existingRrule) existingRrule.setValue(rruleVal);
+      else master.addPropertyWithValue('rrule', rruleVal);
+    } else if (existingRrule) {
+      master.removeProperty('rrule');
+    }
   }
 
   // DTSTART / DTEND (optional — only when caller provides both)

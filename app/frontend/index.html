@@ -294,6 +294,48 @@
       <label class="modal-label" for="calEventTimezone">Timezone</label>
       <select id="calEventTimezone" class="modal-input"></select>
     </div>
+    <div class="modal-field cal-event-allday-row" id="calEventRepeatToggleRow">
+      <label class="modal-label"></label>
+      <label class="cal-event-allday-label"><input type="checkbox" id="calEventRepeat"> Repeat</label>
+    </div>
+    <div id="calEventRepeatSection" hidden>
+      <div class="modal-field">
+        <label class="modal-label" for="calEventFreq">Frequency</label>
+        <select id="calEventFreq" class="modal-input">
+          <option value="DAILY">Daily</option>
+          <option value="WEEKLY" selected>Weekly</option>
+          <option value="MONTHLY">Monthly</option>
+          <option value="YEARLY">Yearly</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="calEventInterval">Every</label>
+        <span class="cal-event-interval-pair">
+          <input type="number" id="calEventInterval" class="modal-input cal-event-interval-input" min="1" max="99" value="1">
+          <span id="calEventIntervalUnit" class="cal-event-interval-unit">week(s)</span>
+        </span>
+      </div>
+      <div class="modal-field" id="calEventBydayRow">
+        <label class="modal-label">On days</label>
+        <span class="cal-event-byday-btns">
+          <label class="cal-event-day-btn"><input type="checkbox" value="MO">Mo</label>
+          <label class="cal-event-day-btn"><input type="checkbox" value="TU">Tu</label>
+          <label class="cal-event-day-btn"><input type="checkbox" value="WE">We</label>
+          <label class="cal-event-day-btn"><input type="checkbox" value="TH">Th</label>
+          <label class="cal-event-day-btn"><input type="checkbox" value="FR">Fr</label>
+          <label class="cal-event-day-btn"><input type="checkbox" value="SA">Sa</label>
+          <label class="cal-event-day-btn"><input type="checkbox" value="SU">Su</label>
+        </span>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label">Ends</label>
+        <div class="cal-event-ends-rows">
+          <label class="cal-event-ends-row"><input type="radio" name="calEventEnds" value="never" checked> Never</label>
+          <label class="cal-event-ends-row"><input type="radio" name="calEventEnds" value="count"> After <input type="number" id="calEventCount" class="cal-event-ends-input" min="1" max="999" value="10"> occurrences</label>
+          <label class="cal-event-ends-row"><input type="radio" name="calEventEnds" value="until"> On <input type="date" id="calEventUntil" class="cal-event-ends-input"></label>
+        </div>
+      </div>
+    </div>
     <div class="modal-field">
       <label class="modal-label" for="calEventDescription">Description</label>
       <textarea id="calEventDescription" class="modal-input" rows="4"></textarea>

@@ -151,6 +151,7 @@ const validateCalendarEvent = ajv.compile({
     href:           { type: 'string' },
     editScope:      { type: 'string', enum: ['occurrence', 'series'] },
     occurrenceDate: { type: 'string' },
+    rrule:          { type: 'string', maxLength: 500 },
   },
 });
 

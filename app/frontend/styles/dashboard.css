@@ -921,3 +921,75 @@
   background: color-mix(in srgb, var(--danger) 10%, transparent);
   border-radius: 6px;
 }
+
+/* ---- Recurrence section ---- */
+
+.cal-event-interval-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cal-event-interval-input {
+  width: 70px;
+  flex: none;
+}
+.cal-event-interval-unit {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.cal-event-byday-btns {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.cal-event-day-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  user-select: none;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.cal-event-day-btn:has(input:checked) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.cal-event-day-btn input[type=checkbox] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.cal-event-ends-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cal-event-ends-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.cal-event-ends-input {
+  padding: 4px 7px;
+  font-size: 0.82rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+}
+.cal-event-ends-input:focus { outline: none; border-color: var(--accent); }

@@ -2263,15 +2263,17 @@ async function openCalEventModal(accountId, ev, acc, scope) {
   const descInput  = document.getElementById('calEventDescription');
   const errEl      = document.getElementById('calEventError');
   const saveBtn    = document.getElementById('calEventSaveBtn');
-  const scopeRow   = document.getElementById('calEventScopeRow');
-  const scopeLabel = document.getElementById('calEventScopeLabel');
-  const recurRow   = document.getElementById('calEventRecurRow');
-  const recurInfo  = document.getElementById('calEventRecurInfo');
+  const scopeRow          = document.getElementById('calEventScopeRow');
+  const scopeLabel        = document.getElementById('calEventScopeLabel');
+  const recurRow          = document.getElementById('calEventRecurRow');
+  const recurInfo         = document.getElementById('calEventRecurInfo');
+  const repeatToggleRow   = document.getElementById('calEventRepeatToggleRow');
 
   errEl.hidden = true; errEl.textContent = '';
   saveBtn.textContent = 'Save event'; saveBtn.disabled = false;
   scopeRow.hidden = true;
   recurRow.hidden = true;
+  _resetRepeatUi();
 
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -2305,6 +2307,14 @@ async function openCalEventModal(accountId, ev, acc, scope) {
         recurRow.hidden = false;
         recurInfo.textContent = _formatRRule(ev.rruleStr || null, ev.seriesStart || ev.start);
       }
+    }
+
+    // Repeat section: show for series edits (populated from rrule), hide for occurrence edits
+    if (scope === 'occurrence') {
+      repeatToggleRow.hidden = true;
+    } else {
+      repeatToggleRow.hidden = false;
+      if (ev.rruleStr) _parseRRuleToUi(ev.rruleStr);
     }
 
     titleInput.value = ev.title || '';
@@ -2351,6 +2361,7 @@ async function openCalEventModal(accountId, ev, acc, scope) {
     _calModalScope   = null;
     _calModalOccDate = null;
     titleEl.textContent = 'New event';
+    repeatToggleRow.hidden = false;
 
     // Populate account selector
     accField.style.display = '';
@@ -2428,10 +2439,16 @@ async function _submitCalEvent() {
   if (location) body.location = location;
   if (desc)     body.description = desc;
   if (timezone) body.timezone = timezone;
-  if (_calModalMode === 'edit' && _calModalEtag)   body.etag = _calModalEtag;
-  if (_calModalMode === 'edit' && _calModalHref)   body.href = _calModalHref;
-  if (_calModalMode === 'edit' && _calModalScope)  body.editScope = _calModalScope;
+  if (_calModalMode === 'edit' && _calModalEtag)    body.etag = _calModalEtag;
+  if (_calModalMode === 'edit' && _calModalHref)    body.href = _calModalHref;
+  if (_calModalMode === 'edit' && _calModalScope)   body.editScope = _calModalScope;
   if (_calModalMode === 'edit' && _calModalOccDate) body.occurrenceDate = _calModalOccDate;
+  // Include rrule for create mode and series edits (not for single-occurrence edits)
+  if (_calModalScope !== 'occurrence') {
+    const rrule = _buildRRule();
+    if (rrule) body.rrule = rrule;
+    else if (_calModalMode === 'edit' && _calModalScope === 'series') body.rrule = ''; // signal to remove RRULE
+  }
 
   try {
     let res;
@@ -2708,6 +2725,118 @@ async function _refreshCalendarAccount(accountId) {
   } catch { /* ignore — stale UI is better than a crash */ }
 }
 
+// ---- Recurrence helpers ----
+
+/** Update interval unit label and show/hide BYDAY row based on frequency. */
+function _updateFreqUi(freq) {
+  const units = { DAILY: 'day(s)', WEEKLY: 'week(s)', MONTHLY: 'month(s)', YEARLY: 'year(s)' };
+  document.getElementById('calEventIntervalUnit').textContent = units[freq] || 'occurrence(s)';
+  document.getElementById('calEventBydayRow').hidden = freq !== 'WEEKLY';
+}
+
+/** Pre-select the day-of-week checkbox that matches the current start date. */
+function _preselectStartDay() {
+  const val = document.getElementById('calEventStartDate').value;
+  if (!val) return;
+  const dayNames = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  const dow = dayNames[new Date(val + 'T12:00:00').getDay()];
+  for (const cb of document.querySelectorAll('#calEventBydayRow .cal-event-day-btn input')) {
+    cb.checked = cb.value === dow;
+  }
+}
+
+/**
+ * Build an RRULE string from the current repeat UI state.
+ * Returns '' when the Repeat checkbox is unchecked.
+ */
+function _buildRRule() {
+  if (!document.getElementById('calEventRepeat').checked) return '';
+  const freq     = document.getElementById('calEventFreq').value;
+  const interval = Math.max(1, parseInt(document.getElementById('calEventInterval').value, 10) || 1);
+
+  let rrule = `FREQ=${freq}`;
+  if (interval > 1) rrule += `;INTERVAL=${interval}`;
+
+  if (freq === 'WEEKLY') {
+    const days = [...document.querySelectorAll('#calEventBydayRow .cal-event-day-btn input:checked')]
+      .map(cb => cb.value);
+    if (days.length > 0) rrule += `;BYDAY=${days.join(',')}`;
+  }
+
+  const endsVal = document.querySelector('input[name="calEventEnds"]:checked')?.value || 'never';
+  if (endsVal === 'count') {
+    const count = Math.max(1, parseInt(document.getElementById('calEventCount').value, 10) || 10);
+    rrule += `;COUNT=${count}`;
+  } else if (endsVal === 'until') {
+    const until = document.getElementById('calEventUntil').value; // YYYY-MM-DD
+    if (until) {
+      const allDay = document.getElementById('calEventAllDay').checked;
+      if (allDay) {
+        rrule += `;UNTIL=${until.replace(/-/g, '')}`;
+      } else {
+        // Timed events: UNTIL in UTC datetime format (end of that day)
+        const d = new Date(until + 'T23:59:59Z');
+        rrule += `;UNTIL=${d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`;
+      }
+    }
+  }
+
+  return rrule;
+}
+
+/**
+ * Populate the repeat UI from an existing RRULE string.
+ * e.g. "FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2"
+ */
+function _parseRRuleToUi(rruleStr) {
+  if (!rruleStr) return;
+  const parts = {};
+  for (const part of rruleStr.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq >= 0) parts[part.substring(0, eq).toUpperCase()] = part.substring(eq + 1);
+  }
+
+  document.getElementById('calEventRepeat').checked = true;
+  document.getElementById('calEventRepeatSection').hidden = false;
+
+  const freq = parts.FREQ || 'WEEKLY';
+  document.getElementById('calEventFreq').value = freq;
+  document.getElementById('calEventInterval').value = parts.INTERVAL || '1';
+  _updateFreqUi(freq);
+
+  if (freq === 'WEEKLY' && parts.BYDAY) {
+    const days = parts.BYDAY.split(',').map(d => d.trim().toUpperCase());
+    for (const cb of document.querySelectorAll('#calEventBydayRow .cal-event-day-btn input')) {
+      cb.checked = days.includes(cb.value);
+    }
+  }
+
+  if (parts.COUNT) {
+    document.querySelector('input[name="calEventEnds"][value="count"]').checked = true;
+    document.getElementById('calEventCount').value = parts.COUNT;
+  } else if (parts.UNTIL) {
+    document.querySelector('input[name="calEventEnds"][value="until"]').checked = true;
+    const u = parts.UNTIL;
+    document.getElementById('calEventUntil').value =
+      `${u.substring(0, 4)}-${u.substring(4, 6)}-${u.substring(6, 8)}`;
+  } else {
+    document.querySelector('input[name="calEventEnds"][value="never"]').checked = true;
+  }
+}
+
+/** Reset the repeat section to its default empty state. */
+function _resetRepeatUi() {
+  document.getElementById('calEventRepeat').checked = false;
+  document.getElementById('calEventRepeatSection').hidden = true;
+  document.getElementById('calEventFreq').value = 'WEEKLY';
+  document.getElementById('calEventInterval').value = '1';
+  _updateFreqUi('WEEKLY');
+  for (const cb of document.querySelectorAll('#calEventBydayRow .cal-event-day-btn input')) cb.checked = false;
+  document.querySelector('input[name="calEventEnds"][value="never"]').checked = true;
+  document.getElementById('calEventCount').value = '10';
+  document.getElementById('calEventUntil').value = '';
+}
+
 // ---- Calendar event modal wiring ----
 
 (function _initCalEventModal() {
@@ -2727,4 +2856,28 @@ async function _refreshCalendarAccount(accountId) {
       _submitCalEvent();
     }
   });
+
+  // Repeat toggle
+  document.getElementById('calEventRepeat').addEventListener('change', function () {
+    document.getElementById('calEventRepeatSection').hidden = !this.checked;
+    if (this.checked && document.getElementById('calEventFreq').value === 'WEEKLY') {
+      _preselectStartDay();
+    }
+  });
+
+  // Frequency change → update unit label + BYDAY visibility
+  document.getElementById('calEventFreq').addEventListener('change', function () {
+    _updateFreqUi(this.value);
+    if (this.value === 'WEEKLY') _preselectStartDay();
+  });
+
+  // Clicking "After" or "On" radio selects it automatically via the label,
+  // but clicking the nested input shouldn't propagate to the label radio
+  for (const inp of document.querySelectorAll('.cal-event-ends-input')) {
+    inp.addEventListener('click', e => e.stopPropagation());
+    inp.addEventListener('focus', function () {
+      const radio = this.closest('.cal-event-ends-row')?.querySelector('input[type=radio]');
+      if (radio) radio.checked = true;
+    });
+  }
 })();
