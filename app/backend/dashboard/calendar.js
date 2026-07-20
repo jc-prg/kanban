@@ -790,6 +790,262 @@ async function testCalendarAccount(account) {
   }
 }
 
+// ---- Recurring event modification helpers ----
+
+/**
+ * Convert a UTC ISO timestamp to a localtime string in a named IANA timezone.
+ * Returns "YYYYMMDDTHHMMSS" suitable for ICS DTSTART/DTEND/RECURRENCE-ID/EXDATE.
+ */
+function _fmtLocalInTz(utcIsoStr, tzid) {
+  const dtf = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tzid,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(new Date(utcIsoStr)).map(p => [p.type, p.value]));
+  const h = parts.hour === '24' ? '00' : parts.hour;
+  return `${parts.year}${parts.month}${parts.day}T${h}${parts.minute}${parts.second}`;
+}
+
+/**
+ * Fetch the raw ICS text for an event from CalDAV.
+ * Returns { ics: string, url: string }.
+ */
+async function fetchRawIcs(account, uid, href, timeoutMs = 10_000) {
+  const headers = {};
+  if (account.user && account.password) {
+    headers['Authorization'] = 'Basic ' + Buffer.from(`${account.user}:${account.password}`).toString('base64');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const eventUrl = href
+      ? (hrefToUrl(account, href) || await resolveEventUrl(account, uid, headers, controller.signal))
+      : await resolveEventUrl(account, uid, headers, controller.signal);
+    if (!eventUrl) throw new Error('Could not resolve event URL');
+    const res = await fetch(eventUrl, { headers, signal: controller.signal });
+    if (res.status === 404) throw new Error('Event not found on CalDAV server');
+    if (!res.ok) throw new Error(`CalDAV error (HTTP ${res.status})`);
+    return { ics: await res.text(), url: eventUrl };
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`Connection timed out (${timeoutMs / 1000} s)`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Patch the master VEVENT of an ICS string: update SUMMARY, LOCATION, DESCRIPTION,
+ * DTSTAMP, and optionally DTSTART/DTEND. RRULE and exception VEVENTs are preserved.
+ * Returns modified ICS string (CRLF line endings).
+ */
+function patchMasterIcs(masterIcs, event) {
+  const jcal   = ICAL.parse(masterIcs);
+  const vcal   = new ICAL.Component(jcal);
+  const master = vcal.getAllSubcomponents('vevent').find(ve => !ve.getFirstProperty('recurrence-id'));
+  if (!master) throw new Error('Master VEVENT not found in ICS');
+
+  const { title, location, description, allDay, start, end, timezone } = event;
+
+  master.updatePropertyWithValue('summary', title || '');
+  master.updatePropertyWithValue('dtstamp', ICAL.Time.fromJSDate(new Date(), true));
+
+  // LOCATION
+  const locProp = master.getFirstProperty('location');
+  if (location) {
+    if (locProp) locProp.setValue(location);
+    else master.addPropertyWithValue('location', location);
+  } else if (locProp) {
+    master.removeProperty('location');
+  }
+
+  // DESCRIPTION
+  const descProp = master.getFirstProperty('description');
+  if (description) {
+    if (descProp) descProp.setValue(description);
+    else master.addPropertyWithValue('description', description);
+  } else if (descProp) {
+    master.removeProperty('description');
+  }
+
+  // DTSTART / DTEND (optional — only when caller provides both)
+  if (start && end) {
+    const dtStartProp  = master.getFirstProperty('dtstart');
+    const dtEndProp    = master.getFirstProperty('dtend');
+    const masterAllDay = dtStartProp?.getFirstValue()?.isDate ?? false;
+    const masterTzid   = dtStartProp?.getParameter('tzid') || null;
+
+    if (masterAllDay || allDay) {
+      const sDate = ICAL.Time.fromDateString(start.substring(0, 10));
+      const eDate = ICAL.Time.fromDateString((end || start).substring(0, 10));
+      if (dtStartProp) dtStartProp.setValue(sDate); else master.addPropertyWithValue('dtstart', sDate);
+      if (dtEndProp)   dtEndProp.setValue(eDate);   else master.addPropertyWithValue('dtend',   eDate);
+    } else {
+      // Keep the master's timezone; fall back to the event timezone, then UTC
+      const tzid = masterTzid || timezone || null;
+      if (tzid && tzid !== 'UTC') {
+        // Express new times as local-time in the master timezone
+        const sLocal = _fmtLocalInTz(start, tzid);
+        const eLocal = _fmtLocalInTz(end,   tzid);
+        // ICAL.Time.fromString on "YYYYMMDDTHHMMSS" → floating time (no Z)
+        const sTime  = ICAL.Time.fromString(sLocal);
+        const eTime  = ICAL.Time.fromString(eLocal);
+        if (dtStartProp) { dtStartProp.setValue(sTime); dtStartProp.setParameter('tzid', tzid); }
+        else { master.addPropertyWithValue('dtstart', sTime); master.getFirstProperty('dtstart').setParameter('tzid', tzid); }
+        if (dtEndProp)   { dtEndProp.setValue(eTime);   dtEndProp.setParameter('tzid', tzid); }
+        else { master.addPropertyWithValue('dtend', eTime);   master.getFirstProperty('dtend').setParameter('tzid', tzid); }
+      } else {
+        const sTime = ICAL.Time.fromJSDate(new Date(start), true);
+        const eTime = ICAL.Time.fromJSDate(new Date(end),   true);
+        if (dtStartProp) dtStartProp.setValue(sTime); else master.addPropertyWithValue('dtstart', sTime);
+        if (dtEndProp)   dtEndProp.setValue(eTime);   else master.addPropertyWithValue('dtend',   eTime);
+      }
+    }
+  }
+
+  return ICAL.stringify(vcal.jCal).replace(/\r?\n/g, '\r\n');
+}
+
+/**
+ * Build an ICS string with an exception VEVENT override for a single occurrence.
+ * Replaces any existing exception for that date. The master VEVENT and RRULE are
+ * preserved via ical.js; the new override block is injected as raw ICS.
+ * occurrenceStart: ISO string (UTC) of the occurrence's original DTSTART.
+ * event: { title, allDay, start, end, location, description, timezone }.
+ */
+function buildOccurrenceOverrideIcs(masterIcs, occurrenceStart, event) {
+  const jcal    = ICAL.parse(masterIcs);
+  const vcal    = new ICAL.Component(jcal);
+  const vevents = vcal.getAllSubcomponents('vevent');
+  const master  = vevents.find(ve => !ve.getFirstProperty('recurrence-id'));
+  if (!master) throw new Error('Master VEVENT not found in ICS');
+
+  const evUid       = master.getFirstPropertyValue('uid');
+  const dtStartProp = master.getFirstProperty('dtstart');
+  const masterAllDay = dtStartProp?.getFirstValue()?.isDate ?? false;
+  const masterTzid   = dtStartProp?.getParameter('tzid') || null;
+
+  // Remove any existing exception for this occurrence date
+  const occDateStr = new Date(occurrenceStart).toISOString().substring(0, 10);
+  for (const ve of [...vevents]) {
+    const rid = ve.getFirstProperty('recurrence-id');
+    if (!rid) continue;
+    try {
+      if (rid.getFirstValue().toJSDate().toISOString().substring(0, 10) === occDateStr) {
+        vcal.removeSubcomponent(ve);
+      }
+    } catch { /* skip unparseable RECURRENCE-ID */ }
+  }
+
+  // Build RECURRENCE-ID line matching the master's DTSTART format
+  let ridLine;
+  if (masterAllDay) {
+    ridLine = `RECURRENCE-ID;VALUE=DATE:${occurrenceStart.substring(0, 10).replace(/-/g, '')}`;
+  } else if (masterTzid) {
+    ridLine = _icsFold(`RECURRENCE-ID;TZID=${masterTzid}:${_fmtLocalInTz(occurrenceStart, masterTzid)}`);
+  } else {
+    const utc = new Date(occurrenceStart).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    ridLine = `RECURRENCE-ID:${utc}`;
+  }
+
+  // Build the override VEVENT lines (reuses the same helpers as buildIcs)
+  const dtstamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const { title, allDay, start, end, location, description, timezone } = event;
+
+  function toLocalDt(iso) { return iso.replace(/[-:]/g, '').replace(/\.\d+/, '').replace(/Z$/, '').substring(0, 15); }
+  function toDateOnly(iso) { return iso.substring(0, 10).replace(/-/g, ''); }
+  const useTzid = !allDay && timezone && timezone !== 'UTC';
+
+  const lines = [
+    'BEGIN:VEVENT',
+    _icsFold(`UID:${evUid}`),
+    `DTSTAMP:${dtstamp}`,
+    ridLine,
+  ];
+
+  if (allDay) {
+    const endDate = end
+      ? toDateOnly(end)
+      : toDateOnly(new Date(new Date(start.substring(0, 10)).getTime() + 86_400_000).toISOString());
+    lines.push(`DTSTART;VALUE=DATE:${toDateOnly(start)}`);
+    lines.push(`DTEND;VALUE=DATE:${endDate}`);
+  } else if (useTzid) {
+    lines.push(_icsFold(`DTSTART;TZID=${timezone}:${toLocalDt(start)}`));
+    lines.push(_icsFold(`DTEND;TZID=${timezone}:${toLocalDt(end)}`));
+  } else {
+    lines.push(`DTSTART:${new Date(start).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`);
+    lines.push(`DTEND:${new Date(end).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`);
+  }
+
+  lines.push(_icsFold(`SUMMARY:${_icsEscape(title)}`));
+  if (location)    lines.push(_icsFold(`LOCATION:${_icsEscape(location)}`));
+  if (description) lines.push(_icsFold(`DESCRIPTION:${_icsEscape(description)}`));
+  lines.push('END:VEVENT');
+
+  const overrideBlock = lines.join('\r\n');
+
+  // Re-serialize the vcal (old exception removed) then inject override before END:VCALENDAR
+  const baseIcs = ICAL.stringify(vcal.jCal).replace(/\r?\n/g, '\r\n');
+  const endVcalIdx = baseIcs.lastIndexOf('END:VCALENDAR');
+  if (endVcalIdx < 0) throw new Error('Invalid ICS: END:VCALENDAR not found');
+  const prefix = baseIcs.substring(0, endVcalIdx).replace(/[\r\n]+$/, '');
+  return `${prefix}\r\n${overrideBlock}\r\nEND:VCALENDAR`;
+}
+
+/**
+ * Build an ICS string with an EXDATE added to the master VEVENT to skip one occurrence.
+ * Also removes any existing exception override for that occurrence date.
+ * occurrenceStart: ISO string (UTC) of the occurrence's original DTSTART.
+ */
+function buildDeleteOccurrenceIcs(masterIcs, occurrenceStart) {
+  const jcal    = ICAL.parse(masterIcs);
+  const vcal    = new ICAL.Component(jcal);
+  const vevents = vcal.getAllSubcomponents('vevent');
+  const master  = vevents.find(ve => !ve.getFirstProperty('recurrence-id'));
+  if (!master) throw new Error('Master VEVENT not found in ICS');
+
+  const dtStartProp  = master.getFirstProperty('dtstart');
+  const masterAllDay = dtStartProp?.getFirstValue()?.isDate ?? false;
+  const masterTzid   = dtStartProp?.getParameter('tzid') || null;
+
+  // Remove any existing exception override for this date
+  const occDateStr = new Date(occurrenceStart).toISOString().substring(0, 10);
+  for (const ve of [...vevents]) {
+    const rid = ve.getFirstProperty('recurrence-id');
+    if (!rid) continue;
+    try {
+      if (rid.getFirstValue().toJSDate().toISOString().substring(0, 10) === occDateStr) {
+        vcal.removeSubcomponent(ve);
+      }
+    } catch { /* skip */ }
+  }
+
+  // Build EXDATE line
+  let exdateLine;
+  if (masterAllDay) {
+    exdateLine = `EXDATE;VALUE=DATE:${occurrenceStart.substring(0, 10).replace(/-/g, '')}`;
+  } else if (masterTzid) {
+    exdateLine = _icsFold(`EXDATE;TZID=${masterTzid}:${_fmtLocalInTz(occurrenceStart, masterTzid)}`);
+  } else {
+    const utc = new Date(occurrenceStart).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    exdateLine = `EXDATE:${utc}`;
+  }
+
+  master.updatePropertyWithValue('dtstamp', ICAL.Time.fromJSDate(new Date(), true));
+
+  // Re-serialize, then inject EXDATE before the first END:VEVENT (= master VEVENT's end)
+  const baseIcs = ICAL.stringify(vcal.jCal).replace(/\r?\n/g, '\r\n');
+  const endVeventPos = baseIcs.indexOf('\r\nEND:VEVENT');
+  if (endVeventPos < 0) throw new Error('VEVENT not found in serialized ICS');
+  return (
+    baseIcs.substring(0, endVeventPos) +
+    '\r\n' + exdateLine +
+    baseIcs.substring(endVeventPos)
+  );
+}
+
 module.exports = {
   parseEvents,
   filterEvents,
@@ -798,6 +1054,10 @@ module.exports = {
   testCalendarAccount,
   clearCalendarUrlCache,
   buildIcs,
+  fetchRawIcs,
+  patchMasterIcs,
+  buildOccurrenceOverrideIcs,
+  buildDeleteOccurrenceIcs,
   resolveEventUrl,
   hrefToUrl,
   _buildVTimezone, // exported for unit tests

@@ -147,8 +147,10 @@ const validateCalendarEvent = ajv.compile({
     timezone:    { type: 'string', maxLength: 100 },
     location:    { type: 'string', maxLength: 500 },
     description: { type: 'string', maxLength: 10000 },
-    etag:        { type: 'string' },
-    href:        { type: 'string' },
+    etag:           { type: 'string' },
+    href:           { type: 'string' },
+    editScope:      { type: 'string', enum: ['occurrence', 'series'] },
+    occurrenceDate: { type: 'string' },
   },
 });
 

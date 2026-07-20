@@ -90,11 +90,13 @@ let _cardSourcesMeta    = [];   // unique boards from last-rendered card sources
 let _mailAccountsMeta   = [];
 let _calAccountsMeta    = [];
 // Calendar event modal state
-let _calModalMode   = 'create'; // 'create' | 'edit'
-let _calModalAccId  = null;
-let _calModalUid    = null;
-let _calModalEtag   = null;
-let _calModalHref   = null;
+let _calModalMode    = 'create'; // 'create' | 'edit'
+let _calModalAccId   = null;
+let _calModalUid     = null;
+let _calModalEtag    = null;
+let _calModalHref    = null;
+let _calModalScope   = null;    // 'occurrence' | 'series' | null
+let _calModalOccDate = null;    // ISO start of the occurrence being edited
 
 async function _dashPatchCard(board, cardId, patchFn) {
   const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
@@ -1715,11 +1717,18 @@ function _showCalEventContextMenu(e, accountId, uid, webUrl) {
   const isIcal      = (ev?._accountType || 'caldav') === 'ical-url';
   const isRecurring = !!ev?.hasRrule;
   const items = [
-    { labelHtml: `<span class="ctx-icon">${SVGICONS.cardInfo()}</span>Open`,   action: () => _openEventDetail(accountId, uid, webUrl) },
+    { labelHtml: `<span class="ctx-icon">${SVGICONS.cardInfo()}</span>Open`, action: () => _openEventDetail(accountId, uid, webUrl) },
   ];
-  if (!isIcal && !isRecurring) {
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit`,             action: () => openCalEventModal(accountId, ev) });
-    items.push({ labelHtml: `<span class="ctx-icon">${_svgDelete()}</span>Delete`, danger: true, action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href) });
+  if (!isIcal) {
+    if (isRecurring) {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit this occurrence`, action: () => openCalEventModal(accountId, ev, null, 'occurrence') });
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit entire series`,    action: () => openCalEventModal(accountId, ev, null, 'series') });
+      items.push({ labelHtml: `<span class="ctx-icon">${_svgDelete()}</span>Delete this occurrence`, danger: true, action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href, 'occurrence', ev?.start) });
+      items.push({ labelHtml: `<span class="ctx-icon">${_svgDelete()}</span>Delete entire series`,   danger: true, action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href, 'series') });
+    } else {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit`,             action: () => openCalEventModal(accountId, ev) });
+      items.push({ labelHtml: `<span class="ctx-icon">${_svgDelete()}</span>Delete`, danger: true, action: () => _deleteCalEvent(accountId, uid, ev?.etag, ev?.href) });
+    }
   }
   openContextMenu(e, items);
 }
@@ -1811,10 +1820,40 @@ function _openEventDetail(accountId, uid, webUrl) {
       footer.className = 'dash-detail-footer';
 
       if (isRecurring) {
-        const note = document.createElement('span');
-        note.style.cssText = 'font-size:0.8rem;color:var(--text-muted);flex:1';
-        note.textContent = 'Recurring event \u2014 editing not supported.';
-        footer.appendChild(note);
+        // Two rows: occurrence actions, series actions
+        const occRow = document.createElement('div');
+        occRow.className = 'dash-detail-footer-row';
+        const occLabel = document.createElement('span');
+        occLabel.className = 'dash-detail-footer-scope-label';
+        occLabel.textContent = 'This occurrence:';
+        const delOccBtn = document.createElement('button');
+        delOccBtn.className = 'btn btn-secondary';
+        delOccBtn.style.color = 'var(--danger)';
+        delOccBtn.textContent = 'Delete';
+        delOccBtn.addEventListener('click', () => _deleteCalEvent(ev._accountId, ev.uid, ev.etag, ev.href, 'occurrence', ev.start));
+        const editOccBtn = document.createElement('button');
+        editOccBtn.className = 'btn btn-primary';
+        editOccBtn.textContent = 'Edit';
+        editOccBtn.addEventListener('click', () => openCalEventModal(ev._accountId, ev, null, 'occurrence'));
+        occRow.append(occLabel, delOccBtn, editOccBtn);
+
+        const serRow = document.createElement('div');
+        serRow.className = 'dash-detail-footer-row';
+        const serLabel = document.createElement('span');
+        serLabel.className = 'dash-detail-footer-scope-label';
+        serLabel.textContent = 'Entire series:';
+        const delSerBtn = document.createElement('button');
+        delSerBtn.className = 'btn btn-secondary';
+        delSerBtn.style.color = 'var(--danger)';
+        delSerBtn.textContent = 'Delete';
+        delSerBtn.addEventListener('click', () => _deleteCalEvent(ev._accountId, ev.uid, ev.etag, ev.href, 'series'));
+        const editSerBtn = document.createElement('button');
+        editSerBtn.className = 'btn btn-primary';
+        editSerBtn.textContent = 'Edit';
+        editSerBtn.addEventListener('click', () => openCalEventModal(ev._accountId, ev, null, 'series'));
+        serRow.append(serLabel, delSerBtn, editSerBtn);
+
+        footer.append(occRow, serRow);
       } else {
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'btn btn-secondary';
@@ -2205,8 +2244,9 @@ function _populateTzSelect(sel, selected) {
  * Open the calendar event creation/edit modal.
  * accountId + acc: create mode (acc is the account config object for type check).
  * accountId + ev:  edit mode (ev is the cached event from _calEventMap).
+ * scope: 'occurrence' | 'series' | null — for recurring event edits.
  */
-async function openCalEventModal(accountId, ev, acc) {
+async function openCalEventModal(accountId, ev, acc, scope) {
   const modal      = document.getElementById('calEventModal');
   const titleEl    = document.getElementById('calEventModalTitle');
   const accField   = document.getElementById('calEventAccountField');
@@ -2223,21 +2263,49 @@ async function openCalEventModal(accountId, ev, acc) {
   const descInput  = document.getElementById('calEventDescription');
   const errEl      = document.getElementById('calEventError');
   const saveBtn    = document.getElementById('calEventSaveBtn');
+  const scopeRow   = document.getElementById('calEventScopeRow');
+  const scopeLabel = document.getElementById('calEventScopeLabel');
+  const recurRow   = document.getElementById('calEventRecurRow');
+  const recurInfo  = document.getElementById('calEventRecurInfo');
 
   errEl.hidden = true; errEl.textContent = '';
   saveBtn.textContent = 'Save event'; saveBtn.disabled = false;
+  scopeRow.hidden = true;
+  recurRow.hidden = true;
 
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   if (ev) {
     // Edit mode — populate from cache immediately, fetch fresh etag/href in background
-    _calModalMode  = 'edit';
-    _calModalAccId = ev._accountId || accountId;
-    _calModalUid   = ev.uid;
-    _calModalEtag  = ev.etag || null;
-    _calModalHref  = ev.href || null;
-    titleEl.textContent = 'Edit event';
+    _calModalMode    = 'edit';
+    _calModalAccId   = ev._accountId || accountId;
+    _calModalUid     = ev.uid;
+    _calModalEtag    = ev.etag || null;
+    _calModalHref    = ev.href || null;
+    _calModalScope   = (ev.hasRrule && scope) ? scope : null;
+    _calModalOccDate = (_calModalScope === 'occurrence') ? (ev.start || null) : null;
+
+    // Title
+    if (ev.hasRrule && scope === 'occurrence') titleEl.textContent = 'Edit occurrence';
+    else if (ev.hasRrule && scope === 'series') titleEl.textContent = 'Edit series';
+    else titleEl.textContent = 'Edit event';
+
     accField.style.display = 'none';
+
+    // Scope info row for recurring events
+    if (ev.hasRrule && scope) {
+      scopeRow.hidden = false;
+      if (scope === 'occurrence') {
+        const dateStr = ev.start ? new Date(ev.start).toLocaleDateString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) : '';
+        scopeLabel.textContent = `This occurrence${dateStr ? ' \u2014 ' + dateStr : ''}`;
+      } else {
+        scopeLabel.textContent = 'All occurrences';
+      }
+      if (ev.rruleStr || ev.hasRrule) {
+        recurRow.hidden = false;
+        recurInfo.textContent = _formatRRule(ev.rruleStr || null, ev.seriesStart || ev.start);
+      }
+    }
 
     titleInput.value = ev.title || '';
     allDayCb.checked = !!ev.allDay;
@@ -2276,10 +2344,12 @@ async function openCalEventModal(accountId, ev, acc) {
     _populateTzSelect(tzSel, tz);
   } else {
     // Create mode
-    _calModalMode  = 'create';
-    _calModalAccId = accountId;
-    _calModalUid   = null;
-    _calModalEtag  = null;
+    _calModalMode    = 'create';
+    _calModalAccId   = accountId;
+    _calModalUid     = null;
+    _calModalEtag    = null;
+    _calModalScope   = null;
+    _calModalOccDate = null;
     titleEl.textContent = 'New event';
 
     // Populate account selector
@@ -2358,8 +2428,10 @@ async function _submitCalEvent() {
   if (location) body.location = location;
   if (desc)     body.description = desc;
   if (timezone) body.timezone = timezone;
-  if (_calModalMode === 'edit' && _calModalEtag) body.etag = _calModalEtag;
-  if (_calModalMode === 'edit' && _calModalHref) body.href = _calModalHref;
+  if (_calModalMode === 'edit' && _calModalEtag)   body.etag = _calModalEtag;
+  if (_calModalMode === 'edit' && _calModalHref)   body.href = _calModalHref;
+  if (_calModalMode === 'edit' && _calModalScope)  body.editScope = _calModalScope;
+  if (_calModalMode === 'edit' && _calModalOccDate) body.occurrenceDate = _calModalOccDate;
 
   try {
     let res;
@@ -2395,12 +2467,22 @@ async function _submitCalEvent() {
   }
 }
 
-async function _deleteCalEvent(accountId, uid, etag, href) {
+async function _deleteCalEvent(accountId, uid, etag, href, scope, occurrenceDate) {
   // Show confirm immediately from cached data — no network wait
   const ev      = _calEventMap.get(`${accountId}\0${uid}`);
   const title   = ev?.title || 'this event';
-  const dateStr = ev?.start ? fmtDate(ev.start.slice(0, 10)) : '';
-  const msg     = dateStr ? `Delete \u201c${title}\u201d on ${dateStr}?` : `Delete \u201c${title}\u201d?`;
+  const dateStr = occurrenceDate
+    ? fmtDate(new Date(occurrenceDate).toISOString().slice(0, 10))
+    : (ev?.start ? fmtDate(ev.start.slice(0, 10)) : '');
+
+  let msg;
+  if (scope === 'occurrence') {
+    msg = dateStr ? `Delete this occurrence of \u201c${title}\u201d on ${dateStr}?` : `Delete this occurrence of \u201c${title}\u201d?`;
+  } else if (scope === 'series') {
+    msg = `Delete the entire series \u201c${title}\u201d and all its occurrences?`;
+  } else {
+    msg = dateStr ? `Delete \u201c${title}\u201d on ${dateStr}?` : `Delete \u201c${title}\u201d?`;
+  }
 
   const ok = await showConfirm(msg, { okLabel: 'Delete', danger: true });
   if (!ok) return;
@@ -2415,7 +2497,13 @@ async function _deleteCalEvent(accountId, uid, etag, href) {
 
   const headers = {};
   if (etag) headers['If-Match'] = etag;
-  const qs = href ? `?href=${encodeURIComponent(href)}` : '';
+  const qp = new URLSearchParams();
+  if (href) qp.set('href', href);
+  if (scope === 'occurrence' && occurrenceDate) {
+    qp.set('editScope', 'occurrence');
+    qp.set('occurrenceDate', occurrenceDate);
+  }
+  const qs = qp.toString() ? '?' + qp.toString() : '';
   try {
     const res = await fetch(
       `/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(uid)}${qs}`,

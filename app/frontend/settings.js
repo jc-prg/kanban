@@ -12,11 +12,20 @@ function initTitleChars() {
 }
 
 // ---- Remote change polling ----
+let _pollWasOffline = false;
+
 async function checkForUpdates() {
   if (!API) return;
   try {
     const headers = boardEtag ? { 'If-None-Match': boardEtag } : {};
     const r = await fetch(API, { headers });
+    if (_pollWasOffline) {
+      _pollWasOffline = false;
+      // Reconnected — immediately verify the session token
+      fetch('/api/auth/verify').then(vr => vr.json()).then(({ ok }) => {
+        if (!ok) handleSessionExpired();
+      }).catch(() => {});
+    }
     if (r.status === 304) return;
     if (!r.ok) return;
     boardEtag = r.headers.get('ETag');
@@ -32,7 +41,7 @@ async function checkForUpdates() {
       baseState = JSON.parse(JSON.stringify(remote));
       render();
     }
-  } catch (e) { /* ignore network errors */ }
+  } catch (e) { _pollWasOffline = true; }
 }
 
 setInterval(checkForUpdates, 5000);

@@ -6,7 +6,8 @@ const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount, 
 const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
-        buildIcs, resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
+        buildIcs, fetchRawIcs, patchMasterIcs, buildOccurrenceOverrideIcs, buildDeleteOccurrenceIcs,
+        resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
 const { validateCalendarEvent, schemaError } = require('../schemas');
 const { fetchMailAccount, fetchMailMessage, fetchMailAttachment, testMailAccount,
         listMailFolders, markMailMessage, moveMailMessage, deleteMailMessage } = require('../dashboard/mail');
@@ -512,6 +513,10 @@ router.post('/dashboard/calendar/:accountId/events', writeRateLimit, async (req,
 });
 
 // PUT /api/dashboard/calendar/:accountId/event/:uid — update an existing event
+// Body may include editScope: 'occurrence'|'series' for recurring event editing.
+// For 'occurrence': occurrenceDate (ISO) is required — fetches raw ICS and injects an exception VEVENT.
+// For 'series': fetches raw ICS and patches master VEVENT fields.
+// Without editScope: rebuilds from scratch (existing behaviour for non-recurring events).
 router.put('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (req, res) => {
   try {
     const account = await getCalAccount(req.params.accountId);
@@ -521,20 +526,36 @@ router.put('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (r
     if (!validateCalendarEvent(req.body)) {
       return res.status(400).json({ error: schemaError(validateCalendarEvent) });
     }
-    const { start, end, timezone, allDay, etag, href } = req.body;
+    const { start, end, timezone, allDay, etag, href, editScope, occurrenceDate } = req.body;
     if (new Date(end) < new Date(start)) return res.status(400).json({ error: 'end must be >= start' });
     if (!allDay && timezone) {
       const tzErr = _validateTz(timezone);
       if (tzErr) return res.status(400).json({ error: tzErr });
     }
 
-    const uid = req.params.uid;
-    const { ics } = buildIcs(req.body, uid);
+    const uid     = req.params.uid;
     const headers = _calHeaders(account);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
-      const eventUrl = hrefToUrl(account, href) || await resolveEventUrl(account, uid, headers, controller.signal);
+      let ics, eventUrl;
+
+      if (editScope === 'occurrence' || editScope === 'series') {
+        // Fetch current raw ICS, then build modified version
+        if (editScope === 'occurrence' && !occurrenceDate) {
+          return res.status(400).json({ error: 'occurrenceDate is required for occurrence edits' });
+        }
+        const raw = await fetchRawIcs(account, uid, href, 10_000);
+        eventUrl = raw.url;
+        ics = editScope === 'occurrence'
+          ? buildOccurrenceOverrideIcs(raw.ics, occurrenceDate, req.body)
+          : patchMasterIcs(raw.ics, req.body);
+      } else {
+        // Rebuild from scratch (non-recurring event)
+        ({ ics } = buildIcs(req.body, uid));
+        eventUrl = hrefToUrl(account, href) || await resolveEventUrl(account, uid, headers, controller.signal);
+      }
+
       const putHeaders = { ...headers, 'Content-Type': 'text/calendar; charset=utf-8' };
       if (etag) putHeaders['If-Match'] = etag;
       const r = await fetch(eventUrl, { method: 'PUT', headers: putHeaders, body: ics, signal: controller.signal });
@@ -552,19 +573,38 @@ router.put('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (r
 });
 
 // DELETE /api/dashboard/calendar/:accountId/event/:uid — delete an event
+// ?editScope=occurrence&occurrenceDate=<ISO> → adds EXDATE to master (removes one occurrence).
+// Without editScope → deletes the entire event resource.
 router.delete('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (req, res) => {
   try {
     const account = await getCalAccount(req.params.accountId);
     if (!account) return res.status(404).json({ error: 'Account not found' });
     if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
 
-    const uid  = req.params.uid;
-    const etag = req.headers['if-match'] || null;
-    const href = req.query.href || null;
-    const headers = _calHeaders(account);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
+    const uid            = req.params.uid;
+    const etag           = req.headers['if-match'] || null;
+    const href           = req.query.href || null;
+    const editScope      = req.query.editScope || null;
+    const occurrenceDate = req.query.occurrenceDate || null;
+    const headers        = _calHeaders(account);
+    const controller     = new AbortController();
+    const timer          = setTimeout(() => controller.abort(), 10_000);
     try {
+      if (editScope === 'occurrence') {
+        if (!occurrenceDate) return res.status(400).json({ error: 'occurrenceDate is required' });
+        // Fetch current ICS, add EXDATE, PUT back
+        const raw = await fetchRawIcs(account, uid, href, 10_000);
+        const newIcs = buildDeleteOccurrenceIcs(raw.ics, occurrenceDate);
+        const putHeaders = { ...headers, 'Content-Type': 'text/calendar; charset=utf-8' };
+        if (etag) putHeaders['If-Match'] = etag;
+        const r = await fetch(raw.url, { method: 'PUT', headers: putHeaders, body: newIcs, signal: controller.signal });
+        if (r.status === 204 || r.status === 201) return res.json({ ok: true });
+        if (r.status === 412) return res.status(409).json({ error: 'Event was modified — please reload.' });
+        const detail = await r.text().catch(() => '');
+        return res.status(502).json({ error: `CalDAV error (HTTP ${r.status})`, detail });
+      }
+
+      // Delete entire event resource
       const eventUrl = hrefToUrl(account, href) || await resolveEventUrl(account, uid, headers, controller.signal);
       const delHeaders = { ...headers };
       if (etag) delHeaders['If-Match'] = etag;
