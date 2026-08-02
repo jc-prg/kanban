@@ -98,6 +98,7 @@ function clearAppCache() {
     DB_MODULE,
     BACKUP_MODULE,
     path.resolve(__dirname, '../../backend/auth.js'),
+    path.resolve(__dirname, '../../backend/twoFactor.js'),
     path.resolve(__dirname, '../../backend/config.js'),
     path.resolve(__dirname, '../../backend/schemas.js'),
     path.resolve(__dirname, '../../backend/routes/auth.js'),

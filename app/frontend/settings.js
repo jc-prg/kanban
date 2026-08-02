@@ -52,12 +52,25 @@ document.getElementById('appTitle').addEventListener('click', async () => {
 
 // ---- Session expiry ----
 function handleSessionExpired() {
+  // Close 2FA form if open — session expired so 2FA is moot
+  document.getElementById('twoFactorBackdrop').style.display = 'none';
   // Avoid triggering multiple times while the login modal is already open
   if (document.getElementById('loginBackdrop').style.display !== 'none') return;
   const msg = document.getElementById('loginSessionMsg');
   if (msg) msg.style.display = '';
   document.getElementById('loginBackdrop').style.display = 'flex';
   setTimeout(() => document.getElementById('loginPassword').focus(), 50);
+}
+
+// ---- 2FA form ----
+function show2FAForm() {
+  // Avoid showing multiple times
+  if (document.getElementById('twoFactorBackdrop').style.display !== 'none') return;
+  document.getElementById('loginBackdrop').style.display = 'none';
+  document.getElementById('twoFactorSendStep').style.display = '';
+  document.getElementById('twoFactorVerifyStep').style.display = 'none';
+  document.getElementById('twoFactorSendError').style.display = 'none';
+  document.getElementById('twoFactorBackdrop').style.display = 'flex';
 }
 
 // Periodically verify the session is still valid (every 60 s)
@@ -85,8 +98,14 @@ async function tryLogin(password) {
   }
   const { ok } = data;
   if (ok) {
-    document.getElementById('loginBackdrop').style.display = 'none';
     document.getElementById('loginError').textContent = 'Wrong password.';
+    const checkR = await fetch('/api/auth/check');
+    const checkData = await checkR.json();
+    if (checkData.twoFactorRequired) {
+      show2FAForm();
+      return true;
+    }
+    document.getElementById('loginBackdrop').style.display = 'none';
     await afterAuth();
   }
   return ok;
@@ -95,8 +114,11 @@ async function tryLogin(password) {
 async function checkAuth() {
   const r = await fetch('/api/auth/verify');
   const { ok } = await r.json();
-  if (ok) { afterAuth(); return; }
-  handleSessionExpired();
+  if (!ok) { handleSessionExpired(); return; }
+  const checkR = await fetch('/api/auth/check');
+  const checkData = await checkR.json();
+  if (checkData.twoFactorRequired) { show2FAForm(); return; }
+  afterAuth();
 }
 
 document.getElementById('loginForm').addEventListener('submit', async () => {
@@ -117,6 +139,84 @@ document.getElementById('loginPassword').addEventListener('focus', () => {
 
 document.getElementById('loginPassword').addEventListener('keydown', () => {
   document.getElementById('loginError').style.display = 'none';
+});
+
+// ---- 2FA event handlers ----
+let _2faChallengeId = null;
+
+async function _send2FACode() {
+  const sendBtn = document.getElementById('twoFactorSendBtn');
+  const errEl   = document.getElementById('twoFactorSendError');
+  sendBtn.disabled = true;
+  sendBtn.textContent = 'Sending…';
+  errEl.style.display = 'none';
+  try {
+    const r    = await fetch('/api/auth/2fa/send', { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) {
+      errEl.textContent = data.error || 'Failed to send code.';
+      errEl.style.display = 'block';
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send verification code';
+      return;
+    }
+    _2faChallengeId = data.challengeId;
+    document.getElementById('twoFactorSendStep').style.display = 'none';
+    document.getElementById('twoFactorVerifyStep').style.display = '';
+    document.getElementById('twoFactorError').style.display = 'none';
+    document.getElementById('twoFactorCode').value = '';
+    setTimeout(() => document.getElementById('twoFactorCode').focus(), 50);
+  } catch (e) {
+    errEl.textContent = 'Network error. Try again.';
+    errEl.style.display = 'block';
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send verification code';
+  }
+}
+
+document.getElementById('twoFactorSendBtn').addEventListener('click', _send2FACode);
+document.getElementById('twoFactorResendBtn').addEventListener('click', () => {
+  document.getElementById('twoFactorVerifyStep').style.display = 'none';
+  document.getElementById('twoFactorSendStep').style.display = '';
+  const sendBtn = document.getElementById('twoFactorSendBtn');
+  sendBtn.disabled = false;
+  sendBtn.textContent = 'Send verification code';
+  _send2FACode();
+});
+
+document.getElementById('twoFactorForm').addEventListener('submit', async () => {
+  const code    = document.getElementById('twoFactorCode').value.trim();
+  const errEl   = document.getElementById('twoFactorError');
+  const verBtn  = document.getElementById('twoFactorVerifyBtn');
+  errEl.style.display = 'none';
+  if (!code || !_2faChallengeId) return;
+  verBtn.disabled = true;
+  verBtn.textContent = 'Verifying…';
+  try {
+    const r = await fetch('/api/auth/2fa/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeId: _2faChallengeId, code }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      errEl.textContent = data.error || 'Invalid or expired code.';
+      errEl.style.display = 'block';
+      document.getElementById('twoFactorCode').value = '';
+      document.getElementById('twoFactorCode').focus();
+      verBtn.disabled = false;
+      verBtn.textContent = 'Verify';
+      return;
+    }
+    document.getElementById('twoFactorBackdrop').style.display = 'none';
+    _2faChallengeId = null;
+    await afterAuth();
+  } catch (e) {
+    errEl.textContent = 'Network error. Try again.';
+    errEl.style.display = 'block';
+    verBtn.disabled = false;
+    verBtn.textContent = 'Verify';
+  }
 });
 
 // ---- Settings dialog ----

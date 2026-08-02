@@ -39,6 +39,11 @@ const API        = _isBoard ? `${API_BASE}/board`  : null;
       if (r.status === 401 && isApi && !url.startsWith('/api/auth')) {
         if (typeof handleSessionExpired === 'function') handleSessionExpired();
       }
+      if (r.status === 403 && isApi && !url.startsWith('/api/auth')) {
+        r.clone().json().then(data => {
+          if (data?.error === '2FA_REQUIRED' && typeof show2FAForm === 'function') show2FAForm();
+        }).catch(() => {});
+      }
       return r;
     } catch (e) {
       if (isApi) setOffline(true);

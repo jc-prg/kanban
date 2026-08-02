@@ -114,7 +114,10 @@ function authenticate(req, res, next) {
 
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
   const apiKey = req.headers['x-api-key'] || '';
-  if (API_KEY && (safeEqual(bearer, API_KEY) || safeEqual(apiKey, API_KEY))) return next();
+  if (API_KEY && (safeEqual(bearer, API_KEY) || safeEqual(apiKey, API_KEY))) {
+    req.authedByApiKey = true;
+    return next();
+  }
 
   const failCount = recordAuthFailure(req.ip);
   if (failCount > AUTH_FAIL_MAX)

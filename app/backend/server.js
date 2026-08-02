@@ -6,7 +6,8 @@ const path    = require('path');
 const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES } = require('./config');
 const { initDb }                          = require('./db');
 const { initGlobalDb }                    = require('./global-db');
-const { authenticate }                    = require('./auth');
+const { authenticate, parseCookies }      = require('./auth');
+const { isTwoFactorEnabled, isIntranet, isDeviceTokenValid } = require('./twoFactor');
 const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize, runOrphanAttachmentCleanup } = require('./backup');
 const { initRecurring } = require('./recurring');
 
@@ -65,6 +66,18 @@ if (LOG_API_RESPONSES) {
 }
 
 app.use('/api', authenticate);
+
+// 2FA middleware — skips auth routes; enforces device-token cookie for external IPs.
+// Completely inactive when TWO_FA_EMAIL / SMTP_HOST are not configured.
+app.use('/api', (req, res, next) => {
+  if (!isTwoFactorEnabled()) return next();
+  if (req.path === '/auth' || req.path.startsWith('/auth/')) return next();
+  if (req.authedByApiKey) return next();
+  if (isIntranet(req.ip)) return next();
+  const cookies = parseCookies(req);
+  if (isDeviceTokenValid(cookies['kanban-2fa'])) return next();
+  return res.status(403).json({ error: '2FA_REQUIRED' });
+});
 
 app.use('/api', require('./routes/auth'));
 app.use('/api', require('./routes/prompts'));

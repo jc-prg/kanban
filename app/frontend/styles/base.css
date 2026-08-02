@@ -44,6 +44,7 @@
   --border: #34344a;
   --text: #f2f2fa;
   --text-muted: #9090b0;
+  --text-tooltip: #fff;
   --accent: #7c6af7;
   --accent-glow: rgba(124,106,247,0.25);
   --danger: #f04f6a;
@@ -62,6 +63,7 @@
     --border: #d0d0de;
     --text: #1a1a2e;
     --text-muted: #707088;
+    --text-tooltip: #fff;
     --accent: #5b4de0;
     --accent-glow: rgba(91,77,224,0.18);
     --danger: #d93a55;

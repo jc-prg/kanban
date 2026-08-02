@@ -487,6 +487,33 @@
   </div>
 </div>
 
+<div id="twoFactorBackdrop" class="modal-backdrop" style="display:none">
+  <div class="modal login-modal">
+    <h2>Two-factor verification</h2>
+    <p class="login-session-msg">Access from outside the local network requires a verification code sent to your email.</p>
+    <div id="twoFactorSendStep">
+      <div class="modal-actions">
+        <button class="btn btn-accent" id="twoFactorSendBtn">Send verification code</button>
+      </div>
+      <p id="twoFactorSendError" class="login-error" style="display:none"></p>
+    </div>
+    <div id="twoFactorVerifyStep" style="display:none">
+      <p class="login-session-msg" style="margin-top:0">A 6-digit code was sent to your email.</p>
+      <form id="twoFactorForm" action="#" onsubmit="return false">
+        <div class="modal-field">
+          <label>Code</label>
+          <input id="twoFactorCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+        </div>
+        <p id="twoFactorError" class="login-error" style="display:none">Invalid or expired code.</p>
+        <div class="modal-actions">
+          <button type="submit" class="btn btn-accent" id="twoFactorVerifyBtn">Verify</button>
+          <button type="button" class="btn" id="twoFactorResendBtn">Resend code</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 
 <div id="searchBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal search-modal">
