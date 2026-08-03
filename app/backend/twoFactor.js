@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const fs     = require('fs');
 const path   = require('path');
 const nodemailer = require('nodemailer');
-const { BACKUP_DIR } = require('./config');
+const { BACKUP_DIR, SESSION_SECRET } = require('./config');
 
 // ─── IP / intranet check ─────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ const pendingChallenges = new Map();
 
 function generateChallenge() {
   const challengeId = crypto.randomUUID();
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = String(crypto.randomInt(100000, 1000000));
   pendingChallenges.set(challengeId, { code, expiresAt: Date.now() + CHALLENGE_TTL_MS });
   return { challengeId, code };
 }
@@ -57,6 +57,10 @@ function verifyChallenge(challengeId, code) {
 // ─── Device tokens (file-backed, survives restarts) ──────────────────────────
 
 const TOKENS_FILE = path.join(BACKUP_DIR, '2fa-tokens.json');
+
+function _hashToken(token) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(token).digest('hex');
+}
 
 function readTokens() {
   try {
@@ -84,7 +88,7 @@ function generateDeviceToken() {
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + days * 86400 * 1000).toISOString();
   const tokens = pruneExpired(readTokens());
-  tokens[token] = expiresAt;
+  tokens[_hashToken(token)] = expiresAt;
   writeTokens(tokens);
   return { token, days };
 }
@@ -92,7 +96,7 @@ function generateDeviceToken() {
 function isDeviceTokenValid(token) {
   if (!token) return false;
   const tokens = pruneExpired(readTokens());
-  if (!tokens[token]) return false;
+  if (!tokens[_hashToken(token)]) return false;
   writeTokens(tokens); // persist pruned list
   return true;
 }

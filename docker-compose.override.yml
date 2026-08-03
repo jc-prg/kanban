@@ -2,6 +2,9 @@
 # Docker Compose automatically merges this file when present.
 # Remove or rename this file before deploying to production.
 services:
+  couchdb:
+    ports:
+      - "127.0.0.1:5984:5984"   # Fauxton admin UI access for development only
   kanban:
     volumes:
       - ./app/frontend:/app/frontend

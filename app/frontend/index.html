@@ -350,7 +350,7 @@
 
 <div id="modal" class="modal-backdrop" style="display:none">
   <div class="modal">
-    <button class="modal-fs-btn" id="cardFullscreenBtn" title="Enter full screen" onclick="toggleCardFullscreen()"><span data-icon="fullscreen"></span></button>
+    <button class="modal-fs-btn" id="cardFullscreenBtn" title="Enter full screen"><span data-icon="fullscreen"></span></button>
     <h2 id="modalTitle" style="display:none">Add Card</h2>
     <div class="modal-field" id="modalBoardField" style="display:none">
       <label>Board / Column</label>
@@ -365,7 +365,7 @@
           <label>Card</label>
           <div class="cardtext-wrap">
             <textarea id="cardText" rows="1" placeholder="What needs to be done?"></textarea>
-            <button type="button" id="cardDoneBtn" class="card-done-btn" onclick="toggleModalDone()" style="display:none">
+            <button type="button" id="cardDoneBtn" class="card-done-btn" style="display:none">
               <span class="card-done-circle"></span>
             </button>
           </div>
@@ -389,7 +389,7 @@
               <span class="note-tb-sep"></span>
               <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
             </div>
-            <button class="note-tb-btn desc-scroll-top" title="Scroll to top" onclick="scrollEditorToTop('cardDesc')">↑ top</button>
+            <button class="note-tb-btn desc-scroll-top" id="cardDescScrollTop" title="Scroll to top">↑ top</button>
           </div>
           <div id="cardDesc-mount" class="cm-mount"></div>
           <textarea id="cardDesc" style="display:none" placeholder="Optional details…"></textarea>
@@ -461,10 +461,10 @@
         <span id="modalSavedMsg" class="modal-saved-msg"></span>
       </div>
       <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
-      <button class="btn" id="modalPrintBtn" style="display:none" onclick="printCardFromModal()"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
-      <button class="btn" onclick="tryCloseModal()"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
-      <button class="btn btn-danger" id="modalDeleteBtn" style="display:none" onclick="deleteCardFromModal()"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
-      <button class="btn btn-accent" id="modalSubmitBtn" onclick="submitCard()"><span class="btn-label">Add Card</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="modalPrintBtn" style="display:none"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="modalCloseBtn"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-danger" id="modalDeleteBtn" style="display:none"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-accent" id="modalSubmitBtn"><span class="btn-label">Add Card</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-accent" id="modalAddCloseBtn" style="display:none"><span class="btn-label">Add &amp; Close</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
     </div>
   </div>
@@ -474,7 +474,7 @@
   <div class="modal login-modal">
     <h2>Access required</h2>
     <p id="loginSessionMsg" class="login-session-msg" style="display:none">You were logged out automatically. Please sign in again.</p>
-    <form id="loginForm" action="#" onsubmit="return false">
+    <form id="loginForm" action="#">
       <div class="modal-field">
         <label>Password</label>
         <input id="loginPassword" type="password" placeholder="Enter password…" autocomplete="current-password">
@@ -499,7 +499,7 @@
     </div>
     <div id="twoFactorVerifyStep" style="display:none">
       <p class="login-session-msg" style="margin-top:0">A 6-digit code was sent to your email.</p>
-      <form id="twoFactorForm" action="#" onsubmit="return false">
+      <form id="twoFactorForm" action="#">
         <div class="modal-field">
           <label>Code</label>
           <input id="twoFactorCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" autocomplete="one-time-code">
@@ -554,7 +554,7 @@
     <div id="searchResults" class="search-results"></div>
     <div class="modal-actions">
       <span id="searchCount" class="search-count"></span>
-      <button class="btn btn-accent" onclick="closeSearch()">Close</button>
+      <button class="btn btn-accent" id="searchCloseBtn">Close</button>
     </div>
   </div>
 </div>
@@ -564,7 +564,7 @@
     <h2>Card Info</h2>
     <div id="cardInfoContent" class="card-info-content"></div>
     <div class="modal-actions">
-      <button class="btn btn-accent" onclick="closeCardInfo()">Close</button>
+      <button class="btn btn-accent" id="cardInfoCloseBtn">Close</button>
     </div>
   </div>
 </div>
@@ -595,7 +595,7 @@
     <div id="analyticsResults" class="analytics-results"></div>
     <div class="modal-actions">
       <span id="analyticsCardCount" class="search-count"></span>
-      <button class="btn" onclick="closeAnalytics()">Close</button>
+      <button class="btn" id="analyticsCloseBtn">Close</button>
       <button class="btn btn-accent" id="analyticsRunBtn">Run</button>
     </div>
   </div>
@@ -611,7 +611,7 @@
     </div>
     <div id="achHistoryChart" class="ach-history-chart"></div>
     <div class="modal-actions">
-      <button class="btn btn-accent" onclick="closeAchievementHistory()">Close</button>
+      <button class="btn btn-accent" id="achHistoryCloseBtn">Close</button>
     </div>
   </div>
 </div>
@@ -1321,7 +1321,7 @@
 
 <div id="noteModal" class="modal-backdrop" style="display:none">
   <div class="modal note-modal">
-    <button class="modal-fs-btn" id="noteFullscreenBtn" title="Enter full screen" onclick="toggleNoteFullscreen()"><span data-icon="fullscreen"></span></button>
+    <button class="modal-fs-btn" id="noteFullscreenBtn" title="Enter full screen"><span data-icon="fullscreen"></span></button>
     <div id="noteModalLoading" class="note-modal-loading" style="display:none">
       <span class="note-modal-loading-text">Loading…</span>
     </div>
@@ -1351,7 +1351,7 @@
               <span class="note-tb-sep"></span>
               <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
             </div>
-            <button class="note-tb-btn desc-scroll-top" title="Scroll to top" onclick="scrollEditorToTop('notePageDesc')">↑ top</button>
+            <button class="note-tb-btn desc-scroll-top" id="noteDescScrollTop" title="Scroll to top">↑ top</button>
           </div>
           <div id="notePageDesc-mount" class="cm-mount"></div>
           <textarea id="notePageDesc" style="display:none" placeholder="Write notes in markdown…"></textarea>
@@ -1415,7 +1415,7 @@
         <label class="modal-autosave-label" id="noteAutoSaveLabel"><input type="checkbox" id="noteAutoSave"> Auto-save</label>
         <span id="noteModalSavedMsg" class="modal-saved-msg"></span>
       </div>
-      <button class="btn" id="noteModalPrintBtn" onclick="printNote(noteModalPageId)"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="noteModalPrintBtn"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn" id="noteModalCancelBtn"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-danger" id="noteModalDeleteBtn"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-accent" id="noteModalSaveBtn"><span class="btn-label">Save</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>

@@ -59,11 +59,8 @@ function getLinkBadgeHtml(url, href) {
     ));
   }
 
-  if (!host) return `<a class="card-link-badge card-link-badge--fallback" href="${escHtml(href)}" target="_blank" rel="noopener" title="${escHtml(url)}">></a>`;
-  return `<a class="card-link-badge card-link-badge--favicon" href="${escHtml(href)}" target="_blank" rel="noopener" title="${escHtml(url)}">` +
-    `<img src="https://${host}/favicon.ico" alt="" ` +
-    `onerror="this.parentElement.classList.replace('card-link-badge--favicon','card-link-badge--fallback');this.parentElement.textContent='>'">` +
-    `</a>`;
+  // Always use text fallback — avoids leaking board activity to third-party servers.
+  return `<a class="card-link-badge card-link-badge--fallback" href="${escHtml(href)}" target="_blank" rel="noopener" title="${escHtml(url)}">></a>`;
 }
 
 // ---- Render ----

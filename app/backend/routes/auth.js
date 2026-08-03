@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { safeEqual, parseCookies, loginState, issueSessionToken, verifySessionToken,
-        RATE_MAX, LOCKOUT_AFTER, LOCKOUT_MS } = require('../auth');
+        RATE_MAX, LOCKOUT_AFTER, LOCKOUT_MS, twoFaRateLimit, revokeAllSessions } = require('../auth');
 const { APP_PASSWORD, SESSION_MAX_AGE_MS } = require('../config');
 const {
   isTwoFactorEnabled, isIntranet, isDeviceTokenValid,
@@ -50,6 +50,15 @@ router.post('/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// Invalidate all currently active session tokens immediately.
+// Useful after a suspected compromise — forces re-login on all devices.
+router.post('/auth/revoke-all', (req, res) => {
+  revokeAllSessions();
+  res.clearCookie('kanban-session', { path: '/', sameSite: 'strict' });
+  res.clearCookie('kanban-2fa', { path: '/', sameSite: 'strict' });
+  res.json({ ok: true });
+});
+
 // Returns whether 2FA is still required for this request.
 // Requires a valid session (not bypassed by authenticate); bypassed by 2FA middleware.
 router.get('/auth/check', (req, res) => {
@@ -74,7 +83,7 @@ router.post('/auth/2fa/send', async (req, res) => {
 });
 
 // Verify the submitted code and set an HttpOnly device-token cookie on success.
-router.post('/auth/2fa/verify', (req, res) => {
+router.post('/auth/2fa/verify', twoFaRateLimit, (req, res) => {
   if (!isTwoFactorEnabled())
     return res.status(400).json({ error: '2FA is not configured' });
   const { challengeId, code } = req.body || {};

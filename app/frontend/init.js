@@ -4,6 +4,24 @@ if (BOARD_NAME) {
 initTitleChars();
 checkAuth();
 
+// Wire up buttons that previously used inline onclick/onsubmit attributes.
+document.getElementById('cardFullscreenBtn').addEventListener('click', () => toggleCardFullscreen());
+document.getElementById('cardDoneBtn').addEventListener('click', () => toggleModalDone());
+document.getElementById('cardDescScrollTop').addEventListener('click', () => scrollEditorToTop('cardDesc'));
+document.getElementById('modalPrintBtn').addEventListener('click', () => printCardFromModal());
+document.getElementById('modalCloseBtn').addEventListener('click', () => tryCloseModal());
+document.getElementById('modalDeleteBtn').addEventListener('click', () => deleteCardFromModal());
+document.getElementById('modalSubmitBtn').addEventListener('click', () => submitCard());
+document.getElementById('loginForm').addEventListener('submit', e => e.preventDefault());
+document.getElementById('twoFactorForm').addEventListener('submit', e => e.preventDefault());
+document.getElementById('searchCloseBtn').addEventListener('click', () => closeSearch());
+document.getElementById('cardInfoCloseBtn').addEventListener('click', () => closeCardInfo());
+document.getElementById('analyticsCloseBtn').addEventListener('click', () => closeAnalytics());
+document.getElementById('achHistoryCloseBtn').addEventListener('click', () => closeAchievementHistory());
+document.getElementById('noteFullscreenBtn').addEventListener('click', () => toggleNoteFullscreen());
+document.getElementById('noteDescScrollTop').addEventListener('click', () => scrollEditorToTop('notePageDesc'));
+document.getElementById('noteModalPrintBtn').addEventListener('click', () => printNote(noteModalPageId));
+
 let _hScrollTarget = 0;
 let _hScrollRafId = null;
 

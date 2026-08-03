@@ -844,9 +844,10 @@ function renderColorRow() {
   const row = document.getElementById('colorRow');
   row.innerHTML = COLORS.map(c => `
     <div class="color-swatch ${c === selectedColor ? 'selected' : ''}"
-         style="background:${c}"
-         onclick="selectColor('${c}')"></div>
+         data-color="${escHtml(c)}"
+         style="background:${c}"></div>
   `).join('');
+  row.onclick = e => { const c = e.target.dataset.color; if (c) selectColor(c); };
 }
 
 function selectColor(c) {
@@ -860,14 +861,18 @@ function renderPriorityRow() {
     const isSelected = selectedPriority === p;
     if (p === 0) {
       return `<button class="priority-btn ${isSelected ? 'selected' : ''}"
-        style="${isSelected ? 'background:var(--surface);border-color:var(--accent);color:var(--text)' : ''}"
-        onclick="selectPriority(0)">—</button>`;
+        data-priority="0"
+        style="${isSelected ? 'background:var(--surface);border-color:var(--accent);color:var(--text)' : ''}">—</button>`;
     }
     const col = PRIORITY_COLORS[p];
     return `<button class="priority-btn ${isSelected ? 'selected' : ''}"
-      style="color:${col};${isSelected ? `background:${col};border-color:${col};color:#fff` : `border-color:var(--border)`}"
-      onclick="selectPriority(${p})">${PRIORITY_LABELS[p]}</button>`;
+      data-priority="${p}"
+      style="color:${col};${isSelected ? `background:${col};border-color:${col};color:#fff` : `border-color:var(--border)`}">${PRIORITY_LABELS[p]}</button>`;
   }).join('');
+  row.onclick = e => {
+    const btn = e.target.closest('.priority-btn');
+    if (btn) selectPriority(parseInt(btn.dataset.priority, 10));
+  };
 }
 
 function selectPriority(p) {

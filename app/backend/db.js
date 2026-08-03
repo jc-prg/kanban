@@ -77,13 +77,16 @@ async function saveNotesData(db, data) {
   return upsertDoc(db, NOTES_DOC_ID, data);
 }
 
+const _isProd = process.env.NODE_ENV === 'production';
+function _errMsg(err) { return _isProd ? 'Internal server error' : err.message; }
+
 function withHandler(handler) {
   return async (req, res) => {
     try {
       await handler(req, res);
     } catch (err) {
       console.error(err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: _errMsg(err) });
     }
   };
 }
@@ -97,7 +100,7 @@ function withBoard(handler) {
       await handler(req, res, db);
     } catch (err) {
       console.error(err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: _errMsg(err) });
     }
   };
 }
@@ -113,7 +116,7 @@ function withExistingBoard(handler) {
       await handler(req, res, db);
     } catch (err) {
       console.error(err.message);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: _errMsg(err) });
     }
   };
 }

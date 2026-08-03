@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const { SESSION_SECRET, SESSION_MAX_AGE_MS, API_KEY } = require('./config');
+const fs     = require('fs');
+const { SESSION_SECRET, SESSION_MAX_AGE_MS, API_KEY, REVOCATION_FILE } = require('./config');
 
 function safeEqual(a, b) {
   const sa = String(a || ''), sb = String(b || '');
@@ -23,6 +24,10 @@ const UPLOAD_MAX       = 30;              // max upload requests per window
 const writeMap         = new Map();        // ip -> { count, windowStart }
 const uploadMap        = new Map();        // ip -> { count, windowStart }
 
+const TWO_FA_WINDOW_MS = 10 * 60 * 1000; // matches challenge TTL
+const TWO_FA_MAX       = 10;             // max verify attempts per window
+const twoFaMap         = new Map();       // ip -> { count, windowStart }
+
 function makeWriteLimiter(map, max) {
   return function writeLimiter(req, res, next) {
     const ip  = req.ip;
@@ -42,6 +47,20 @@ function makeWriteLimiter(map, max) {
 const writeRateLimit  = makeWriteLimiter(writeMap,  WRITE_MAX);
 const uploadRateLimit = makeWriteLimiter(uploadMap, UPLOAD_MAX);
 
+function twoFaRateLimit(req, res, next) {
+  const ip  = req.ip;
+  const now = Date.now();
+  let s = twoFaMap.get(ip);
+  if (!s || now > s.windowStart + TWO_FA_WINDOW_MS) {
+    s = { count: 0, windowStart: now };
+    twoFaMap.set(ip, s);
+  }
+  s.count++;
+  if (s.count > TWO_FA_MAX)
+    return res.status(429).json({ error: 'Too many verification attempts. Try again later.' });
+  next();
+}
+
 // Purge expired entries every window cycle
 setInterval(() => {
   const now = Date.now();
@@ -53,6 +72,8 @@ setInterval(() => {
     if (now > s.windowStart + WRITE_WINDOW_MS) writeMap.delete(ip);
   for (const [ip, s] of uploadMap)
     if (now > s.windowStart + WRITE_WINDOW_MS) uploadMap.delete(ip);
+  for (const [ip, s] of twoFaMap)
+    if (now > s.windowStart + TWO_FA_WINDOW_MS) twoFaMap.delete(ip);
 }, WRITE_WINDOW_MS);
 
 function loginState(ip) {
@@ -76,6 +97,23 @@ function recordAuthFailure(ip) {
   return s.count;
 }
 
+// ── Session revocation ────────────────────────────────────────────────────────
+
+let _revokedBefore = 0; // ms timestamp; tokens issued before this are rejected
+
+function _loadRevocation() {
+  try { _revokedBefore = JSON.parse(fs.readFileSync(REVOCATION_FILE, 'utf8')).revokedBefore || 0; } catch { _revokedBefore = 0; }
+}
+
+function revokeAllSessions() {
+  _revokedBefore = Date.now();
+  try { fs.writeFileSync(REVOCATION_FILE, JSON.stringify({ revokedBefore: _revokedBefore })); } catch {}
+}
+
+_loadRevocation();
+
+// ── Token issue / verify ──────────────────────────────────────────────────────
+
 function issueSessionToken() {
   const payload = Buffer.from(JSON.stringify({ iat: Date.now() })).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
@@ -92,7 +130,7 @@ function verifySessionToken(token) {
   if (!safeEqual(sig, expected)) return false;
   try {
     const { iat } = JSON.parse(Buffer.from(payload, 'base64url').toString());
-    return typeof iat === 'number' && Date.now() - iat < SESSION_MAX_AGE_MS;
+    return typeof iat === 'number' && Date.now() - iat < SESSION_MAX_AGE_MS && iat >= _revokedBefore;
   } catch { return false; }
 }
 
@@ -129,6 +167,7 @@ module.exports = {
   safeEqual, parseCookies, authenticate,
   issueSessionToken, verifySessionToken,
   loginState, recordAuthFailure,
-  writeRateLimit, uploadRateLimit,
+  writeRateLimit, uploadRateLimit, twoFaRateLimit,
+  revokeAllSessions,
   RATE_MAX, LOCKOUT_AFTER, LOCKOUT_MS,
 };

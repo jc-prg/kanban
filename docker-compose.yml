@@ -7,8 +7,6 @@ services:
       COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:-kanban-pwd}
     volumes:
       - ./data/couchdb:/opt/couchdb/data
-    ports:
-      - "127.0.0.1:5984:5984"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5984/"]
       interval: 10s

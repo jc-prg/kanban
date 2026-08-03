@@ -22,14 +22,13 @@ if (process.env.TRUST_PROXY === '1') {
   app.set('trust proxy', 1);
 }
 
-// Security headers — note: scriptSrc includes 'unsafe-inline' because the frontend
-// uses inline onclick handlers; remove it once the frontend is refactored.
+// Security headers
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:     ["'self'"],
-      scriptSrc:      ["'self'", "'unsafe-inline'"],
-      scriptSrcAttr:  ["'unsafe-inline'"],
+      scriptSrc:      ["'self'"],
+      scriptSrcAttr:  ["'none'"],
       styleSrc:       ["'self'", "'unsafe-inline'"],
       imgSrc:         ["'self'", "data:", "blob:", "https:"],
       connectSrc:     ["'self'"],
