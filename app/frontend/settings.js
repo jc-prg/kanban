@@ -293,6 +293,8 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
   });
 
   async function loadPrompts() {
+    const urlEl = document.getElementById('promptsApiUrl');
+    if (urlEl) urlEl.textContent = 'GET ' + location.origin + '/api/prompts';
     try {
       const r = await fetch('/api/prompts');
       if (!r.ok) return;

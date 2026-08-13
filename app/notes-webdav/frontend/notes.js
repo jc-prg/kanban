@@ -863,24 +863,30 @@ function initNotes(cfg) {
   function _updateNoteToggleCount(btnId, count) {
     const btn = document.getElementById(btnId);
     if (!btn) return;
-    const countEl = btn.querySelector('.notes-toggle-count');
-    if (countEl) countEl.textContent = count > 0 ? ` (${count})` : '';
+    let countEl = btn.querySelector('.attach-count');
+    if (count > 0) {
+      if (countEl) countEl.textContent = count;
+      else btn.insertAdjacentHTML('beforeend', `<span class="attach-count">${count}</span>`);
+    } else {
+      countEl?.remove();
+    }
   }
 
   function setNoteSection(sectionId, btnId, open) {
-    document.getElementById(sectionId)?.classList.toggle('note-section--open', open);
-    document.getElementById(btnId)?.classList.toggle('note-toggle--open', open);
+    const section = document.getElementById(sectionId);
+    const btn     = document.getElementById(btnId);
+    if (section) section.style.display = open ? '' : 'none';
+    if (btn)     btn.classList.toggle('card-section-toggle--active', open);
   }
   function toggleNoteSection(sectionId, btnId) {
-    const el = document.getElementById(sectionId);
-    if (!el) return;
-    const open = !el.classList.contains('note-section--open');
-    setNoteSection(sectionId, btnId, open);
+    const section = document.getElementById(sectionId);
+    setNoteSection(sectionId, btnId, section?.style.display === 'none');
   }
   function resetNoteSections() {
-    setNoteSection('noteLinkSection',        'noteToggleLink',        false);
-    setNoteSection('noteLinkedCardsSection', 'noteToggleLinkedCards', false);
-    setNoteSection('noteAttachmentsSection', 'noteToggleAttachments', false);
+    const wide = window.innerWidth >= 1200;
+    setNoteSection('noteLinkSection',        'noteToggleLink',        wide);
+    setNoteSection('noteLinkedCardsSection', 'noteToggleLinkedCards', wide);
+    setNoteSection('noteAttachmentsSection', 'noteToggleAttachments', wide);
   }
 
   // ---- Note Modal ----
@@ -1250,9 +1256,21 @@ function initNotes(cfg) {
   async function linkCardToPage(cardId, pageId) {
     const target = findNotePage(pageId, notesState.items);
     if (!target || (target.linkedCards || []).includes(cardId)) return;
+
+    let card = null;
+    for (const col of _getColumns()) {
+      card = col.cards.find(c => c.id === cardId);
+      if (card) break;
+    }
+    if (!card) return;
+
+    const label = card.text.length > 60 ? card.text.slice(0, 60) + '\u2026' : card.text;
+    if (!await _showConfirm(`Link "${label}" to page "${target.title}"?`, { okLabel: 'Link card' })) return;
+
     (target.linkedCards ??= []).push(cardId);
     target.lastModified = new Date().toISOString();
     if (noteModalPageId === pageId) renderLinkedCards(target.linkedCards);
+    renderNotesTree();
     _render();
     await _saveLinkedCards(target);
   }

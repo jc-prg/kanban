@@ -66,13 +66,14 @@ function getLinkBadgeHtml(url, href) {
 // ---- Render ----
 function _buildNoteLinkedSet() {
   const s = new Set();
-  if (typeof notesState === 'undefined') return s;
+  const ns = window._notesModule?.getNotesState() ?? (typeof notesState !== 'undefined' ? notesState : null);
+  if (!ns) return s;
   (function collect(items) {
     for (const item of items) {
       if (item.type === 'folder') { collect(item.children || []); continue; }
       for (const id of (item.linkedCards || [])) s.add(id);
     }
-  })(notesState.items || notesState.pages || []);
+  })(ns.items || ns.pages || []);
   return s;
 }
 
