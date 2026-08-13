@@ -1,0 +1,46 @@
+<!-- WebDAV settings section — paste inside the board settings dialog, as a .settings-section block -->
+<!-- Reference copy: the canonical version lives in app/frontend/index.html -->
+<!--
+  Required JS wiring (in settings.js / equivalent):
+    - Populate #webdavAccount <select> with available accounts on open
+    - Read/write #webdavEnabledToggle, #webdavAccount, #webdavSubfolder
+    - #webdavSaveBtn → PUT /api/:board/webdav-config
+    - #webdavTestBtn → POST /api/:board/webdav-config/test → show result in #webdavTestResult
+    - After save: call notesModule.updateWebdavEnabled(enabled && !!accountId)
+-->
+
+<div class="settings-section" id="webdavSection" data-settings-label="WebDAV Notes" data-settings-keywords="nextcloud sync dav notes files server account subfolder cloud storage">
+  <div class="settings-section-title">
+    <span>WebDAV Notes</span>
+    <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+  </div>
+  <div class="settings-section-body">
+    <label class="settings-item">
+      <div class="settings-item-info">
+        <div class="settings-item-label">Enable WebDAV notes</div>
+        <div class="settings-item-desc">Sync notes with a WebDAV account. Configure accounts in Global Settings → WebDAV Accounts.</div>
+      </div>
+      <div class="settings-toggle">
+        <input type="checkbox" id="webdavEnabledToggle">
+        <span class="settings-toggle-track"></span>
+      </div>
+    </label>
+    <div id="webdavFields">
+      <div class="settings-field-row">
+        <label class="settings-field-label" for="webdavAccount">Account</label>
+        <select id="webdavAccount" class="new-board-input">
+          <option value="">— select account —</option>
+        </select>
+      </div>
+      <div class="settings-field-row">
+        <label class="settings-field-label" for="webdavSubfolder">Subfolder</label>
+        <input id="webdavSubfolder" class="new-board-input" type="text" placeholder="e.g. kanban/myboard" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="settings-webdav-actions">
+        <button class="btn btn-accent" id="webdavSaveBtn">Save</button>
+        <button class="btn" id="webdavTestBtn">Test connection</button>
+      </div>
+      <div id="webdavTestResult" class="settings-webdav-result" style="display:none"></div>
+    </div>
+  </div>
+</div>

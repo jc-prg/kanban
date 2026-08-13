@@ -5,6 +5,7 @@ const express = require('express')
 const DB_MODULE          = path.resolve(__dirname, '../../backend/db.js')
 const BACKUP_MODULE      = path.resolve(__dirname, '../../backend/backup.js')
 const GLOBAL_DB_MODULE   = path.resolve(__dirname, '../../backend/global-db.js')
+const NOTES_ADAPTER_MODULE = path.resolve(__dirname, '../../backend/notes-adapter.js')
 const DASHBOARD_ROUTE    = path.resolve(__dirname, '../../backend/routes/dashboard.js')
 const CALENDAR_MODULE    = path.resolve(__dirname, '../../backend/dashboard/calendar.js')
 const MAIL_MODULE        = path.resolve(__dirname, '../../backend/dashboard/mail.js')
@@ -40,6 +41,10 @@ function createApp(dbMock) {
   }
 
   // Stub global-db if the test hasn't already injected its own mock.
+  const _defaultWdDb = {
+    get:    async () => { throw Object.assign(new Error('missing'), { statusCode: 404 }) },
+    insert: async (doc) => ({ ok: true, id: doc._id, rev: '1-abc' }),
+  };
   if (!require.cache[GLOBAL_DB_MODULE]) {
     require.cache[GLOBAL_DB_MODULE] = {
       id: GLOBAL_DB_MODULE, filename: GLOBAL_DB_MODULE, loaded: true,
@@ -50,10 +55,11 @@ function createApp(dbMock) {
         getCalAccount:       async () => null,
         initGlobalDb:        async () => {},
         getGlobalDb:         () => ({}),
-        getWebdavDb:         () => ({
-          get:    async () => { throw Object.assign(new Error('missing'), { statusCode: 404 }) },
-          insert: async (doc) => ({ ok: true, id: doc._id, rev: '1-abc' }),
-        }),
+        getWebdavDb:         () => _defaultWdDb,
+        getWebdavAccounts:   async () => [],
+        saveWebdavAccounts:  async () => ({ ok: true }),
+        getRecentFolders:    async () => ({}),
+        addRecentFolder:     async () => {},
       },
       children: [], paths: [],
     }
@@ -76,12 +82,17 @@ function createApp(dbMock) {
   const app = express()
   app.use(express.json({ limit: '10mb' }))
 
-  const { authenticate } = require('../../backend/auth')
+  const { authenticate, writeRateLimit } = require('../../backend/auth')
+  const { withBoard, withExistingBoard }  = require('../../backend/db')
+  const { createNotesRouter, createAccountsRouter } = require('../../notes-webdav/backend')
+  const notesAdapter = require('../../backend/notes-adapter')
+
   app.use('/api', authenticate)
   app.use('/api', require('../../backend/routes/auth'))
   app.use('/api', require('../../backend/routes/boards'))
   app.use('/api', require('../../backend/routes/board'))
-  app.use('/api', require('../../backend/routes/notes'))
+  app.use('/api', createNotesRouter({ adapter: notesAdapter, withBoard, withExistingBoard, writeRateLimit }))
+  app.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit }))
   app.use('/api', require('../../backend/routes/attachments'))
   app.use('/api', require('../../backend/routes/dashboard'))
   app.use('/api', require('../../backend/routes/recurring'))
@@ -97,6 +108,7 @@ function clearAppCache() {
   const toDelete = [
     DB_MODULE,
     BACKUP_MODULE,
+    NOTES_ADAPTER_MODULE,
     path.resolve(__dirname, '../../backend/auth.js'),
     path.resolve(__dirname, '../../backend/twoFactor.js'),
     path.resolve(__dirname, '../../backend/config.js'),
@@ -104,7 +116,6 @@ function clearAppCache() {
     path.resolve(__dirname, '../../backend/routes/auth.js'),
     path.resolve(__dirname, '../../backend/routes/boards.js'),
     path.resolve(__dirname, '../../backend/routes/board.js'),
-    path.resolve(__dirname, '../../backend/routes/notes.js'),
     path.resolve(__dirname, '../../backend/routes/attachments.js'),
     GLOBAL_DB_MODULE,
     DASHBOARD_ROUTE,
@@ -116,4 +127,4 @@ function clearAppCache() {
   toDelete.forEach(p => { delete require.cache[p] })
 }
 
-module.exports = { createApp, clearAppCache }
+module.exports = { createApp, clearAppCache, NOTES_ADAPTER_MODULE }

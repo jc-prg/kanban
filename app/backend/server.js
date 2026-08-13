@@ -3,13 +3,28 @@ const express = require('express');
 const helmet  = require('helmet');
 const path    = require('path');
 
-const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES } = require('./config');
-const { initDb }                          = require('./db');
+const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES, ATTACHMENTS_DIR } = require('./config');
+const { initDb, getCouch, withBoard, withExistingBoard } = require('./db');
 const { initGlobalDb }                    = require('./global-db');
-const { authenticate, parseCookies }      = require('./auth');
+const { authenticate, parseCookies, writeRateLimit, uploadRateLimit } = require('./auth');
 const { isTwoFactorEnabled, isIntranet, isDeviceTokenValid } = require('./twoFactor');
 const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize, runOrphanAttachmentCleanup } = require('./backup');
 const { initRecurring } = require('./recurring');
+
+const { createNotesRouter, createAccountsRouter } = require('../notes-webdav/backend');
+const notesAdapter = require('./notes-adapter');
+
+async function resolveCards(boardName) {
+  try {
+    const db = getCouch().use('jc-kanban-' + boardName);
+    const { columns } = await db.get('board');
+    const map = new Map();
+    for (const col of columns || [])
+      for (const card of col.cards || [])
+        map.set(card.id, card.text);
+    return map;
+  } catch { return new Map(); }
+}
 
 const app = express();
 
@@ -44,6 +59,7 @@ app.use(helmet({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
+app.use('/notes-webdav', express.static(path.join(__dirname, '..', 'notes-webdav', 'frontend')));
 
 if (LOG_API_RESPONSES) {
   const REDACT_REQ_KEYS = new Set(['password']);
@@ -82,10 +98,10 @@ app.use('/api', require('./routes/auth'));
 app.use('/api', require('./routes/prompts'));
 app.use('/api', require('./routes/boards'));
 app.use('/api', require('./routes/board'));
-app.use('/api', require('./routes/notes'));
+app.use('/api', createNotesRouter({ adapter: notesAdapter, withBoard, withExistingBoard, writeRateLimit, attachmentsDir: ATTACHMENTS_DIR, resolveCards }));
 app.use('/api', require('./routes/attachments'));
 app.use('/api', require('./routes/dashboard'));
-app.use('/api', require('./routes/webdav-accounts'));
+app.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit }));
 app.use('/api', require('./routes/recurring'));
 
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');

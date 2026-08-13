@@ -7,6 +7,7 @@ RUN npm ci --omit=dev
 
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY notes-webdav/ ./notes-webdav/
 
 RUN mkdir -p /app/data && chmod 700 /app/data && chown -R node:node /app
 

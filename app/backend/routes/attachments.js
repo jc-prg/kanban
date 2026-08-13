@@ -7,8 +7,8 @@ const { writeRateLimit, uploadRateLimit } = require('../auth');
 const { validBoardName, getBoardDb }      = require('../db');
 const { ATTACHMENTS_DIR, NOTES_DOC_ID }   = require('../config');
 const { getDbSizeBytes }                  = require('../backup');
-const { getWebdavConfig }                 = require('./notes');
-const { wdPutBinary, wdDelete, wdMkcol, _titleToSlug } = require('../webdav-notes');
+const notesAdapter                        = require('../notes-adapter');
+const { wdPutBinary, wdDelete, wdMkcol, _titleToSlug } = require('../../notes-webdav/backend/webdav-core');
 
 function safePageId(id) {
   return typeof id === 'string' && /^n-(?:wd-)?[a-z0-9]{1,20}$/.test(id);
@@ -135,7 +135,7 @@ router.post('/:board/notes/attachments/:pageId', uploadRateLimit, async (req, re
     res.json({ name: originalName, size: req.file.size });
     try {
       const db  = await getBoardDb(board);
-      const cfg = await getWebdavConfig(board);
+      const cfg = await notesAdapter.resolveWebdavCfg(board);
       if (cfg.enabled) {
         // Ensure all ancestor folders and _attachments collection exist
         if (prefix) {

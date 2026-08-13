@@ -1,0 +1,24 @@
+{
+  "name": "notes-webdav",
+  "version": "1.0.0",
+  "description": "Self-contained WebDAV-backed notes module for Express apps",
+  "main": "backend/index.js",
+  "license": "ISC",
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "archiver": "^7.0.1",
+    "multer": "^2.1.1"
+  },
+  "peerDependencies": {
+    "express": "^5.0.0",
+    "nano": "^11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "nano": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

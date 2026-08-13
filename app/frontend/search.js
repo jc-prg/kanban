@@ -326,7 +326,7 @@
       if (dashMode) {
         el.addEventListener('click', () => window.open(`/board/${encodeURIComponent(boardName)}#note:${page.id}`, '_blank', 'noopener,noreferrer'));
       } else {
-        el.addEventListener('click', () => { closeSearch(); openNoteModal(page.id); });
+        el.addEventListener('click', () => { closeSearch(); window._notesModule?.openNoteModal(page.id); });
       }
       box.appendChild(el);
     });

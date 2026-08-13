@@ -1,0 +1,106 @@
+<!-- Note editor modal — paste at the end of <body>, before the print root -->
+<!-- Reference copy: the canonical version lives in app/frontend/index.html -->
+
+<div id="noteModal" class="modal-backdrop" style="display:none">
+  <div class="modal note-modal">
+    <button class="modal-fs-btn" id="noteFullscreenBtn" title="Enter full screen"><span data-icon="fullscreen"></span></button>
+    <div id="noteModalLoading" class="note-modal-loading" style="display:none">
+      <span class="note-modal-loading-text">Loading…</span>
+    </div>
+    <div class="modal-columns">
+      <div class="modal-col-main">
+        <div class="modal-field">
+          <label>Note</label>
+          <textarea id="notePageTitle" rows="1" placeholder="Page title…" spellcheck="false" autocomplete="off"></textarea>
+          <div class="note-modal-crumb" id="noteModalBreadcrumb"></div>
+        </div>
+        <div class="modal-field modal-field-desc">
+          <div class="modal-field-label-row">
+            <label>Description</label>
+            <div id="noteDescToolbar" class="note-desc-toolbar">
+              <button class="note-tb-btn" data-fmt="bold"      title="Bold (Ctrl+B)"><b>B</b></button>
+              <button class="note-tb-btn" data-fmt="italic"    title="Italic (Ctrl+I)"><i>I</i></button>
+              <button class="note-tb-btn" data-fmt="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+              <button class="note-tb-btn note-tb-btn--mark" data-fmt="mark" title="Highlight (Ctrl+M)">M</button>
+              <button class="note-tb-btn" data-fmt="strikethrough" title="Strikethrough"><s>S</s></button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="h1" title="Heading 1">H1</button>
+              <button class="note-tb-btn" data-fmt="h2" title="Heading 2">H2</button>
+              <button class="note-tb-btn" data-fmt="h3" title="Heading 3">H3</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="checkbox" title="Checkbox"><span data-icon="checkbox"></span></button>
+              <button class="note-tb-btn" data-fmt="code"     title="Code block">&lt;/&gt;</button>
+              <span class="note-tb-sep"></span>
+              <button class="note-tb-btn" data-fmt="toc"      title="Table of contents">[toc]</button>
+            </div>
+            <button class="note-tb-btn desc-scroll-top" id="noteDescScrollTop" title="Scroll to top">↑ top</button>
+          </div>
+          <div id="notePageDesc-mount" class="cm-mount"></div>
+          <textarea id="notePageDesc" style="display:none" placeholder="Write notes in markdown…"></textarea>
+        </div>
+      </div>
+      <div class="modal-col-side">
+        <div class="card-section-header">Properties</div>
+        <div class="card-section-toggles">
+          <button class="card-section-toggle" id="noteToggleLink" title="Link"><span data-icon="link" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="noteToggleLinkedCards" title="Linked Cards"><span data-icon="linkedCards" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="noteToggleAttachments" title="Attachments"><span data-icon="attachment" data-icon-w="12" data-icon-h="12"></span></button>
+          <button class="card-section-toggle" id="noteWdInfoBtn" title="WebDAV info" style="display:none"><span data-icon="cardInfo" data-icon-w="12" data-icon-h="12"></span></button>
+        </div>
+        <div id="noteLinkSection" style="display:none">
+          <div class="modal-field">
+            <label>Link</label>
+            <div class="modal-link-row">
+              <input id="notePageLink" type="url" placeholder="https://…">
+              <button class="btn modal-link-open" id="notePageLinkOpen" title="Open link" tabindex="-1"><span data-icon="openLink"></span></button>
+            </div>
+          </div>
+        </div>
+        <div id="noteLinkedCardsSection" style="display:none">
+          <div class="modal-field">
+            <label>Linked Cards</label>
+            <div id="noteLinkedCardsList" class="note-linked-cards-list"></div>
+            <div class="note-card-search-wrapper">
+              <div class="note-card-search-row">
+                <input id="noteCardSearchInput" type="text" placeholder="Search cards to link…" autocomplete="off" spellcheck="false">
+                <button class="btn" id="noteCreateCardBtn" title="Create a new card and link it">+ card</button>
+              </div>
+              <div id="noteCardSearchResults" class="note-card-search-results" style="display:none"></div>
+            </div>
+            <div id="noteCreateCardForm" class="note-create-card-form" style="display:none">
+              <input id="noteNewCardText" type="text" placeholder="Card text…" autocomplete="off" spellcheck="false">
+              <div class="note-create-card-actions">
+                <button class="btn" id="noteCreateCardCancel">Cancel</button>
+                <button class="btn btn-accent" id="noteCreateCardSubmit">Create &amp; link</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="noteAttachmentsSection" style="display:none">
+          <div id="noteAttachmentsField" class="modal-field">
+            <label>Attachments</label>
+            <div id="noteAttachList" class="note-attach-list"></div>
+            <div class="note-attach-upload-row">
+              <label class="btn note-upload-label" for="noteAttachInput">+ Upload</label>
+              <input id="noteAttachInput" type="file" multiple style="display:none">
+            </div>
+          </div>
+        </div>
+        <div id="noteWdInfoPopover" class="note-wd-info-popover" style="display:none">
+          <div class="note-wd-info-row"><span class="note-wd-info-label">ID</span><code id="noteWdInfoId" class="note-wd-info-value"></code></div>
+          <div class="note-wd-info-row"><span class="note-wd-info-label">WebDAV path</span><code id="noteWdInfoPath" class="note-wd-info-value"></code></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <div class="modal-autosave-wrap">
+        <label class="modal-autosave-label" id="noteAutoSaveLabel"><input type="checkbox" id="noteAutoSave"> Auto-save</label>
+        <span id="noteModalSavedMsg" class="modal-saved-msg"></span>
+      </div>
+      <button class="btn" id="noteModalPrintBtn"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="noteModalCancelBtn"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-danger" id="noteModalDeleteBtn"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn btn-accent" id="noteModalSaveBtn"><span class="btn-label">Save</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
+    </div>
+  </div>
+</div>

@@ -486,6 +486,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       document.getElementById('webdavSubfolder').value = cfg.subfolder || '';
       _webdavFieldsVisible(cfg.enabled);
       window.WEBDAV_CFG = cfg.enabled && cfg.accountId ? { enabled: true } : null;
+      window._notesModule?.updateWebdavEnabled(cfg.enabled && !!cfg.accountId);
     } catch (_) {}
   }
 
@@ -1666,14 +1667,50 @@ function handleUrlHash() {
     openSettings();
   } else if (hash.startsWith('note:')) {
     const noteId = hash.slice(5);
-    if (findNotePage(noteId, notesState.items || notesState.pages || [])) {
-      openNoteModal(noteId);
+    const ns = window._notesModule?.getNotesState() || {};
+    if (window._notesModule?.findNotePage(noteId, ns.items || ns.pages || [])) {
+      window._notesModule.openNoteModal(noteId);
     } else {
       document.getElementById('noteModal').style.display = 'none';
       const loadingEl = document.getElementById('noteModalLoading');
       if (loadingEl) loadingEl.style.display = 'none';
     }
   }
+}
+
+// ---- Notes module wiring ----
+
+function _createCardInInbox(text) {
+  if (!text?.trim()) return null;
+  const withDate = state.settings?.inboxWithDate ?? false;
+  const now = new Date();
+  const title = withDate
+    ? `Inbox ${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.`
+    : 'Inbox';
+  let inbox = state.columns.find(c => c.title === title);
+  if (!inbox) {
+    const inboxCols = state.columns.filter(c => /^inbox/i.test(c.title));
+    if (inboxCols.length) {
+      const parseDate = t => {
+        const m = t.match(/(\d{2})\.(\d{2})\./);
+        if (!m) return new Date(0);
+        const d = new Date(now.getFullYear(), +m[2] - 1, +m[1]);
+        if (d - now > 7 * 86400000) d.setFullYear(d.getFullYear() - 1);
+        return d;
+      };
+      inbox = inboxCols.reduce((a, b) => parseDate(b.title) > parseDate(a.title) ? b : a);
+    }
+  }
+  if (!inbox) {
+    inbox = { id: uid(), title, cards: [], color: '#06b6d4' };
+    state.columns.unshift(inbox);
+    render();
+  }
+  const cardId = uid();
+  inbox.cards.unshift({ id: cardId, text: text.trim(), color: inbox.color || '#06b6d4', created: new Date().toISOString().slice(0, 10) });
+  schedulesSave();
+  render();
+  return cardId;
 }
 
 // ---- After-auth routing ----
@@ -1696,16 +1733,62 @@ async function afterAuth() {
     if (window.matchMedia('(min-width: 640px)').matches)
       document.getElementById('dashboardBtn').style.display = '';
     await load();
+    window._notesModule = initNotes({
+      apiBase:      API_BASE,
+      boardName:    BOARD_NAME,
+      webdavEnabled: !!(window.WEBDAV_CFG?.enabled),
+      hooks: {
+        scheduleSave:       () => schedulesSave(),
+        render:             () => render(),
+        showConfirm:        (msg, opts) => showConfirm(msg, opts),
+        escHtml:            s => escHtml(s),
+        openEditModal:      (colId, card) => openEditModal(colId, card),
+        uid:                () => uid(),
+        getColumns:         () => state.columns,
+        getSettings:        () => state.settings,
+        getCardAttachCount: id => cardAttachMap.get(id) ?? null,
+        createCard:         text => _createCardInInbox(text),
+      },
+      icons: {
+        collapse:         ICONS.collapse,
+        expand:           ICONS.expand,
+        done:             ICONS.done,
+        svgNetworkFolder: _svgNetworkFolder,
+        svgFolder:        _svgFolder,
+        svgDelete:        _svgDelete,
+        svgClose:         _svgClose,
+        svgAttachment:    _svgAttachment,
+        svgAttachmentSm:  (w, h) => _svgAttachment(w, h),
+        svgFileImage:     _svgFileImage,
+        svgFilePdf:       _svgFilePdf,
+        svgFileWeb:       _svgFileWeb,
+        svgLink:          _svgLink,
+        svgLinkedCards:   _svgLinkedCards,
+        svgSync:          _svgSync,
+      },
+      markdown: { render: text => DOMPurify.sanitize(marked.parse(text)) },
+      editor: {
+        create:      (id, opts) => createMarkdownEditor(id, opts),
+        setValue:    (id, text) => setEditorValue(id, text),
+        getValue:    id => getEditorValue(id),
+        isActive:    id => isEditorActive(id),
+        focus:       id => focusEditor(id),
+        applyFormat: (id, fmt) => applyEditorFormat(id, fmt),
+      },
+      print: {
+        buildItem: _buildPrintItem,
+        trigger:   _triggerPrint,
+        fmtDate:   _fmtPrintDate,
+      },
+    });
     // If the sidebar was open on last visit, open it immediately and show a
     // loading indicator so the panel is visible while notes are being fetched.
     if (state.settings?.notesSidebarOpen) {
-      const w = state.settings?.notesSidebarWidth;
-      if (w >= SIDEBAR_MIN) sidebarWidth = Math.min(w, _sidebarMax());
-      toggleNotesSidebar();
+      window._notesModule.restoreNotesSidebar();
       const treeBody = document.getElementById('notesTreeBody');
       if (treeBody) treeBody.innerHTML = '<p class="notes-empty notes-loading">Loading\u2026</p>';
     }
-    await loadNotes();
+    await window._notesModule.loadNotes();
     loadCardAttachSet();
     handleUrlHash();
   } else initOverview();

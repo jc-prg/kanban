@@ -489,7 +489,7 @@ function renderCardLinkedPages(cardId) {
       if (item.type === 'folder') { search(item.children || []); continue; }
       if ((item.linkedCards || []).includes(cardId)) linked.push(item);
     }
-  })(typeof notesState !== 'undefined' ? (notesState.items || notesState.pages || []) : []);
+  })(window._notesModule ? (window._notesModule.getNotesState().items || []) : []);
 
   const hasLinked = linked.length > 0;
   const wide = window.innerWidth >= 1200;
@@ -503,10 +503,10 @@ function renderCardLinkedPages(cardId) {
     chip.className = 'card-linked-page-chip';
     chip.textContent = page.title;
     const path = typeof getNotePath === 'function'
-      ? getNotePath(page.id, notesState.items || notesState.pages || [])
+      ? getNotePath(page.id, window._notesModule?.getNotesState()?.items || [])
       : null;
     chip.title = path ? path.map(p => p.title).join(' › ') : page.title;
-    chip.addEventListener('click', () => { closeModal(); openNoteModal(page.id); });
+    chip.addEventListener('click', () => { closeModal(); window._notesModule?.openNoteModal(page.id); });
     list.appendChild(chip);
   });
 }
