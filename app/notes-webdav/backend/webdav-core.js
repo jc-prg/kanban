@@ -428,11 +428,23 @@ async function syncFromWebdav(cfg, tree) {
     }
   }
 
-  // Mark pages absent from WebDAV as orphaned.
+  // Build reverse map id → computed path (last write wins → current slug path).
+  const idToPath = new Map();
+  for (const [p, it] of pathMap) idToPath.set(it.id, p);
+
+  // Mark items absent from WebDAV as orphaned with a detailed reason.
+  // Full infinity-depth sync: matchedIds covers all levels, so each item is
+  // checked independently. Folder condition removed so folders are marked too.
   function _markOrphans(items) {
     for (const item of items) {
-      if (item.type !== 'folder' && !matchedIds.has(item.id)) {
-        if (!item.orphaned) { item.orphaned = true; changed = true; }
+      if (!matchedIds.has(item.id)) {
+        if (!item.orphaned || item.orphaned === true) {
+          const expected = item.wdPath || idToPath.get(item.id) || '(unknown)';
+          item.orphaned = item.wdPath
+            ? `Deleted or moved on WebDAV (was: ${item.wdPath})`
+            : `Not yet uploaded to WebDAV (expected path: ${expected})`;
+          changed = true;
+        }
       }
       if (item.type === 'folder') _markOrphans(item.children || []);
     }
@@ -506,10 +518,31 @@ async function syncRootFromWebdav(cfg, tree) {
     }
   }
 
+  // Build reverse map id → computed path for detailed orphan messages.
+  const idToPath = new Map();
+  for (const [p, it] of pathMap) idToPath.set(it.id, p);
+
   // Mark root-level items absent from WebDAV as orphaned (scoped to what we queried).
+  // When a folder is missing, also recursively mark its children as orphaned.
+  function _orphanSubtree(items, reason) {
+    for (const item of items) {
+      if (!item.orphaned || item.orphaned === true) { item.orphaned = reason; changed = true; }
+      if (item.type === 'folder') _orphanSubtree(item.children || [], reason);
+    }
+  }
   for (const item of newTree.items) {
     if (!matchedIds.has(item.id)) {
-      if (!item.orphaned) { item.orphaned = true; changed = true; }
+      if (!item.orphaned || item.orphaned === true) {
+        const expected = item.wdPath || idToPath.get(item.id) || '(unknown)';
+        item.orphaned = item.wdPath
+          ? `Deleted or moved on WebDAV (was: ${item.wdPath})`
+          : `Not yet uploaded to WebDAV (expected path: ${expected})`;
+        changed = true;
+      }
+      if (item.type === 'folder') {
+        const folderExpected = item.wdPath || idToPath.get(item.id) || '(unknown)';
+        _orphanSubtree(item.children || [], `Parent folder not on WebDAV (expected: ${folderExpected})`);
+      }
     }
   }
 
@@ -605,10 +638,31 @@ async function syncFolderChildrenFromWebdav(cfg, tree, folderId) {
     }
   }
 
+  // Build reverse map id → computed path for detailed orphan messages.
+  const idToPath = new Map();
+  for (const [p, it] of newPathMap) idToPath.set(it.id, p);
+
   // Mark direct children of this folder absent from WebDAV as orphaned.
+  // When a sub-folder is missing, also recursively mark its children.
+  function _orphanSubtree(items, reason) {
+    for (const item of items) {
+      if (!item.orphaned || item.orphaned === true) { item.orphaned = reason; changed = true; }
+      if (item.type === 'folder') _orphanSubtree(item.children || [], reason);
+    }
+  }
   for (const item of newFolderItem.children) {
     if (!matchedIds.has(item.id)) {
-      if (!item.orphaned) { item.orphaned = true; changed = true; }
+      if (!item.orphaned || item.orphaned === true) {
+        const expected = item.wdPath || idToPath.get(item.id) || '(unknown)';
+        item.orphaned = item.wdPath
+          ? `Deleted or moved on WebDAV (was: ${item.wdPath})`
+          : `Not yet uploaded to WebDAV (expected path: ${expected})`;
+        changed = true;
+      }
+      if (item.type === 'folder') {
+        const folderExpected = item.wdPath || idToPath.get(item.id) || '(unknown)';
+        _orphanSubtree(item.children || [], `Parent folder not on WebDAV (expected: ${folderExpected})`);
+      }
     }
   }
 

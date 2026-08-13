@@ -202,6 +202,16 @@
 .notes-tree-item--orphaned .notes-item-title:hover,
 .notes-tree-item--orphaned .notes-item-folder-title:hover { color: var(--accent); }
 
+.notes-orphan-ctx__reason {
+  padding: 8px 12px 6px;
+  font-size: 0.74rem;
+  color: #c9971a;
+  font-weight: 600;
+  max-width: 300px;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
 .notes-item-indicators {
   display: flex;
   gap: 2px;

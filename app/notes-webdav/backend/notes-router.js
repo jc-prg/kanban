@@ -703,6 +703,73 @@ function createNotesRouter(options = {}) {
   }));
 
   // ---------------------------------------------------------------------------
+  // Orphan repair route
+  // ---------------------------------------------------------------------------
+
+  router.post('/:board/notes/repair-orphan', writeRateLimit, withBoard(async (req, res, _db) => {
+    const { board } = req.params;
+    const { itemId, action } = req.body;
+    if (!itemId || !['upload', 'delete'].includes(action)) {
+      return res.status(400).json({ error: 'itemId and action (upload|delete) required' });
+    }
+    const notes = await _loadNotes(board);
+    const item  = _findItem(itemId, notes.items);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    if (action === 'delete') {
+      // Remove from DB only — no WebDAV touch since item is orphaned (not present there).
+      // Clean up any local attachments for pages.
+      function _cleanLocalAttach(it) {
+        if (it.type === 'page' && attachmentsDir) {
+          const prefix = getAttachmentPrefix(it, notes.items);
+          const aDir   = path.join(attachmentsDir, board, prefix, '_attachments');
+          for (const f of _getAttachmentFiles(attachmentsDir, board, it.id, prefix)) {
+            try { fs.unlinkSync(path.join(aDir, `${it.id}_${f}`)); } catch { /* ok */ }
+          }
+        }
+        if (it.type === 'folder') for (const child of it.children || []) _cleanLocalAttach(child);
+      }
+      _cleanLocalAttach(item);
+      _removeItem(itemId, notes.items);
+      const result = await adapter.saveNotes(board, notes);
+      return res.json({ ok: true, notes, rev: result.rev });
+    }
+
+    // action === 'upload': (re-)create item on WebDAV.
+    const cfg = await adapter.resolveWebdavCfg(board);
+    if (!cfg.enabled) return res.status(400).json({ error: 'WebDAV not enabled' });
+
+    async function _uploadItem(it) {
+      delete it.wdPath;
+      delete it.orphaned;
+      const itPath = buildPath(it, notes.items);
+      if (!itPath) return;
+      if (it.type === 'folder') {
+        await wdMkcol(cfg, itPath).catch(() => {});
+        it.wdPath = itPath;
+        for (const child of (it.children || [])) await _uploadItem(child);
+      } else {
+        const dir = itPath.includes('/') ? itPath.substring(0, itPath.lastIndexOf('/') + 1) : '';
+        if (dir) await wdMkcol(cfg, dir).catch(() => {});
+        const attachFiles = _getAttachmentFiles(attachmentsDir, board, it.id, getAttachmentPrefix(it, notes.items));
+        const source      = _sourceUrl(req, baseUrl, board, it.id);
+        const lcEntries   = await _buildLinkedCardEntries(it.linkedCards, board, req, resolveCards, baseUrl);
+        await wdPut(cfg, itPath, renderMd(it, attachFiles, source, lcEntries));
+        it.wdPath = itPath;
+        it.lastModified = new Date().toISOString();
+      }
+    }
+
+    try {
+      await _uploadItem(item);
+    } catch (err) {
+      return res.status(502).json({ error: `WebDAV upload failed: ${err.message}` });
+    }
+    const result = await adapter.saveNotes(board, notes);
+    res.json({ ok: true, notes, rev: result.rev });
+  }));
+
+  // ---------------------------------------------------------------------------
   // Sync routes
   // ---------------------------------------------------------------------------
 

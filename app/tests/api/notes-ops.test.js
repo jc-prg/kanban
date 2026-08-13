@@ -649,7 +649,7 @@ describe('POST /:board/notes/sync', () => {
     expect(res.status).toBe(200)
     expect(res.body.changed).toBe(true)
     const page = res.body.notes.items.find(i => i.id === 'n-testpage')
-    expect(page.orphaned).toBe(true)
+    expect(page.orphaned).toBeTruthy()
   })
 
   it('NS-4: WebDAV disabled → 200 { ok: true, changed: false }, no fetch', async () => {

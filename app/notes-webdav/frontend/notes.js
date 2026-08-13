@@ -598,6 +598,97 @@ function initNotes(cfg) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Orphan repair context menu
+  // ---------------------------------------------------------------------------
+
+  let _orphanMenuEl   = null;
+  let _orphanTargetId = null;
+  let _orphanTargetType = null;
+
+  function _closeOrphanMenu() {
+    if (_orphanMenuEl) _orphanMenuEl.style.display = 'none';
+    _orphanTargetId = null;
+  }
+
+  function _ensureOrphanMenu() {
+    if (_orphanMenuEl) return;
+    _orphanMenuEl = document.createElement('div');
+    _orphanMenuEl.className = 'context-menu notes-orphan-ctx';
+    _orphanMenuEl.style.display = 'none';
+    _orphanMenuEl.innerHTML =
+      `<div class="notes-orphan-ctx__reason"></div>` +
+      `<div class="ctx-separator"></div>` +
+      `<button class="ctx-item notes-orphan-ctx__upload"><span class="ctx-icon">&#x2191;</span>Upload to WebDAV</button>` +
+      `<button class="ctx-item ctx-danger notes-orphan-ctx__delete"><span class="ctx-icon">&#xd7;</span>Delete from database</button>`;
+    document.body.appendChild(_orphanMenuEl);
+
+    _orphanMenuEl.querySelector('.notes-orphan-ctx__upload').addEventListener('click', async () => {
+      const id = _orphanTargetId;
+      _closeOrphanMenu();
+      if (!id || !NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-orphan`, { itemId: id, action: 'upload' });
+        _applyNotesResult(data);
+      } catch (e) {
+        await _showConfirm(`Upload failed: ${e.message}`, { okLabel: 'OK' });
+      }
+      renderNotesTree();
+    });
+
+    _orphanMenuEl.querySelector('.notes-orphan-ctx__delete').addEventListener('click', async () => {
+      const id   = _orphanTargetId;
+      const type = _orphanTargetType;
+      _closeOrphanMenu();
+      if (!id) return;
+      const it = findNoteItem(id, notesState.items);
+      if (!it) return;
+      const label = type === 'folder' ? `folder "${it.title}"` : `page "${it.title}"`;
+      if (!await _showConfirm(`Delete ${label} from database?`, { okLabel: 'Delete', danger: true })) return;
+      if (!NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-orphan`, { itemId: id, action: 'delete' });
+        if (noteModalPageId === id) closeNoteModal();
+        _applyNotesResult(data);
+      } catch (e) {
+        await _showConfirm(`Delete failed: ${e.message}`, { okLabel: 'OK' });
+      }
+      renderNotesTree();
+    });
+
+    document.addEventListener('mousedown', e => {
+      if (_orphanMenuEl?.style.display !== 'none' && !_orphanMenuEl.contains(e.target)) {
+        _closeOrphanMenu();
+      }
+    }, true);
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _orphanMenuEl?.style.display !== 'none') _closeOrphanMenu();
+    });
+  }
+
+  function _showOrphanMenu(e, item) {
+    e.preventDefault();
+    e.stopPropagation();
+    _ensureOrphanMenu();
+    _orphanTargetId   = item.id;
+    _orphanTargetType = item.type;
+
+    const reason = (item.orphaned === true || !item.orphaned) ? 'Item not on WebDAV' : String(item.orphaned);
+    _orphanMenuEl.querySelector('.notes-orphan-ctx__reason').textContent = '\u26a0 ' + reason;
+
+    // Items orphaned because their parent folder is missing can't be individually re-uploaded.
+    const isChildOrphan = typeof item.orphaned === 'string' && item.orphaned.startsWith('Parent folder');
+    _orphanMenuEl.querySelector('.notes-orphan-ctx__upload').style.display = isChildOrphan ? 'none' : '';
+
+    _orphanMenuEl.style.display = 'block';
+    const x = e.clientX, y = e.clientY;
+    const w = _orphanMenuEl.offsetWidth  || 240;
+    const h = _orphanMenuEl.offsetHeight || 100;
+    _orphanMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
+    _orphanMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
+  }
+
   function _renderFolderItem(folder, container, depth) {
     const isExpanded  = notesExpanded.has(folder.id);
     const hasChildren = (folder.children || []).length > 0 || _webdavActive();
@@ -670,6 +761,10 @@ function initNotes(cfg) {
       }
     });
 
+    if (_webdavActive() && folder.orphaned) {
+      el.addEventListener('contextmenu', e => _showOrphanMenu(e, folder));
+    }
+
     container.appendChild(el);
 
     if (isExpanded) renderNotesList(folder.children || [], container, depth + 1);
@@ -717,6 +812,10 @@ function initNotes(cfg) {
         deleteNoteItem(page.id);
       }
     });
+
+    if (_webdavActive() && page.orphaned) {
+      el.addEventListener('contextmenu', e => _showOrphanMenu(e, page));
+    }
 
     container.appendChild(el);
   }
