@@ -28,6 +28,8 @@
  *   svgDelete()
  *   svgClose()
  *   svgAttachment()
+ *   svgDownload()
+ *   svgFullscreen(), svgOpenLink()
  *   svgFileImage(), svgFilePdf(), svgFileWeb()
  *   svgLink(w,h), svgLinkedCards(w,h), svgAttachmentSm(w,h)
  *
@@ -1370,7 +1372,10 @@ function initNotes(cfg) {
     const svgFileImg  = _icons.svgFileImage     ? _icons.svgFileImage()    : svgAttach;
     const svgFilePdf  = _icons.svgFilePdf       ? _icons.svgFilePdf()      : svgAttach;
     const svgFileWeb  = _icons.svgFileWeb       ? _icons.svgFileWeb()      : svgAttach;
-    const svgDelete   = _icons.svgDelete        ? _icons.svgDelete()       : '\u00d7';
+    const svgDelete      = _icons.svgDelete     ? _icons.svgDelete()     : '\u00d7';
+    const svgDownload    = _icons.svgDownload   ? _icons.svgDownload()   : '\u21e9';
+    const svgFullscreen  = _icons.svgFullscreen ? _icons.svgFullscreen() : '\u26f6';
+    const svgOpenLink    = _icons.svgOpenLink   ? _icons.svgOpenLink()   : '\u2197';
 
     for (const f of files) {
       const ext = f.name.split('.').pop()?.toLowerCase() || '';
@@ -1389,16 +1394,22 @@ function initNotes(cfg) {
         `<span class="note-attach-name" title="${_escHtml(f.name)}">${_escHtml(f.name)}</span>` +
         `<span class="note-attach-size">${_fmtFileSize(f.size)}</span>` +
         `<div class="note-attach-actions">` +
-          `<button class="note-attach-btn" data-act="insert" title="Insert link">&#x2b;</button>` +
-          `<button class="note-attach-btn" data-act="view"   title="Open/view">&#x1f441;</button>` +
+          `<button class="note-attach-btn" data-act="insert"   title="Insert link">&#x2b;</button>` +
+          (ft === 'image' || ft === 'pdf' ? `<button class="note-attach-btn" data-act="view" title="View fullscreen">${svgFullscreen}</button>` : '') +
+          (ft === 'html' ? `<button class="note-attach-btn" data-act="view" title="Open in new tab">${svgOpenLink}</button>` : '') +
+          `<button class="note-attach-btn" data-act="download" title="Download">${svgDownload}</button>` +
           `<button class="note-attach-btn note-attach-btn--del" data-act="delete" title="Delete">${svgDelete}</button>` +
         `</div>`;
 
       item.querySelector('[data-act="insert"]').addEventListener('click', () => {
         _insertAttachmentMd(f.name, ft);
       });
-      item.querySelector('[data-act="view"]').addEventListener('click', () => {
-        openAttachmentViewer(url, f.name, ft);
+      if (ft === 'image' || ft === 'pdf' || ft === 'html')
+        item.querySelector('[data-act="view"]').addEventListener('click', () => {
+          openAttachmentViewer(url, f.name, ft);
+        });
+      item.querySelector('[data-act="download"]').addEventListener('click', () => {
+        _downloadAttachment(url, f.name);
       });
       item.querySelector('[data-act="delete"]').addEventListener('click', async () => {
         if (!await _showConfirm(`Delete "${f.name}"?`, { okLabel: 'Delete', danger: true })) return;
@@ -1511,14 +1522,13 @@ function initNotes(cfg) {
   let _viewerBlob = null;
 
   async function openAttachmentViewer(url, name, type) {
-    const viewer = document.getElementById('attachViewer');
-    if (!viewer) return;
-    const iframe = document.getElementById('attachViewerFrame');
-    const img    = document.getElementById('attachViewerImg');
-    if (!iframe || !img) return;
+    const viewer  = document.getElementById('attachViewer');
+    const content = document.getElementById('attachViewerContent');
+    if (!viewer || !content) return;
 
     viewer.style.display = 'flex';
     document.getElementById('attachViewerName').textContent = name;
+    content.innerHTML = '';
 
     try {
       const r = await fetch(url);
@@ -1531,19 +1541,30 @@ function initNotes(cfg) {
       const isPdf   = type === 'pdf';
       const isHtml  = ['html','htm'].includes(type);
 
-      img.style.display    = isImage ? '' : 'none';
-      iframe.style.display = (isPdf || isHtml) ? '' : 'none';
+      if (isImage) {
+        const img = document.createElement('img');
+        img.src = _viewerBlob;
+        img.className = 'attach-viewer-img';
+        content.appendChild(img);
+      } else if (isPdf || isHtml) {
+        const iframe = document.createElement('iframe');
+        iframe.src = _viewerBlob;
+        iframe.className = 'attach-viewer-iframe';
+        content.appendChild(iframe);
+      }
 
-      if (isImage)        img.src    = _viewerBlob;
-      else if (isPdf || isHtml) iframe.src = _viewerBlob;
+      const dlBtn = document.getElementById('attachViewerDl');
+      if (dlBtn) dlBtn.onclick = () => _triggerBlobDownload(blob, name);
     } catch (e) {
       document.getElementById('attachViewerName').textContent = `Error: ${e.message}`;
     }
   }
 
   function closeAttachmentViewer() {
-    const viewer = document.getElementById('attachViewer');
-    if (viewer) viewer.style.display = 'none';
+    const viewer  = document.getElementById('attachViewer');
+    const content = document.getElementById('attachViewerContent');
+    if (viewer)  viewer.style.display = 'none';
+    if (content) content.innerHTML = '';
     if (_viewerBlob) { URL.revokeObjectURL(_viewerBlob); _viewerBlob = null; }
   }
 
@@ -2107,6 +2128,9 @@ function initNotes(cfg) {
 
     // Expose buildToc for editor preview rendering
     window.buildToc = buildToc;
+    // Expose attachment helpers for cards.js and dashboard.js
+    window._downloadAttachment = _downloadAttachment;
+    window.openAttachmentViewer = openAttachmentViewer;
   }
 
   // Run wiring immediately (initNotes is called after DOM ready)
