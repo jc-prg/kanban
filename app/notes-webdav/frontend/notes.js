@@ -86,6 +86,7 @@ function initNotes(cfg) {
   const NOTES_ATTACH_API = _base ? `${_base}/notes/attachments` : null;
   const NOTES_PAGES_API  = _base ? `${_base}/notes/pages`       : null;
   const NOTES_FOLD_API   = _base ? `${_base}/notes/folders`     : null;
+  const NOTES_CHECK_API  = _base ? `${_base}/notes/check-consistency` : null;
 
   function _webdavActive() { return !!(_webdavEnabled && NOTES_PAGES_API); }
 
@@ -202,6 +203,17 @@ function initNotes(cfg) {
         notesState     = _normalizeNotes(data.notes);
         baseNotesState = JSON.parse(JSON.stringify(notesState));
         renderNotesTree();
+      }
+      // Run consistency check after sync to detect conflicts, duplicates, attachment orphans
+      if (NOTES_CHECK_API) {
+        try {
+          const checkData = await _notesOp('POST', NOTES_CHECK_API, {});
+          if (checkData.notes) {
+            notesState     = _normalizeNotes(checkData.notes);
+            baseNotesState = JSON.parse(JSON.stringify(notesState));
+            renderNotesTree();
+          }
+        } catch (e) { console.warn('Consistency check failed:', e.message); }
       }
     } catch (e) { console.error('WebDAV sync error:', e.message); }
     finally {
@@ -691,13 +703,250 @@ function initNotes(cfg) {
     _orphanMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
   }
 
+  // ---------------------------------------------------------------------------
+  // Conflict context menu
+  // ---------------------------------------------------------------------------
+
+  let _conflictMenuEl   = null;
+  let _conflictTargetId = null;
+
+  function _closeConflictMenu() {
+    if (_conflictMenuEl) _conflictMenuEl.style.display = 'none';
+    _conflictTargetId = null;
+  }
+
+  function _ensureConflictMenu() {
+    if (_conflictMenuEl) return;
+    _conflictMenuEl = document.createElement('div');
+    _conflictMenuEl.className = 'context-menu notes-conflict-ctx';
+    _conflictMenuEl.style.display = 'none';
+    _conflictMenuEl.innerHTML =
+      `<div class="notes-conflict-ctx__reason"></div>` +
+      `<div class="ctx-separator"></div>` +
+      `<button class="ctx-item notes-conflict-ctx__use-db"><span class="ctx-icon">&#x2191;</span>Use DB version (overwrite WebDAV)</button>` +
+      `<button class="ctx-item notes-conflict-ctx__use-wd"><span class="ctx-icon">&#x2193;</span>Use WebDAV version (overwrite DB)</button>`;
+    document.body.appendChild(_conflictMenuEl);
+
+    _conflictMenuEl.querySelector('.notes-conflict-ctx__use-db').addEventListener('click', async () => {
+      const id = _conflictTargetId;
+      _closeConflictMenu();
+      if (!id || !NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-conflict`, { itemId: id, action: 'use-db' });
+        _applyNotesResult(data);
+      } catch (e) { await _showConfirm(`Upload failed: ${e.message}`, { okLabel: 'OK' }); }
+      renderNotesTree();
+    });
+
+    _conflictMenuEl.querySelector('.notes-conflict-ctx__use-wd').addEventListener('click', async () => {
+      const id = _conflictTargetId;
+      _closeConflictMenu();
+      if (!id || !NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-conflict`, { itemId: id, action: 'use-webdav' });
+        _applyNotesResult(data);
+        // If the affected page is currently open in the modal, reload it
+        if (noteModalPageId === id) { closeNoteModal(); }
+      } catch (e) { await _showConfirm(`Download failed: ${e.message}`, { okLabel: 'OK' }); }
+      renderNotesTree();
+    });
+
+    document.addEventListener('mousedown', e => {
+      if (_conflictMenuEl?.style.display !== 'none' && !_conflictMenuEl.contains(e.target))
+        _closeConflictMenu();
+    }, true);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _conflictMenuEl?.style.display !== 'none') _closeConflictMenu();
+    });
+  }
+
+  function _showConflictMenu(e, item) {
+    e.preventDefault();
+    e.stopPropagation();
+    _ensureConflictMenu();
+    _conflictTargetId = item.id;
+
+    const diff = item.conflict || {};
+    const parts = [];
+    if (diff.title)       parts.push(`Title: DB="${diff.title.db}" / WebDAV="${diff.title.wd}"`);
+    if (diff.link)        parts.push(`Link: DB="${diff.link.db}" / WebDAV="${diff.link.wd}"`);
+    if (diff.description) parts.push('Description differs');
+    const reason = parts.length ? parts.join(' \u2022 ') : 'Content differs from WebDAV';
+    _conflictMenuEl.querySelector('.notes-conflict-ctx__reason').textContent = '\u26a0 ' + reason;
+
+    _conflictMenuEl.style.display = 'block';
+    const x = e.clientX, y = e.clientY;
+    const w = _conflictMenuEl.offsetWidth  || 280;
+    const h = _conflictMenuEl.offsetHeight || 100;
+    _conflictMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
+    _conflictMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Duplicate context menu
+  // ---------------------------------------------------------------------------
+
+  let _duplicateMenuEl   = null;
+  let _duplicateTargetId = null;
+
+  function _closeDuplicateMenu() {
+    if (_duplicateMenuEl) _duplicateMenuEl.style.display = 'none';
+    _duplicateTargetId = null;
+  }
+
+  function _ensureDuplicateMenu() {
+    if (_duplicateMenuEl) return;
+    _duplicateMenuEl = document.createElement('div');
+    _duplicateMenuEl.className = 'context-menu notes-duplicate-ctx';
+    _duplicateMenuEl.style.display = 'none';
+    _duplicateMenuEl.innerHTML =
+      `<div class="notes-duplicate-ctx__reason"></div>` +
+      `<div class="ctx-separator"></div>` +
+      `<button class="ctx-item ctx-danger notes-duplicate-ctx__remove"><span class="ctx-icon">&#xd7;</span>Remove this duplicate entry</button>`;
+    document.body.appendChild(_duplicateMenuEl);
+
+    _duplicateMenuEl.querySelector('.notes-duplicate-ctx__remove').addEventListener('click', async () => {
+      const id = _duplicateTargetId;
+      _closeDuplicateMenu();
+      if (!id || !NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-duplicate`, { itemId: id });
+        if (noteModalPageId === id) closeNoteModal();
+        _applyNotesResult(data);
+      } catch (e) { await _showConfirm(`Remove failed: ${e.message}`, { okLabel: 'OK' }); }
+      renderNotesTree();
+    });
+
+    document.addEventListener('mousedown', e => {
+      if (_duplicateMenuEl?.style.display !== 'none' && !_duplicateMenuEl.contains(e.target))
+        _closeDuplicateMenu();
+    }, true);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _duplicateMenuEl?.style.display !== 'none') _closeDuplicateMenu();
+    });
+  }
+
+  function _showDuplicateMenu(e, item) {
+    e.preventDefault();
+    e.stopPropagation();
+    _ensureDuplicateMenu();
+    _duplicateTargetId = item.id;
+
+    _duplicateMenuEl.querySelector('.notes-duplicate-ctx__reason').textContent =
+      '\u26a0 Duplicate ID in tree — this is the second occurrence';
+
+    _duplicateMenuEl.style.display = 'block';
+    const x = e.clientX, y = e.clientY;
+    const w = _duplicateMenuEl.offsetWidth  || 260;
+    const h = _duplicateMenuEl.offsetHeight || 80;
+    _duplicateMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
+    _duplicateMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Attachment-orphan context menu
+  // ---------------------------------------------------------------------------
+
+  let _attachMenuEl   = null;
+  let _attachTargetId = null;
+
+  function _closeAttachMenu() {
+    if (_attachMenuEl) _attachMenuEl.style.display = 'none';
+    _attachTargetId = null;
+  }
+
+  function _ensureAttachMenu() {
+    if (_attachMenuEl) return;
+    _attachMenuEl = document.createElement('div');
+    _attachMenuEl.className = 'context-menu notes-attach-ctx';
+    _attachMenuEl.style.display = 'none';
+    _attachMenuEl.innerHTML =
+      `<div class="notes-attach-ctx__reason"></div>` +
+      `<div class="ctx-separator"></div>` +
+      `<button class="ctx-item notes-attach-ctx__upload" style="display:none"><span class="ctx-icon">&#x2191;</span>Upload attachments to WebDAV</button>` +
+      `<button class="ctx-item notes-attach-ctx__download" style="display:none"><span class="ctx-icon">&#x2193;</span>Download attachments from WebDAV</button>` +
+      `<button class="ctx-item ctx-danger notes-attach-ctx__clear"><span class="ctx-icon">&#xd7;</span>Clear flag (false positive)</button>`;
+    document.body.appendChild(_attachMenuEl);
+
+    _attachMenuEl.querySelector('.notes-attach-ctx__upload').addEventListener('click', async () => {
+      const id = _attachTargetId;
+      _closeAttachMenu();
+      if (!id || !NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-attachments`, { itemId: id, action: 'upload' });
+        _applyNotesResult(data);
+      } catch (e) { await _showConfirm(`Upload failed: ${e.message}`, { okLabel: 'OK' }); }
+      renderNotesTree();
+    });
+
+    _attachMenuEl.querySelector('.notes-attach-ctx__download').addEventListener('click', async () => {
+      const id = _attachTargetId;
+      _closeAttachMenu();
+      if (!id || !NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-attachments`, { itemId: id, action: 'download' });
+        _applyNotesResult(data);
+      } catch (e) { await _showConfirm(`Download failed: ${e.message}`, { okLabel: 'OK' }); }
+      renderNotesTree();
+    });
+
+    _attachMenuEl.querySelector('.notes-attach-ctx__clear').addEventListener('click', async () => {
+      const id = _attachTargetId;
+      _closeAttachMenu();
+      if (!id || !NOTES_API) return;
+      try {
+        const data = await _notesOp('POST', `${NOTES_API}/repair-attachments`, { itemId: id, action: 'clear' });
+        _applyNotesResult(data);
+      } catch (e) { await _showConfirm(`Clear failed: ${e.message}`, { okLabel: 'OK' }); }
+      renderNotesTree();
+    });
+
+    document.addEventListener('mousedown', e => {
+      if (_attachMenuEl?.style.display !== 'none' && !_attachMenuEl.contains(e.target))
+        _closeAttachMenu();
+    }, true);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && _attachMenuEl?.style.display !== 'none') _closeAttachMenu();
+    });
+  }
+
+  function _showAttachOrphanMenu(e, item) {
+    e.preventDefault();
+    e.stopPropagation();
+    _ensureAttachMenu();
+    _attachTargetId = item.id;
+
+    const status = item.attachmentsOrphaned;
+    const reasons = {
+      webdav: 'Attachments exist locally but are missing on WebDAV',
+      local:  'Attachments exist on WebDAV but are missing locally',
+      both:   'hasAttachments=true but no attachment files found anywhere',
+    };
+    _attachMenuEl.querySelector('.notes-attach-ctx__reason').textContent =
+      '\u26a0 ' + (reasons[status] || 'Attachment mismatch');
+
+    const showWd = _webdavActive();
+    _attachMenuEl.querySelector('.notes-attach-ctx__upload').style.display =
+      showWd && status === 'webdav' ? '' : 'none';
+    _attachMenuEl.querySelector('.notes-attach-ctx__download').style.display =
+      showWd && status === 'local' ? '' : 'none';
+
+    _attachMenuEl.style.display = 'block';
+    const x = e.clientX, y = e.clientY;
+    const w = _attachMenuEl.offsetWidth  || 280;
+    const h = _attachMenuEl.offsetHeight || 120;
+    _attachMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
+    _attachMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
+  }
+
   function _renderFolderItem(folder, container, depth) {
     const isExpanded  = notesExpanded.has(folder.id);
     const hasChildren = (folder.children || []).length > 0 || _webdavActive();
 
     const el = document.createElement('div');
     el.className = 'notes-tree-item notes-tree-item--folder';
-    if (_webdavActive() && folder.orphaned) el.classList.add('notes-tree-item--orphaned');
+    if (_webdavActive() && folder.orphaned)  el.classList.add('notes-tree-item--orphaned');
+    else if (_webdavActive() && folder.duplicate) el.classList.add('notes-tree-item--duplicate');
     el.dataset.itemId   = folder.id;
     el.dataset.itemType = 'folder';
     el.dataset.depth    = depth;
@@ -765,6 +1014,8 @@ function initNotes(cfg) {
 
     if (_webdavActive() && folder.orphaned) {
       el.addEventListener('contextmenu', e => _showOrphanMenu(e, folder));
+    } else if (_webdavActive() && folder.duplicate) {
+      el.addEventListener('contextmenu', e => _showDuplicateMenu(e, folder));
     }
 
     container.appendChild(el);
@@ -775,7 +1026,10 @@ function initNotes(cfg) {
   function _renderPageItem(page, container, depth) {
     const el = document.createElement('div');
     el.className = 'notes-tree-item notes-tree-item--page';
-    if (_webdavActive() && page.orphaned) el.classList.add('notes-tree-item--orphaned');
+    if (_webdavActive() && page.orphaned)          el.classList.add('notes-tree-item--orphaned');
+    else if (_webdavActive() && page.conflict)     el.classList.add('notes-tree-item--conflict');
+    else if (_webdavActive() && page.duplicate)    el.classList.add('notes-tree-item--duplicate');
+    else if (page.attachmentsOrphaned)             el.classList.add('notes-tree-item--attach-orphaned');
     el.dataset.itemId   = page.id;
     el.dataset.pageId   = page.id;
     el.dataset.itemType = 'page';
@@ -817,6 +1071,12 @@ function initNotes(cfg) {
 
     if (_webdavActive() && page.orphaned) {
       el.addEventListener('contextmenu', e => _showOrphanMenu(e, page));
+    } else if (_webdavActive() && page.conflict) {
+      el.addEventListener('contextmenu', e => _showConflictMenu(e, page));
+    } else if (_webdavActive() && page.duplicate) {
+      el.addEventListener('contextmenu', e => _showDuplicateMenu(e, page));
+    } else if (page.attachmentsOrphaned) {
+      el.addEventListener('contextmenu', e => _showAttachOrphanMenu(e, page));
     }
 
     container.appendChild(el);
@@ -1430,25 +1690,34 @@ function initNotes(cfg) {
 
   async function _handleAttachUpload(pageId, fileList, atCursor = false) {
     if (!NOTES_ATTACH_API || !fileList?.length) return;
-    for (const file of fileList) {
-      const fd = new FormData();
-      fd.append('file', file);
-      try {
-        const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          await _showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
-          continue;
-        }
-        const ext = data.name.split('.').pop()?.toLowerCase() || '';
-        const ft  = ['jpg','jpeg','png','gif','webp','avif','bmp','ico','tiff','svg'].includes(ext) ? 'image'
-                  : ext === 'svg' ? 'svg'
-                  : ext === 'pdf' ? 'pdf'
-                  : ['html','htm'].includes(ext) ? 'html'
-                  : 'other';
-        if (atCursor) _insertAttachmentMd(data.name, ft);
-        loadAttachments(pageId);
-      } catch (e) { console.error('Upload error:', e.message); }
+    const label = document.querySelector('label[for="noteAttachInput"]');
+    const input = document.getElementById('noteAttachInput');
+    if (label) label.textContent = 'Uploading…';
+    if (input) input.disabled = true;
+    try {
+      for (const file of Array.from(fileList)) {
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+          const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            await _showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+            continue;
+          }
+          const ext = data.name.split('.').pop()?.toLowerCase() || '';
+          const ft  = ['jpg','jpeg','png','gif','webp','avif','bmp','ico','tiff','svg'].includes(ext) ? 'image'
+                    : ext === 'svg' ? 'svg'
+                    : ext === 'pdf' ? 'pdf'
+                    : ['html','htm'].includes(ext) ? 'html'
+                    : 'other';
+          _insertAttachmentMd(data.name, ft);
+        } catch (e) { console.error('Upload error:', e.message); }
+      }
+    } finally {
+      if (label) label.textContent = '+ Upload';
+      if (input) input.disabled = false;
+      loadAttachments(pageId);
     }
   }
 

@@ -146,6 +146,12 @@ async function wdPropfind(cfg, relPath, depth = '1') {
   return _parsePropfindXml(await r.text(), cfg.url);
 }
 
+async function wdGetBinary(cfg, relPath) {
+  const r = await fetch(_resolveUrl(cfg, relPath), { headers: _authHeader(cfg) });
+  if (!r.ok) { const e = new Error(`GET ${relPath} → ${r.status}`); e.status = r.status; throw e; }
+  return Buffer.from(await r.arrayBuffer());
+}
+
 async function wdGetMeta(cfg, relPath) {
   const entries = await wdPropfind(cfg, relPath, '0');
   // The root entry has href '' or '/', skip it and return the first non-empty one, or the first
@@ -727,7 +733,7 @@ async function deleteFolderWithAttachments(cfg, folder, tree, boardAttachDir) {
 }
 
 module.exports = {
-  wdGet, wdPut, wdPutBinary, wdDelete, wdMove, wdMkcol, wdPropfind, wdGetMeta,
+  wdGet, wdGetBinary, wdPut, wdPutBinary, wdDelete, wdMove, wdMkcol, wdPropfind, wdGetMeta,
   buildPath, getAttachmentPrefix, parseFm, renderMd,
   syncFromWebdav, syncRootFromWebdav, syncFolderChildrenFromWebdav,
   deletePageWithAttachments, deleteFolderWithAttachments,

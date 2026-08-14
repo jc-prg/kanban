@@ -236,8 +236,10 @@
         renderPageResults(results);
       } else {
         const results = [];
-        if (typeof notesState !== 'undefined')
-          collectPages(notesState.items || notesState.pages || [], words, results, []);
+        const _ns = (typeof notesState !== 'undefined' ? notesState : null)
+          || window._notesModule?.getNotesState() || null;
+        if (_ns)
+          collectPages(_ns.items || _ns.pages || [], words, results, []);
         renderPageResults(results);
       }
     }

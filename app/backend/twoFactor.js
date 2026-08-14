@@ -22,10 +22,10 @@ function isIntranet(ip) {
   if (!ip) return false;
   if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return true;
   const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
-  const cidr = (process.env.INTRANET_CIDR || '').trim();
-  if (!cidr) return false;
+  const cidrs = (process.env.INTRANET_CIDR || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!cidrs.length) return false;
   try {
-    return isInCidr(v4, cidr);
+    return cidrs.some(cidr => isInCidr(v4, cidr));
   } catch {
     return false;
   }

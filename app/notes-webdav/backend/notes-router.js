@@ -7,7 +7,7 @@ const path     = require('path');
 
 const { validateNotes, validateNotesPatch, schemaError } = require('./schemas');
 const {
-  wdGet, wdPut, wdMove, wdMkcol, wdGetMeta,
+  wdGet, wdGetBinary, wdPut, wdPutBinary, wdMove, wdMkcol, wdPropfind, wdGetMeta,
   buildPath, getAttachmentPrefix, parseFm, renderMd,
   syncFromWebdav, syncRootFromWebdav, syncFolderChildrenFromWebdav,
   deletePageWithAttachments, deleteFolderWithAttachments,
@@ -99,6 +99,17 @@ function _uniqueWdPath(basePath, occupied) {
   let i = 2;
   while (occupied.has(`${stem}-${i}.md`)) i++;
   return `${stem}-${i}.md`;
+}
+
+const _MIME_MAP = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+  txt: 'text/plain', md: 'text/markdown', json: 'application/json',
+  zip: 'application/zip',
+};
+function _guessMime(filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  return _MIME_MAP[ext] || 'application/octet-stream';
 }
 
 function _insertItem(item, parentId, items, targetId = null, position = null) {
@@ -765,6 +776,298 @@ function createNotesRouter(options = {}) {
     } catch (err) {
       return res.status(502).json({ error: `WebDAV upload failed: ${err.message}` });
     }
+    const result = await adapter.saveNotes(board, notes);
+    res.json({ ok: true, notes, rev: result.rev });
+  }));
+
+  // ---------------------------------------------------------------------------
+  // Consistency check route
+  // ---------------------------------------------------------------------------
+
+  router.post('/:board/notes/check-consistency', writeRateLimit, withBoard(async (req, res, _db) => {
+    const { board } = req.params;
+    const notes = await _loadNotes(board);
+    const cfg   = await adapter.resolveWebdavCfg(board);
+    let changed = false;
+
+    // 1. Duplicate detection — DFS; second occurrence of same ID gets duplicate=true
+    const seen = new Set();
+    function _detectDuplicates(items) {
+      for (const item of items) {
+        if (seen.has(item.id)) {
+          if (!item.duplicate) { item.duplicate = true; changed = true; }
+        } else {
+          seen.add(item.id);
+          if (item.duplicate) { delete item.duplicate; changed = true; }
+        }
+        if (item.type === 'folder') _detectDuplicates(item.children || []);
+      }
+    }
+    _detectDuplicates(notes.items);
+
+    // 2. Content-conflict detection (WebDAV only)
+    if (cfg.enabled) {
+      async function _checkConflicts(items) {
+        for (const item of items) {
+          if (item.type === 'page' && item.wdPath && !item.orphaned && !item.duplicate) {
+            try {
+              const text       = await wdGet(cfg, item.wdPath);
+              const { meta, body } = parseFm(text);
+              const diff = {};
+              if (meta.title !== undefined && meta.title !== (item.title || ''))
+                diff.title = { db: item.title || '', wd: meta.title };
+              const wdDesc = body.replace(/\r?\n$/, '').trim();
+              const dbDesc = (item.description || '').trim();
+              if (wdDesc !== dbDesc)
+                diff.description = { db: dbDesc, wd: wdDesc };
+              const wdLink = meta.link || '';
+              const dbLink = item.link  || '';
+              if (wdLink !== dbLink)
+                diff.link = { db: dbLink, wd: wdLink };
+
+              if (Object.keys(diff).length) {
+                if (JSON.stringify(item.conflict) !== JSON.stringify(diff)) { item.conflict = diff; changed = true; }
+              } else {
+                if (item.conflict) { delete item.conflict; changed = true; }
+              }
+            } catch (err) {
+              if (err.status === 404 && item.conflict) { delete item.conflict; changed = true; }
+              // other errors: leave existing flag as-is
+            }
+          } else if (item.conflict) {
+            delete item.conflict; changed = true;
+          }
+          if (item.type === 'folder') await _checkConflicts(item.children || []);
+        }
+      }
+      await _checkConflicts(notes.items);
+    }
+
+    // 3. Attachment-orphan detection
+    async function _checkAttachOrphans(items) {
+      for (const item of items) {
+        if (item.type === 'page' && item.hasAttachments) {
+          const prefix     = getAttachmentPrefix(item, notes.items);
+          const localFiles = _getAttachmentFiles(attachmentsDir, board, item.id, prefix);
+
+          let wdFiles = null; // null = not checked (WebDAV disabled)
+          if (cfg.enabled) {
+            const wdAttachDir = `${prefix}_attachments/`;
+            try {
+              const entries = await wdPropfind(cfg, wdAttachDir, '1');
+              const fname   = `${item.id}_`;
+              wdFiles = entries
+                .filter(e => !e.isCollection && e.href.split('/').pop().startsWith(fname))
+                .map(e => e.href.split('/').pop().slice(fname.length));
+            } catch { wdFiles = []; }
+          }
+
+          let status = null;
+          if (wdFiles !== null) {
+            if (localFiles.length === 0 && wdFiles.length === 0) status = 'both';
+            else if (localFiles.length > 0  && wdFiles.length === 0) status = 'webdav';
+            else if (localFiles.length === 0 && wdFiles.length > 0)  status = 'local';
+          } else {
+            if (localFiles.length === 0) status = 'both';
+          }
+
+          if (status) {
+            if (item.attachmentsOrphaned !== status) { item.attachmentsOrphaned = status; changed = true; }
+          } else if (item.attachmentsOrphaned) {
+            delete item.attachmentsOrphaned; changed = true;
+          }
+        } else if (item.attachmentsOrphaned) {
+          delete item.attachmentsOrphaned; changed = true;
+        }
+        if (item.type === 'folder') await _checkAttachOrphans(item.children || []);
+      }
+    }
+    await _checkAttachOrphans(notes.items);
+
+    if (changed) await adapter.saveNotes(board, notes);
+
+    let orphans = 0, conflicts = 0, attachmentOrphans = 0, duplicates = 0;
+    function _count(items) {
+      for (const item of items) {
+        if (item.orphaned)            orphans++;
+        if (item.conflict)            conflicts++;
+        if (item.attachmentsOrphaned) attachmentOrphans++;
+        if (item.duplicate)           duplicates++;
+        if (item.type === 'folder')   _count(item.children || []);
+      }
+    }
+    _count(notes.items);
+
+    res.json({ ok: true, changed, orphans, conflicts, attachmentOrphans, duplicates, notes: changed ? notes : undefined });
+  }));
+
+  // ---------------------------------------------------------------------------
+  // Conflict repair route
+  // ---------------------------------------------------------------------------
+
+  router.post('/:board/notes/repair-conflict', writeRateLimit, withBoard(async (req, res, _db) => {
+    const { board } = req.params;
+    const { itemId, action } = req.body;
+    if (!itemId || !['use-db', 'use-webdav'].includes(action))
+      return res.status(400).json({ error: 'itemId and action (use-db|use-webdav) required' });
+
+    const notes = await _loadNotes(board);
+    const page  = _findItem(itemId, notes.items);
+    if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
+    if (!page.conflict) return res.status(400).json({ error: 'Page has no conflict flag' });
+
+    const cfg = await adapter.resolveWebdavCfg(board);
+    if (!cfg.enabled) return res.status(400).json({ error: 'WebDAV not enabled' });
+
+    const pagePath = page.wdPath || buildPath(page, notes.items);
+    if (!pagePath) return res.status(400).json({ error: 'Cannot determine page WebDAV path' });
+
+    if (action === 'use-db') {
+      try {
+        const attachFiles = _getAttachmentFiles(attachmentsDir, board, page.id, getAttachmentPrefix(page, notes.items));
+        const source      = `${baseUrl || ''}/${board}#note:${page.id}`;
+        const lcEntries   = await _buildLinkedCardEntries(page.linkedCards, board, req, resolveCards, baseUrl);
+        await wdPut(cfg, pagePath, renderMd(page, attachFiles, source, lcEntries));
+      } catch (err) {
+        return res.status(502).json({ error: `WebDAV write failed: ${err.message}` });
+      }
+      delete page.conflict;
+    } else {
+      // use-webdav: read WebDAV content into DB
+      let text;
+      try { text = await wdGet(cfg, pagePath); }
+      catch (err) { return res.status(502).json({ error: `WebDAV read failed: ${err.message}` }); }
+
+      const { meta, body } = parseFm(text);
+      if (meta.title !== undefined) page.title       = meta.title;
+      page.description = body.replace(/\r?\n$/, '');
+      page.link        = meta.link || '';
+      page.lastModified = new Date().toISOString();
+      delete page.conflict;
+    }
+
+    const result = await adapter.saveNotes(board, notes);
+    res.json({ ok: true, notes, rev: result.rev });
+  }));
+
+  // ---------------------------------------------------------------------------
+  // Attachment-orphan repair route
+  // ---------------------------------------------------------------------------
+
+  router.post('/:board/notes/repair-attachments', writeRateLimit, withBoard(async (req, res, _db) => {
+    const { board } = req.params;
+    const { itemId, action } = req.body;
+    if (!itemId || !['upload', 'download', 'clear'].includes(action))
+      return res.status(400).json({ error: 'itemId and action (upload|download|clear) required' });
+
+    const notes = await _loadNotes(board);
+    const page  = _findItem(itemId, notes.items);
+    if (!page || page.type !== 'page') return res.status(404).json({ error: 'Page not found' });
+
+    const prefix = getAttachmentPrefix(page, notes.items);
+
+    if (action === 'clear') {
+      page.hasAttachments = false;
+      delete page.attachmentsOrphaned;
+      const result = await adapter.saveNotes(board, notes);
+      return res.json({ ok: true, notes, rev: result.rev });
+    }
+
+    const cfg = await adapter.resolveWebdavCfg(board);
+    if (!cfg.enabled) return res.status(400).json({ error: 'WebDAV not enabled' });
+
+    const wdAttachDir = `${prefix}_attachments/`;
+
+    if (action === 'upload') {
+      const localFiles = _getAttachmentFiles(attachmentsDir, board, page.id, prefix);
+      if (!localFiles.length) return res.status(400).json({ error: 'No local attachment files found' });
+      try {
+        await wdMkcol(cfg, wdAttachDir).catch(() => {});
+        const localDir = path.join(attachmentsDir || '', board, prefix, '_attachments');
+        for (const f of localFiles) {
+          const filePath = path.join(localDir, `${page.id}_${f}`);
+          const buf      = fs.readFileSync(filePath);
+          const mime     = _guessMime(f);
+          await wdPutBinary(cfg, `${wdAttachDir}${page.id}_${f}`, buf, mime);
+        }
+      } catch (err) {
+        return res.status(502).json({ error: `WebDAV upload failed: ${err.message}` });
+      }
+      delete page.attachmentsOrphaned;
+    } else {
+      // download
+      let entries;
+      try { entries = await wdPropfind(cfg, wdAttachDir, '1'); }
+      catch (err) { return res.status(502).json({ error: `WebDAV listing failed: ${err.message}` }); }
+
+      const fname   = `${page.id}_`;
+      const wdFiles = entries.filter(e => !e.isCollection && e.href.split('/').pop().startsWith(fname));
+      if (!wdFiles.length) return res.status(400).json({ error: 'No WebDAV attachment files found' });
+
+      try {
+        const localDir = path.join(attachmentsDir || '', board, prefix, '_attachments');
+        fs.mkdirSync(localDir, { recursive: true });
+        for (const entry of wdFiles) {
+          const filename = entry.href.split('/').pop();
+          const buf      = await wdGetBinary(cfg, `${wdAttachDir}${filename}`);
+          fs.writeFileSync(path.join(localDir, filename), buf);
+        }
+      } catch (err) {
+        return res.status(500).json({ error: `Local write failed: ${err.message}` });
+      }
+      page.hasAttachments = true;
+      delete page.attachmentsOrphaned;
+    }
+
+    const result = await adapter.saveNotes(board, notes);
+    res.json({ ok: true, notes, rev: result.rev });
+  }));
+
+  // ---------------------------------------------------------------------------
+  // Duplicate repair route
+  // ---------------------------------------------------------------------------
+
+  router.post('/:board/notes/repair-duplicate', writeRateLimit, withBoard(async (req, res, _db) => {
+    const { board } = req.params;
+    const { itemId } = req.body;
+    if (!itemId) return res.status(400).json({ error: 'itemId required' });
+
+    const notes = await _loadNotes(board);
+
+    // Two-pass approach: forward DFS to confirm it's a duplicate, then forward DFS to remove
+    // the second occurrence. Both passes use the same DFS order (check ID first, then recurse).
+    const seen = new Set();
+    let removed = false;
+
+    function _dfsFind(items) {
+      for (const item of items) {
+        if (item.id === itemId) {
+          if (seen.has(item.id)) return true;
+          seen.add(item.id);
+        }
+        if (item.type === 'folder' && _dfsFind(item.children || [])) return true;
+      }
+      return false;
+    }
+    const isDup = _dfsFind(notes.items);
+    if (!isDup) return res.status(400).json({ error: 'Item is not a duplicate (only one occurrence found)' });
+
+    seen.clear();
+    function _removeSecond(items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.id === itemId) {
+          if (seen.has(item.id)) { items.splice(i, 1); removed = true; return; }
+          else seen.add(item.id);
+        }
+        if (!removed && item.type === 'folder') _removeSecond(item.children || []);
+        if (removed) return;
+      }
+    }
+    _removeSecond(notes.items);
+
+    if (!removed) return res.status(404).json({ error: 'Item not found' });
+
     const result = await adapter.saveNotes(board, notes);
     res.json({ ok: true, notes, rev: result.rev });
   }));

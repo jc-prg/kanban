@@ -212,6 +212,52 @@
   line-height: 1.4;
 }
 
+/* Content conflict — yellow */
+.notes-tree-item--conflict .notes-item-title,
+.notes-tree-item--conflict .notes-item-folder-title { color: #ca9a0a; }
+.notes-tree-item--conflict .notes-item-title:hover,
+.notes-tree-item--conflict .notes-item-folder-title:hover { color: var(--accent); }
+
+.notes-conflict-ctx__reason {
+  padding: 8px 12px 6px;
+  font-size: 0.74rem;
+  color: #ca9a0a;
+  font-weight: 600;
+  max-width: 320px;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+/* Duplicate — purple */
+.notes-tree-item--duplicate .notes-item-title,
+.notes-tree-item--duplicate .notes-item-folder-title { color: #9333ea; }
+.notes-tree-item--duplicate .notes-item-title:hover,
+.notes-tree-item--duplicate .notes-item-folder-title:hover { color: var(--accent); }
+
+.notes-duplicate-ctx__reason {
+  padding: 8px 12px 6px;
+  font-size: 0.74rem;
+  color: #9333ea;
+  font-weight: 600;
+  max-width: 300px;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+/* Attachment orphan — orange */
+.notes-tree-item--attach-orphaned .notes-item-title { color: #d97706; }
+.notes-tree-item--attach-orphaned .notes-item-title:hover { color: var(--accent); }
+
+.notes-attach-ctx__reason {
+  padding: 8px 12px 6px;
+  font-size: 0.74rem;
+  color: #d97706;
+  font-weight: 600;
+  max-width: 300px;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
 .notes-item-indicators {
   display: flex;
   gap: 2px;
