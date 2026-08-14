@@ -852,6 +852,32 @@
 .card-info-error { font-size: 0.82rem; color: var(--text-muted); }
 .card-info-error { color: var(--danger); }
 
+.card-info-content--inline {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.card-info-content--inline .card-info-table { margin-bottom: 10px; }
+.card-info-content--inline .card-info-moves li { padding: 5px 8px; }
+
+.card-info-location { display: flex; align-items: center; gap: 6px; }
+
+.card-info-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.card-info-act:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
 /* Settings dialog */
 .settings-modal {
   width: min(900px, 94vw);
@@ -1528,6 +1554,16 @@
     overflow-y: auto;
     border-left: 1px solid var(--border);
     padding-left: 24px;
+  }
+
+  /* Match the visual gap that start→priority has (14px inside date section + 11px flex gap).
+     Priority/color/attachments/card-info use block .modal-field whose margin-bottom collapses
+     through the section div, leaving only the 11px flex gap visible. Add 14px explicitly. */
+  #cardPrioritySection,
+  #cardColorSection,
+  #cardAttachmentsSection,
+  #cardInfoInline {
+    margin-top: 14px;
   }
 }
 

@@ -51,9 +51,17 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('cardText').addEventListener('input', e => autoResizeTitle(e.target));
 
   document.getElementById('cardInfoBtn')?.addEventListener('click', () => {
-    const col = state.columns.find(c => c.id === modalColId);
+    const col  = state.columns.find(c => c.id === modalColId);
     const card = col?.cards.find(c => c.id === editCardId);
-    if (card) openCardInfo(card);
+    if (!card) return;
+    if (window.innerWidth >= 1200) {
+      const inlineEl = document.getElementById('cardInfoInline');
+      const wasHidden = inlineEl.style.display === 'none';
+      setCardSection('cardInfoInline', 'cardInfoBtn', wasHidden);
+      if (wasHidden) _renderCardInfoContent(card, document.getElementById('cardInfoInlineContent'), false);
+    } else {
+      openCardInfo(card);
+    }
   });
 
   document.getElementById('cardToggleDate')       ?.addEventListener('click', () => toggleCardSection('cardDateSection',        'cardToggleDate'));
@@ -474,6 +482,7 @@ function resetCardSections() {
   const attachToggle = document.getElementById('cardToggleAttachments');
   if (attachToggle) attachToggle.style.display = canAttach ? '' : 'none';
   setCardSection('cardAttachmentsSection', 'cardToggleAttachments', canAttach && wide);
+  setCardSection('cardInfoInline', 'cardInfoBtn', false);
 }
 
 // ---- Linked note pages on a card ----
@@ -960,19 +969,45 @@ function saveCardInPlace() {
 }
 
 // ---- Card info dialog ----
+
+// Copies all attachments from one card to another (same or different board).
+async function _copyCardAttachments(srcBoard, srcCardId, dstBoard, dstCardId) {
+  try {
+    const srcBase = `/api/${encodeURIComponent(srcBoard)}/cards/attachments/${encodeURIComponent(srcCardId)}`;
+    const dstBase = `/api/${encodeURIComponent(dstBoard)}/cards/attachments/${encodeURIComponent(dstCardId)}`;
+    const files = await fetch(srcBase).then(r => r.ok ? r.json() : []);
+    if (!files.length) return;
+    await Promise.all(files.map(async f => {
+      const blob = await fetch(`${srcBase}/${encodeURIComponent(f.name)}`).then(r => r.blob());
+      const fd = new FormData();
+      fd.append('file', blob, f.name);
+      await fetch(dstBase, { method: 'POST', body: fd });
+    }));
+  } catch {}
+}
+
 let dateEditMode = false;
 
-function openCardInfo(card) {
-  const backdrop = document.getElementById('cardInfoBackdrop');
-  const content  = document.getElementById('cardInfoContent');
-  content.innerHTML = '<span class="card-info-loading">Loading…</span>';
-  backdrop.style.display = 'flex';
+// Renders card info into `container`. `showTitle` controls whether the card
+// text heading is included (true = dialog, false = inline sidebar panel).
+// `isInline` changes post-action behaviour: moves close the card modal,
+// copies collapse the inline panel; in dialog mode both call closeCardInfo().
+function _renderCardInfoContent(card, container, showTitle, isInline) {
+  container.innerHTML = '<span class="card-info-loading">Loading…</span>';
+
+  function _done(isMove) {
+    if (isInline) {
+      if (isMove) { closeModal(); } else { setCardSection('cardInfoInline', 'cardInfoBtn', false); }
+    } else {
+      closeCardInfo();
+    }
+  }
 
   fetch(`${API_BASE}/card/${encodeURIComponent(card.id)}`)
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(({ created, moves, column }) => {
       let html = '';
-      html += `<div class="card-info-title">${escHtml(card.text)}</div>`;
+      if (showTitle) html += `<div class="card-info-title">${escHtml(card.text)}</div>`;
       html += '<table class="card-info-table">';
       html += `<tr><th>ID</th><td>${escHtml(card.id)}</td></tr>`;
       if (dateEditMode) {
@@ -989,7 +1024,20 @@ function openCardInfo(card) {
       } else if (card.doneAt) {
         html += `<tr><th>Done</th><td>${escHtml(new Date(card.doneAt).toLocaleString())}</td></tr>`;
       }
-      html += `<tr><th>Current column</th><td>${escHtml(column)}</td></tr>`;
+      html += `<tr><th>Current column</th><td>
+        <div class="card-info-location">
+          <span>${escHtml(column)}</span>
+          <button class="card-info-act" data-ci="copy-col" title="Copy to column">${_svgDuplicate()}</button>
+          <button class="card-info-act" data-ci="move-col" title="Move to column">${_svgMoveTo()}</button>
+        </div>
+      </td></tr>`;
+      html += `<tr><th>Current board</th><td>
+        <div class="card-info-location">
+          <span>${escHtml(BOARD_NAME || '')}</span>
+          <button class="card-info-act" data-ci="copy-board" title="Copy to board">${_svgDuplicate()}</button>
+          <button class="card-info-act" data-ci="move-board" title="Move to board">${_svgMoveTo()}</button>
+        </div>
+      </td></tr>`;
       html += '</table>';
       if (moves && moves.length) {
         html += '<h3 class="card-info-section">Move history</h3>';
@@ -1004,10 +1052,10 @@ function openCardInfo(card) {
       } else {
         html += '<p class="card-info-empty">No move history.</p>';
       }
-      content.innerHTML = html;
+      container.innerHTML = html;
 
       if (dateEditMode) {
-        content.querySelectorAll('.card-info-date-input').forEach(input => {
+        container.querySelectorAll('.card-info-date-input').forEach(input => {
           input.addEventListener('change', () => {
             const liveCard = state.columns.flatMap(c => c.cards).find(c => c.id === card.id);
             if (!liveCard) return;
@@ -1020,8 +1068,89 @@ function openCardInfo(card) {
           });
         });
       }
+
+      const fromCol = state.columns.find(c => c.cards.some(ca => ca.id === card.id));
+      let _boardList = null;
+      fetch('/api/boards').then(r => r.json()).then(b => { _boardList = b; }).catch(() => {});
+
+      container.querySelector('[data-ci="copy-col"]').addEventListener('click', e => {
+        const cols = state.columns.filter(c => !fromCol || c.id !== fromCol.id);
+        if (!cols.length) return;
+        openContextMenu(e, cols.map(c => ({
+          labelHtml: `<span class="ctx-icon">${_svgCard(12, 9)}</span>${escHtml(c.title)}`,
+          action: async () => {
+            const toCol = state.columns.find(col => col.id === c.id);
+            if (!toCol) return;
+            const copy = { ...JSON.parse(JSON.stringify(card)), id: uid(), lastModified: new Date().toISOString() };
+            toCol.cards.unshift(copy);
+            render();
+            schedulesSave();
+            _done(false);
+            await _copyCardAttachments(BOARD_NAME, card.id, BOARD_NAME, copy.id);
+            showMessage(`Card copied to column "${c.title}".`);
+          }
+        })));
+      });
+
+      container.querySelector('[data-ci="move-col"]').addEventListener('click', e => {
+        const cols = state.columns.filter(c => !fromCol || c.id !== fromCol.id);
+        if (!cols.length) return;
+        openContextMenu(e, cols.map(c => ({
+          labelHtml: `<span class="ctx-icon">${_svgMoveTo()}</span>${escHtml(c.title)}`,
+          action: () => {
+            if (!fromCol) return;
+            moveCardToColumn(fromCol.id, card.id, c.id);
+            _done(true);
+            showMessage(`Card moved to column "${c.title}".`);
+          }
+        })));
+      });
+
+      async function _openBoardMenu(e, mode) {
+        if (!_boardList) {
+          try { _boardList = await fetch('/api/boards').then(r => r.json()); } catch { return; }
+        }
+        const others = _boardList.filter(b => b.name !== BOARD_NAME);
+        if (!others.length) return;
+        const icon = mode === 'copy' ? _svgDuplicate() : _svgMoveTo();
+        openContextMenu(e, others.map(b => ({
+          labelHtml: `<span class="ctx-icon">${icon}</span>${escHtml(b.name)}`,
+          action: async () => {
+            const cardData = { text: card.text };
+            if (card.color)       cardData.color       = card.color;
+            if (card.priority)    cardData.priority    = card.priority;
+            if (card.link)        cardData.link        = card.link;
+            if (card.description) cardData.description = card.description;
+            const importRes = await fetch(`/api/${encodeURIComponent(b.name)}/import`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify([cardData])
+            }).then(r => r.json());
+            const newCardId = (importRes.relevant_items?.[0] ?? importRes.duplicate_items?.[0])?.id;
+            if (newCardId) await _copyCardAttachments(BOARD_NAME, card.id, b.name, newCardId);
+            if (mode === 'move' && fromCol) {
+              fromCol.cards = fromCol.cards.filter(c => c.id !== card.id);
+              render();
+              schedulesSave();
+            }
+            _done(mode === 'move');
+            const verb = mode === 'move' ? 'moved' : 'copied';
+            showMessage(`Card ${verb} to inbox of board "${b.name}".`);
+          }
+        })));
+      }
+
+      container.querySelector('[data-ci="copy-board"]').addEventListener('click', e => _openBoardMenu(e, 'copy'));
+      container.querySelector('[data-ci="move-board"]').addEventListener('click', e => _openBoardMenu(e, 'move'));
     })
-    .catch(() => { content.innerHTML = '<span class="card-info-error">Failed to load card info.</span>'; });
+    .catch(() => { container.innerHTML = '<span class="card-info-error">Failed to load card info.</span>'; });
+}
+
+function openCardInfo(card) {
+  const backdrop = document.getElementById('cardInfoBackdrop');
+  const content  = document.getElementById('cardInfoContent');
+  backdrop.style.display = 'flex';
+  _renderCardInfoContent(card, content, true, false);
 }
 
 function closeCardInfo() {
