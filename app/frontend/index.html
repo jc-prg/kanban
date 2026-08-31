@@ -362,7 +362,10 @@
     <div class="modal-columns">
       <div class="modal-col-main">
         <div class="modal-field">
-          <label>Card</label>
+          <div class="modal-field-label-row">
+            <label>Card</label>
+            <button type="button" id="cardFromTemplateBtn" class="btn btn--xs tpl-from-btn" style="display:none">From template ▾</button>
+          </div>
           <div class="cardtext-wrap">
             <textarea id="cardText" rows="1" placeholder="What needs to be done?"></textarea>
             <button type="button" id="cardDoneBtn" class="card-done-btn" style="display:none">
@@ -470,6 +473,7 @@
       <button class="btn" id="modalPrintBtn" style="display:none"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn" id="modalCloseBtn"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-danger" id="modalDeleteBtn" style="display:none"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="modalSaveAsTemplateBtn" style="display:none"><span class="btn-label">→ Template</span></button>
       <button class="btn btn-accent" id="modalSubmitBtn"><span class="btn-label">Add Card</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-accent" id="modalAddCloseBtn" style="display:none"><span class="btn-label">Add &amp; Close</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
     </div>
@@ -987,6 +991,52 @@
           </div>
         </div>
 
+        <div class="settings-section" id="templatesSection" data-settings-label="Templates" data-settings-keywords="template card reuse prefill preset quick add">
+          <div class="settings-section-title">
+            <span>Templates</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="recurring-header">
+              <p class="settings-item-desc">Reusable card presets. Select a template when adding a card to pre-fill its fields.</p>
+              <button class="btn" id="templatesAddBtn">+ Add template</button>
+            </div>
+            <ul id="templatesList" class="tpl-list"></ul>
+            <div id="tplForm" class="tpl-form" hidden>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplName">Template name *</label>
+                <input id="tplName" class="new-board-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" placeholder="e.g. Bug report">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplText">Card title (prefill)</label>
+                <input id="tplText" class="new-board-input" type="text" maxlength="300" autocomplete="off" spellcheck="false" placeholder="Optional — left blank for user to fill">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label">Color</label>
+                <div id="tplColorRow" class="recurring-color-row"></div>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label">Priority</label>
+                <div id="tplPriorityRow" class="recurring-priority-row"></div>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplLink">Link</label>
+                <input id="tplLink" class="new-board-input" type="url" maxlength="2000" placeholder="https://…" autocomplete="off">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplDesc">Description</label>
+                <textarea id="tplDesc" class="new-board-input recurring-desc-input" rows="3" spellcheck="false" placeholder="Optional markdown content…"></textarea>
+              </div>
+              <div id="tplFormError" class="recurring-form-error" hidden></div>
+              <div class="settings-webdav-actions">
+                <button class="btn" id="tplCancelBtn">Cancel</button>
+                <button class="btn btn-danger" id="tplDeleteBtn" style="display:none">Delete</button>
+                <button class="btn btn-accent" id="tplSaveBtn">Save template</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="settings-section" id="accountsSection" data-settings-label="Sources" data-settings-keywords="calendar caldav ical imap mail email cards columns board webdav nextcloud accounts add account" style="display:none">
           <div class="settings-section-title">
             <span>Sources</span>
@@ -1456,6 +1506,7 @@
 <script src="/analytics.js"></script>
 <script src="/dashboard.js"></script>
 <script src="/recurring.js"></script>
+<script src="/templates.js"></script>
 <script src="/init.js"></script>
 </body>
 </html>

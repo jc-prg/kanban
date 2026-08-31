@@ -75,6 +75,24 @@ document.addEventListener('DOMContentLoaded', () => {
     e.target.value = '';
   });
 
+  // "From template" button — show dropdown of templates
+  document.getElementById('cardFromTemplateBtn')?.addEventListener('click', e => {
+    if (typeof templates === 'undefined' || templates.length === 0) return;
+    const items = templates.map(tpl => ({
+      label:  tpl.name,
+      action: () => _applyTemplate(tpl),
+    }));
+    openContextMenu(e, items);
+  });
+
+  // "Save as template" button — pre-fill template form from current card
+  document.getElementById('modalSaveAsTemplateBtn')?.addEventListener('click', () => {
+    const col  = state.columns.find(c => c.id === modalColId);
+    const card = col?.cards.find(c => c.id === editCardId);
+    if (!card) return;
+    if (typeof openTemplateFormFromCard === 'function') openTemplateFormFromCard(card);
+  });
+
   // File drag-and-drop upload: drag files from OS file manager onto the card modal
   let _cardFileDragDepth = 0;
   let _cardDragAtCursor = false;
@@ -527,6 +545,25 @@ function autoResizeTitle(ta) {
 }
 
 // ---- Card add/edit modal ----
+// Apply a template to the currently-open add modal
+function _applyTemplate(tpl) {
+  if (tpl.text) {
+    const ct = document.getElementById('cardText');
+    ct.value = tpl.text;
+    autoResizeTitle(ct);
+  }
+  if (tpl.description) setEditorValue('cardDesc', tpl.description);
+  if (tpl.link)        document.getElementById('cardLink').value = tpl.link;
+  if (tpl.color) {
+    selectedColor = tpl.color;
+    renderColorRow();
+  }
+  if (tpl.priority) {
+    selectedPriority = tpl.priority;
+    renderPriorityRow();
+  }
+}
+
 function openModal(colId) {
   modalMode = 'add';
   modalColId = colId;
@@ -541,6 +578,9 @@ function openModal(colId) {
   document.getElementById('cardDoneBtn').style.display = 'none';
   document.getElementById('cardInfoBtn').style.display  = 'none';
   document.getElementById('modalPrintBtn').style.display = 'none';
+  document.getElementById('modalSaveAsTemplateBtn').style.display = 'none';
+  const _fromTplBtn = document.getElementById('cardFromTemplateBtn');
+  if (_fromTplBtn) _fromTplBtn.style.display = (typeof templates !== 'undefined' && templates.length > 0) ? '' : 'none';
   _updateLinkBtn();
   document.getElementById('modalTitle').textContent      = 'Add Card';
   document.querySelector('#modalSubmitBtn .btn-label').textContent  = 'Add Card';
@@ -573,6 +613,9 @@ function openEditModal(colId, card) {
   document.getElementById('cardDoneBtn').style.display  = '';
   document.getElementById('cardInfoBtn').style.display  = '';
   document.getElementById('modalPrintBtn').style.display = '';
+  document.getElementById('modalSaveAsTemplateBtn').style.display = '';
+  const _fromTplBtnE = document.getElementById('cardFromTemplateBtn');
+  if (_fromTplBtnE) _fromTplBtnE.style.display = 'none';
   setModalDone(card.done || false);
   _updateLinkBtn();
   document.getElementById('modalTitle').textContent     = 'Edit Card';
@@ -1044,9 +1087,15 @@ function _renderCardInfoContent(card, container, showTitle, isInline) {
         html += '<ol class="card-info-moves">';
         for (const m of moves) {
           const when = m.at ? new Date(m.at).toLocaleString() : '?';
+          const fromLabel = (m.board && m.board !== BOARD_NAME)
+            ? `<span class="card-info-move-board">${escHtml(m.board)} ›</span> ${escHtml(m.from)}`
+            : escHtml(m.from);
+          const toLabel = (m.toBoard && m.toBoard !== BOARD_NAME)
+            ? `<span class="card-info-move-board">${escHtml(m.toBoard)} ›</span> ${escHtml(m.to)}`
+            : escHtml(m.to);
           html += `<li><span class="card-info-move-time">${escHtml(when)}</span> ` +
-                  `<span class="card-info-move-from">${escHtml(m.from)}</span>` +
-                  ` → <span class="card-info-move-to">${escHtml(m.to)}</span></li>`;
+                  `<span class="card-info-move-from">${fromLabel}</span>` +
+                  ` → <span class="card-info-move-to">${toLabel}</span></li>`;
         }
         html += '</ol>';
       } else {
@@ -1121,6 +1170,11 @@ function _renderCardInfoContent(card, container, showTitle, isInline) {
             if (card.priority)    cardData.priority    = card.priority;
             if (card.link)        cardData.link        = card.link;
             if (card.description) cardData.description = card.description;
+            if (mode === 'move') {
+              const moves = [...(card.moves || [])];
+              moves.push({ at: new Date().toISOString(), from: fromCol?.title || '', to: 'Inbox', board: BOARD_NAME, toBoard: b.name });
+              cardData.moves = moves;
+            }
             const importRes = await fetch(`/api/${encodeURIComponent(b.name)}/import`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },

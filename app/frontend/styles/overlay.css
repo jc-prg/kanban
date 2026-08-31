@@ -613,6 +613,7 @@
 @media (max-width: 500px) {
   .modal-actions .btn-label { display: none; }
   .modal-actions .btn-icon  { display: inline-flex; }
+  #modalSaveAsTemplateBtn   { display: none !important; }
 }
 
 .modal-autosave-wrap {
@@ -846,6 +847,7 @@
 .card-info-move-time  { color: var(--text-muted); font-size: 0.72rem; flex: 0 0 100%; }
 .card-info-move-from  { color: var(--text); }
 .card-info-move-to    { color: var(--accent); }
+.card-info-move-board { color: var(--text-muted); font-size: 0.72rem; }
 
 .card-info-empty,
 .card-info-loading,
@@ -2040,3 +2042,73 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---- Card templates ---- */
+
+.tpl-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tpl-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  background: var(--bg-inset, rgba(0,0,0,0.1));
+}
+
+.tpl-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.tpl-color-dot--none {
+  background: var(--border);
+}
+
+.tpl-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.tpl-item-name {
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tpl-item-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tpl-form {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* "From template" button in card add modal header */
+.tpl-from-btn {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.tpl-from-btn:hover { opacity: 1; }

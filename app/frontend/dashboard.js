@@ -952,15 +952,15 @@ function _renderCardsPanel(groups) {
       return `<div class="dashboard-source-error">\u26a0 ${escHtml(group.board)}: ${escHtml(group.error)}</div>`;
     }
     const groupKey   = `${group.board}\0${group.column}`;
+    const visibleCards  = group.cards.filter(c => !c.text?.startsWith('#'));
     if (!_seededGroups.has(groupKey)) {
       _seededGroups.add(groupKey);
-      if (group.initiallyCollapsed) {
+      if (group.initiallyCollapsed || !visibleCards.length) {
         _collapsedGroups.add(groupKey);
         _persistGroupState(groupKey, true);
       }
     }
     const collapsed     = _collapsedGroups.has(groupKey);
-    const visibleCards  = group.cards.filter(c => !c.text?.startsWith('#'));
     const cardCount     = visibleCards.length;
     const hasOverdue    = visibleCards.some(c => !c.done && c.endDate && c.endDate < today);
     const hasWarning    = !hasOverdue && visibleCards.some(c => !c.done && c.endDate && c.endDate >= today && c.endDate <= warnDate);

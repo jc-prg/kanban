@@ -130,6 +130,7 @@ const selectedCards     = new Map(); // cardId → colId (multi-select state)
 // ---- State ----
 let state        = { columns: [] };
 let baseState    = null; // snapshot from last server load — the merge ancestor
+let templates    = [];
 let saveTimer       = null;
 let boardEtag       = null;
 let _boardSaving    = false;
@@ -275,7 +276,27 @@ function showSaveError() {
 }
 
 // ---- ID generator ----
-const uid = () => 'id-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
+const uid    = () => 'id-'  + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
+const tplUid = () => 'tpl-' + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
+
+// ---- Templates ----
+async function loadTemplates() {
+  try {
+    const r = await fetch('/api/templates');
+    if (r.ok) { const d = await r.json(); templates = Array.isArray(d.items) ? d.items : []; }
+  } catch { /* non-critical */ }
+}
+
+async function saveTemplates(items) {
+  templates = items;
+  try {
+    await fetch('/api/templates', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+  } catch { /* non-critical */ }
+}
 
 // ---- State mutations ----
 function addColumn() {
@@ -313,7 +334,7 @@ function addCard(colId, data) {
 
 function recordMove(card, fromColTitle, toColTitle) {
   if (!card.moves) card.moves = [];
-  card.moves.push({ at: new Date().toISOString(), from: fromColTitle, to: toColTitle });
+  card.moves.push({ at: new Date().toISOString(), from: fromColTitle, to: toColTitle, board: BOARD_NAME });
 }
 
 function updateCardFull(colId, cardId, data) {

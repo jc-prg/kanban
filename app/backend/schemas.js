@@ -135,6 +135,25 @@ const validateInboxCards = ajv.compile({
   ]
 });
 
+const _templateSchema = {
+  type: 'object', required: ['id', 'name'], additionalProperties: false,
+  properties: {
+    id:          { type: 'string', pattern: '^tpl-[a-z0-9]{1,12}$' },
+    name:        { type: 'string', minLength: 1, maxLength: 100 },
+    text:        { type: 'string', maxLength: 300 },
+    color:       { type: 'string', maxLength: 20 },
+    priority:    { type: 'integer', minimum: 0, maximum: 5 },
+    description: { type: 'string', maxLength: 10000 },
+    link:        { type: 'string', maxLength: 2000 },
+  },
+};
+const validateTemplates = ajv.compile({
+  type: 'object', required: ['items'], additionalProperties: false,
+  properties: {
+    items: { type: 'array', maxItems: 100, items: _templateSchema },
+  },
+});
+
 const validateCalendarEvent = ajv.compile({
   type: 'object',
   required: ['title', 'allDay', 'start', 'end'],
@@ -201,4 +220,4 @@ function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateRecurringTasks, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateRecurringTasks, validateTemplates, schemaError };

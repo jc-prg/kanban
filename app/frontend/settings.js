@@ -244,6 +244,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('boardDeleteSection').style.display = '';
     document.getElementById('boardExportSection').style.display = '';
     document.getElementById('menuRecurring').style.display = '';
+    document.getElementById('menuDashboardSettings').style.display = '';
     document.getElementById('dbSection').style.display = 'none';
     document.getElementById('apiKeySection').style.display = 'none';
     document.getElementById('promptsSection').style.display = 'none';
@@ -407,6 +408,29 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
 
   window.openSettings = openSettings;
 
+  // Open settings in global mode even when on a board page
+  function openGlobalSettings() {
+    openSettings();
+    document.getElementById('settingsTitle').textContent = 'Global settings';
+    ['boardRenameSection','importSection','archiveSection','boardDeleteSection',
+     'boardExportSection','webdavSection','webhookSection','recurringSection'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    ['dbSection','apiKeySection','colorPaletteSection','promptsSection',
+     'iconLibrarySection','accountsSection','dashboardSection','aboutSection'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = '';
+    });
+    buildSettingsNav();
+  }
+  window.openGlobalSettings = openGlobalSettings;
+
+  document.getElementById('menuDashboardSettings')?.addEventListener('click', () => {
+    hideMenu();
+    if (_isBoard) openGlobalSettings(); else openSettings();
+  });
+
   /**
    * Open the settings dialog and navigate to a specific section / account tab.
    * section: 'calendar-accounts' | any settings-section id
@@ -453,6 +477,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       if (typeof renderRecurringList === 'function') renderRecurringList();
     }
     if (!_isBoard) { loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); }
+    if (typeof renderTemplatesList === 'function') renderTemplatesList();
     document.getElementById('colorPaletteSection').style.display = _isBoard ? 'none' : '';
     document.getElementById('recurringSection').style.display    = _isBoard ? ''     : 'none';
     buildSettingsNav();
@@ -1726,6 +1751,7 @@ async function afterAuth() {
   if (API_BASE && typeof loadWebdavSettings  === 'function') await loadWebdavSettings();
   if (API_BASE && typeof loadWebhookSettings === 'function') await loadWebhookSettings();
   if (API_BASE && typeof loadRecurringTasks  === 'function') await loadRecurringTasks();
+  if (typeof loadTemplates === 'function') await loadTemplates();
   if (BOARD_NAME === 'focus') { await initDashboard(); return; }
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {

@@ -268,6 +268,7 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
     if (normalized.startDate)   card.startDate   = normalized.startDate;
     if (normalized.endDate)     card.endDate     = normalized.endDate;
     if (normalized.done)        { card.done = true; if (normalized.doneAt) card.doneAt = normalized.doneAt; }
+    if (Array.isArray(normalized.moves) && normalized.moves.length) card.moves = normalized.moves;
     if (isDuplicate) card.duplicate = true; else existingTexts.add(normalized.text);
 
     inbox.cards.push(card);

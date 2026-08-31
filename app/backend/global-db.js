@@ -4,13 +4,16 @@ const { getCouch, upsertDoc } = require('./db');
 const GLOBAL_DB_NAME      = 'jc-config-dashboard';
 const DASHBOARD_CONFIG_ID = 'dashboard-config';
 
-const WEBDAV_DB_NAME = 'jc-config-webdav';
+const WEBDAV_DB_NAME     = 'jc-config-webdav';
+const TEMPLATES_DB_NAME  = 'jc-config-templates';
 
 let globalDb;
 let webdavDb;
+let templatesDb;
 
-function getGlobalDb()  { return globalDb;  }
-function getWebdavDb()  { return webdavDb;  }
+function getGlobalDb()    { return globalDb;    }
+function getWebdavDb()    { return webdavDb;    }
+function getTemplatesDb() { return templatesDb; }
 
 async function initGlobalDb() {
   const couch = getCouch();
@@ -32,6 +35,15 @@ async function initGlobalDb() {
     console.log(`Database "${WEBDAV_DB_NAME}" already exists`);
   }
   webdavDb = couch.use(WEBDAV_DB_NAME);
+
+  try {
+    await couch.db.create(TEMPLATES_DB_NAME);
+    console.log(`Database "${TEMPLATES_DB_NAME}" created`);
+  } catch (err) {
+    if (err.statusCode !== 412) throw err;
+    console.log(`Database "${TEMPLATES_DB_NAME}" already exists`);
+  }
+  templatesDb = couch.use(TEMPLATES_DB_NAME);
 }
 
 async function getDashboardConfig() {
@@ -98,4 +110,4 @@ async function addRecentFolder(accountId, folder) {
   return upsertDoc(globalDb, RECENT_FOLDERS_ID, current);
 }
 
-module.exports = { getGlobalDb, getWebdavDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder };
+module.exports = { getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder };

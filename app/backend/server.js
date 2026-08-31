@@ -103,6 +103,7 @@ app.use('/api', require('./routes/attachments'));
 app.use('/api', require('./routes/dashboard'));
 app.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit }));
 app.use('/api', require('./routes/recurring'));
+app.use('/api', require('./routes/templates'));
 
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
 app.get('/focus',              (req, res) => res.sendFile(SPA_HTML));
