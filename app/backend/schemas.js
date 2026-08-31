@@ -4,7 +4,7 @@ const ajv = new Ajv({ allErrors: true, strict: false });
 
 const _moveSchema = {
   type: 'object', additionalProperties: false,
-  properties: { at: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' } }
+  properties: { at: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, board: { type: 'string' }, toBoard: { type: 'string' } }
 };
 const _cardSchema = {
   type: 'object', required: ['id', 'text'], additionalProperties: false,
