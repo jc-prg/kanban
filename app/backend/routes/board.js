@@ -238,7 +238,7 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
   const inboxTitle = (data.settings?.inboxWithDate ?? false)
     ? `Inbox ${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.`
     : 'Inbox';
-  let inbox = data.columns.find(c => c.title === inboxTitle);
+  let inbox = data.columns.find(c => c.title.toLowerCase() === inboxTitle.toLowerCase());
   if (!inbox) {
     inbox = { id: 'id-' + crypto.randomBytes(6).toString('hex'), title: inboxTitle, cards: [], color: '#06b6d4' };
     data.columns.unshift(inbox);
@@ -294,7 +294,7 @@ router.post('/:board/inbox', writeRateLimit, withBoard(async (req, res, db) => {
   const inboxTitle = (data.settings?.inboxWithDate ?? false)
     ? `Inbox ${String(now.getDate()).padStart(2,'0')}.${String(now.getMonth()+1).padStart(2,'0')}.`
     : 'Inbox';
-  let inbox = data.columns.find(c => c.title === inboxTitle);
+  let inbox = data.columns.find(c => c.title.toLowerCase() === inboxTitle.toLowerCase());
   if (!inbox) {
     inbox = { id: 'id-' + crypto.randomBytes(6).toString('hex'), title: inboxTitle, cards: [], color: '#06b6d4' };
     data.columns.unshift(inbox);
