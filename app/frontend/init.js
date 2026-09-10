@@ -6,6 +6,7 @@ checkAuth();
 
 // Wire up buttons that previously used inline onclick/onsubmit attributes.
 document.getElementById('cardFullscreenBtn').addEventListener('click', () => toggleCardFullscreen());
+document.getElementById('noteFullscreenBtn').addEventListener('click', () => toggleNoteFullscreen());
 document.getElementById('cardDoneBtn').addEventListener('click', () => toggleModalDone());
 document.getElementById('cardDescScrollTop').addEventListener('click', () => scrollEditorToTop('cardDesc'));
 document.getElementById('modalPrintBtn').addEventListener('click', () => printCardFromModal());
