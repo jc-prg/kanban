@@ -377,6 +377,56 @@
   padding: 0 1px;
 }
 
+/* ---- in-modal find bar (Ctrl+F) ---- */
+.modal-find-bar {
+  position: absolute;
+  top: 10px;
+  right: 48px;      /* sits left of the fullscreen button */
+  z-index: 20;
+  align-items: center;
+  gap: 3px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.modal-find-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+  width: 150px;
+  padding: 2px 4px;
+}
+.modal-find-input::placeholder { color: var(--text-muted); opacity: 0.7; }
+.modal-find-input--nomatch { color: #f87171; }
+.modal-find-counter {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.modal-find-btn,
+.modal-find-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.modal-find-btn:hover,
+.modal-find-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
 /* hide the default gutters (line numbers, fold) */
 .cm-mount .cm-gutters { display: none; }
 

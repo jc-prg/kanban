@@ -192,6 +192,20 @@
   padding: 0 2px;
 }
 
+/* Find bar highlights — orange, distinct from the amber ==mark== */
+.modal-find-hl {
+  background: rgba(249, 115, 22, 0.35);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.modal-find-hl--current {
+  background: rgba(249, 115, 22, 0.9);
+  color: #0e0c1e;
+  border-radius: 2px;
+  outline: 1px solid #f97316;
+  padding: 0 1px;
+}
+
 /* Table of contents */
 .md-toc {
   display: block;

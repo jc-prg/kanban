@@ -817,6 +817,7 @@ async function openNoteModal(pageId, focusTitle = false) {
   }
 
   if (BOARD_NAME) document.title = `${BOARD_NAME} - ${page.title} (note)`;
+  window.closeModalFind?.('notePageDesc');
   document.getElementById('noteModal').style.display = 'flex';
   if (!_pendingNewPage) history.replaceState(null, '', '#note:' + pageId);
   const nt = document.getElementById('notePageTitle');
@@ -846,6 +847,7 @@ async function openNoteModal(pageId, focusTitle = false) {
 }
 
 function closeNoteModal() {
+  window.closeModalFind?.('notePageDesc');
   _exitNoteFullscreen();
   _stopNoteAutoSave();
   if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;

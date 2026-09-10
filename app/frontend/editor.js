@@ -236,6 +236,11 @@ function _deactivateEditor(id) {
   _renderPreview(entry, entry.view.state.doc.toString());
   entry.editorWrap.style.display = 'none';
   entry.preview.style.display = '';
+  // Re-apply find highlights if find bar is open
+  const st = _findState.get(id);
+  if (st && st.bar.style.display !== 'none' && st.matches.length) {
+    _applyFindHighlights(entry, st, st.idx);
+  }
 }
 
 // ---- internal helpers ----
@@ -481,6 +486,199 @@ function applyEditorFormat(id, action) {
   if (action === 'subpages')      return _insertBlock(view, '[subpages]', 10);
 }
 
+// ---- in-modal find bar (Ctrl+F inside card/note modals) ----
+
+// Maps editor ID → its containing modal-backdrop element ID
+const _editorModalMap = { cardDesc: 'modal', notePageDesc: 'noteModal' };
+
+// Per-editor find state: { bar, input, counter, matches[], idx }
+const _findState = new Map();
+
+function _createFindBar(editorId) {
+  if (_findState.has(editorId)) return _findState.get(editorId);
+  const modalEl = document.getElementById(_editorModalMap[editorId]);
+  if (!modalEl) return null;
+  const inner = modalEl.querySelector('.modal');
+  if (!inner) return null;
+
+  const bar = document.createElement('div');
+  bar.className = 'modal-find-bar';
+  bar.style.display = 'none';
+  bar.innerHTML =
+    '<input class="modal-find-input" type="text" placeholder="Find in text…" spellcheck="false" autocomplete="off">' +
+    '<span class="modal-find-counter"></span>' +
+    '<button class="modal-find-btn" data-dir="-1" title="Previous (Shift+Enter)">↑</button>' +
+    '<button class="modal-find-btn" data-dir="1" title="Next (Enter)">↓</button>' +
+    '<button class="modal-find-close" title="Close (Esc)">✕</button>';
+  inner.appendChild(bar);
+
+  const input   = bar.querySelector('.modal-find-input');
+  const counter = bar.querySelector('.modal-find-counter');
+  const st      = { bar, input, counter, matches: [], idx: 0, editorId };
+  _findState.set(editorId, st);
+
+  input.addEventListener('input', () => _runFind(st));
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); _findNavigate(st, e.shiftKey ? -1 : 1); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _closeFindBar(st); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); e.stopPropagation(); }
+  });
+  // Prevent mousedown from stealing focus away from the editor / preview
+  bar.querySelectorAll('.modal-find-btn, .modal-find-close').forEach(btn => {
+    btn.addEventListener('mousedown', e => e.preventDefault());
+  });
+  bar.querySelector('[data-dir="-1"]').addEventListener('click', () => _findNavigate(st, -1));
+  bar.querySelector('[data-dir="1"]').addEventListener('click',  () => _findNavigate(st,  1));
+  bar.querySelector('.modal-find-close').addEventListener('click', () => _closeFindBar(st));
+  return st;
+}
+
+function _openFindBar(editorId) {
+  const entry = _editors.get(editorId);
+  if (!entry) return;
+  const st = _createFindBar(editorId);
+  if (!st) return;
+
+  // If editor is active, run find against current text and jump cursor before focus moves
+  if (entry.editorWrap.style.display !== 'none' && st.input.value) {
+    _runFind(st); // computes matches + jumps cursor in CM
+  }
+
+  st.bar.style.display = 'flex';
+  st.input.select();
+  st.input.focus(); // causes editorWrap focusout → _deactivateEditor → preview shown
+}
+
+function _closeFindBar(st) {
+  st.bar.style.display = 'none';
+  st.input.value = '';
+  st.counter.textContent = '';
+  st.matches = [];
+  st.idx = 0;
+  const entry = _editors.get(st.editorId);
+  if (entry && entry.editorWrap.style.display === 'none') {
+    _renderPreview(entry, entry.view.state.doc.toString());
+  }
+}
+
+function _runFind(st) {
+  const entry = _editors.get(st.editorId);
+  if (!entry) return;
+  const query = st.input.value;
+
+  if (!query) {
+    st.matches = [];
+    st.counter.textContent = '';
+    st.input.classList.remove('modal-find-input--nomatch');
+    if (entry.editorWrap.style.display === 'none')
+      _renderPreview(entry, entry.view.state.doc.toString());
+    return;
+  }
+
+  const text = entry.view.state.doc.toString();
+  const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  const matches = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    matches.push({ from: m.index, to: m.index + m[0].length });
+    if (matches.length >= 500) break;
+  }
+  st.matches = matches;
+  st.idx = 0;
+  st.input.classList.toggle('modal-find-input--nomatch', matches.length === 0);
+
+  if (!matches.length) {
+    st.counter.textContent = '0 / 0';
+    if (entry.editorWrap.style.display === 'none')
+      _renderPreview(entry, entry.view.state.doc.toString());
+    return;
+  }
+
+  _findGoto(st, 0);
+}
+
+function _findNavigate(st, dir) {
+  if (!st.matches.length) return;
+  st.idx = (st.idx + dir + st.matches.length) % st.matches.length;
+  _findGoto(st, st.idx);
+}
+
+function _findGoto(st, idx) {
+  const entry = _editors.get(st.editorId);
+  if (!entry) return;
+  const match = st.matches[idx];
+  st.counter.textContent = `${idx + 1} / ${st.matches.length}`;
+
+  if (entry.editorWrap.style.display !== 'none') {
+    // Editor is active — move cursor to match
+    entry.view.dispatch({
+      selection: { anchor: match.from, head: match.to },
+      effects: EditorView.scrollIntoView(match.from, { y: 'center' }),
+    });
+  } else {
+    // Preview mode — highlight all matches, scroll current into view
+    _applyFindHighlights(entry, st, idx);
+  }
+}
+
+function _applyFindHighlights(entry, st, currentIdx) {
+  _renderPreview(entry, entry.view.state.doc.toString());
+  if (!st.input.value || !st.matches.length) return;
+
+  const re = new RegExp(
+    st.input.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  const walker = document.createTreeWalker(entry.preview, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  let n;
+  while ((n = walker.nextNode())) textNodes.push(n);
+
+  let matchIdx = 0;
+  for (const tn of textNodes) {
+    const txt = tn.textContent;
+    re.lastIndex = 0;
+    if (!re.test(txt)) continue;
+    re.lastIndex = 0;
+
+    const frag = document.createDocumentFragment();
+    let last = 0, m2;
+    while ((m2 = re.exec(txt)) !== null) {
+      if (last < m2.index) frag.appendChild(document.createTextNode(txt.slice(last, m2.index)));
+      const sp = document.createElement('span');
+      sp.className = matchIdx === currentIdx
+        ? 'modal-find-hl modal-find-hl--current'
+        : 'modal-find-hl';
+      sp.textContent = m2[0];
+      frag.appendChild(sp);
+      matchIdx++;
+      last = m2.index + m2[0].length;
+    }
+    if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+    tn.parentNode.replaceChild(frag, tn);
+    re.lastIndex = 0;
+  }
+
+  entry.preview.querySelector('.modal-find-hl--current')
+    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Ctrl+F — intercept in capture phase when a card/note modal is open
+document.addEventListener('keydown', e => {
+  if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === 'f')) return;
+  for (const [editorId, modalId] of Object.entries(_editorModalMap)) {
+    const modalEl = document.getElementById(modalId);
+    if (!modalEl || modalEl.style.display === 'none') continue;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const st = _findState.get(editorId);
+    if (st && st.bar.style.display !== 'none') {
+      st.input.focus(); st.input.select(); // re-focus if already open
+    } else {
+      _openFindBar(editorId);
+    }
+    return;
+  }
+}, { capture: true });
+
 // Ctrl+U (underline) — handled in capture phase so browsers cannot intercept it
 // as "View Page Source" before CodeMirror's own keymap runs.
 document.addEventListener('keydown', e => {
@@ -520,3 +718,7 @@ window.applyEditorFormat    = applyEditorFormat;
 window.isEditorActive       = isEditorActive;
 window.appendToEditor       = appendToEditor;
 window.scrollEditorToTop    = scrollEditorToTop;
+window.closeModalFind       = editorId => {
+  const st = _findState.get(editorId);
+  if (st) _closeFindBar(st);
+};

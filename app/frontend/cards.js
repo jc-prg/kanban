@@ -565,6 +565,7 @@ function _applyTemplate(tpl) {
 }
 
 function openModal(colId) {
+  window.closeModalFind?.('cardDesc');
   modalMode = 'add';
   modalColId = colId;
   editCardId = null;
@@ -600,6 +601,7 @@ function openModal(colId) {
 }
 
 function openEditModal(colId, card) {
+  window.closeModalFind?.('cardDesc');
   modalMode = 'edit';
   modalColId = colId;
   editCardId = card.id;
@@ -643,6 +645,7 @@ function openEditModal(colId, card) {
 }
 
 function closeModal() {
+  window.closeModalFind?.('cardDesc');
   _inboxOnSuccess = null;
   // Clean up inbox temp attachments immediately on close (card was not saved)
   if (_inboxTempCardId && _inboxTempBoard) {
