@@ -12,9 +12,9 @@ function fmtDate(iso) {
 
 function countCheckboxes(desc) {
   if (!desc) return null;
-  const total = (desc.match(/^- \[[ xX]\]/mg) || []).length;
+  const total = (desc.match(/^\s*- \[[ xX]\]/mg) || []).length;
   if (!total) return null;
-  const done = (desc.match(/^- \[[xX]\]/mg) || []).length;
+  const done = (desc.match(/^\s*- \[[xX]\]/mg) || []).length;
   return { done, total };
 }
 
