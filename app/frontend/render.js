@@ -10,6 +10,14 @@ function fmtDate(iso) {
   return `${months[+m-1]} ${+d}`;
 }
 
+function countCheckboxes(desc) {
+  if (!desc) return null;
+  const total = (desc.match(/^- \[[ xX]\]/mg) || []).length;
+  if (!total) return null;
+  const done = (desc.match(/^- \[[xX]\]/mg) || []).length;
+  return { done, total };
+}
+
 function safeLink(url) {
   try {
     const u = new URL(url);
@@ -231,6 +239,10 @@ function render() {
       if (!isLabel) {
         if (card.description) {
           metaParts.push(`<span class="card-desc" title="${escHtml(card.description)}">${SVGICONS.description()}</span>`);
+        }
+        const cbx = countCheckboxes(card.description);
+        if (cbx) {
+          metaParts.push(`<span class="card-task-badge" title="${cbx.done} of ${cbx.total} tasks done">${SVGICONS.checkedBox(10, 10)}<span class="task-count">${cbx.done}/${cbx.total}</span></span>`);
         }
         if (cardAttachMap.has(card.id)) {
           const attachCount = cardAttachMap.get(card.id);

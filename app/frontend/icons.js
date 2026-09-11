@@ -138,6 +138,11 @@ function _svgCheckbox(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="10.6" height="10.6" rx="1.8"/></svg>`;
 }
 
+// Square with checkmark — task progress badge on cards
+function _svgCheckedBox(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="10.6" height="10.6" rx="1.8"/><polyline points="2.8,6.2 4.8,8.2 9.2,3.8"/></svg>`;
+}
+
 // Three vertical dots — more options / context menu
 function _svgMoreOptions(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="currentColor" aria-hidden="true"><circle cx="6" cy="2.5" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="6" cy="9.5" r="1.2"/></svg>`;
@@ -223,6 +228,7 @@ const SVGICONS = {
   fileGeneric:    _svgAttachment,
   fullscreen:     _svgFullscreen,
   checkbox:       _svgCheckbox,
+  checkedBox:     _svgCheckedBox,
   moreOptions:    _svgMoreOptions,
   save:           _svgSave,
   upload:         _svgUpload,
@@ -261,6 +267,7 @@ const ICON_REGISTRY = [
   // Character icons
   { type: 'char', char: ICONS.done,         name: 'Done',           usage: 'Confirms action; marks card as done' },
   { type: 'char', char: ICONS.error,        name: 'Error',          usage: 'Save error or failed operation' },
+  { type: 'svg', svg: _svgCheckedBox(16, 16),  name: 'CheckedBox',     usage: 'Checkbox progress badge on cards' },
   { type: 'svg', svg: _svgClose(16, 16),       name: 'Close',          usage: 'Close a dialog or attachment viewer' },
   { type: 'svg', svg: _svgDelete(16, 16),      name: 'Delete',         usage: 'Delete item, attachment, card, or column' },
   { type: 'svg', svg: _svgCreate(16, 16),      name: 'Create / New',   usage: 'Create a new item (event, card, etc.)' },

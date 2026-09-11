@@ -147,7 +147,8 @@
 }
 
 .card-attach-badge,
-.card-note-badge {
+.card-note-badge,
+.card-task-badge {
   font-size: 0.75rem;
   color: var(--text-muted);
   display: inline-flex;
@@ -156,10 +157,15 @@
   gap: 2px;
 }
 
-.attach-count {
+.attach-count,
+.task-count {
   font-size: 0.62rem;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+}
+
+.task-count {
+  margin-left: 2px;
 }
 
 .card-link-icon {
