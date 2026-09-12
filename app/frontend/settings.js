@@ -175,6 +175,12 @@ async function _send2FACode() {
 }
 
 document.getElementById('twoFactorSendBtn').addEventListener('click', _send2FACode);
+document.getElementById('twoFactorBackdrop').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('twoFactorSendStep').style.display !== 'none') {
+    e.preventDefault();
+    _send2FACode();
+  }
+});
 document.getElementById('twoFactorResendBtn').addEventListener('click', () => {
   document.getElementById('twoFactorVerifyStep').style.display = 'none';
   document.getElementById('twoFactorSendStep').style.display = '';
