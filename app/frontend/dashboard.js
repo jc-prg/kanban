@@ -482,6 +482,7 @@ async function initDashboard() {
 
   // Card click → open detail panel (skipped on touch; handled by touchend below)
   document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
+    if (e.target.closest('.card-link-badge')) return;
     const item = e.target.closest('[data-card-id]');
     if (!item) return;
     if (lastInputWasTouch) return;
@@ -508,6 +509,7 @@ async function initDashboard() {
     _cardsPanel.addEventListener('touchmove',  () => { _cardTouchMoved = true;  }, { passive: true });
     _cardsPanel.addEventListener('touchend', e => {
       if (_cardTouchMoved) return;
+      if (e.target.closest('.card-link-badge')) return;
       const item = e.target.closest('[data-card-id]');
       if (!item) return;
       e.preventDefault();
