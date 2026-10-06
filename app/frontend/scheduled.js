@@ -62,6 +62,8 @@ window.toggleScheduledColumn = toggleScheduledColumn;
 function _updateMenuBtn() {
   const btn = document.getElementById('menuScheduled');
   if (btn) btn.textContent = _showScheduled ? 'Hide scheduled' : 'Scheduled cards';
+  const hdrBtn = document.getElementById('schedToggleBtn');
+  if (hdrBtn) hdrBtn.classList.toggle('open', _showScheduled);
 }
 
 function _today() {
@@ -340,6 +342,8 @@ document.addEventListener('DOMContentLoaded', () => {
       toggleScheduledColumn();
     });
   }
+
+  document.getElementById('schedToggleBtn')?.addEventListener('click', toggleScheduledColumn);
 
   document.getElementById('schedModeOnetime')?.addEventListener('change',   _updateModeVisibility);
   document.getElementById('schedModeRecurring')?.addEventListener('change',  _updateModeVisibility);

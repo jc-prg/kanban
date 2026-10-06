@@ -60,6 +60,7 @@ header h1 span { color: var(--accent); }
   #overview, #inboxView { padding: 24px 12px; }
   .inbox-form { padding: 16px; }
   .board-wrapper { padding: 0 4px; }
+  .header-menu-btn--hide-mobile { display: none !important; }
 }
 
 @media (max-height: 640px) {

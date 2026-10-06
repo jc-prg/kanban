@@ -1761,8 +1761,10 @@ async function afterAuth() {
     document.title = `jc://${BOARD_NAME}/`;
     document.getElementById('boardSwitchWrap').style.display = '';
     document.getElementById('notesToggleBtn').style.display = '';
-    if (window.matchMedia('(min-width: 640px)').matches)
+    if (window.matchMedia('(min-width: 640px)').matches) {
+      document.getElementById('schedToggleBtn').style.display = '';
       document.getElementById('dashboardBtn').style.display = '';
+    }
     await load();
     if (typeof ensureScheduledColumn === 'function' && state.settings?.scheduledColumnId && state.columns.find(c => c.id === state.settings.scheduledColumnId)) ensureScheduledColumn();
     window._notesModule = initNotes({
