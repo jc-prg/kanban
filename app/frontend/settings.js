@@ -417,6 +417,8 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
   // Open settings in global mode even when on a board page
   function openGlobalSettings() {
     openSettings();
+    // openSettings() skips global loaders when _isBoard — load them now
+    loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings();
     document.getElementById('settingsTitle').textContent = 'Global settings';
     ['boardRenameSection','importSection','archiveSection','boardDeleteSection',
      'boardExportSection','webdavSection','webhookSection','recurringSection'].forEach(id => {
