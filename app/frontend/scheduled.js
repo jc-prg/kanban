@@ -184,6 +184,8 @@ function openScheduleDialog(colId, cardId, prefillTargetId) {
   // Card text row — shown when creating a new card
   const textRow = document.getElementById('schedCardTextRow');
   if (textRow) textRow.style.display = isNew ? '' : 'none';
+  const editBtn = document.getElementById('schedEditCardBtn');
+  if (editBtn) editBtn.style.display = isNew ? 'none' : '';
   if (isNew) {
     document.getElementById('schedCardText').value = '';
     document.getElementById('schedDialogTitle').textContent = 'Schedule new card';
@@ -355,6 +357,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('schedCancelBtn')?.addEventListener('click',  closeScheduleDialog);
   document.getElementById('schedSubmitBtn')?.addEventListener('click',  _submitScheduleDialog);
+  document.getElementById('schedEditCardBtn')?.addEventListener('click', () => {
+    const colId  = _schedDialogColId;
+    const cardId = _schedDialogCardId;
+    closeScheduleDialog();
+    if (colId && cardId && typeof openEditModal === 'function') {
+      const col  = state.columns.find(c => c.id === colId);
+      const card = col?.cards.find(c => c.id === cardId);
+      if (card) openEditModal(colId, card);
+    }
+  });
 
   document.getElementById('schedDialogBackdrop')?.addEventListener('click', e => {
     if (e.target === e.currentTarget) closeScheduleDialog();
