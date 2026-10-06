@@ -91,11 +91,18 @@ function render() {
   const builtCols = [];
   const noteLinkedCards = _buildNoteLinkedSet();
 
+  const _scheduledColId = state.settings?.scheduledColumnId;
+
   state.columns.forEach((col, ci) => {
+    // Hide scheduled column unless the user toggled it visible
+    if (col.id === _scheduledColId && !_showScheduled) return;
+
     const color = col.color || COL_COLORS[ci % COL_COLORS.length];
 
+    const isScheduledCol = col.id === _scheduledColId;
+
     const colEl = document.createElement('div');
-    colEl.className = 'column';
+    colEl.className = 'column' + (isScheduledCol ? ' column--scheduled' : '');
     colEl.dataset.colId = col.id;
     colEl.setAttribute('dragover', 'true');
 
@@ -130,9 +137,11 @@ function render() {
 
     colEl.innerHTML = `
       <div class="column-header" style="--col-color:${color}">
-        <div class="col-drag-handle" draggable="true" title="Drag to reorder">${_svgDragHandle()}</div>
-        <input class="column-title" value="${escHtml(col.title)}" spellcheck="false" />
-        <button class="col-btn" title="Column options" style="margin-left:auto">${_svgMoreOptions()}</button>
+        ${isScheduledCol
+          ? `<span class="col-sched-icon">${_svgSchedule()}</span>`
+          : `<div class="col-drag-handle" draggable="true" title="Drag to reorder">${_svgDragHandle()}</div>`}
+        <input class="column-title" value="${escHtml(isScheduledCol ? col.title.replace(/^⏰\s*/, '') : col.title)}" spellcheck="false"${isScheduledCol ? ' readonly' : ''} />
+        ${isScheduledCol ? '' : `<button class="col-btn" title="Column options" style="margin-left:auto">${_svgMoreOptions()}</button>`}
         ${(colColorFilter[col.id] || colDupFilter.has(col.id) || colPriorityFilter[col.id]) ? `<span class="col-filter-icon" title="Filter active — click to clear">${SVGICONS.filter(15, 15)}</span>` : ''}
         <span class="column-count">${(() => { const filterColor = colColorFilter[col.id]; const filterDup = colDupFilter.has(col.id); const filterPriority = colPriorityFilter[col.id]; const total = col.cards.filter(c => !c.text.startsWith('#')).length; if (!filterColor && !filterDup && !filterPriority) return total; const filtered = col.cards.filter(c => !c.text.startsWith('#') && (!filterColor || c.color === filterColor) && (!filterDup || c.duplicate || c.text.startsWith('(copy) ')) && (!filterPriority || c.priority === filterPriority)).length; return `${filtered}/${total}`; })()}</span>
       </div>
@@ -140,7 +149,7 @@ function render() {
       <button class="add-card-btn">+ add card</button>
     `;
 
-    colEl.querySelector('.col-drag-handle').addEventListener('touchstart', e => {
+    colEl.querySelector('.col-drag-handle')?.addEventListener('touchstart', e => {
       e.preventDefault();
       const t = e.touches[0];
       touchPending = { el: colEl, sx: t.clientX, sy: t.clientY };
@@ -184,18 +193,25 @@ function render() {
     });
 
     const titleInput = colEl.querySelector('.column-title');
-    titleInput.addEventListener('change', () => updateColumnTitle(col.id, titleInput.value));
-    titleInput.addEventListener('blur',   () => updateColumnTitle(col.id, titleInput.value));
+    if (!isScheduledCol) {
+      titleInput.addEventListener('change', () => updateColumnTitle(col.id, titleInput.value));
+      titleInput.addEventListener('blur',   () => updateColumnTitle(col.id, titleInput.value));
+    }
 
     const colMenuBtn = colEl.querySelector('.col-btn');
-    colMenuBtn.addEventListener('mousedown', e => e.stopPropagation());
-    colMenuBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      const rect = colMenuBtn.getBoundingClientRect();
-      showColContextMenu(rect.left, rect.bottom + 4, col.id);
-    });
+    if (colMenuBtn) {
+      colMenuBtn.addEventListener('mousedown', e => e.stopPropagation());
+      colMenuBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const rect = colMenuBtn.getBoundingClientRect();
+        showColContextMenu(rect.left, rect.bottom + 4, col.id);
+      });
+    }
 
-    colEl.querySelector('.add-card-btn').addEventListener('click', () => openModal(col.id));
+    colEl.querySelector('.add-card-btn').addEventListener('click', () => {
+      if (isScheduledCol && typeof openScheduleDialog === 'function') openScheduleDialog(null, null);
+      else openModal(col.id);
+    });
 
     const cardsEl = colEl.querySelector('.cards');
     const filterColor    = colColorFilter[col.id];
@@ -268,6 +284,9 @@ function render() {
         if (card.done) {
           metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
         }
+        if (isScheduledCol && (card.scheduledFor || card.recurrence) && typeof getScheduledBadgeHtml === 'function') {
+          metaParts.push(getScheduledBadgeHtml(card));
+        }
         if (card.duplicate || card.text.startsWith('(copy) ')) {
           const origText = card.duplicate ? card.text : card.text.slice('(copy) '.length);
           let origCol = null, origCard = null;
@@ -322,7 +341,8 @@ function render() {
           clearSelection();
           return;
         }
-        openEditModal(col.id, card);
+        if (isScheduledCol && typeof openScheduleDialog === 'function') openScheduleDialog(col.id, card.id);
+        else openEditModal(col.id, card);
       });
 
       cardEl.addEventListener('contextmenu', e => {
@@ -389,7 +409,8 @@ function render() {
             cardId: card.id,
             timer: setTimeout(() => {
               cardTapState = null;
-              openEditModal(col.id, card);
+              if (isScheduledCol && typeof openScheduleDialog === 'function') openScheduleDialog(col.id, card.id);
+              else openEditModal(col.id, card);
             }, 280),
           };
         }
@@ -404,6 +425,10 @@ function render() {
     const lastInd = document.createElement('div');
     lastInd.className = 'drop-indicator';
     cardsEl.appendChild(lastInd);
+
+    if (isScheduledCol && typeof appendRecurringTaskCards === 'function') {
+      appendRecurringTaskCards(cardsEl);
+    }
 
     if (remaining > 0) {
       const loadMoreBtn = document.createElement('button');

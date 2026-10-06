@@ -251,3 +251,39 @@
   color: var(--accent);
   background: var(--accent-glow);
 }
+
+/* ---- Scheduled card badges ---- */
+.card-sched-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.72rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(107,114,128,0.12);
+  color: var(--text-secondary);
+  border: 1px solid rgba(107,114,128,0.25);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+.card-sched-badge--recur { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.25); color: var(--accent); }
+
+/* ---- Virtual recurring task cards (settings-defined, shown in scheduled column) ---- */
+.card--recur-virtual {
+  border-style: dashed;
+  opacity: 0.85;
+  cursor: pointer;
+}
+.card--recur-virtual:hover { opacity: 1; }
+
+.sched-recur-divider {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 8px 4px 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}

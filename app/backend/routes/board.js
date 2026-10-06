@@ -115,6 +115,7 @@ const _KNOWN_SETTINGS = new Set([
   'description','archived','inboxWithDate','persistCollapse','collapsedColumnIds',
   'trackedColumns','notesSidebarOpen','notesSidebarWidth','notesFontSize',
   'autoSaveDialogs','autoSaveIntervalMin','hideDoneInOverview',
+  'scheduledColumnId',
 ]);
 
 router.patch('/:board/board', writeRateLimit, withBoard(async (req, res, db) => {

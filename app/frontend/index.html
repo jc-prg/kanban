@@ -48,7 +48,7 @@
 <button class="header-dd-item" id="menuFindCard">Find</button>
       <button class="header-dd-item" id="menuAnalytics">Statistics</button>
       <button class="header-dd-item" id="menuWebhook" style="display:none"></button>
-      <button class="header-dd-item" id="menuRecurring" style="display:none">Recurring tasks</button>
+      <button class="header-dd-item" id="menuScheduled" style="display:none">Scheduled cards</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
       <button class="header-dd-item" id="menuDashboardSettings" style="display:none">Global settings</button>
       <div class="header-dd-separator"></div>
@@ -209,6 +209,89 @@
 </div>
 
 
+<!-- Scheduling dialog -->
+<div class="modal-backdrop" id="schedDialogBackdrop" style="display:none">
+  <div class="modal sched-dialog">
+    <h2 id="schedDialogTitle">Schedule card</h2>
+    <div class="modal-field" id="schedCardTextRow" style="display:none">
+      <label for="schedCardText">Card text</label>
+      <input type="text" id="schedCardText" class="new-board-input" placeholder="Enter card text…">
+    </div>
+    <div class="sched-mode-row">
+      <label class="sched-mode-label"><input type="radio" name="schedMode" id="schedModeOnetime" value="onetime" checked> One-time</label>
+      <label class="sched-mode-label"><input type="radio" name="schedMode" id="schedModeRecurring" value="recurring"> Recurring</label>
+    </div>
+    <div id="schedOnetimePanel">
+      <div class="modal-field">
+        <label for="schedDate">Trigger date</label>
+        <input type="date" id="schedDate" class="new-board-input">
+      </div>
+      <div class="modal-field">
+        <label for="schedTarget">Move to column</label>
+        <select id="schedTarget" class="new-board-input"></select>
+      </div>
+    </div>
+    <div id="schedRecurPanel" style="display:none">
+      <div class="modal-field sched-recur-type-row">
+        <label>Repeat</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="color:var(--text-secondary);white-space:nowrap">every</span>
+          <input type="number" id="schedRecurInterval" class="new-board-input" value="1" min="1" max="365" style="width:60px">
+          <select id="schedRecurType" class="new-board-input" style="flex:1">
+            <option value="daily">day(s)</option>
+            <option value="weekly" selected>week(s)</option>
+            <option value="monthly">month(s)</option>
+            <option value="yearly">year(s)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-field" id="schedRecurDowRow">
+        <label>On</label>
+        <div class="sched-dow-row">
+          <button type="button" class="sched-dow-btn" data-dow="1">Mon</button>
+          <button type="button" class="sched-dow-btn" data-dow="2">Tue</button>
+          <button type="button" class="sched-dow-btn" data-dow="3">Wed</button>
+          <button type="button" class="sched-dow-btn" data-dow="4">Thu</button>
+          <button type="button" class="sched-dow-btn" data-dow="5">Fri</button>
+          <button type="button" class="sched-dow-btn" data-dow="6">Sat</button>
+          <button type="button" class="sched-dow-btn" data-dow="0">Sun</button>
+        </div>
+      </div>
+      <div class="modal-field" id="schedRecurDomRow" style="display:none">
+        <label for="schedRecurDayOfMonth">Day of month</label>
+        <input type="number" id="schedRecurDayOfMonth" class="new-board-input" value="1" min="1" max="31" style="width:70px">
+      </div>
+      <div class="modal-field" id="schedRecurMonthRow" style="display:none">
+        <label for="schedRecurMonth">Month</label>
+        <select id="schedRecurMonth" class="new-board-input">
+          <option value="1">January</option><option value="2">February</option>
+          <option value="3">March</option><option value="4">April</option>
+          <option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option>
+          <option value="9">September</option><option value="10">October</option>
+          <option value="11">November</option><option value="12">December</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label for="schedRecurFrom">From</label>
+        <input type="date" id="schedRecurFrom" class="new-board-input">
+      </div>
+      <div class="modal-field">
+        <label for="schedRecurUntil">Until <span style="color:var(--text-muted)">(optional)</span></label>
+        <input type="date" id="schedRecurUntil" class="new-board-input">
+      </div>
+      <div class="modal-field">
+        <label for="schedRecurTarget">Create in column</label>
+        <select id="schedRecurTarget" class="new-board-input"></select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn--secondary" id="schedCancelBtn">Cancel</button>
+      <button class="btn" id="schedSubmitBtn">Schedule</button>
+    </div>
+  </div>
+</div>
+
 <div id="contextMenu" class="context-menu" style="display:none">
   <button class="ctx-item" id="ctxOpen" style="display:none"><span data-icon="cardInfo"></span>  Open</button>
   <button class="ctx-item" id="ctxInfo" style="display:none"><span data-icon="cardInfo"></span>  Info</button>
@@ -225,6 +308,9 @@
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="ctxMoveSubmenu"></div>
   </div>
+  <button class="ctx-item" id="ctxSchedule" style="display:none"><span data-icon="schedule"></span>  Schedule for…</button>
+  <button class="ctx-item" id="ctxEditSchedule" style="display:none"><span data-icon="schedule"></span>  Edit schedule</button>
+  <button class="ctx-item" id="ctxRemoveSchedule" style="display:none"><span data-icon="schedule"></span>  Remove schedule</button>
   <button class="ctx-item ctx-danger" id="ctxDelete"><span data-icon="delete"></span>  Delete</button>
 </div>
 
@@ -901,6 +987,9 @@
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
           </div>
           <div class="settings-section-body">
+            <div id="recurringScheduledNotice" class="settings-item-desc recurring-sched-notice" style="display:none">
+              💡 You can also manage recurring and one-time scheduled cards directly in the board's <a href="#" id="recurringOpenScheduled">Scheduled column →</a>
+            </div>
             <div class="recurring-header">
               <p class="settings-item-desc">Automatically create a card on a schedule.</p>
               <button class="btn" id="addRecurringBtn">+ Add task</button>
@@ -1507,6 +1596,7 @@
 <script src="/dashboard.js"></script>
 <script src="/recurring.js"></script>
 <script src="/templates.js"></script>
+<script src="/scheduled.js"></script>
 <script src="/init.js"></script>
 </body>
 </html>

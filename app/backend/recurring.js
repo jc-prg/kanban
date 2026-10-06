@@ -278,6 +278,131 @@ async function runRecurringCheck() {
 }
 
 // ---------------------------------------------------------------------------
+// runScheduledCheck — per-board scheduled-column processor
+// ---------------------------------------------------------------------------
+
+/**
+ * Process the scheduled column of one board:
+ * - One-time cards whose scheduledFor <= today are moved to their target column.
+ * - Recurring templates whose nextDueDate <= today spawn a new card in the target column
+ *   and get their lastCreatedDate / nextDueDate updated.
+ */
+async function runScheduledCheck(db, dbName) {
+  const today    = new Date().toISOString().slice(0, 10);
+  const lookback = addDays(today, -30);
+
+  let boardState;
+  try {
+    boardState = await loadBoardData(db);
+  } catch (err) {
+    if (err.statusCode === 404) return;
+    throw err;
+  }
+
+  const scheduledColId = boardState.settings?.scheduledColumnId;
+  if (!scheduledColId) return;
+
+  const scheduledCol = boardState.columns.find(c => c.id === scheduledColId);
+  if (!scheduledCol || !scheduledCol.cards.length) return;
+
+  let changed = false;
+  const cardsToRemove = [];
+
+  for (const card of scheduledCol.cards) {
+    const isOnetime   = card.scheduledFor && !card.recurrence;
+    const isRecurring = card.recurrence   && card.scheduledTarget;
+
+    if (isOnetime) {
+      if (card.scheduledFor > today) continue;
+
+      const targetCol = boardState.columns.find(c => c.id === card.scheduledTarget && c.id !== scheduledColId)
+        || boardState.columns.find(c => c.title.toLowerCase().startsWith('inbox') && c.id !== scheduledColId)
+        || boardState.columns.find(c => c.id !== scheduledColId);
+      if (!targetCol) continue;
+
+      // Build a clean copy without scheduling metadata
+      const { scheduledFor, scheduledTarget, scheduledEndDate, recurrence, nextDueDate: _nd, lastCreatedDate: _lc, ...cleanCard } = card;
+      cleanCard.lastModified = new Date().toISOString();
+      if (!cleanCard.moves) cleanCard.moves = [];
+      cleanCard.moves.push({ at: new Date().toISOString(), from: scheduledCol.title, to: targetCol.title });
+
+      targetCol.cards.unshift(cleanCard);
+      cardsToRemove.push(card.id);
+      changed = true;
+      console.log(`[scheduled] ${dbName}: moved "${card.text}" → "${targetCol.title}"`);
+
+    } else if (isRecurring) {
+      if (card.nextDueDate && card.nextDueDate > today) continue;
+
+      const taskLike = {
+        recurrence: card.recurrence,
+        startDate:  card.scheduledFor,
+        endDate:    card.scheduledEndDate || null,
+      };
+
+      try {
+        const from = card.lastCreatedDate ? addDays(card.lastCreatedDate, 1) : card.scheduledFor;
+        const effectiveFrom = from < lookback ? lookback : from;
+        const dueDates = getDueDates(taskLike, effectiveFrom, addDays(today, 1));
+        if (dueDates.length === 0) continue;
+
+        const targetCol = boardState.columns.find(c => c.id === card.scheduledTarget && c.id !== scheduledColId)
+          || boardState.columns.find(c => c.title.toLowerCase().startsWith('inbox') && c.id !== scheduledColId)
+          || boardState.columns.find(c => c.id !== scheduledColId);
+        if (!targetCol) continue;
+
+        // Deduplication: same text created today already in target
+        if (targetCol.cards.some(c => c.text === card.text && c.created === today)) continue;
+
+        const missedCount = dueDates.length;
+        const baseDesc    = card.description || '';
+        const desc = missedCount > 1
+          ? (baseDesc ? `${baseDesc} (${missedCount}x missed)` : `(${missedCount}x missed)`)
+          : baseDesc;
+
+        const newCard = {
+          id:      'id-' + crypto.randomBytes(6).toString('hex'),
+          text:    card.text,
+          created: today,
+          ...(desc          ? { description: desc }         : {}),
+          ...(card.color    ? { color:   card.color }       : {}),
+          ...(card.priority ? { priority: card.priority }   : {}),
+          ...(card.link     ? { link:    card.link }        : {}),
+        };
+        targetCol.cards.unshift(newCard);
+        card.lastCreatedDate = today;
+        card.nextDueDate     = computeNextDueDate(taskLike, today);
+        changed = true;
+        console.log(`[scheduled] ${dbName}: created recurring "${card.text}" → "${targetCol.title}"`);
+      } catch (err) {
+        console.error(`[scheduled] ${dbName} card "${card.id}":`, err.message);
+      }
+    }
+  }
+
+  if (cardsToRemove.length) {
+    scheduledCol.cards = scheduledCol.cards.filter(c => !cardsToRemove.includes(c.id));
+  }
+
+  if (changed) await saveBoardData(db, boardState);
+}
+
+async function runScheduledChecks() {
+  const couch = getCouch();
+  if (!couch) return;
+
+  let allDbs;
+  try { allDbs = await couch.db.list(); }
+  catch (err) { console.error('[scheduled] Could not list databases:', err.message); return; }
+
+  for (const dbName of allDbs.filter(n => n.startsWith(DB_PREFIX))) {
+    const db = couch.use(dbName);
+    try { await runScheduledCheck(db, dbName); }
+    catch (err) { console.error(`[scheduled] ${dbName}:`, err.message); }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Scheduler
 // ---------------------------------------------------------------------------
 
@@ -290,12 +415,14 @@ function _msUntilMidnight() {
 
 function initRecurring() {
   runRecurringCheck().catch(err => console.error('[recurring] Initial check failed:', err.message));
+  runScheduledChecks().catch(err => console.error('[scheduled] Initial check failed:', err.message));
   setTimeout(() => {
     runRecurringCheck().catch(err => console.error('[recurring] Scheduled check failed:', err.message));
-    setInterval(
-      () => runRecurringCheck().catch(err => console.error('[recurring] Scheduled check failed:', err.message)),
-      24 * 60 * 60 * 1000
-    );
+    runScheduledChecks().catch(err => console.error('[scheduled] Scheduled check failed:', err.message));
+    setInterval(() => {
+      runRecurringCheck().catch(err => console.error('[recurring] Scheduled check failed:', err.message));
+      runScheduledChecks().catch(err => console.error('[scheduled] Scheduled check failed:', err.message));
+    }, 24 * 60 * 60 * 1000);
   }, _msUntilMidnight());
 }
 
@@ -305,5 +432,7 @@ module.exports = {
   getDueDates,
   createDueCards,
   runRecurringCheck,
+  runScheduledCheck,
+  runScheduledChecks,
   initRecurring,
 };

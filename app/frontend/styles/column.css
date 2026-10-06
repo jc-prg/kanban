@@ -202,3 +202,8 @@
     background: color-mix(in srgb, var(--surface2) 85%, var(--col-color));
   }
 }
+
+/* ---- Scheduled column ---- */
+.column--scheduled .column-header { opacity: 0.9; }
+.column--scheduled .column-title[readonly] { cursor: default; pointer-events: none; }
+.col-sched-icon { display: flex; align-items: center; opacity: 0.6; flex-shrink: 0; }

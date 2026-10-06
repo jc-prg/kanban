@@ -312,6 +312,7 @@ function addColumn() {
 }
 
 function deleteColumn(colId) {
+  if (state.settings?.scheduledColumnId === colId) delete state.settings.scheduledColumnId;
   state.columns = state.columns.filter(c => c.id !== colId);
   render();
   schedulesSave();

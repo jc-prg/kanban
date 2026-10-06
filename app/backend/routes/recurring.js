@@ -6,7 +6,7 @@ const router  = express.Router();
 const { writeRateLimit }                            = require('../auth');
 const { withExistingBoard, loadBoardData, upsertDoc } = require('../db');
 const { validateRecurringTasks, schemaError }       = require('../schemas');
-const { addDays, computeNextDueDate, getDueDates, createDueCards } = require('../recurring');
+const { addDays, computeNextDueDate, getDueDates, createDueCards, runScheduledCheck } = require('../recurring');
 
 const RT_DOC_ID = 'recurring-tasks';
 
@@ -99,6 +99,16 @@ router.post('/:board/recurring-tasks/:id/run', writeRateLimit, withExistingBoard
     }
 
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}));
+
+// POST /api/:board/scheduled/run  — manually trigger the scheduled column check
+router.post('/:board/scheduled/run', writeRateLimit, withExistingBoard(async (req, res, db) => {
+  try {
+    await runScheduledCheck(db, req.params.board);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

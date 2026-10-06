@@ -6,6 +6,16 @@ const _moveSchema = {
   type: 'object', additionalProperties: false,
   properties: { at: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, board: { type: 'string' }, toBoard: { type: 'string' } }
 };
+const _schedRecurrenceSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    type:       { type: 'string', enum: ['daily', 'weekly', 'monthly', 'yearly'] },
+    interval:   { type: 'integer', minimum: 1, maximum: 365 },
+    daysOfWeek: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 6 }, minItems: 1, maxItems: 7 },
+    dayOfMonth: { type: 'integer', minimum: 1, maximum: 31 },
+    month:      { type: 'integer', minimum: 1, maximum: 12 },
+  },
+};
 const _cardSchema = {
   type: 'object', required: ['id', 'text'], additionalProperties: false,
   properties: {
@@ -22,7 +32,13 @@ const _cardSchema = {
     duplicate:    { type: 'boolean' },
     created:      { type: 'string' },
     lastModified: { type: 'string' },
-    moves:        { type: 'array', items: _moveSchema }
+    moves:        { type: 'array', items: _moveSchema },
+    scheduledFor:    { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    scheduledTarget: { type: 'string' },
+    scheduledEndDate:{ type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    recurrence:      _schedRecurrenceSchema,
+    nextDueDate:     { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    lastCreatedDate: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
   }
 };
 const _columnSchema = {
@@ -49,7 +65,8 @@ const _settingsSchema = {
     notesFontSize:         { type: 'number' },
     autoSaveDialogs:       { type: 'boolean' },
     autoSaveIntervalMin:   { type: 'number' },
-    hideDoneInOverview:    { type: 'boolean' }
+    hideDoneInOverview:    { type: 'boolean' },
+    scheduledColumnId:     { type: 'string' },
   }
 };
 

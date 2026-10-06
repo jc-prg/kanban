@@ -179,6 +179,14 @@ function onDrop(e, toColId) {
   const toCol   = state.columns.find(c => c.id === toColId);
   if (!fromCol || !toCol) return;
 
+  // Single-card drop onto the scheduled column: intercept for scheduling dialog
+  if (!multiIds && toColId === state.settings?.scheduledColumnId && fromColId !== toColId) {
+    dragState = null;
+    document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+    if (typeof openScheduleDialog === 'function') openScheduleDialog(fromColId, cardId, fromColId);
+    return;
+  }
+
   if (multiIds && fromColId !== toColId) {
     // Multi-card drop — preserve relative source order, insert at drop position
     const cardsToMove = fromCol.cards.filter(c => multiIds.includes(c.id));
@@ -339,6 +347,12 @@ document.addEventListener('touchend', e => {
       const fromCol = state.columns.find(c => c.id === fromColId);
       const toCol   = state.columns.find(c => c.id === toColId);
       if (fromCol && toCol) {
+        // Single-card touch drop onto scheduled column: intercept for scheduling dialog
+        if (!multiIds && toColId === state.settings?.scheduledColumnId && fromColId !== toColId) {
+          endTouchDrag();
+          if (typeof openScheduleDialog === 'function') openScheduleDialog(fromColId, cardId, fromColId);
+          return;
+        }
         if (multiIds && fromColId !== toColId) {
           const cardsToMove = fromCol.cards.filter(c => multiIds.includes(c.id));
           if (cardsToMove.length) {

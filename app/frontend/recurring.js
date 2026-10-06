@@ -80,6 +80,11 @@ function _describeRecurrence(task) {
 function renderRecurringList() {
   const list = document.getElementById('recurringList');
   if (!list) return;
+  // Show notice pointing to the scheduled column feature
+  const notice = document.getElementById('recurringScheduledNotice');
+  if (notice && typeof toggleScheduledColumn === 'function') {
+    notice.style.display = '';
+  }
   if (_recurringTasks.length === 0) {
     list.innerHTML = '<li class="settings-item-desc" style="padding:4px 0">No recurring tasks defined.</li>';
     return;

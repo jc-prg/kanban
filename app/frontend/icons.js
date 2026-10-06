@@ -218,6 +218,11 @@ function _svgNetworkFolder(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 3.5h10v4a.8.8 0 0 1-.8.8H1.8a.8.8 0 0 1-.8-.8V3.5z"/><path d="M1 3.5V2a.8.8 0 0 1 .8-.8h2.7L6 3.5"/><line x1="6" y1="8.3" x2="6" y2="10.5"/><line x1="2.5" y1="10.5" x2="9.5" y2="10.5"/></svg>`;
 }
 
+// Clock — scheduled cards feature
+function _svgSchedule(w = 14, h = 14) {
+  return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke-width="1.5"/><line x1="8" y1="2" x2="8" y2="3.2" stroke-width="1.5"/><polyline points="8,5 8,8.5 11.5,8.5" stroke-width="1.6"/><circle cx="8" cy="8" r="0.8" fill="currentColor" stroke="none"/></svg>`;
+}
+
 const SVGICONS = {
   close:          _svgClose,
   delete:         _svgDelete,
@@ -260,6 +265,7 @@ const SVGICONS = {
   filter:         _svgFilter,
   dashboard:      _svgDashboard,
   openLink:       _svgOpenLink,
+  schedule:       _svgSchedule,
 };
 
 // ---- Icon registry (used to render the icon library in settings) ----

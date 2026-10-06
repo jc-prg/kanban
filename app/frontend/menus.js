@@ -90,6 +90,9 @@ function showContextMenu(x, y, colId, card) {
   _closeAllContextMenus();
   ctxColId = colId;
   ctxCard  = card;
+  // Expose for scheduled.js (loaded later)
+  window._ctxColId = colId;
+  window._ctxCard  = card;
   _dashCtxBoard = null;
 
   // Restore items that showDashboardContextMenu may have hidden
@@ -101,6 +104,12 @@ function showContextMenu(x, y, colId, card) {
   document.getElementById('ctxInfo').style.display = dateEditMode ? '' : 'none';
   document.getElementById('ctxCopyLink').style.display = card.link ? '' : 'none';
   document.getElementById('ctxColorRow').style.display = 'none';
+
+  // Scheduling menu items
+  const isScheduledCol = colId === state.settings?.scheduledColumnId;
+  document.getElementById('ctxSchedule').style.display      = !isScheduledCol ? '' : 'none';
+  document.getElementById('ctxEditSchedule').style.display  = isScheduledCol  ? '' : 'none';
+  document.getElementById('ctxRemoveSchedule').style.display = isScheduledCol ? '' : 'none';
 
   const submenu = document.getElementById('ctxMoveSubmenu');
   submenu.innerHTML = state.columns
@@ -138,6 +147,8 @@ function hideContextMenu() {
   _dashCtxBoard = null;
   ctxColId = null;
   ctxCard  = null;
+  window._ctxColId = null;
+  window._ctxCard  = null;
 }
 
 function showDashboardContextMenu(x, y, board, card) {
@@ -451,10 +462,16 @@ function showColContextMenu(x, y, colId) {
   setIcon(toggleIcon, toggleKey);
   document.getElementById('colCtxToggleLabel').textContent = `  ${collapsed ? 'Show content' : 'Hide content'}`;
 
+  const isScheduledCol = colId === state.settings?.scheduledColumnId;
   const hideWhenCollapsed = display => ['colCtxSettings','colCtxFilterBy','colCtxDeleteCards','colCtxPrint'].forEach(id =>
     document.getElementById(id).style.display = display);
   document.querySelector('#colContextMenu .ctx-submenu-trigger').style.display = collapsed ? 'none' : '';
   hideWhenCollapsed(collapsed ? 'none' : '');
+  if (isScheduledCol) {
+    ['colCtxDelete','colCtxPrint','colCtxDeleteCards'].forEach(id => {
+      document.getElementById(id).style.display = 'none';
+    });
+  }
 
   const col = state.columns.find(c => c.id === colId);
   const hasDuplicates = col?.cards.some(c => c.duplicate || c.text?.startsWith('(copy) '));

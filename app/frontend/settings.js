@@ -249,7 +249,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('archiveSection').style.display = '';
     document.getElementById('boardDeleteSection').style.display = '';
     document.getElementById('boardExportSection').style.display = '';
-    document.getElementById('menuRecurring').style.display = '';
+    document.getElementById('menuScheduled').style.display  = '';
     document.getElementById('menuDashboardSettings').style.display = '';
     document.getElementById('dbSection').style.display = 'none';
     document.getElementById('apiKeySection').style.display = 'none';
@@ -1417,12 +1417,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     btn.textContent = 'Test connection';
   });
 
-  document.getElementById('menuRecurring').addEventListener('click', () => {
-    hideMenu();
-    openSettingsDialog('recurringSection');
-  });
-
-  document.getElementById('menuSettings').addEventListener('click', () => {
+document.getElementById('menuSettings').addEventListener('click', () => {
     hideMenu();
     openSettings();
   });
@@ -1769,6 +1764,7 @@ async function afterAuth() {
     if (window.matchMedia('(min-width: 640px)').matches)
       document.getElementById('dashboardBtn').style.display = '';
     await load();
+    if (typeof ensureScheduledColumn === 'function' && state.settings?.scheduledColumnId && state.columns.find(c => c.id === state.settings.scheduledColumnId)) ensureScheduledColumn();
     window._notesModule = initNotes({
       apiBase:      API_BASE,
       boardName:    BOARD_NAME,
