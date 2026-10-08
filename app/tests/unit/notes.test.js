@@ -333,6 +333,54 @@ describe('buildNotesPatch()', () => {
     const patch = ctx.__buildNotesPatch(base, current)
     expect(patch).toBeNull()
   })
+
+  it('NT-7: page at root immediately after folder moved into that folder (same DFS type:id sequence) → returns null', () => {
+    // This was the exact bug: [folder(empty), page] and [folder(page)] produced
+    // identical DFS sequences ["f:f-1","p:n-1"], causing buildNotesPatch to return {}
+    // and scheduleSaveNotes to skip the save entirely.
+    const base = { items: [
+      { type: 'folder', id: 'f-1', title: 'F', children: [] },
+      { type: 'page',   id: 'n-1', title: 'P', description: '', linkedCards: [] },
+    ], schemaVersion: 2 }
+    const current = { items: [
+      { type: 'folder', id: 'f-1', title: 'F', children: [
+        { type: 'page', id: 'n-1', title: 'P', description: '', linkedCards: [] },
+      ]},
+    ], schemaVersion: 2 }
+    const patch = ctx.__buildNotesPatch(base, current)
+    expect(patch).toBeNull()
+  })
+
+  it('NT-8: folder title changed, page content unchanged → returns null (PATCH cannot update folders)', () => {
+    const base = { items: [
+      { type: 'folder', id: 'f-1', title: 'Old Name', children: [
+        { type: 'page', id: 'n-1', title: 'P', description: 'x' },
+      ]},
+    ], schemaVersion: 2 }
+    const current = { items: [
+      { type: 'folder', id: 'f-1', title: 'New Name', children: [
+        { type: 'page', id: 'n-1', title: 'P', description: 'x' },
+      ]},
+    ], schemaVersion: 2 }
+    const patch = ctx.__buildNotesPatch(base, current)
+    expect(patch).toBeNull()
+  })
+
+  it('NT-9: page moved from inside folder to root, landing in same DFS slot → returns null', () => {
+    // Mirror of NT-7: [folder(page)] → [folder(empty), page] produced identical
+    // DFS sequences and was silently not saved before the parent-context fix.
+    const base = { items: [
+      { type: 'folder', id: 'f-1', title: 'F', children: [
+        { type: 'page', id: 'n-1', title: 'P', description: '', linkedCards: [] },
+      ]},
+    ], schemaVersion: 2 }
+    const current = { items: [
+      { type: 'folder', id: 'f-1', title: 'F', children: [] },
+      { type: 'page',   id: 'n-1', title: 'P', description: '', linkedCards: [] },
+    ], schemaVersion: 2 }
+    const patch = ctx.__buildNotesPatch(base, current)
+    expect(patch).toBeNull()
+  })
 })
 
 // ---------------------------------------------------------------------------

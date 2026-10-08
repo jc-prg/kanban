@@ -370,6 +370,97 @@ test.describe('3.6 Notes sidebar', () => {
     expect(firstTitle?.trim()).toBe('Page Three');
   });
 
+  // E-N-12 -----------------------------------------------------------------
+  test('E-N-12: rename folder → reload → new name persists', async ({ page }) => {
+    await apiPut(`/api/${BOARD}/notes`, {
+      schemaVersion: 2,
+      items: [{ type: 'folder', id: 'f-ren1', title: 'Old Name', children: [] }],
+    });
+    await page.reload();
+    await expect(page.locator('.column')).toHaveCount(1, { timeout: 10_000 });
+    await openSidebar(page);
+
+    // Click folder title to enter inline rename mode
+    const folderTitle = page.locator('.notes-tree-item--folder .notes-item-folder-title');
+    await folderTitle.click();
+    const input = page.locator('.notes-folder-rename-input');
+    await expect(input).toBeVisible();
+    await input.fill('New Name');
+    await input.press('Enter');
+
+    // Wait for 600 ms debounce + save round-trip
+    await page.waitForTimeout(1500);
+    await page.reload();
+    await openSidebar(page);
+
+    await expect(page.locator('.notes-tree-item--folder .notes-item-folder-title')).toContainText('New Name');
+  });
+
+  // E-N-13 -----------------------------------------------------------------
+  test('E-N-13: drag page into adjacent folder → reload → page nested inside folder', async ({ page }) => {
+    // Seed the exact same-DFS-position scenario: folder at index 0, page at index 1
+    await apiPut(`/api/${BOARD}/notes`, {
+      schemaVersion: 2,
+      items: [
+        { type: 'folder', id: 'f-mv1', title: 'Target Folder', children: [] },
+        { type: 'page',   id: 'n-mv1', title: 'Movable Page', description: '', link: '', linkedCards: [] },
+      ],
+    });
+    await page.reload();
+    await expect(page.locator('.column')).toHaveCount(1, { timeout: 10_000 });
+    await openSidebar(page);
+
+    // Drag the page onto the folder (drop into the centre → position 'into')
+    const folderItem = page.locator('.notes-tree-item--folder');
+    const pageItem   = page.locator('.notes-tree-item--page');
+    await pageItem.dragTo(folderItem);
+
+    // Wait for 600 ms debounce + save round-trip
+    await page.waitForTimeout(1500);
+    await page.reload();
+    await openSidebar(page);
+
+    // After reload the folder should contain the page (depth 1)
+    // notesExpanded was persisted to sessionStorage so the folder auto-expands;
+    // click the toggle explicitly to be safe.
+    const folderToggle = page.locator('.notes-tree-item--folder .notes-toggle-btn');
+    if (!(await folderToggle.getAttribute('class'))?.includes('notes-toggle-btn--hidden')) {
+      await folderToggle.click();
+    }
+
+    const nestedPage = page.locator('.notes-tree-item--page[data-depth="1"]');
+    await expect(nestedPage).toHaveCount(1, { timeout: 5000 });
+    await expect(nestedPage.locator('.notes-item-title')).toContainText('Movable Page');
+  });
+
+  // E-N-14 -----------------------------------------------------------------
+  test('E-N-14: [[Page Title]] in note description → preview renders link → click opens target page', async ({ page }) => {
+    await apiPut(`/api/${BOARD}/notes`, {
+      schemaVersion: 2,
+      items: [
+        { type: 'page', id: 'n-wl1', title: 'Source Page',  description: '[[Target Page]]', link: '', linkedCards: [] },
+        { type: 'page', id: 'n-wl2', title: 'Target Page',  description: '', link: '', linkedCards: [] },
+      ],
+    });
+    await page.reload();
+    await expect(page.locator('.column')).toHaveCount(1, { timeout: 10_000 });
+    await openSidebar(page);
+
+    // Open Source Page
+    await page.locator('.notes-tree-item--page').filter({ hasText: 'Source Page' })
+      .locator('.notes-item-title').click();
+    await expect(page.locator('#noteModal')).toBeVisible();
+
+    // Preview pane should render [[Target Page]] as a note-page link
+    const previewLink = page.locator('#notePageDesc-mount .cm-preview a.note-page-link');
+    await expect(previewLink).toBeVisible({ timeout: 5000 });
+    await expect(previewLink).toContainText('Target Page');
+
+    // Clicking the link navigates to (updates the modal with) the target page
+    await previewLink.click();
+    await expect(page.locator('#notePageTitle')).toHaveValue('Target Page', { timeout: 5000 });
+  });
+
   // E-N-11 -----------------------------------------------------------------
   test('E-N-11: export notes → ZIP download triggered', async ({ page }) => {
     // Seed a page so the export has content

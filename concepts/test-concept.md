@@ -290,6 +290,9 @@ Pure-function tests using Vitest + jsdom. No network calls.
 | NT-4 | Linked card appears in page; unlinking removes it | `linkedCards` array updated |
 | NT-5 | `buildNotesPatch` — page content change, same tree structure | Returns `{ updatedPages: [changedPage] }` |
 | NT-6 | `buildNotesPatch` — page moved between folders (structure change) | Returns `null` (caller falls back to PUT) |
+| NT-7 | `buildNotesPatch` — page at root adjacent to folder; same page moved inside that folder (same DFS id sequence, different parent) | Returns `null` |
+| NT-8 | `buildNotesPatch` — folder title changed, all page content unchanged | Returns `null` (PATCH cannot express folder renames) |
+| NT-9 | `buildNotesPatch` — page moved from inside folder to root, landing in same DFS slot | Returns `null` |
 
 ### 2.5 Analytics computations (`analytics.test.js`)
 
@@ -385,6 +388,9 @@ Run against a live server (local or CI Docker Compose). Each test file gets a fr
 | E-N-9 | Drag card to page → linked |
 | E-N-10 | Reorder pages by drag → new order persists |
 | E-N-11 | Export notes → ZIP downloaded |
+| E-N-12 | Rename folder → reload → new name persists (regression: was reverting before fix) |
+| E-N-13 | Drag page into adjacent folder → reload → page nested inside folder (regression: move was lost before fix) |
+| E-N-14 | `[[Page Title]]` in note description → preview renders clickable link → click opens target page |
 
 ### 3.7 Attachment uploads (`attachments.spec.js`)
 
@@ -538,6 +544,10 @@ Implement in this order to get coverage fastest:
 - [x] PATCH /notes + ETag (N-13..N-17, add to `notes.test.js`)
 - [x] `doneAt` field on markDone/markUndone actions (S-6, S-7 — update `state.test.js`)
 - [x] Analytics unit tests (section 2.5, AN-1..AN-12) — new `analytics.test.js`
+
+**Phase 3.6 — Notes tree structural save + wiki-links** ✓ complete
+- [x] Unit: `buildNotesPatch` parent-context and folder-rename detection (NT-7, NT-8, NT-9)
+- [x] E2E: folder rename persists (E-N-12), page drag-into-folder persists (E-N-13), `[[wiki-link]]` in note preview (E-N-14)
 
 **Phase 4 — Reliability**
 - [ ] Concurrency and edge cases (section 5)
