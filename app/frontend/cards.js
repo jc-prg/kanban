@@ -34,11 +34,68 @@ marked.use({
   }]
 });
 
+function _escAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); }
+
+const _notePageUrlRe = /^(?:https?:|ftp:|mailto:|attachment:|_attachments\/|#|\/)/;
+
+// Internal note page links — two syntaxes, both resolved by resolveNotePageLinks in notes.js:
+//   [[Page Title]]           — wiki-style, label = title
+//   [[Page Title|Label]]     — wiki-style with custom label
+//   [Label](Page Title)      — markdown-style, spaces allowed (matched before built-in link tokenizer)
+marked.use({
+  extensions: [{
+    name: 'notepage',
+    level: 'inline',
+    start(src) { return src.indexOf('['); },
+    tokenizer(src) {
+      // [[title]] or [[title|label]] or [[url]] or [[url|label]]
+      let m = src.match(/^\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/);
+      if (m) {
+        const inner = m[1].trim();
+        if (_notePageUrlRe.test(inner)) {
+          // [[https://url]] → external link, consume the brackets cleanly
+          return { type: 'notepage', raw: m[0], href: inner, label: m[2]?.trim() || inner };
+        }
+        return { type: 'notepage', raw: m[0], title: inner, label: m[2]?.trim() };
+      }
+      // [label](title) where title is not a URL (intercepts before built-in link tokenizer, allows spaces)
+      m = src.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+      if (m && !_notePageUrlRe.test(m[2].trimStart()))
+        return { type: 'notepage', raw: m[0], title: m[2].trim(), label: m[1].trim() };
+    },
+    renderer(token) {
+      if (token.href) {
+        const icon = /^mailto:/i.test(token.href) ? _svgEmail(10,10) : _svgOpenLink(10,10);
+        return `<a href="${_escAttr(token.href)}">${_escAttr(token.label)}<span class="md-link-icon">${icon}</span></a>`;
+      }
+      const display = token.label !== undefined ? token.label : token.title;
+      return `<a class="note-page-link" data-note-page-title="${_escAttr(token.title)}" href="#">${_escAttr(display)}<span class="md-link-icon">${_svgNotePages(10,10)}</span></a>`;
+    }
+  }]
+});
+
+// Append link-type icons to standard Markdown links (http/https, mailto, attachments)
+marked.use({
+  renderer: {
+    link({ href, title, text }) {
+      const h = href || '';
+      let icon = '';
+      if (/^https?:/i.test(h))                       icon = _svgOpenLink(10, 10);
+      else if (/^mailto:/i.test(h))                  icon = _svgEmail(10, 10);
+      else if (/^(attachment:|_attachments\/)/.test(h)) icon = _svgAttachment(10, 10);
+      const iconHtml = icon ? `<span class="md-link-icon">${icon}</span>` : '';
+      const tAttr = title ? ` title="${_escAttr(title)}"` : '';
+      return `<a href="${_escAttr(h)}"${tAttr}>${text}${iconHtml}</a>`;
+    }
+  }
+});
+
 // ---- Description markdown preview ----
 function renderMarkdown(text) {
   return DOMPurify.sanitize(marked.parse(text, { breaks: true }), {
     ALLOWED_URI_REGEXP: /^(?:https?|ftp|mailto|attachment:|_attachments\/)/i,
-    ADD_URI_SAFE_ATTR: ['type']
+    ADD_URI_SAFE_ATTR: ['type'],
+    ADD_ATTR: ['data-note-page-title'],
   });
 }
 

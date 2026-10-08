@@ -326,3 +326,26 @@
   border-color: var(--accent);
   color: #fff;
 }
+
+/* Inline link-type icons (open-link, email, note-page, attachment) */
+.card-desc-preview .md-link-icon {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 3px;
+  opacity: 0.65;
+}
+
+/* Internal note page links — [[title]] / [text](page title) */
+a.note-page-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.note-page-link--missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.note-page-link--missing .note-page-link-icon {
+  margin-right: 0.2em;
+  font-style: normal;
+}

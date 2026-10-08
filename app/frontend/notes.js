@@ -153,17 +153,29 @@ function _flattenNotePages(items, out = new Map()) {
   return out;
 }
 
-// DFS item structure signature (type:id pairs) for structural comparison.
-function _itemDFSStructure(items, out = []) {
+// DFS-flatten only folders, returning a Map<id, { title }> for change detection.
+function _flattenNoteFolders(items, out = new Map()) {
   for (const item of items) {
-    out.push((item.type || 'page')[0] + ':' + item.id);
-    if (item.type === 'folder') _itemDFSStructure(item.children || [], out);
+    if (item.type === 'folder') {
+      out.set(item.id, { title: item.title });
+      _flattenNoteFolders(item.children || [], out);
+    }
+  }
+  return out;
+}
+
+// DFS item structure signature for structural comparison.
+// Encodes parent context so that moving an item between levels is detected as a change.
+function _itemDFSStructure(items, out = [], parentId = '') {
+  for (const item of items) {
+    out.push(`${parentId}/${(item.type || 'page')[0]}:${item.id}`);
+    if (item.type === 'folder') _itemDFSStructure(item.children || [], out, item.id);
   }
   return out;
 }
 
 // Returns { updatedPages } for content-only changes, {} for no changes,
-// or null when structure changed (add/remove/reorder/move) — caller should fall back to PUT.
+// or null when structure changed (add/remove/reorder/move/folder-rename) — caller should fall back to PUT.
 function buildNotesPatch(base, current) {
   const baseItems = base.items || base.pages || [];
   const currItems = current.items || current.pages || [];
@@ -171,6 +183,13 @@ function buildNotesPatch(base, current) {
   const baseStruct = _itemDFSStructure(baseItems);
   const currStruct = _itemDFSStructure(currItems);
   if (JSON.stringify(baseStruct) !== JSON.stringify(currStruct)) return null;
+
+  // Folder data (e.g. title) is not sent via PATCH — force PUT if any folder changed.
+  const baseFolders = _flattenNoteFolders(baseItems);
+  const currFolders = _flattenNoteFolders(currItems);
+  for (const [id, curr] of currFolders) {
+    if (JSON.stringify(curr) !== JSON.stringify(baseFolders.get(id))) return null;
+  }
 
   const baseFlat = _flattenNotePages(baseItems);
   const currFlat = _flattenNotePages(currItems);
@@ -264,6 +283,35 @@ function findNotePage(id, items) {
     if (!item.type && item.id === id) return item;
   }
   return null;
+}
+
+function findNotePageByTitle(title, items) {
+  const t = title.trim().toLowerCase();
+  for (const item of items) {
+    if (item.type === 'page' && item.title.trim().toLowerCase() === t) return item;
+    if (item.type === 'folder') { const f = findNotePageByTitle(title, item.children || []); if (f) return f; }
+  }
+  return null;
+}
+
+function resolveNotePageLinks(el) {
+  el.querySelectorAll('a[data-note-page-title]').forEach(a => {
+    const title = a.getAttribute('data-note-page-title');
+    const page  = findNotePageByTitle(title, notesState.items);
+    if (page) {
+      a.removeAttribute('data-note-page-title');
+      a.href = '#';
+      a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openNoteModal(page.id); });
+    } else {
+      const span = document.createElement('span');
+      span.className = 'note-page-link--missing';
+      const icon = document.createElement('span');
+      icon.className = 'note-page-link-icon';
+      icon.textContent = '⚠';
+      span.append(icon, document.createTextNode(' ' + a.textContent));
+      a.replaceWith(span);
+    }
+  });
 }
 
 // Return the parent folder id of the item with given id (null = root, undefined = not found)
@@ -1932,7 +1980,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  createMarkdownEditor('notePageDesc', { onPreview: el => resolveAttachments(el) });
+  createMarkdownEditor('notePageDesc', { sanitizeOpts: { ADD_ATTR: ['target', 'data-note-page-title'] }, onPreview: el => { resolveAttachments(el); resolveNotePageLinks(el); } });
 
   // Title key handling
   document.getElementById('notePageTitle')?.addEventListener('focus', e => {
@@ -2084,5 +2132,6 @@ async function printNote(pageId) {
   });
   buildToc(root);
   await resolveAttachments(root);
+  resolveNotePageLinks(root);
   await _triggerPrint(root);
 }

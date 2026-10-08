@@ -243,10 +243,21 @@ function initNotes(cfg) {
     return out;
   }
 
-  function _itemDFSStructure(items, out = []) {
+  // DFS-flatten only folders → Map<id, { title }> for change detection.
+  function _flattenNoteFolders(items, out = new Map()) {
     for (const item of items) {
-      out.push((item.type || 'page')[0] + ':' + item.id);
-      if (item.type === 'folder') _itemDFSStructure(item.children || [], out);
+      if (item.type === 'folder') {
+        out.set(item.id, { title: item.title });
+        _flattenNoteFolders(item.children || [], out);
+      }
+    }
+    return out;
+  }
+
+  function _itemDFSStructure(items, out = [], parentId = '') {
+    for (const item of items) {
+      out.push(`${parentId}/${(item.type || 'page')[0]}:${item.id}`);
+      if (item.type === 'folder') _itemDFSStructure(item.children || [], out, item.id);
     }
     return out;
   }
@@ -258,6 +269,13 @@ function initNotes(cfg) {
     const baseStruct = _itemDFSStructure(baseItems);
     const currStruct = _itemDFSStructure(currItems);
     if (JSON.stringify(baseStruct) !== JSON.stringify(currStruct)) return null;
+
+    // Folder data (e.g. title) is not sent via PATCH — force PUT if any folder changed.
+    const baseFolders = _flattenNoteFolders(baseItems);
+    const currFolders = _flattenNoteFolders(currItems);
+    for (const [id, curr] of currFolders) {
+      if (JSON.stringify(curr) !== JSON.stringify(baseFolders.get(id))) return null;
+    }
 
     const baseFlat = _flattenNotePages(baseItems);
     const currFlat = _flattenNotePages(currItems);
@@ -345,6 +363,32 @@ function initNotes(cfg) {
       if (!item.type && item.id === id) return item;
     }
     return null;
+  }
+
+  function findNotePageByTitle(title, items) {
+    const t = title.trim().toLowerCase();
+    for (const item of items) {
+      if (item.type === 'page' && item.title.trim().toLowerCase() === t) return item;
+      if (item.type === 'folder') { const f = findNotePageByTitle(title, item.children || []); if (f) return f; }
+    }
+    return null;
+  }
+
+  function resolveNotePageLinks(el) {
+    el.querySelectorAll('a[data-note-page-title]').forEach(a => {
+      const title = a.getAttribute('data-note-page-title');
+      const page  = findNotePageByTitle(title, notesState.items);
+      if (!page) {
+        const span = document.createElement('span');
+        span.className = 'note-page-link--missing';
+        const icon = document.createElement('span');
+        icon.className = 'note-page-link-icon';
+        icon.textContent = '⚠';
+        span.append(icon, document.createTextNode(' ' + a.textContent));
+        a.replaceWith(span);
+      }
+      // Found pages keep their <a data-note-page-title> for the capture click handler
+    });
   }
 
   function _getParentId(id, items, parentId = null) {
@@ -1190,7 +1234,7 @@ function initNotes(cfg) {
     });
   }
 
-  async function openNoteModal(pageId, focusTitle = false) {
+  async function openNoteModal(pageId, focusTitle = false, { push = false } = {}) {
     let page = findNotePage(pageId, notesState.items);
     if (!page && _pendingNewPage?.page.id === pageId) page = _pendingNewPage.page;
     if (!page) return;
@@ -1229,7 +1273,7 @@ function initNotes(cfg) {
 
     if (cfg.boardName) document.title = `${cfg.boardName} - ${page.title} (note)`;
     document.getElementById('noteModal').style.display = 'flex';
-    if (!_pendingNewPage) history.replaceState(null, '', '#note:' + pageId);
+    if (!_pendingNewPage) history[push ? 'pushState' : 'replaceState'](null, '', '#note:' + pageId);
     const nt = document.getElementById('notePageTitle');
     autoResizeTitle(nt);
     if (focusTitle) requestAnimationFrame(() => { nt.focus(); nt.select(); });
@@ -1255,13 +1299,13 @@ function initNotes(cfg) {
     }
   }
 
-  function closeNoteModal() {
+  function closeNoteModal(skipHistory = false) {
     _exitNoteFullscreen();
     _stopNoteAutoSave();
     if (cfg.boardName) document.title = `jc://${cfg.boardName}/`;
     const _wdInfoPop = document.getElementById('noteWdInfoPopover');
     if (_wdInfoPop) _wdInfoPop.style.display = 'none';
-    if (location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
+    if (!skipHistory && location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
     document.getElementById('noteModal').style.display = 'none';
     document.getElementById('noteCreateCardForm').style.display = 'none';
     noteModalPageId = null;
@@ -2176,6 +2220,7 @@ function initNotes(cfg) {
     root.innerHTML = _print.buildItem({ board, context, title: page.title, body, footerRows: rows });
     buildToc(root);
     await resolveAttachments(root);
+    resolveNotePageLinks(root);
     if (_print.trigger) await _print.trigger(root);
   }
 
@@ -2292,8 +2337,38 @@ function initNotes(cfg) {
     });
 
     if (_editor.create) {
-      _editor.create('notePageDesc', { onPreview: el => resolveAttachments(el) });
+      _editor.create('notePageDesc', { onPreview: el => { resolveAttachments(el); resolveNotePageLinks(el); } });
     }
+
+    // Capture-mode click handler: intercepts note-page-link clicks before the editor's
+    // preview click handler (which would activate edit mode) can fire.
+    document.getElementById('notePageDesc-mount')?.addEventListener('click', async e => {
+      const a = e.target.closest('a.note-page-link');
+      if (!a) return;
+      const title = a.getAttribute('data-note-page-title');
+      if (!title) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const page = findNotePageByTitle(title, notesState.items);
+      if (!page) return;
+      if (noteModalHasChanges()) {
+        const ok = await _showConfirm('This page has unsaved changes.', {
+          okLabel: 'Save and continue',
+          cancelLabel: 'Cancel',
+        });
+        if (!ok) return;
+        await submitNote();
+      }
+      openNoteModal(page.id, false, { push: true });
+    }, { capture: true });
+
+    window.addEventListener('popstate', () => {
+      if (location.hash.startsWith('#note:')) {
+        openNoteModal(location.hash.slice(6));
+      } else if (noteModalPageId) {
+        closeNoteModal(true);
+      }
+    });
 
     // Title key handling
     document.getElementById('notePageTitle')?.addEventListener('focus', e => {
