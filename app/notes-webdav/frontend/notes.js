@@ -1724,8 +1724,8 @@ function initNotes(cfg) {
   function _insertAttachmentMd(name, type) {
     const rel = `_attachments/${noteModalPageId}_${name}`;
     const md  = (type === 'image' || type === 'svg') ? `![${name}](${rel})` : `[${name}](${rel})`;
-    if (_editor.isActive && _editor.isActive('notePageDesc')) {
-      if (_editor.applyFormat) _editor.applyFormat('notePageDesc', { insert: md });
+    if (_editor.insertAtCursor) {
+      _editor.insertAtCursor('notePageDesc', md);
     } else {
       const ta = document.getElementById('notePageDesc');
       if (ta) {
