@@ -32,7 +32,7 @@
 .card-desc-preview h4:first-child,
 .card-desc-preview h5:first-child,
 .card-desc-preview h6:first-child { margin-top: 0; }
-.card-desc-preview h1 { font-size: 1.35rem; }
+.card-desc-preview h1 { font-size: 1.35rem; margin-top: 30px; }
 .card-desc-preview h2 { font-size: 1.15rem; }
 .card-desc-preview h3 { font-size: 1.0rem; }
 .card-desc-preview h4,
