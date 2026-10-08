@@ -387,19 +387,24 @@
   padding: 0 1px;
 }
 
-/* ---- in-modal find bar (Ctrl+F) ---- */
+/* ---- in-modal find/replace bar (Ctrl+F / Ctrl+R) ---- */
 .modal-find-bar {
   position: absolute;
   top: 10px;
   right: 56px;      /* sits left of the fullscreen button */
   z-index: 20;
-  align-items: center;
-  gap: 3px;
+  flex-direction: column;
+  gap: 2px;
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 3px 4px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.modal-find-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 .modal-find-input {
   background: transparent;
@@ -433,6 +438,21 @@
 }
 .modal-find-btn:hover,
 .modal-find-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+.modal-find-replace-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.modal-find-replace-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text);
 }

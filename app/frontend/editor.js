@@ -486,12 +486,12 @@ function applyEditorFormat(id, action) {
   if (action === 'subpages')      return _insertBlock(view, '[subpages]', 10);
 }
 
-// ---- in-modal find bar (Ctrl+F inside card/note modals) ----
+// ---- in-modal find bar (Ctrl+F / Ctrl+R inside card/note modals) ----
 
 // Maps editor ID → its containing modal-backdrop element ID
 const _editorModalMap = { cardDesc: 'modal', notePageDesc: 'noteModal' };
 
-// Per-editor find state: { bar, input, counter, matches[], idx }
+// Per-editor find state: { bar, input, counter, replaceRow, replaceInput, matches[], idx }
 const _findState = new Map();
 
 function _createFindBar(editorId) {
@@ -505,16 +505,25 @@ function _createFindBar(editorId) {
   bar.className = 'modal-find-bar';
   bar.style.display = 'none';
   bar.innerHTML =
-    '<input class="modal-find-input" type="text" placeholder="Find in text…" spellcheck="false" autocomplete="off">' +
-    '<span class="modal-find-counter"></span>' +
-    '<button class="modal-find-btn" data-dir="-1" title="Previous (Shift+Enter)">↑</button>' +
-    '<button class="modal-find-btn" data-dir="1" title="Next (Enter)">↓</button>' +
-    '<button class="modal-find-close" title="Close (Esc)">✕</button>';
+    '<div class="modal-find-row">' +
+      '<input class="modal-find-input" type="text" placeholder="Find in text…" spellcheck="false" autocomplete="off">' +
+      '<span class="modal-find-counter"></span>' +
+      '<button class="modal-find-btn" data-dir="-1" title="Previous (Shift+Enter)">↑</button>' +
+      '<button class="modal-find-btn" data-dir="1" title="Next (Enter)">↓</button>' +
+      '<button class="modal-find-close" title="Close (Esc)">✕</button>' +
+    '</div>' +
+    '<div class="modal-find-row modal-find-row--replace" style="display:none">' +
+      '<input class="modal-find-input modal-find-replace-input" type="text" placeholder="Replace with…" spellcheck="false" autocomplete="off">' +
+      '<button class="modal-find-replace-btn" data-act="replace-one" title="Replace (Enter)">Replace</button>' +
+      '<button class="modal-find-replace-btn" data-act="replace-all" title="Replace all">All</button>' +
+    '</div>';
   inner.appendChild(bar);
 
-  const input   = bar.querySelector('.modal-find-input');
-  const counter = bar.querySelector('.modal-find-counter');
-  const st      = { bar, input, counter, matches: [], idx: 0, editorId };
+  const input        = bar.querySelector('.modal-find-input');
+  const counter      = bar.querySelector('.modal-find-counter');
+  const replaceRow   = bar.querySelector('.modal-find-row--replace');
+  const replaceInput = bar.querySelector('.modal-find-replace-input');
+  const st           = { bar, input, counter, replaceRow, replaceInput, matches: [], idx: 0, editorId };
   _findState.set(editorId, st);
 
   input.addEventListener('input', () => _runFind(st));
@@ -522,18 +531,31 @@ function _createFindBar(editorId) {
     if (e.key === 'Enter')  { e.preventDefault(); _findNavigate(st, e.shiftKey ? -1 : 1); }
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _closeFindBar(st); }
     if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); e.stopPropagation(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'r') { e.preventDefault(); e.stopPropagation(); _showReplaceRow(st); st.replaceInput.focus(); }
+  });
+  replaceInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); _replaceOne(st); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _closeFindBar(st); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); e.stopPropagation(); st.input.focus(); st.input.select(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'r') { e.preventDefault(); e.stopPropagation(); }
   });
   // Prevent mousedown from stealing focus away from the editor / preview
-  bar.querySelectorAll('.modal-find-btn, .modal-find-close').forEach(btn => {
+  bar.querySelectorAll('.modal-find-btn, .modal-find-close, .modal-find-replace-btn').forEach(btn => {
     btn.addEventListener('mousedown', e => e.preventDefault());
   });
   bar.querySelector('[data-dir="-1"]').addEventListener('click', () => _findNavigate(st, -1));
   bar.querySelector('[data-dir="1"]').addEventListener('click',  () => _findNavigate(st,  1));
   bar.querySelector('.modal-find-close').addEventListener('click', () => _closeFindBar(st));
+  bar.querySelector('[data-act="replace-one"]').addEventListener('click', () => _replaceOne(st));
+  bar.querySelector('[data-act="replace-all"]').addEventListener('click', () => _replaceAll(st));
   return st;
 }
 
-function _openFindBar(editorId) {
+function _showReplaceRow(st) {
+  st.replaceRow.style.display = 'flex';
+}
+
+function _openFindBar(editorId, mode = 'find') {
   const entry = _editors.get(editorId);
   if (!entry) return;
   const st = _createFindBar(editorId);
@@ -545,20 +567,50 @@ function _openFindBar(editorId) {
   }
 
   st.bar.style.display = 'flex';
-  st.input.select();
-  st.input.focus(); // causes editorWrap focusout → _deactivateEditor → preview shown
+  if (mode === 'replace') {
+    _showReplaceRow(st);
+    st.replaceInput.select();
+    st.replaceInput.focus();
+  } else {
+    st.input.select();
+    st.input.focus(); // causes editorWrap focusout → _deactivateEditor → preview shown
+  }
 }
 
 function _closeFindBar(st) {
   st.bar.style.display = 'none';
   st.input.value = '';
   st.counter.textContent = '';
+  st.replaceInput.value = '';
+  st.replaceRow.style.display = 'none';
   st.matches = [];
   st.idx = 0;
   const entry = _editors.get(st.editorId);
   if (entry && entry.editorWrap.style.display === 'none') {
     _renderPreview(entry, entry.view.state.doc.toString());
   }
+}
+
+function _replaceOne(st) {
+  const entry = _editors.get(st.editorId);
+  if (!entry || !st.matches.length) return;
+  const match = st.matches[st.idx];
+  const replaceWith = st.replaceInput.value;
+  entry.view.dispatch({
+    changes: { from: match.from, to: match.to, insert: replaceWith },
+    selection: { anchor: match.from + replaceWith.length },
+  });
+  _runFind(st);
+}
+
+function _replaceAll(st) {
+  const entry = _editors.get(st.editorId);
+  if (!entry || !st.matches.length) return;
+  const replaceWith = st.replaceInput.value;
+  entry.view.dispatch({
+    changes: st.matches.map(m => ({ from: m.from, to: m.to, insert: replaceWith })),
+  });
+  _runFind(st);
 }
 
 function _runFind(st) {
@@ -674,6 +726,26 @@ document.addEventListener('keydown', e => {
       st.input.focus(); st.input.select(); // re-focus if already open
     } else {
       _openFindBar(editorId);
+    }
+    return;
+  }
+}, { capture: true });
+
+// Ctrl+R — open find bar in replace mode when a card/note modal is open
+document.addEventListener('keydown', e => {
+  if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === 'r')) return;
+  for (const [editorId, modalId] of Object.entries(_editorModalMap)) {
+    const modalEl = document.getElementById(modalId);
+    if (!modalEl || modalEl.style.display === 'none') continue;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const st = _findState.get(editorId);
+    if (st && st.bar.style.display !== 'none') {
+      _showReplaceRow(st);
+      st.replaceInput.select();
+      st.replaceInput.focus();
+    } else {
+      _openFindBar(editorId, 'replace');
     }
     return;
   }
