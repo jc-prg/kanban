@@ -561,16 +561,27 @@ function _openFindBar(editorId, mode = 'find') {
   const st = _createFindBar(editorId);
   if (!st) return;
 
-  // If editor is active, run find against current text and jump cursor before focus moves
-  if (entry.editorWrap.style.display !== 'none' && st.input.value) {
-    _runFind(st); // computes matches + jumps cursor in CM
+  // Pre-fill find input from any active text selection (single-line, ≤200 chars)
+  let selectedText = '';
+  if (entry.editorWrap.style.display !== 'none') {
+    const sel = entry.view.state.selection.main;
+    if (sel.from !== sel.to) selectedText = entry.view.state.sliceDoc(sel.from, sel.to);
+  } else {
+    const domSel = window.getSelection();
+    if (domSel?.rangeCount && entry.preview.contains(domSel.anchorNode))
+      selectedText = domSel.toString();
   }
+  if (selectedText && !selectedText.includes('\n') && selectedText.length <= 200)
+    st.input.value = selectedText;
+
+  // Run find if there's a value — in editor mode this also positions the cursor
+  if (st.input.value) _runFind(st);
 
   st.bar.style.display = 'flex';
   if (mode === 'replace') {
     _showReplaceRow(st);
-    st.replaceInput.select();
-    st.replaceInput.focus();
+    st.input.select();
+    st.input.focus();
   } else {
     st.input.select();
     st.input.focus(); // causes editorWrap focusout → _deactivateEditor → preview shown
@@ -742,8 +753,8 @@ document.addEventListener('keydown', e => {
     const st = _findState.get(editorId);
     if (st && st.bar.style.display !== 'none') {
       _showReplaceRow(st);
-      st.replaceInput.select();
-      st.replaceInput.focus();
+      st.input.select();
+      st.input.focus();
     } else {
       _openFindBar(editorId, 'replace');
     }
