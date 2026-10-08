@@ -371,8 +371,10 @@ function createMarkdownEditor(id, { onChange, onPreview, sanitizeOpts } = {}) {
     _activateEditor(id, srcPos, viewFraction);
   });
 
-  // Focus leaves editorWrap → switch back to preview
+  // Focus leaves editorWrap → switch back to preview (unless focus moved to the find bar)
   editorWrap.addEventListener('focusout', e => {
+    const st = _findState.get(id);
+    if (st?.bar.contains(e.relatedTarget)) return;
     if (!editorWrap.contains(e.relatedTarget)) _deactivateEditor(id);
   });
 
@@ -584,7 +586,7 @@ function _openFindBar(editorId, mode = 'find') {
     st.input.focus();
   } else {
     st.input.select();
-    st.input.focus(); // causes editorWrap focusout → _deactivateEditor → preview shown
+    st.input.focus();
   }
 }
 
@@ -597,8 +599,11 @@ function _closeFindBar(st) {
   st.matches = [];
   st.idx = 0;
   const entry = _editors.get(st.editorId);
-  if (entry && entry.editorWrap.style.display === 'none') {
-    _renderPreview(entry, entry.view.state.doc.toString());
+  if (entry) {
+    if (entry.editorWrap.style.display === 'none')
+      _renderPreview(entry, entry.view.state.doc.toString());
+    else
+      entry.view.focus();
   }
 }
 
