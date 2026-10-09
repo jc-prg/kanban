@@ -96,7 +96,7 @@ marked.use({
 const _SVG_SAFE_ATTR = [
   'viewBox', 'width', 'height',
   'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
-  'd', 'x1', 'y1', 'x2', 'y2',
+  'd', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'rx', 'ry', 'cx', 'cy', 'r', 'points',
 ];
 
 function renderMarkdown(text) {

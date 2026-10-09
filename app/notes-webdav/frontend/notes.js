@@ -1203,13 +1203,13 @@ function initNotes(cfg) {
 
   function toggleNoteFullscreen() {
     _noteFullscreen = !_noteFullscreen;
-    document.getElementById('noteModal')?.classList.toggle('modal--fullscreen', _noteFullscreen);
+    document.querySelector('#noteModal .modal')?.classList.toggle('modal--fullscreen', _noteFullscreen);
   }
 
   function _exitNoteFullscreen() {
     if (!_noteFullscreen) return;
     _noteFullscreen = false;
-    document.getElementById('noteModal')?.classList.remove('modal--fullscreen');
+    document.querySelector('#noteModal .modal')?.classList.remove('modal--fullscreen');
   }
 
   async function _crumbNavigate(pageId) {
