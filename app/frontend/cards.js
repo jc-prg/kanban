@@ -91,10 +91,18 @@ marked.use({
 });
 
 // ---- Description markdown preview ----
+// SVG geometry/presentation attributes stripped by DOMPurify when ALLOWED_URI_REGEXP
+// is customized — their values ("none", "currentColor", "10"…) get URI-filtered.
+const _SVG_SAFE_ATTR = [
+  'viewBox', 'width', 'height',
+  'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+  'd', 'x1', 'y1', 'x2', 'y2',
+];
+
 function renderMarkdown(text) {
   return DOMPurify.sanitize(marked.parse(text, { breaks: true }), {
     ALLOWED_URI_REGEXP: /^(?:https?|ftp|mailto|attachment:|_attachments\/)/i,
-    ADD_URI_SAFE_ATTR: ['type'],
+    ADD_URI_SAFE_ATTR: ['type', ..._SVG_SAFE_ATTR],
     ADD_ATTR: ['data-note-page-title'],
   });
 }
@@ -207,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
     onPreview: el => resolveCardAttachments(el),
     sanitizeOpts: {
       ALLOWED_URI_REGEXP: /^(?:https?|ftp|mailto|attachment:|_attachments\/)/i,
-      ADD_URI_SAFE_ATTR: ['type'],
+      ADD_URI_SAFE_ATTR: ['type', ..._SVG_SAFE_ATTR],
     },
   });
 
