@@ -129,12 +129,23 @@ async function sendCodeEmail(code) {
 
 // ─── Is 2FA enabled? ─────────────────────────────────────────────────────────
 
+function isAutoSend() {
+  return process.env.TWO_FA_AUTO_SEND === 'true';
+}
+
 function isTwoFactorEnabled() {
   return !!(process.env.TWO_FA_EMAIL && process.env.SMTP_HOST);
 }
 
+// When true, the frontend sends the verification code immediately instead of
+// showing the "Send verification code" button first.
+function isAutoSend() {
+  return process.env.TWO_FA_AUTO_SEND === 'true';
+}
+
 module.exports = {
   isIntranet,
+  isAutoSend,
   isTwoFactorEnabled,
   generateChallenge,
   verifyChallenge,

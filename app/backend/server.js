@@ -7,7 +7,7 @@ const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES, 
 const { initDb, getCouch, withBoard, withExistingBoard } = require('./db');
 const { initGlobalDb }                    = require('./global-db');
 const { authenticate, parseCookies, writeRateLimit, uploadRateLimit } = require('./auth');
-const { isTwoFactorEnabled, isIntranet, isDeviceTokenValid } = require('./twoFactor');
+const { isTwoFactorEnabled, isIntranet, isDeviceTokenValid, isAutoSend } = require('./twoFactor');
 const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize, runOrphanAttachmentCleanup } = require('./backup');
 const { initRecurring } = require('./recurring');
 
@@ -91,7 +91,7 @@ app.use('/api', (req, res, next) => {
   if (isIntranet(req.ip)) return next();
   const cookies = parseCookies(req);
   if (isDeviceTokenValid(cookies['kanban-2fa'])) return next();
-  return res.status(403).json({ error: '2FA_REQUIRED' });
+  return res.status(403).json({ error: '2FA_REQUIRED', autoSend: isAutoSend() });
 });
 
 app.use('/api', require('./routes/auth'));

@@ -5,7 +5,7 @@ const { safeEqual, parseCookies, loginState, issueSessionToken, verifySessionTok
 const { APP_PASSWORD, SESSION_MAX_AGE_MS } = require('../config');
 const {
   isTwoFactorEnabled, isIntranet, isDeviceTokenValid,
-  generateChallenge, verifyChallenge, generateDeviceToken, sendCodeEmail,
+  generateChallenge, verifyChallenge, isAutoSend, generateDeviceToken, sendCodeEmail,
 } = require('../twoFactor');
 
 router.post('/auth', (req, res) => {
@@ -65,7 +65,7 @@ router.get('/auth/check', (req, res) => {
   if (!isTwoFactorEnabled()) return res.json({ ok: true, twoFactorRequired: false });
   const cookies = parseCookies(req);
   const twoFactorRequired = !isIntranet(req.ip) && !isDeviceTokenValid(cookies['kanban-2fa']);
-  res.json({ ok: true, twoFactorRequired });
+  res.json({ ok: true, twoFactorRequired, autoSend: isAutoSend() });
 });
 
 // Send a 6-digit code to the configured TWO_FA_EMAIL address.

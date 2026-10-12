@@ -63,7 +63,7 @@ function handleSessionExpired() {
 }
 
 // ---- 2FA form ----
-function show2FAForm() {
+function show2FAForm(autoSend = false) {
   // Avoid showing multiple times
   if (document.getElementById('twoFactorBackdrop').style.display !== 'none') return;
   document.getElementById('loginBackdrop').style.display = 'none';
@@ -71,6 +71,7 @@ function show2FAForm() {
   document.getElementById('twoFactorVerifyStep').style.display = 'none';
   document.getElementById('twoFactorSendError').style.display = 'none';
   document.getElementById('twoFactorBackdrop').style.display = 'flex';
+  if (autoSend) _send2FACode();
 }
 
 // Periodically verify the session is still valid (every 60 s)
@@ -102,7 +103,7 @@ async function tryLogin(password) {
     const checkR = await fetch('/api/auth/check');
     const checkData = await checkR.json();
     if (checkData.twoFactorRequired) {
-      show2FAForm();
+      show2FAForm(checkData.autoSend);
       return true;
     }
     document.getElementById('loginBackdrop').style.display = 'none';
@@ -117,7 +118,7 @@ async function checkAuth() {
   if (!ok) { handleSessionExpired(); return; }
   const checkR = await fetch('/api/auth/check');
   const checkData = await checkR.json();
-  if (checkData.twoFactorRequired) { show2FAForm(); return; }
+  if (checkData.twoFactorRequired) { show2FAForm(checkData.autoSend); return; }
   afterAuth();
 }
 
@@ -132,12 +133,9 @@ document.getElementById('loginForm').addEventListener('submit', async () => {
   }
 });
 
-document.getElementById('loginPassword').addEventListener('focus', () => {
+document.getElementById('loginPassword').addEventListener('keydown', () => {
   const msg = document.getElementById('loginSessionMsg');
   if (msg) msg.style.display = 'none';
-});
-
-document.getElementById('loginPassword').addEventListener('keydown', () => {
   document.getElementById('loginError').style.display = 'none';
 });
 

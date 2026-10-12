@@ -41,7 +41,7 @@ const API        = _isBoard ? `${API_BASE}/board`  : null;
       }
       if (r.status === 403 && isApi && !url.startsWith('/api/auth')) {
         r.clone().json().then(data => {
-          if (data?.error === '2FA_REQUIRED' && typeof show2FAForm === 'function') show2FAForm();
+          if (data?.error === '2FA_REQUIRED' && typeof show2FAForm === 'function') show2FAForm(data.autoSend);
         }).catch(() => {});
       }
       return r;
