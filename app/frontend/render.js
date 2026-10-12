@@ -167,6 +167,7 @@ function render() {
     colEl.querySelector('.column-header').addEventListener('contextmenu', e => {
       e.preventDefault();
       e.stopPropagation();
+      if (isScheduledCol) return; // scheduled column has no column menu
       showColContextMenu(e.clientX, e.clientY, col.id);
     });
 
