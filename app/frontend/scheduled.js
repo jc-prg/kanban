@@ -100,7 +100,7 @@ function _describeRecurrenceBrief(recurrence) {
   if (r.type === 'daily')   return r.interval > 1 ? `every ${r.interval}d` : 'daily';
   if (r.type === 'weekly') {
     const days = (r.daysOfWeek || []).map(d => DOW_LABELS[d]).join(', ');
-    return r.interval > 1 ? `every ${r.interval}w ${days}` : days || 'weekly';
+    return r.interval > 1 ? `every ${r.interval}w ${days}`.trim() : (days ? `weekly ${days}` : 'weekly');
   }
   if (r.type === 'monthly') return r.interval > 1 ? `every ${r.interval}mo` : 'monthly';
   if (r.type === 'yearly')  return 'yearly';
@@ -128,22 +128,23 @@ function sortScheduledCards(cards) {
 }
 window.sortScheduledCards = sortScheduledCards;
 
+// Single badge for recurring items: "↻ interval · next: date → target"
+function _recurBadgeHtml(recurrence, nextDate, targetName, disabled) {
+  const next = nextDate ? fmtDate(nextDate) : (disabled ? 'disabled' : 'none');
+  const text = `↻ ${_describeRecurrenceBrief(recurrence)} · next: ${next} → ${targetName}`;
+  return `<span class="card-sched-badge card-sched-badge--recur" title="${escHtml(text)}">${escHtml(text)}</span>`;
+}
+
 function getScheduledBadgeHtml(card) {
   if (!card.scheduledFor && !card.recurrence) return '';
   const targetCol  = state.columns.find(c => c.id === card.scheduledTarget);
   const targetName = targetCol ? targetCol.title : (card.scheduledTarget ? '?' : '—');
 
-  let datePart;
-  if (card.recurrence) {
-    datePart = '↻ ' + _describeRecurrenceBrief(card.recurrence);
-    const next = _schedSortKey(card);
-    if (next) datePart += ' · next: ' + fmtDate(next);
-  } else {
-    const isOverdue = card.scheduledFor < _today();
-    datePart = (isOverdue ? '⚠ ' : '') + fmtDate(card.scheduledFor);
-  }
+  if (card.recurrence) return _recurBadgeHtml(card.recurrence, _schedSortKey(card), targetName, false);
 
-  return `<span class="card-sched-badge${card.recurrence ? ' card-sched-badge--recur' : ''}" title="${escHtml(datePart)} → ${escHtml(targetName)}">${escHtml(datePart)} → ${escHtml(targetName)}</span>`;
+  const isOverdue = card.scheduledFor < _today();
+  const datePart = (isOverdue ? '⚠ ' : '') + fmtDate(card.scheduledFor);
+  return `<span class="card-sched-badge" title="${escHtml(datePart)} → ${escHtml(targetName)}">${escHtml(datePart)} → ${escHtml(targetName)}</span>`;
 }
 window.getScheduledBadgeHtml = getScheduledBadgeHtml;
 
@@ -207,17 +208,13 @@ function appendRecurringTaskCards(cardsEl) {
     cardEl.className = 'card card--recur-virtual';
     if (task.card.color) cardEl.style.setProperty('--card-color', task.card.color);
 
-    const recurrLabel = _describeRecurrenceBrief(task.recurrence);
-    const nextDue     = task.nextDueDate ? fmtDate(task.nextDueDate) : (task.enabled ? 'none' : 'disabled');
-    const enabled     = task.enabled !== false;
+    const enabled = task.enabled !== false;
 
     cardEl.innerHTML = `
       <div class="card-body">
         <div class="card-text">${escHtml(task.card.text)}</div>
         <div class="card-meta">
-          <span class="card-sched-badge card-sched-badge--recur" title="Recurrence">↻ ${escHtml(recurrLabel)}</span>
-          <span class="card-sched-badge" title="Target column">→ ${escHtml(task.targetColumn)}</span>
-          <span class="card-date${!enabled ? '' : ''}" title="Next occurrence">next: ${escHtml(nextDue)}</span>
+          ${_recurBadgeHtml(task.recurrence, task.nextDueDate, task.targetColumn, !enabled)}
           ${!enabled ? '<span class="card-done-mark">disabled</span>' : ''}
         </div>
       </div>`;
