@@ -101,15 +101,21 @@ function showContextMenu(x, y, colId, card) {
   document.querySelector('#contextMenu .ctx-submenu-trigger').style.display = '';
 
   document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
-  document.getElementById('ctxInfo').style.display = dateEditMode ? '' : 'none';
-  document.getElementById('ctxCopyLink').style.display = card.link ? '' : 'none';
+  // Scheduled column: reduced menu (edit, edit schedule, duplicate, move to, delete)
+  const isScheduledCol = colId === state.settings?.scheduledColumnId;
+  const hideInSched = isScheduledCol ? 'none' : '';
+  document.getElementById('ctxInfo').style.display = (!isScheduledCol && dateEditMode) ? '' : 'none';
+  document.getElementById('ctxCopyLink').style.display = (!isScheduledCol && card.link) ? '' : 'none';
   document.getElementById('ctxColorRow').style.display = 'none';
+  document.getElementById('ctxPriorityRow').style.display = 'none';
+  document.getElementById('ctxDone').style.display     = hideInSched;
+  document.getElementById('ctxColor').style.display    = hideInSched;
+  document.getElementById('ctxPriority').style.display = hideInSched;
 
   // Scheduling menu items
-  const isScheduledCol = colId === state.settings?.scheduledColumnId;
   document.getElementById('ctxSchedule').style.display      = !isScheduledCol ? '' : 'none';
   document.getElementById('ctxEditSchedule').style.display  = isScheduledCol  ? '' : 'none';
-  document.getElementById('ctxRemoveSchedule').style.display = isScheduledCol ? '' : 'none';
+  document.getElementById('ctxRemoveSchedule').style.display = 'none';
 
   const submenu = document.getElementById('ctxMoveSubmenu');
   submenu.innerHTML = state.columns
@@ -164,6 +170,9 @@ function showDashboardContextMenu(x, y, board, card) {
   document.getElementById('ctxColorRow').style.display = 'none';
   document.getElementById('ctxPriorityRow').style.display = 'none';
   document.getElementById('ctxDuplicate').style.display = 'none';
+  // Reset items the scheduled-column menu may have changed
+  for (const id of ['ctxDone', 'ctxColor', 'ctxPriority']) document.getElementById(id).style.display = '';
+  for (const id of ['ctxSchedule', 'ctxEditSchedule', 'ctxRemoveSchedule']) document.getElementById(id).style.display = 'none';
 
   // Populate Move to submenu asynchronously
   const submenu = document.getElementById('ctxMoveSubmenu');

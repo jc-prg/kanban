@@ -149,6 +149,51 @@ window.getScheduledBadgeHtml = getScheduledBadgeHtml;
 
 // ---- Virtual recurring task cards ------------------------------------------
 
+// Context menu for virtual cards built from the recurring-task settings
+function _showRecurringTaskMenu(e, task, editTask) {
+  const schedId = state.settings?.scheduledColumnId;
+  const targets = state.columns.filter(c => c.id !== schedId && c.title !== task.targetColumn);
+  // Same icons as the card context menu (#contextMenu)
+  const lbl = (icon, text) => `<span data-icon="${icon}">${SVGICONS[icon]()}</span>  ${text}`;
+  openContextMenu(e, [
+    { labelHtml: lbl('edit', 'Edit'), action: editTask },
+    {
+      labelHtml: lbl('duplicate', 'Duplicate'),
+      action: async () => {
+        const copy = JSON.parse(JSON.stringify(task));
+        delete copy.id;
+        copy.card.text = '(copy) ' + copy.card.text;
+        copy.lastCreatedDate = null;
+        copy.nextDueDate = null;
+        _recurringTasks.push(copy);
+        await _saveRecurringTasks();
+        if (typeof renderRecurringList === 'function') renderRecurringList();
+        render();
+      },
+    },
+    {
+      labelHtml: lbl('moveTo', 'Move to'),
+      children: targets.map(c => ({
+        label: c.title,
+        action: async () => {
+          task.targetColumn = c.title;
+          await _saveRecurringTasks();
+          if (typeof renderRecurringList === 'function') renderRecurringList();
+          render();
+        },
+      })),
+    },
+    {
+      labelHtml: lbl('delete', 'Delete'),
+      danger: true,
+      action: async () => {
+        await _deleteRecurringTask(task.id);
+        render();
+      },
+    },
+  ].filter(item => !item.children || item.children.length));
+}
+
 function appendRecurringTaskCards(cardsEl) {
   if (typeof _recurringTasks === 'undefined' || !_recurringTasks.length) return;
 
@@ -178,11 +223,16 @@ function appendRecurringTaskCards(cardsEl) {
       </div>`;
 
     cardEl.title = 'Recurring task — click to edit in settings';
-    cardEl.addEventListener('click', () => {
+    const editTask = () => {
       if (typeof openRecurringForm === 'function') {
         if (typeof openSettingsDialog === 'function') openSettingsDialog('recurringSection');
         setTimeout(() => { if (typeof openRecurringForm === 'function') openRecurringForm(task); }, 150);
       }
+    };
+    cardEl.addEventListener('click', editTask);
+    cardEl.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      _showRecurringTaskMenu(e, task, editTask);
     });
     cardsEl.appendChild(cardEl);
   }
