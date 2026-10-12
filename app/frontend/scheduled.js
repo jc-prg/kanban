@@ -113,7 +113,21 @@ function _nextOccurrence(recurrence, startDate, endDate, fromDate) {
   const { type, interval = 1, daysOfWeek = [], dayOfMonth = 1, month = 1 } = recurrence;
   const DAY = 86400000;
   const startD = new Date(startDate + 'T00:00:00Z');
-  const startWeek = startD.getTime() - startD.getUTCDay() * DAY;
+  // Anchor the interval cycle on the first date >= startDate that fits the rule (as in the backend)
+  let anchor = startD;
+  if (type === 'weekly') {
+    for (let i = 0; i < 7; i++) {
+      const c = new Date(startD.getTime() + i * DAY);
+      if (daysOfWeek.includes(c.getUTCDay())) { anchor = c; break; }
+    }
+  } else if (type === 'monthly' || type === 'yearly') {
+    for (let i = 0; i < 3700; i++) {
+      const c = new Date(startD.getTime() + i * DAY);
+      const cl = new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + 1, 0)).getUTCDate();
+      if (c.getUTCDate() === Math.min(dayOfMonth, cl) && (type === 'monthly' || c.getUTCMonth() + 1 === month)) { anchor = c; break; }
+    }
+  }
+  const startWeek = anchor.getTime() - anchor.getUTCDay() * DAY;
   let d = new Date((fromDate > startDate ? fromDate : startDate) + 'T00:00:00Z');
   for (let i = 0; i < 3700 * Math.max(1, interval); i++, d = new Date(d.getTime() + DAY)) {
     const iso = d.toISOString().slice(0, 10);
@@ -128,10 +142,10 @@ function _nextOccurrence(recurrence, startDate, endDate, fromDate) {
       const wk = Math.round((d.getTime() - d.getUTCDay() * DAY - startWeek) / (7 * DAY));
       ok = daysOfWeek.includes(d.getUTCDay()) && wk % interval === 0;
     } else if (type === 'monthly') {
-      const months = (y - startD.getUTCFullYear()) * 12 + (m - 1 - startD.getUTCMonth());
+      const months = (y - anchor.getUTCFullYear()) * 12 + (m - 1 - anchor.getUTCMonth());
       ok = domOk && months % interval === 0;
     } else if (type === 'yearly') {
-      ok = m === month && domOk && (y - startD.getUTCFullYear()) % interval === 0;
+      ok = m === month && domOk && (y - anchor.getUTCFullYear()) % interval === 0;
     }
     if (ok) return iso;
   }
@@ -163,11 +177,13 @@ function sortScheduledCards(cards) {
 }
 window.sortScheduledCards = sortScheduledCards;
 
-// Single badge for recurring items: "↻ interval · next: date → target"
+// Recurring items: rhythm badge ("↻ every 3mo") + badge with next date and target ("5 Nov → Column")
 function _recurBadgeHtml(recurrence, nextDate, targetName, disabled) {
-  const next = nextDate ? fmtDate(nextDate) : (disabled ? 'disabled' : 'none');
-  const text = `↻ ${_describeRecurrenceBrief(recurrence)} · next: ${next} → ${targetName}`;
-  return `<span class="card-sched-badge card-sched-badge--recur" title="${escHtml(text)}">${escHtml(text)}</span>`;
+  const rhythm = `↻ ${_describeRecurrenceBrief(recurrence)}`;
+  const next   = nextDate ? fmtDate(nextDate) : (disabled ? 'disabled' : 'none');
+  const target = `${next} → ${targetName}`;
+  return `<span class="card-sched-badge card-sched-badge--recur" title="Recurrence: ${escHtml(rhythm)}">${escHtml(rhythm)}</span>`
+       + `<span class="card-sched-badge" title="Next: ${escHtml(target)}">${escHtml(target)}</span>`;
 }
 
 function getScheduledBadgeHtml(card) {

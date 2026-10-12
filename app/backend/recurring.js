@@ -77,7 +77,13 @@ function computeNextDueDate(task, afterDate) {
     const { daysOfWeek } = recurrence;
     if (!daysOfWeek || daysOfWeek.length === 0) return null;
 
-    const startWeek = _weekStartMs(startD);
+    // Anchor the interval cycle on the week of the first matching day on/after startDate
+    let anchorD = startD;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startD.getTime() + i * MS_DAY);
+      if (daysOfWeek.includes(d.getUTCDay())) { anchorD = d; break; }
+    }
+    const startWeek = _weekStartMs(anchorD);
     // Walk forward from max(afterDate+1, startDate)
     const walkFrom = new Date(Math.max(afterD.getTime() + MS_DAY, startD.getTime()));
     const limit = interval * 7 + 7;
@@ -98,8 +104,13 @@ function computeNextDueDate(task, afterDate) {
   // ---- monthly ----
   else if (type === 'monthly') {
     const { dayOfMonth } = recurrence;
-    const startMon  = startD.getUTCMonth() + 1;  // 1-based
-    const startYear = startD.getUTCFullYear();
+    // Anchor the interval cycle on the first month whose day-of-month is on/after startDate
+    let startMon  = startD.getUTCMonth() + 1;  // 1-based
+    let startYear = startD.getUTCFullYear();
+    if (startD.getUTCDate() > _clampDay(startYear, startMon, dayOfMonth)) {
+      startMon++;
+      if (startMon > 12) { startMon = 1; startYear++; }
+    }
     const afterMon  = afterD.getUTCMonth() + 1;
     const afterYear = afterD.getUTCFullYear();
 
@@ -119,7 +130,10 @@ function computeNextDueDate(task, afterDate) {
   // ---- yearly ----
   else if (type === 'yearly') {
     const { dayOfMonth, month: rMonth } = recurrence;
-    const startYear = startD.getUTCFullYear();
+    // Anchor the interval cycle on the first year whose date is on/after startDate
+    let startYear = startD.getUTCFullYear();
+    const firstThisYear = `${startYear}-${String(rMonth).padStart(2, '0')}-${String(_clampDay(startYear, rMonth, dayOfMonth)).padStart(2, '0')}`;
+    if (firstThisYear < startDate) startYear++;
     const afterYear = afterD.getUTCFullYear();
     const cycleIdx  = Math.max(0, Math.floor((afterYear - startYear) / interval));
 

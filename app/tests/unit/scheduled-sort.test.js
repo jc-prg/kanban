@@ -53,6 +53,12 @@ describe('SC-13: next occurrence of a recurring card', () => {
     expect(next({ type: 'monthly', interval: 1, dayOfMonth: 1 }, '2027-03-10')).toBe('2027-04-01')
   })
 
+  it('anchors the interval cycle on the first match on/after "from"', () => {
+    const r = { type: 'monthly', interval: 3, dayOfMonth: 5 }
+    expect(ctx._nextOccurrence(r, '2026-10-12', null, '2026-10-12')).toBe('2026-11-05')
+    expect(ctx._nextOccurrence(r, '2026-10-12', null, '2026-11-06')).toBe('2027-02-05')
+  })
+
   it('computes the sort key when nextDueDate is missing', () => {
     const card = { recurrence: { type: 'monthly', interval: 1, dayOfMonth: 20 }, scheduledFor: '2026-01-01' }
     expect(ctx._schedSortKey(card)).toBe('2026-10-20')
