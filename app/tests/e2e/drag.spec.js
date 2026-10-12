@@ -10,7 +10,7 @@ const path = require('path');
 const fs   = require('fs');
 
 const AUTH_STATE = path.join(__dirname, '.auth-state.json');
-const BASE_URL   = 'http://localhost:3000';
+const BASE_URL   = process.env.E2E_BASE_URL;
 const BOARD      = 'e2e-drag';
 const BOARD_URL  = `/board/${BOARD}`;
 

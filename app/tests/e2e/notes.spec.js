@@ -11,7 +11,7 @@ const path = require('path');
 const fs   = require('fs');
 
 const AUTH_STATE = path.join(__dirname, '.auth-state.json');
-const BASE_URL   = 'http://localhost:3000';
+const BASE_URL   = process.env.E2E_BASE_URL;
 const BOARD      = 'e2e-notes';
 const BOARD_URL  = `/board/${BOARD}`;
 
@@ -421,14 +421,12 @@ test.describe('3.6 Notes sidebar', () => {
     await openSidebar(page);
 
     // After reload the folder should contain the page (depth 1)
-    // notesExpanded was persisted to sessionStorage so the folder auto-expands;
-    // click the toggle explicitly to be safe.
-    const folderToggle = page.locator('.notes-tree-item--folder .notes-toggle-btn');
-    if (!(await folderToggle.getAttribute('class'))?.includes('notes-toggle-btn--hidden')) {
-      await folderToggle.click();
-    }
-
+    // notesExpanded was persisted to sessionStorage so the folder usually auto-expands;
+    // only click the toggle when it did not (clicking an expanded folder would collapse it).
     const nestedPage = page.locator('.notes-tree-item--page[data-depth="1"]');
+    if (await nestedPage.count() === 0) {
+      await page.locator('.notes-tree-item--folder .notes-toggle-btn').click();
+    }
     await expect(nestedPage).toHaveCount(1, { timeout: 5000 });
     await expect(nestedPage.locator('.notes-item-title')).toContainText('Movable Page');
   });

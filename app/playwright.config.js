@@ -5,6 +5,13 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 
 const { defineConfig } = require('@playwright/test');
 
+// E2E runs against its own server on a separate port so the tests neither depend on
+// nor touch the running instance. 2FA is disabled for that server only (empty
+// TWO_FA_EMAIL — dotenv never overrides an existing variable), so the production
+// code has no test bypass. Spec files read the URL from E2E_BASE_URL.
+const E2E_PORT = process.env.E2E_PORT || '3100';
+process.env.E2E_BASE_URL = `http://localhost:${E2E_PORT}`;
+
 module.exports = defineConfig({
   testDir: './tests/e2e',
   globalSetup: './tests/e2e/global-setup.js',
@@ -19,20 +26,20 @@ module.exports = defineConfig({
   reporter: [['list']],
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: process.env.E2E_BASE_URL,
     headless: true,
     viewport: { width: 1280, height: 720 },
     // Take screenshot on failure
     screenshot: 'only-on-failure',
   },
 
-  // Reuse the server started by `docker compose up` or `npm start`.
-  // If no server is running, Playwright starts one (requires CouchDB to be up).
+  // Dedicated test server (needs CouchDB up, e.g. via `docker compose up -d couchdb`).
   webServer: {
     command: 'node backend/server.js',
-    url: 'http://localhost:3000',
-    reuseExistingServer: true,
-    timeout: 15_000,
+    url: process.env.E2E_BASE_URL,
+    reuseExistingServer: false,
+    timeout: 30_000,
+    env: { PORT: E2E_PORT, TWO_FA_EMAIL: '' },
   },
 
   projects: [

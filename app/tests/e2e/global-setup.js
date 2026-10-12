@@ -9,7 +9,7 @@ const { chromium } = require('@playwright/test');
 const path = require('path');
 
 const AUTH_STATE = path.join(__dirname, '.auth-state.json');
-const BASE_URL    = 'http://localhost:3000';
+const BASE_URL    = process.env.E2E_BASE_URL;
 const PASSWORD    = process.env.APP_PASSWORD || 'kanban-pwd';
 
 module.exports = async function globalSetup() {
