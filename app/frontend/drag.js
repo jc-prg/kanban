@@ -138,10 +138,16 @@ function onDragEnd() {
   dragState = null;
 }
 
+// Cards in the scheduled column are sorted by date; manual reordering is disabled.
+function isScheduledReorder(fromColId, toColId) {
+  return fromColId === toColId && toColId === state.settings?.scheduledColumnId;
+}
+
 function onDragOver(e, colId) {
   if (!dragState) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
+  if (isScheduledReorder(dragState.colId, colId)) return;
   const cardsEl = document.querySelector(`[data-col-id="${colId}"] .cards`);
   if (cardsEl) showDropIndicator(cardsEl, e.clientY);
 }
@@ -178,6 +184,8 @@ function onDrop(e, toColId) {
   const fromCol = state.columns.find(c => c.id === fromColId);
   const toCol   = state.columns.find(c => c.id === toColId);
   if (!fromCol || !toCol) return;
+
+  if (isScheduledReorder(fromColId, toColId)) { onDragEnd(); return; }
 
   // Single-card drop onto the scheduled column: intercept for scheduling dialog
   if (!multiIds && toColId === state.settings?.scheduledColumnId && fromColId !== toColId) {
@@ -306,7 +314,11 @@ document.addEventListener('touchmove', e => {
       const cr = cardsEl.getBoundingClientRect();
       if (y < cr.top + 50)    cardsEl.scrollTop -= 8;
       if (y > cr.bottom - 50) cardsEl.scrollTop += 8;
-      showDropIndicator(cardsEl, y);
+      if (isScheduledReorder(touchDrag.colId, under.closest('.column')?.dataset.colId)) {
+        document.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
+      } else {
+        showDropIndicator(cardsEl, y);
+      }
     } else {
       document.querySelectorAll('.drop-indicator.active').forEach(el => el.classList.remove('active'));
     }
@@ -347,6 +359,7 @@ document.addEventListener('touchend', e => {
       const fromCol = state.columns.find(c => c.id === fromColId);
       const toCol   = state.columns.find(c => c.id === toColId);
       if (fromCol && toCol) {
+        if (isScheduledReorder(fromColId, toColId)) { endTouchDrag(); return; }
         // Single-card touch drop onto scheduled column: intercept for scheduling dialog
         if (!multiIds && toColId === state.settings?.scheduledColumnId && fromColId !== toColId) {
           endTouchDrag();

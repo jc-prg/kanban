@@ -107,6 +107,27 @@ function _describeRecurrenceBrief(recurrence) {
   return '';
 }
 
+// Date a scheduled card is next due: next occurrence for recurring cards, else the scheduled date.
+function _schedSortKey(card) {
+  return (card.recurrence ? (card.nextDueDate || card.scheduledFor) : card.scheduledFor) || '';
+}
+
+// Splits cards into one-time and recurring groups, each sorted earliest first (undated last, stable).
+function sortScheduledCards(cards) {
+  const byDate = (a, b) => {
+    const ka = _schedSortKey(a), kb = _schedSortKey(b);
+    if (ka === kb) return 0;
+    if (!ka) return 1;
+    if (!kb) return -1;
+    return ka < kb ? -1 : 1;
+  };
+  return {
+    oneTime:   cards.filter(c => !c.recurrence).sort(byDate),
+    recurring: cards.filter(c =>  c.recurrence).sort(byDate),
+  };
+}
+window.sortScheduledCards = sortScheduledCards;
+
 function getScheduledBadgeHtml(card) {
   if (!card.scheduledFor && !card.recurrence) return '';
   const targetCol  = state.columns.find(c => c.id === card.scheduledTarget);
@@ -115,6 +136,8 @@ function getScheduledBadgeHtml(card) {
   let datePart;
   if (card.recurrence) {
     datePart = '↻ ' + _describeRecurrenceBrief(card.recurrence);
+    const next = _schedSortKey(card);
+    if (next) datePart += ' · next: ' + fmtDate(next);
   } else {
     const isOverdue = card.scheduledFor < _today();
     datePart = (isOverdue ? '⚠ ' : '') + fmtDate(card.scheduledFor);

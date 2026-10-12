@@ -221,9 +221,16 @@ function render() {
       .filter(c => !filterColor    || c.color === filterColor)
       .filter(c => !filterDup      || c.duplicate || c.text.startsWith('(copy) '))
       .filter(c => !filterPriority || c.priority === filterPriority);
+    let orderedCards = filteredCards;
+    let firstRecurId = null;
+    if (isScheduledCol && typeof sortScheduledCards === 'function') {
+      const { oneTime, recurring } = sortScheduledCards(filteredCards);
+      orderedCards = [...oneTime, ...recurring];
+      if (recurring.length) firstRecurId = recurring[0].id;
+    }
     const isInbox  = col.title.toLowerCase().startsWith('inbox');
-    const limit    = isInbox ? filteredCards.length : (colVisible[col.id] || CARDS_PER_PAGE);
-    const visible  = filteredCards.slice(0, limit);
+    const limit    = isInbox ? orderedCards.length : (colVisible[col.id] || CARDS_PER_PAGE);
+    const visible  = orderedCards.slice(0, limit);
     const remaining = filteredCards.length - limit;
 
     if (filterColor || filterDup || filterPriority) {
@@ -416,15 +423,27 @@ function render() {
         }
       }, { passive: false });
 
-      const ind = document.createElement('div');
-      ind.className = 'drop-indicator';
-      cardsEl.appendChild(ind);
+      if (isScheduledCol) {
+        // Sorted by date, manual reordering disabled: no drop indicators
+        if (card.id === firstRecurId) {
+          const div = document.createElement('div');
+          div.className = 'sched-recur-divider';
+          div.textContent = 'Recurring tasks';
+          cardsEl.appendChild(div);
+        }
+      } else {
+        const ind = document.createElement('div');
+        ind.className = 'drop-indicator';
+        cardsEl.appendChild(ind);
+      }
       cardsEl.appendChild(cardEl);
     });
 
-    const lastInd = document.createElement('div');
-    lastInd.className = 'drop-indicator';
-    cardsEl.appendChild(lastInd);
+    if (!isScheduledCol) {
+      const lastInd = document.createElement('div');
+      lastInd.className = 'drop-indicator';
+      cardsEl.appendChild(lastInd);
+    }
 
     if (isScheduledCol && typeof appendRecurringTaskCards === 'function') {
       appendRecurringTaskCards(cardsEl);
