@@ -107,9 +107,44 @@ function _describeRecurrenceBrief(recurrence) {
   return '';
 }
 
+// First date >= fromDate that matches the recurrence (mirrors backend computeNextDueDate), or ''.
+function _nextOccurrence(recurrence, startDate, endDate, fromDate) {
+  if (!recurrence || !startDate) return '';
+  const { type, interval = 1, daysOfWeek = [], dayOfMonth = 1, month = 1 } = recurrence;
+  const DAY = 86400000;
+  const startD = new Date(startDate + 'T00:00:00Z');
+  const startWeek = startD.getTime() - startD.getUTCDay() * DAY;
+  let d = new Date((fromDate > startDate ? fromDate : startDate) + 'T00:00:00Z');
+  for (let i = 0; i < 3700 * Math.max(1, interval); i++, d = new Date(d.getTime() + DAY)) {
+    const iso = d.toISOString().slice(0, 10);
+    if (endDate && iso > endDate) return '';
+    const y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
+    const lastDom = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const domOk = d.getUTCDate() === Math.min(dayOfMonth, lastDom);
+    let ok = false;
+    if (type === 'daily') {
+      ok = Math.round((d - startD) / DAY) % interval === 0;
+    } else if (type === 'weekly') {
+      const wk = Math.round((d.getTime() - d.getUTCDay() * DAY - startWeek) / (7 * DAY));
+      ok = daysOfWeek.includes(d.getUTCDay()) && wk % interval === 0;
+    } else if (type === 'monthly') {
+      const months = (y - startD.getUTCFullYear()) * 12 + (m - 1 - startD.getUTCMonth());
+      ok = domOk && months % interval === 0;
+    } else if (type === 'yearly') {
+      ok = m === month && domOk && (y - startD.getUTCFullYear()) % interval === 0;
+    }
+    if (ok) return iso;
+  }
+  return '';
+}
+
 // Date a scheduled card is next due: next occurrence for recurring cards, else the scheduled date.
 function _schedSortKey(card) {
-  return (card.recurrence ? (card.nextDueDate || card.scheduledFor) : card.scheduledFor) || '';
+  if (!card.recurrence) return card.scheduledFor || '';
+  const today = _today();
+  if (card.nextDueDate && card.nextDueDate >= today) return card.nextDueDate;
+  const from = card.lastCreatedDate === today ? new Date(Date.parse(today) + 86400000).toISOString().slice(0, 10) : today;
+  return _nextOccurrence(card.recurrence, card.scheduledFor, card.scheduledEndDate, from);
 }
 
 // Splits cards into one-time and recurring groups, each sorted earliest first (undated last, stable).

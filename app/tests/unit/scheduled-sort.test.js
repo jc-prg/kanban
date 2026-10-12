@@ -13,9 +13,9 @@ let ctx
 
 beforeAll(() => {
   const src = fs.readFileSync(path.resolve(__dirname, '../../frontend/scheduled.js'), 'utf8')
-  const start = src.indexOf('function _schedSortKey')
+  const start = src.indexOf('function _nextOccurrence')
   const end   = src.indexOf('window.sortScheduledCards')
-  ctx = vm.createContext({ window: {} })
+  ctx = vm.createContext({ window: {}, _today: () => '2026-10-12' })
   vm.runInContext(src.slice(start, end), ctx)
 })
 
@@ -40,6 +40,22 @@ describe('SC-11: sort order', () => {
       { id: 'c', recurrence: r, scheduledFor: '2026-10-01', nextDueDate: '2026-11-01' },
     ])
     expect(ids(recurring)).toEqual(['c', 'b', 'a'])
+  })
+})
+
+describe('SC-13: next occurrence of a recurring card', () => {
+  it('uses the first matching date on/after today, not the "from" date', () => {
+    const next = (recurrence, from) => ctx._nextOccurrence(recurrence, from, null, '2026-10-12')
+    expect(next({ type: 'monthly', interval: 1, dayOfMonth: 20 }, '2026-01-01')).toBe('2026-10-20')
+    expect(next({ type: 'monthly', interval: 2, dayOfMonth: 5 }, '2026-01-01')).toBe('2026-11-05')
+    expect(next({ type: 'weekly', interval: 1, daysOfWeek: [3] }, '2026-01-01')).toBe('2026-10-14')
+    expect(next({ type: 'yearly', interval: 1, dayOfMonth: 3, month: 2 }, '2026-01-01')).toBe('2027-02-03')
+    expect(next({ type: 'monthly', interval: 1, dayOfMonth: 1 }, '2027-03-10')).toBe('2027-04-01')
+  })
+
+  it('computes the sort key when nextDueDate is missing', () => {
+    const card = { recurrence: { type: 'monthly', interval: 1, dayOfMonth: 20 }, scheduledFor: '2026-01-01' }
+    expect(ctx._schedSortKey(card)).toBe('2026-10-20')
   })
 })
 
