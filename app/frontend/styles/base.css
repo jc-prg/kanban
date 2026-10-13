@@ -47,6 +47,8 @@
   --text-tooltip: #fff;
   --accent: #7c6af7;
   --accent-glow: rgba(124,106,247,0.25);
+  --unread: #10b981;
+  --unread-glow: rgba(16,185,129,0.35);
   --danger: #f04f6a;
   --link: #93c5fd;
   --link-visited: #c4b5fd;

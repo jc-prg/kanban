@@ -403,3 +403,51 @@ describe('POST /:board/inbox — invalid body', () => {
     expect(res.status).toBe(400)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Unread flag on API-created cards (UR-2 … UR-4)
+// ---------------------------------------------------------------------------
+describe('unread flag on API-created cards', () => {
+  beforeEach(() => {
+    mockDbCtx.db = makeMockDb({ columns: [] })
+  })
+
+  it('UR-2: /import cards are created unread', async () => {
+    const res = await request(app)
+      .post(`/api/${BOARD}/import`)
+      .set(AUTH)
+      .send([{ text: 'Imported' }])
+
+    expect(res.status).toBe(200)
+    const inbox = mockDbCtx.db.getLastSaved().columns.find(c => c.title === 'Inbox')
+    expect(inbox.cards[0].unread).toBe(true)
+  })
+
+  it('UR-3: /inbox cards are created unread', async () => {
+    const res = await request(app)
+      .post(`/api/${BOARD}/inbox`)
+      .set(AUTH)
+      .send({ text: 'Quick' })
+
+    expect(res.status).toBe(200)
+    const inbox = mockDbCtx.db.getLastSaved().columns.find(c => c.title === 'Inbox')
+    expect(inbox.cards[0].unread).toBe(true)
+  })
+
+  it('UR-4: move-to keeps the existing unread value', async () => {
+    mockDbCtx.db = makeMockDb({
+      columns: [
+        { id: 'a', title: 'Inbox', cards: [{ id: 'id-r1', text: 'Dev | Acme | Berlin', unread: false }] },
+        { id: 'b', title: 'Applied', cards: [] },
+      ],
+    })
+    const res = await request(app)
+      .post(`/api/${BOARD}/move-to/applied`)
+      .set(AUTH)
+      .send({ 'job-title': 'Dev', company: 'Acme', location: 'Berlin' })
+
+    expect(res.body.success).toBe(true)
+    const moved = mockDbCtx.db.getLastSaved().columns.find(c => c.id === 'b').cards[0]
+    expect(moved.unread).toBe(false)
+  })
+})

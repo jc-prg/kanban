@@ -101,6 +101,7 @@ function showContextMenu(x, y, colId, card) {
   document.querySelector('#contextMenu .ctx-submenu-trigger').style.display = '';
 
   document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
+  document.getElementById('ctxReadLabel').textContent = `  ${card.unread ? 'Mark as read' : 'Mark as unread'}`;
   // Scheduled column: reduced menu (edit, edit schedule, duplicate, move to, delete)
   const isScheduledCol = colId === state.settings?.scheduledColumnId;
   const hideInSched = isScheduledCol ? 'none' : '';
@@ -109,6 +110,7 @@ function showContextMenu(x, y, colId, card) {
   document.getElementById('ctxColorRow').style.display = 'none';
   document.getElementById('ctxPriorityRow').style.display = 'none';
   document.getElementById('ctxDone').style.display     = hideInSched;
+  document.getElementById('ctxRead').style.display     = hideInSched;
   document.getElementById('ctxColor').style.display    = hideInSched;
   document.getElementById('ctxPriority').style.display = hideInSched;
 
@@ -165,13 +167,14 @@ function showDashboardContextMenu(x, y, board, card) {
 
   document.getElementById('ctxOpen').style.display = '';
   document.getElementById('ctxDoneLabel').textContent = `  ${card.done ? 'Mark as undone' : 'Mark as done'}`;
+  document.getElementById('ctxReadLabel').textContent = `  ${card.unread ? 'Mark as read' : 'Mark as unread'}`;
   document.getElementById('ctxInfo').style.display = 'none';
   document.getElementById('ctxCopyLink').style.display = card.link ? '' : 'none';
   document.getElementById('ctxColorRow').style.display = 'none';
   document.getElementById('ctxPriorityRow').style.display = 'none';
   document.getElementById('ctxDuplicate').style.display = 'none';
   // Reset items the scheduled-column menu may have changed
-  for (const id of ['ctxDone', 'ctxColor', 'ctxPriority']) document.getElementById(id).style.display = '';
+  for (const id of ['ctxDone', 'ctxRead', 'ctxColor', 'ctxPriority']) document.getElementById(id).style.display = '';
   for (const id of ['ctxSchedule', 'ctxEditSchedule', 'ctxRemoveSchedule']) document.getElementById(id).style.display = 'none';
 
   // Populate Move to submenu asynchronously
@@ -255,6 +258,23 @@ document.getElementById('ctxDone').addEventListener('click', () => {
   }
 });
 
+// Read state is not an edit: toggle without bumping lastModified
+document.getElementById('ctxRead').addEventListener('click', () => {
+  const board = _dashCtxBoard, colId = ctxColId, card = ctxCard;
+  hideContextMenu();
+  if (!card) return;
+  const newUnread = !card.unread;
+  if (board) {
+    _dashPatchCard(board, card.id, c => { c.unread = newUnread; }).then(() => _reloadCardsPanel());
+  } else if (colId) {
+    const live = state.columns.find(c => c.id === colId)?.cards.find(c => c.id === card.id);
+    if (!live) return;
+    live.unread = newUnread;
+    render();
+    schedulesSave();
+  }
+});
+
 document.getElementById('ctxDuplicate').addEventListener('click', () => {
   const colId = ctxColId, card = ctxCard;
   hideContextMenu();
@@ -263,6 +283,7 @@ document.getElementById('ctxDuplicate').addEventListener('click', () => {
   if (!col) return;
   const idx = col.cards.findIndex(c => c.id === card.id);
   const copy = { ...JSON.parse(JSON.stringify(card)), id: uid(), text: '(copy) ' + card.text, lastModified: new Date().toISOString() };
+  delete copy.unread;
   col.cards.splice(idx + 1, 0, copy);
   render();
   schedulesSave();
@@ -425,6 +446,14 @@ function showMultiSelectContextMenu(x, y) {
     {
       labelHtml: `<span class="ctx-icon">${ICONS.done}</span>  Mark as done`,
       action: () => applyBulk(card => { card.done = true; card.doneAt = now; card.lastModified = now; }),
+    },
+    {
+      labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>  Mark as read`,
+      action: () => applyBulk(card => markRead(card)),
+    },
+    {
+      labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>  Mark as unread`,
+      action: () => applyBulk(card => { card.unread = true; }),
     },
     {
       labelHtml: `<span class="ctx-icon">${SVGICONS.color()}</span>  Change color`,

@@ -30,6 +30,7 @@ const _cardSchema = {
     done:         { type: 'boolean' },
     doneAt:       { type: 'string' },
     duplicate:    { type: 'boolean' },
+    unread:       { type: 'boolean' },
     created:      { type: 'string' },
     lastModified: { type: 'string' },
     moves:        { type: 'array', items: _moveSchema },

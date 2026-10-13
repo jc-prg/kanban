@@ -207,6 +207,7 @@ async function createDueCards(db, task, dueDates, boardState) {
     id:      'id-' + crypto.randomBytes(6).toString('hex'),
     text:    task.card.text,
     created: today,
+    unread:  true,
     ...(desc                ? { description: desc }           : {}),
     ...(task.card.color     ? { color:       task.card.color } : {}),
     ...(task.card.priority  ? { priority:    task.card.priority } : {}),
@@ -337,6 +338,7 @@ async function runScheduledCheck(db, dbName) {
       // Build a clean copy without scheduling metadata
       const { scheduledFor, scheduledTarget, scheduledEndDate, recurrence, nextDueDate: _nd, lastCreatedDate: _lc, ...cleanCard } = card;
       cleanCard.lastModified = new Date().toISOString();
+      cleanCard.unread = true;
       if (!cleanCard.moves) cleanCard.moves = [];
       cleanCard.moves.push({ at: new Date().toISOString(), from: scheduledCol.title, to: targetCol.title });
 
@@ -378,6 +380,7 @@ async function runScheduledCheck(db, dbName) {
           id:      'id-' + crypto.randomBytes(6).toString('hex'),
           text:    card.text,
           created: today,
+          unread:  true,
           ...(desc          ? { description: desc }         : {}),
           ...(card.color    ? { color:   card.color }       : {}),
           ...(card.priority ? { priority: card.priority }   : {}),

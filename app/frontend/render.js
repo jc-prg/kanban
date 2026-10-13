@@ -254,7 +254,7 @@ function render() {
       const warnDate0 = warnD0.toISOString().slice(0, 10);
       const isOverdue = !card.done && card.endDate && card.endDate < today0;
       const isWarning = !card.done && !isOverdue && card.endDate && card.endDate >= today0 && card.endDate <= warnDate0;
-      cardEl.className = 'card' + (card.done ? ' card--done' : '') + (isLabel ? ' card--label' : '') + (isOverdue ? ' card--overdue' : '') + (selectedCards.has(card.id) ? ' card--selected' : '');
+      cardEl.className = 'card' + (card.done ? ' card--done' : '') + (isLabel ? ' card--label' : '') + (isOverdue ? ' card--overdue' : '') + (card.unread === true ? ' card--unread' : '') + (selectedCards.has(card.id) ? ' card--selected' : '');
       cardEl.dataset.cardId = card.id;
       cardEl.draggable = true;
       cardEl.style.setProperty('--card-color', card.color || color);

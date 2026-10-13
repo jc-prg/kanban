@@ -137,6 +137,7 @@ async function _dashMoveCardCrossGroup(board, cardId, fromColTitle, toColTitle, 
     const cardIdx = fromCol.cards.findIndex(c => c.id === cardId);
     if (cardIdx < 0) return;
     const [movedCard] = fromCol.cards.splice(cardIdx, 1);
+    if (movedCard.unread) movedCard.unread = false;
     movedCard.moves = [...(movedCard.moves || []), { at: new Date().toISOString(), from: fromCol.title, to: toCol.title }];
     const actions = toCol.actions || [];
     const today = new Date().toISOString().slice(0, 10);
@@ -169,6 +170,7 @@ async function _dashMoveCard(board, cardId, fromColId, toColId) {
   const idx = fromCol.cards.findIndex(c => c.id === cardId);
   if (idx < 0) return;
   const [movedCard] = fromCol.cards.splice(idx, 1);
+  if (movedCard.unread) movedCard.unread = false;
   movedCard.moves = [...(movedCard.moves || []), { at: new Date().toISOString(), from: fromCol.title, to: toCol.title }];
   const actions = toCol.actions || [];
   const today = new Date().toISOString().slice(0, 10);
@@ -199,11 +201,13 @@ function applyDashboardPanelVisibility(cfg) {
   document.querySelector('.dashboard-grid').style.setProperty('--dash-panel-count', visible || 1);
 }
 
-async function _dashReorderColumn(board, columnTitle, newCardIdOrder) {
+async function _dashReorderColumn(board, columnTitle, newCardIdOrder, movedCardId) {
   try {
     const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
     const col = data.columns.find(c => c.title === columnTitle);
     if (!col) return;
+    const moved = col.cards.find(c => c.id === movedCardId);
+    if (moved?.unread) moved.unread = false;
     const byId = new Map(col.cards.map(c => [c.id, c]));
     col.cards = [
       ...newCardIdOrder.map(id => byId.get(id)).filter(Boolean),
@@ -278,6 +282,7 @@ function _initCardsDragDrop() {
     const src = _dragCardGroup.querySelector(`.dashboard-card-item[data-card-id="${_dragCardId}"]`);
     if (!src) { ind.remove(); return; }
     ind.replaceWith(src);
+    src.classList.remove('card--unread');
     // Expand target group if it was collapsed
     if (targetGroup.classList.contains('dashboard-card-group--collapsed')) {
       const key = `${targetGroup.dataset.board}\0${targetGroup.dataset.column}`;
@@ -288,7 +293,7 @@ function _initCardsDragDrop() {
     if (targetGroup === _dragCardGroup) {
       const newOrder = [..._dragCardGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
         .map(el => el.dataset.cardId);
-      _dashReorderColumn(_dragCardGroup.dataset.board, _dragCardGroup.dataset.column, newOrder);
+      _dashReorderColumn(_dragCardGroup.dataset.board, _dragCardGroup.dataset.column, newOrder, _dragCardId);
     } else {
       const newToColOrder = [...targetGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
         .map(el => el.dataset.cardId);
@@ -1025,7 +1030,7 @@ function _renderCardsPanel(groups) {
       }
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
 
-      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}${isOverdue ? ' card--overdue' : ''}" draggable="true"
+      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}${isOverdue ? ' card--overdue' : ''}${card.unread === true ? ' card--unread' : ''}" draggable="true"
           data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
         <div class="card-body">
           <div class="card-text">${escHtml(card.text || '')}</div>
@@ -1503,6 +1508,11 @@ async function _resolveDashCardAttachments(container, board, cardId) {
 }
 
 async function _openCardDetail(board, card) {
+  if (card.unread) {
+    card.unread = false;
+    document.querySelectorAll(`.dashboard-card-item[data-card-id="${CSS.escape(card.id)}"]`).forEach(el => el.classList.remove('card--unread'));
+    _dashPatchCard(board, card.id, c => { c.unread = false; }).catch(() => {});
+  }
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const editBtn   = document.getElementById('dashboardDetailEditBtn');

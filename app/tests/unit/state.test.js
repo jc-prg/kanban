@@ -266,6 +266,12 @@ describe('moveCardToColumn()', () => {
     ctx.moveCardToColumn(fromColId, cardId, toColId)
     expect(ctx.__state().columns[1].cards[0].endDate).toBe(today)
   })
+
+  it('UR-7: moving an unread card marks it read', () => {
+    ctx.__state().columns[0].cards[0].unread = true
+    ctx.moveCardToColumn(fromColId, cardId, toColId)
+    expect(ctx.__state().columns[1].cards[0].unread).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -290,5 +296,29 @@ describe('applyColumnActions()', () => {
     const card = { id: 'x', text: 'T' }
     ctx.applyColumnActions(card, { actions: [] })
     expect(card.done).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// markRead() / unread merge — UR-8 … UR-10
+// ---------------------------------------------------------------------------
+describe('markRead()', () => {
+  it('UR-8: sets unread:false without touching lastModified', () => {
+    const card = { id: 'x', text: 'X', unread: true, lastModified: '2025-01-01T00:00:00Z' }
+    ctx.markRead(card)
+    expect(card.unread).toBe(false)
+    expect(card.lastModified).toBe('2025-01-01T00:00:00Z')
+  })
+
+  it('UR-9: leaves cards without the flag untouched', () => {
+    const card = { id: 'x', text: 'X' }
+    ctx.markRead(card)
+    expect('unread' in card).toBe(false)
+  })
+
+  it('UR-10: mergeStates carries local unread:false over remote unread:true', () => {
+    const mk = unread => ({ columns: [{ id: 'c', title: 'T', cards: [{ id: 'x', text: 'X', unread }] }] })
+    const merged = ctx.mergeStates(mk(true), mk(true), mk(false))
+    expect(merged.columns[0].cards[0].unread).toBe(false)
   })
 })

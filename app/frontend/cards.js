@@ -670,6 +670,7 @@ function openEditModal(colId, card) {
   modalMode = 'edit';
   modalColId = colId;
   editCardId = card.id;
+  if (card.unread) { markRead(card); render(); schedulesSave(); }
   selectedColor    = card.color    || COLORS[0];
   selectedPriority = card.priority || 0;
   document.getElementById('cardText').value  = card.text        || '';
@@ -1199,6 +1200,7 @@ function _renderCardInfoContent(card, container, showTitle, isInline) {
             const toCol = state.columns.find(col => col.id === c.id);
             if (!toCol) return;
             const copy = { ...JSON.parse(JSON.stringify(card)), id: uid(), lastModified: new Date().toISOString() };
+            delete copy.unread;
             toCol.cards.unshift(copy);
             render();
             schedulesSave();

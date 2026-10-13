@@ -3,7 +3,7 @@
  * E2E — 3.3 Column & card CRUD
  *
  * Each test resets the board to a known seed state before running.
- * Scenarios: E-B-1 … E-B-10
+ * Scenarios: E-B-1 … E-B-10, UR-E-1 … UR-E-4 (unread state)
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -180,5 +180,56 @@ test.describe('3.3 Column & card CRUD', () => {
     await expect(page.locator('.load-more-btn')).toBeVisible();
     await page.click('.load-more-btn');
     await expect(page.locator('.load-more-btn')).toBeHidden();
+  });
+
+  // UR-E-1 … UR-E-4: unread state -------------------------------------------
+  async function seedUnread(page) {
+    const seed = JSON.parse(JSON.stringify(SEED_STATE));
+    seed.columns[0].cards[0].unread = true;
+    await apiPut(`/api/${BOARD}/board`, seed);
+    await page.reload();
+    await expect(page.locator('.card--unread')).toHaveCount(1, { timeout: 10_000 });
+  }
+
+  test('UR-E-1: unread card is marked; opening it marks it read (persisted)', async ({ page }) => {
+    await seedUnread(page);
+    await expect(page.locator('.card--unread').filter({ hasText: 'First Card' })).toBeVisible();
+    await page.locator('.card').filter({ hasText: 'First Card' }).first().click();
+    await expect(page.locator('#modal')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.card--unread')).toHaveCount(0);
+    await page.waitForTimeout(1200);
+    await page.reload();
+    await expect(page.locator('.card').filter({ hasText: 'First Card' })).toBeVisible();
+    await expect(page.locator('.card--unread')).toHaveCount(0);
+  });
+
+  test('UR-E-2: context menu toggles read / unread', async ({ page }) => {
+    await seedUnread(page);
+    const card = page.locator('.card').filter({ hasText: 'First Card' }).first();
+    await card.click({ button: 'right' });
+    await expect(page.locator('#ctxReadLabel')).toHaveText(/Mark as read/);
+    await page.click('#ctxRead');
+    await expect(page.locator('.card--unread')).toHaveCount(0);
+
+    await page.locator('.card').filter({ hasText: 'First Card' }).first().click({ button: 'right' });
+    await expect(page.locator('#ctxReadLabel')).toHaveText(/Mark as unread/);
+    await page.click('#ctxRead');
+    await expect(page.locator('.card--unread').filter({ hasText: 'First Card' })).toBeVisible();
+  });
+
+  test('UR-E-3: reordering within the column marks the card read', async ({ page }) => {
+    await seedUnread(page);
+    const cards = page.locator('.column .cards').first();
+    const box = await cards.boundingBox();
+    await page.locator('.card').filter({ hasText: 'First Card' }).first()
+      .dragTo(cards, { targetPosition: { x: box.width / 2, y: box.height - 5 } });
+    await expect(page.locator('.card--unread')).toHaveCount(0);
+  });
+
+  test('UR-E-4: API-imported card shows as unread', async ({ page }) => {
+    await apiPost(`/api/${BOARD}/import`, [{ text: 'Imported via API' }]);
+    await page.reload();
+    await expect(page.locator('.card--unread').filter({ hasText: 'Imported via API' })).toBeVisible({ timeout: 10_000 });
   });
 });

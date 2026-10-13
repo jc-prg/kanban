@@ -287,3 +287,18 @@
   margin-top: 4px;
   border-top: 1px solid var(--border);
 }
+
+/* Unread: card arrived without user action (API import, recurring, scheduler) */
+.card--unread .card-text { font-weight: 600; }
+.card--unread::after {
+  content: '';
+  position: absolute;
+  top: 16px;                  /* 10px padding + half of the first .card-text line (0.8rem × 1.5) − half dot */
+  left: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--unread);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 6px var(--unread-glow);
+  pointer-events: none;
+}

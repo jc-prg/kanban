@@ -284,3 +284,34 @@ describe('SC-10: recurring dedup — already created today → no duplicate', ()
     expect(_savedState).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// UR-5 / UR-6: scheduler output is marked unread
+// ---------------------------------------------------------------------------
+
+describe('UR-5: one-time card moved out of Scheduled is unread', () => {
+  it('sets unread:true on the moved card', async () => {
+    _boardState = makeBoard({
+      schedCards: [{ id: 'id-ur5', text: 'Due', scheduledFor: TODAY, scheduledTarget: 'inbox' }],
+    })
+    await runScheduledCheck({}, 'test')
+    const inbox = _savedState.columns.find(c => c.id === 'inbox')
+    expect(inbox.cards[0].unread).toBe(true)
+  })
+})
+
+describe('UR-6: recurring spawn is unread, template is not', () => {
+  it('sets unread:true only on the spawned card', async () => {
+    _boardState = makeBoard({
+      schedCards: [{
+        id: 'id-ur6', text: 'Daily', scheduledFor: TODAY, scheduledTarget: 'inbox',
+        recurrence: { type: 'daily', interval: 1 },
+      }],
+    })
+    await runScheduledCheck({}, 'test')
+    const inbox = _savedState.columns.find(c => c.id === 'inbox')
+    const sched = _savedState.columns.find(c => c.id === 'sched')
+    expect(inbox.cards[0].unread).toBe(true)
+    expect(sched.cards[0].unread).toBeUndefined()
+  })
+})

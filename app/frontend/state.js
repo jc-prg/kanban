@@ -333,7 +333,12 @@ function addCard(colId, data) {
   return card;
 }
 
+// Unread = arrived without user action (API import, recurring, scheduler).
+// Set false rather than deleting: mergeStates() only propagates keys present locally.
+function markRead(card) { if (card?.unread) card.unread = false; }
+
 function recordMove(card, fromColTitle, toColTitle) {
+  markRead(card);
   if (!card.moves) card.moves = [];
   card.moves.push({ at: new Date().toISOString(), from: fromColTitle, to: toColTitle, board: BOARD_NAME });
 }

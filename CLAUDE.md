@@ -268,6 +268,8 @@ Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_
           "startDate": "YYYY-MM-DD", // optional
           "endDate": "YYYY-MM-DD",   // optional
           "done": false,        // optional boolean, set via "Mark as done"
+          "unread": true,       // optional; true for cards created via API (/import, /inbox), recurring tasks or the scheduler.
+                                // Opening or moving the card sets it to false (never deleted — mergeStates needs the key)
           "created": "YYYY-MM-DD",   // set automatically on card creation
           "moves": [            // optional, appended on every column move
             { "at": "ISO-8601", "from": "column title", "to": "column title" }

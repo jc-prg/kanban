@@ -212,6 +212,22 @@ describe('PATCH /:board/board', () => {
     expect(saved.settings?.description).toBe('Test board')
   })
 
+  it('UR-1: card unread flag accepted and persisted', async () => {
+    const res = await request(app)
+      .patch(`/api/${BOARD}/board`)
+      .set(AUTH)
+      .send({
+        updatedColumns: [{
+          id: 'col-a', title: 'Alpha',
+          cards: [{ id: 'card-x', text: 'Original', unread: false }],
+        }],
+      })
+
+    expect(res.status).toBe(200)
+    const saved = mockDbCtx.db.insert.mock.calls[0][0]
+    expect(saved.columns.find(c => c.id === 'col-a').cards[0].unread).toBe(false)
+  })
+
   it('invalid patch body (unknown field) → 400', async () => {
     const res = await request(app)
       .patch(`/api/${BOARD}/board`)

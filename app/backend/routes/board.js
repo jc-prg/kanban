@@ -262,6 +262,7 @@ router.post('/:board/import', writeRateLimit, withBoard(async (req, res, db) => 
       text: normalized.text,
       color: color || normalized.color || '#06b6d4',
       created: new Date().toISOString().slice(0, 10),
+      unread: true,
     };
     if (normalized.priority)    card.priority    = normalized.priority;
     if (normalized.description) card.description = normalized.description;
@@ -310,6 +311,7 @@ router.post('/:board/inbox', writeRateLimit, withBoard(async (req, res, db) => {
       id:      'id-' + crypto.randomBytes(6).toString('hex'),
       created: now.toISOString().slice(0, 10),
       ...item,
+      unread:  true,
     };
     if (isDuplicate) card.duplicate = true; else existingTexts.add(item.text);
     inbox.cards.unshift(card);

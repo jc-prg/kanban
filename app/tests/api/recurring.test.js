@@ -246,6 +246,10 @@ describe('RC-A9: POST /run task due today', () => {
     expect(res.body.skipped).toBe(0)
     // board was saved with the new card
     expect(mockDbCtx.db.insert).toHaveBeenCalled()
+    // UR-11: spawned card is unread
+    const boardSave = mockDbCtx.db.insert.mock.calls.map(c => c[0]).find(d => Array.isArray(d.columns))
+    const spawned = boardSave.columns.flatMap(c => c.cards).find(c => c.created)
+    expect(spawned.unread).toBe(true)
   })
 })
 
