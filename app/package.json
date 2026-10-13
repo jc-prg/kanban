@@ -1,6 +1,6 @@
 {
   "name": "kanban",
-  "version": "1.15.8",
+  "version": "1.15.9",
   "description": "## Setup & Start",
   "main": "backend/server.js",
   "scripts": {
