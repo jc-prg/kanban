@@ -196,31 +196,35 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
   if (!code || !_2faChallengeId) return;
   verBtn.disabled = true;
   verBtn.textContent = 'Verifying…';
+  let r;
   try {
-    const r = await fetch('/api/auth/2fa/verify', {
+    r = await fetch('/api/auth/2fa/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ challengeId: _2faChallengeId, code }),
     });
-    const data = await r.json();
-    if (!r.ok) {
-      errEl.textContent = data.error || 'Invalid or expired code.';
-      errEl.style.display = 'block';
-      document.getElementById('twoFactorCode').value = '';
-      document.getElementById('twoFactorCode').focus();
-      verBtn.disabled = false;
-      verBtn.textContent = 'Verify';
-      return;
-    }
-    document.getElementById('twoFactorBackdrop').style.display = 'none';
-    _2faChallengeId = null;
-    await afterAuth();
   } catch (e) {
     errEl.textContent = 'Network error. Try again.';
     errEl.style.display = 'block';
     verBtn.disabled = false;
     verBtn.textContent = 'Verify';
+    return;
   }
+  // Non-JSON bodies (e.g. a proxy error page) must not be reported as a network error
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    errEl.textContent = data.error
+      || (r.status >= 500 ? `Server error (${r.status}). Try again.` : 'Invalid or expired code.');
+    errEl.style.display = 'block';
+    document.getElementById('twoFactorCode').value = '';
+    document.getElementById('twoFactorCode').focus();
+    verBtn.disabled = false;
+    verBtn.textContent = 'Verify';
+    return;
+  }
+  document.getElementById('twoFactorBackdrop').style.display = 'none';
+  _2faChallengeId = null;
+  await afterAuth();
 });
 
 // ---- Settings dialog ----

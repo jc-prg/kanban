@@ -91,7 +91,13 @@ router.post('/auth/2fa/verify', twoFaRateLimit, (req, res) => {
     return res.status(400).json({ error: 'Missing challengeId or code' });
   if (!verifyChallenge(challengeId, String(code)))
     return res.status(401).json({ error: 'Invalid or expired code' });
-  const { token, days } = generateDeviceToken();
+  let token, days;
+  try {
+    ({ token, days } = generateDeviceToken());
+  } catch (err) {
+    console.error('2FA device token error:', err.message);
+    return res.status(500).json({ error: `Failed to store device token: ${err.message}` });
+  }
   const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
   res.cookie('kanban-2fa', token, {
     httpOnly: true,
