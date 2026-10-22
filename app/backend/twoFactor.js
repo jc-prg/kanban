@@ -70,8 +70,17 @@ function readTokens() {
   }
 }
 
+// Write to a temp file and rename, so a failed write (e.g. disk full) leaves the
+// existing tokens file intact instead of truncating it.
 function writeTokens(tokens) {
-  fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2));
+  const tmp = `${TOKENS_FILE}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(tokens, null, 2));
+    fs.renameSync(tmp, TOKENS_FILE);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch {}
+    throw err;
+  }
 }
 
 function pruneExpired(tokens) {
@@ -95,10 +104,13 @@ function generateDeviceToken() {
 
 function isDeviceTokenValid(token) {
   if (!token) return false;
-  const tokens = pruneExpired(readTokens());
-  if (!tokens[_hashToken(token)]) return false;
-  writeTokens(tokens); // persist pruned list
-  return true;
+  const all    = readTokens();
+  const tokens = pruneExpired(all);
+  if (Object.keys(tokens).length !== Object.keys(all).length) {
+    // Persisting the pruned list is housekeeping — never fail the request over it
+    try { writeTokens(tokens); } catch (err) { console.warn('2FA token prune failed:', err.message); }
+  }
+  return !!tokens[_hashToken(token)];
 }
 
 // ─── Email ────────────────────────────────────────────────────────────────────
