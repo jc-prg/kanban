@@ -328,7 +328,17 @@ function render() {
       if (safeLinkHref && !isLabel) {
         const badge = cardEl.querySelector('.card-link-badge');
         badge.addEventListener('mousedown', e => e.stopPropagation());
-        badge.addEventListener('click', e => e.stopPropagation());
+        // Opening the link (left or middle click) marks the card as read.
+        // Re-render deferred so the anchor stays in the DOM while the browser follows it.
+        const onLinkOpen = e => {
+          e.stopPropagation();
+          if (e.type === 'auxclick' && e.button !== 1) return;
+          if (!card.unread) return;
+          markRead(card);
+          setTimeout(() => { render(); schedulesSave(); }, 0);
+        };
+        badge.addEventListener('click', onLinkOpen);
+        badge.addEventListener('auxclick', onLinkOpen);
       }
 
       cardEl.addEventListener('click', e => {

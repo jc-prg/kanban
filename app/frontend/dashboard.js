@@ -496,6 +496,17 @@ async function initDashboard() {
     _openCardDetail(entry.board, entry.card);
   });
 
+  // Opening a card's link (left or middle click) marks the card as read
+  const _onCardLinkOpen = e => {
+    if (e.type === 'auxclick' && e.button !== 1) return;
+    if (!e.target.closest('.card-link-badge')) return;
+    const item = e.target.closest('[data-card-id]');
+    const entry = item && _dashCardMap.get(item.dataset.cardId);
+    if (entry) _dashMarkRead(entry.board, entry.card);
+  };
+  document.getElementById('dashboardCardsPanel').addEventListener('click', _onCardLinkOpen);
+  document.getElementById('dashboardCardsPanel').addEventListener('auxclick', _onCardLinkOpen);
+
   // Card right-click → card context menu (same as on the board)
   document.getElementById('dashboardCardsPanel').addEventListener('contextmenu', e => {
     const item = e.target.closest('[data-card-id]');
@@ -1507,12 +1518,15 @@ async function _resolveDashCardAttachments(container, board, cardId) {
   }
 }
 
+function _dashMarkRead(board, card) {
+  if (!card.unread) return;
+  card.unread = false;
+  document.querySelectorAll(`.dashboard-card-item[data-card-id="${CSS.escape(card.id)}"]`).forEach(el => el.classList.remove('card--unread'));
+  _dashPatchCard(board, card.id, c => { c.unread = false; }).catch(() => {});
+}
+
 async function _openCardDetail(board, card) {
-  if (card.unread) {
-    card.unread = false;
-    document.querySelectorAll(`.dashboard-card-item[data-card-id="${CSS.escape(card.id)}"]`).forEach(el => el.classList.remove('card--unread'));
-    _dashPatchCard(board, card.id, c => { c.unread = false; }).catch(() => {});
-  }
+  _dashMarkRead(board, card);
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const editBtn   = document.getElementById('dashboardDetailEditBtn');

@@ -1,3 +1,26 @@
+/**
+ * Size a submenu to the available viewport height: opens downward if it fits,
+ * otherwise in the direction with more room, capped so it scrolls instead of overflowing.
+ */
+function _fitSubmenu(trigger, edge = 4) {
+  const sub = trigger.querySelector(':scope > .ctx-submenu');
+  if (!sub) return;
+  // Measure natural height while hidden (submenus are display:none until hover)
+  sub.style.maxHeight = 'none';
+  sub.style.visibility = 'hidden';
+  sub.style.display = 'block';
+  const natural = sub.offsetHeight;
+  sub.style.display = '';
+  sub.style.visibility = '';
+
+  const r = trigger.getBoundingClientRect();
+  const below = window.innerHeight - edge - (r.top - 4); // matches .ctx-submenu top: -4px
+  const above = r.bottom + 4 - edge;                     // matches .ctx-submenu-up bottom: -4px
+  const up = natural > below && above > below;
+  trigger.classList.toggle('ctx-submenu-up', up);
+  sub.style.maxHeight = Math.max(0, Math.min(natural, up ? above : below)) + 'px';
+}
+
 // ---- Generic context menu ----
 
 /**
@@ -69,6 +92,7 @@ function openContextMenu(e, items) {
   const subWidth  = 185 + edge; // matches .ctx-submenu min-width
   menu.querySelectorAll('.ctx-submenu-trigger').forEach(trigger => {
     trigger.classList.toggle('ctx-submenu-left', menuRight + subWidth > window.innerWidth);
+    _fitSubmenu(trigger, edge);
   });
 
   const close = ev => {
@@ -144,8 +168,7 @@ function showContextMenu(x, y, colId, card) {
 
   const trigger = document.querySelector('#contextMenu .ctx-submenu-trigger');
   trigger.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
-  const triggerRect = trigger.getBoundingClientRect();
-  trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight - edge);
+  _fitSubmenu(trigger, edge);
 }
 
 function hideContextMenu() {
@@ -208,7 +231,7 @@ function showDashboardContextMenu(x, y, board, card) {
       trigger.style.display = '';
       const menu = document.getElementById('contextMenu');
       trigger.classList.toggle('ctx-submenu-left', parseFloat(menu.style.left) + (menu.offsetWidth || 140) + 160 > window.innerWidth - 4);
-      trigger.classList.toggle('ctx-submenu-up', trigger.getBoundingClientRect().bottom + 260 > window.innerHeight - 4);
+      _fitSubmenu(trigger);
     })
     .catch(() => { /* leave Move to hidden */ });
 
@@ -547,8 +570,7 @@ function showColContextMenu(x, y, colId) {
 
   document.querySelectorAll('#colContextMenu > .ctx-submenu-trigger').forEach(trigger => {
     trigger.classList.toggle('ctx-submenu-left', menuLeft + mw + 160 > window.innerWidth - edge);
-    const triggerRect = trigger.getBoundingClientRect();
-    trigger.classList.toggle('ctx-submenu-up', triggerRect.bottom + 260 > window.innerHeight - edge);
+    _fitSubmenu(trigger, edge);
   });
 }
 

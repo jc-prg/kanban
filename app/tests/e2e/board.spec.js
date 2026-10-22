@@ -3,7 +3,7 @@
  * E2E — 3.3 Column & card CRUD
  *
  * Each test resets the board to a known seed state before running.
- * Scenarios: E-B-1 … E-B-10, UR-E-1 … UR-E-4 (unread state)
+ * Scenarios: E-B-1 … E-B-10, UR-E-1 … UR-E-5 (unread state)
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -231,5 +231,23 @@ test.describe('3.3 Column & card CRUD', () => {
     await apiPost(`/api/${BOARD}/import`, [{ text: 'Imported via API' }]);
     await page.reload();
     await expect(page.locator('.card--unread').filter({ hasText: 'Imported via API' })).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('UR-E-5: clicking the card link marks the card read (persisted)', async ({ page, context }) => {
+    const seed = JSON.parse(JSON.stringify(SEED_STATE));
+    Object.assign(seed.columns[0].cards[0], { unread: true, link: 'https://example.com/' });
+    await apiPut(`/api/${BOARD}/board`, seed);
+    await page.reload();
+    await expect(page.locator('.card--unread')).toHaveCount(1, { timeout: 10_000 });
+
+    const popup = context.waitForEvent('page');
+    await page.locator('.card').filter({ hasText: 'First Card' }).first().locator('.card-link-badge').click();
+    await (await popup).close();
+    await expect(page.locator('.card--unread')).toHaveCount(0);
+    await expect(page.locator('#modal')).toBeHidden();
+    await page.waitForTimeout(1200);
+    await page.reload();
+    await expect(page.locator('.card').filter({ hasText: 'First Card' })).toBeVisible();
+    await expect(page.locator('.card--unread')).toHaveCount(0);
   });
 });
