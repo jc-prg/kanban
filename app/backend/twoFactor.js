@@ -34,24 +34,54 @@ function isIntranet(ip) {
 // ─── Pending challenges (in-memory, 10 min TTL) ──────────────────────────────
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
-const pendingChallenges = new Map();
+const CHALLENGE_MAX_ATTEMPTS = 5;
+const pendingChallenges = new Map(); // challengeId → { code, expiresAt, attempts, sessionKey }
+const sessionChallenges = new Map(); // sessionKey  → challengeId
 
-function generateChallenge() {
+function _dropChallenge(challengeId) {
+  const entry = pendingChallenges.get(challengeId);
+  if (!entry) return;
+  pendingChallenges.delete(challengeId);
+  if (sessionChallenges.get(entry.sessionKey) === challengeId) sessionChallenges.delete(entry.sessionKey);
+}
+
+// One pending challenge per session: concurrent tabs / repeated 2FA_REQUIRED
+// responses reuse the existing challenge (isNew: false → no new email), so every
+// tab verifies against the same code. `force` (explicit "resend") replaces it.
+function generateChallenge(sessionKey, { force = false } = {}) {
+  const existingId = sessionChallenges.get(sessionKey);
+  if (existingId) {
+    const existing = pendingChallenges.get(existingId);
+    if (existing && Date.now() <= existing.expiresAt && !force)
+      return { challengeId: existingId, code: existing.code, isNew: false };
+    _dropChallenge(existingId);
+  }
   const challengeId = crypto.randomUUID();
   const code = String(crypto.randomInt(100000, 1000000));
-  pendingChallenges.set(challengeId, { code, expiresAt: Date.now() + CHALLENGE_TTL_MS });
-  return { challengeId, code };
+  pendingChallenges.set(challengeId, { code, expiresAt: Date.now() + CHALLENGE_TTL_MS, attempts: 0, sessionKey });
+  sessionChallenges.set(sessionKey, challengeId);
+  return { challengeId, code, isNew: true };
+}
+
+// Removes the challenge (e.g. when sending the email failed) so the next request starts fresh.
+function discardChallenge(challengeId) {
+  _dropChallenge(challengeId);
 }
 
 function verifyChallenge(challengeId, code) {
   const entry = pendingChallenges.get(challengeId);
   if (!entry) return false;
   if (Date.now() > entry.expiresAt) {
-    pendingChallenges.delete(challengeId);
+    _dropChallenge(challengeId);
     return false;
   }
-  pendingChallenges.delete(challengeId); // single-use
-  return entry.code === String(code);
+  if (entry.code === String(code)) {
+    _dropChallenge(challengeId); // single-use
+    return true;
+  }
+  // A typo shouldn't burn the code; give up after a few wrong attempts
+  if (++entry.attempts >= CHALLENGE_MAX_ATTEMPTS) _dropChallenge(challengeId);
+  return false;
 }
 
 // ─── Device tokens (file-backed, survives restarts) ──────────────────────────
@@ -141,10 +171,6 @@ async function sendCodeEmail(code) {
 
 // ─── Is 2FA enabled? ─────────────────────────────────────────────────────────
 
-function isAutoSend() {
-  return process.env.TWO_FA_AUTO_SEND === 'true';
-}
-
 function isTwoFactorEnabled() {
   return !!(process.env.TWO_FA_EMAIL && process.env.SMTP_HOST);
 }
@@ -160,6 +186,7 @@ module.exports = {
   isAutoSend,
   isTwoFactorEnabled,
   generateChallenge,
+  discardChallenge,
   verifyChallenge,
   generateDeviceToken,
   isDeviceTokenValid,

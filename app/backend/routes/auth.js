@@ -1,3 +1,4 @@
+const crypto  = require('crypto');
 const express = require('express');
 const router  = express.Router();
 const { safeEqual, parseCookies, loginState, issueSessionToken, verifySessionToken,
@@ -5,7 +6,7 @@ const { safeEqual, parseCookies, loginState, issueSessionToken, verifySessionTok
 const { APP_PASSWORD, SESSION_MAX_AGE_MS } = require('../config');
 const {
   isTwoFactorEnabled, isIntranet, isDeviceTokenValid,
-  generateChallenge, verifyChallenge, isAutoSend, generateDeviceToken, sendCodeEmail,
+  generateChallenge, discardChallenge, verifyChallenge, isAutoSend, generateDeviceToken, sendCodeEmail,
 } = require('../twoFactor');
 
 router.post('/auth', (req, res) => {
@@ -69,14 +70,21 @@ router.get('/auth/check', (req, res) => {
 });
 
 // Send a 6-digit code to the configured TWO_FA_EMAIL address.
+// Only one code per session: while a challenge is pending, further calls return the
+// same challengeId without sending another email. Body `{ resend: true }` forces a new code.
 router.post('/auth/2fa/send', async (req, res) => {
   if (!isTwoFactorEnabled())
     return res.status(400).json({ error: '2FA is not configured' });
+  const session    = parseCookies(req)['kanban-session'] || '';
+  const sessionKey = crypto.createHash('sha256').update(session).digest('hex');
+  const force      = req.body?.resend === true;
+  const { challengeId, code, isNew } = generateChallenge(sessionKey, { force });
+  if (!isNew) return res.json({ challengeId, alreadySent: true });
   try {
-    const { challengeId, code } = generateChallenge();
     await sendCodeEmail(code);
     res.json({ challengeId });
   } catch (err) {
+    discardChallenge(challengeId);
     console.error('2FA send error:', err.message);
     res.status(500).json({ error: `Failed to send code: ${err.message}` });
   }

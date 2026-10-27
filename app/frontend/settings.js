@@ -141,15 +141,22 @@ document.getElementById('loginPassword').addEventListener('keydown', () => {
 
 // ---- 2FA event handlers ----
 let _2faChallengeId = null;
+let _2faSending = false;
 
-async function _send2FACode() {
+async function _send2FACode(resend = false) {
+  if (_2faSending) return;
+  _2faSending = true;
   const sendBtn = document.getElementById('twoFactorSendBtn');
   const errEl   = document.getElementById('twoFactorSendError');
   sendBtn.disabled = true;
   sendBtn.textContent = 'Sending…';
   errEl.style.display = 'none';
   try {
-    const r    = await fetch('/api/auth/2fa/send', { method: 'POST' });
+    const r    = await fetch('/api/auth/2fa/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resend }),
+    });
     const data = await r.json();
     if (!r.ok) {
       errEl.textContent = data.error || 'Failed to send code.';
@@ -169,10 +176,12 @@ async function _send2FACode() {
     errEl.style.display = 'block';
     sendBtn.disabled = false;
     sendBtn.textContent = 'Send verification code';
+  } finally {
+    _2faSending = false;
   }
 }
 
-document.getElementById('twoFactorSendBtn').addEventListener('click', _send2FACode);
+document.getElementById('twoFactorSendBtn').addEventListener('click', () => _send2FACode());
 document.getElementById('twoFactorBackdrop').addEventListener('keydown', e => {
   if (e.key === 'Enter' && document.getElementById('twoFactorSendStep').style.display !== 'none') {
     e.preventDefault();
@@ -185,7 +194,7 @@ document.getElementById('twoFactorResendBtn').addEventListener('click', () => {
   const sendBtn = document.getElementById('twoFactorSendBtn');
   sendBtn.disabled = false;
   sendBtn.textContent = 'Send verification code';
-  _send2FACode();
+  _send2FACode(true);
 });
 
 document.getElementById('twoFactorForm').addEventListener('submit', async () => {
