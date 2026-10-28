@@ -1,5 +1,16 @@
+// Public URL prefix when the app is served from a subdirectory (e.g. "/folder");
+// injected by the server as <meta name="base-path">. "" when served at the root.
+const BASE_PATH  = document.querySelector?.('meta[name="base-path"]')?.getAttribute('content') || '';
+// Prefix an app-absolute path ("/board/x") with BASE_PATH for links and navigation.
+const appUrl     = p => BASE_PATH + p;
+// Current path relative to BASE_PATH ("/focus", "/board/x", "/").
+const APP_PATH   = (() => {
+  const p = window.location.pathname;
+  return BASE_PATH && (p === BASE_PATH || p.startsWith(BASE_PATH + '/')) ? (p.slice(BASE_PATH.length) || '/') : p;
+})();
+
 // Board URLs are /board/<name>; special views (/focus, /inbox) are top-level.
-const _pathSegs  = window.location.pathname.split('/').filter(Boolean);
+const _pathSegs  = APP_PATH.split('/').filter(Boolean);
 const _isBoard   = _pathSegs[0] === 'board' && _pathSegs.length > 1;
 const BOARD_NAME = _isBoard ? _pathSegs[1] : (_pathSegs[0] || null);
 const API_BASE   = _isBoard ? `/api/${BOARD_NAME}` : null;
@@ -23,7 +34,7 @@ const API        = _isBoard ? `${API_BASE}/board`  : null;
   setInterval(async () => {
     if (!_offline) return;
     try {
-      const r = await _fetch('/api/auth/verify');
+      const r = await _fetch(appUrl('/api/auth/verify'));
       if (!isGatewayError(r)) setOffline(false);
     } catch {}
   }, 5000);
@@ -31,7 +42,9 @@ const API        = _isBoard ? `${API_BASE}/board`  : null;
   window.fetch = async (url, opts = {}) => {
     const isApi = typeof url === 'string' && url.startsWith('/api/');
     try {
-      const r = await _fetch(url, opts);
+      // All app requests use app-absolute "/api/…" paths; prefix them here
+      // so callers don't need to know about BASE_PATH.
+      const r = await _fetch(isApi ? appUrl(url) : url, opts);
       if (isApi) {
         if (isGatewayError(r)) setOffline(true);
         else setOffline(false);

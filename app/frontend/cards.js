@@ -943,7 +943,7 @@ async function submitInboxCard(closeAfter = false) {
         renderColorRow(); renderPriorityRow();
         loadCardAttachments(_inboxTempCardId);
         const goBtn = document.getElementById('modalGoBoardBtn');
-        goBtn.href = `/board/${encodeURIComponent(board)}`;
+        goBtn.href = `${BASE_PATH}/board/${encodeURIComponent(board)}`;
         goBtn.style.display = '';
         document.getElementById('cardText').focus();
       }

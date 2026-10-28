@@ -312,7 +312,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
 
   async function loadPrompts() {
     const urlEl = document.getElementById('promptsApiUrl');
-    if (urlEl) urlEl.textContent = 'GET ' + location.origin + '/api/prompts';
+    if (urlEl) urlEl.textContent = 'GET ' + location.origin + appUrl('/api/prompts');
     try {
       const r = await fetch('/api/prompts');
       if (!r.ok) return;
@@ -1468,7 +1468,7 @@ document.getElementById('menuSettings').addEventListener('click', () => {
         });
         const data = await r.json();
         if (!r.ok) { backdrop.style.display = 'flex'; errEl.textContent = data.error || 'Failed to rename.'; errEl.style.display = 'block'; return; }
-        window.location.replace(`/board/${newName}`);
+        window.location.replace(`${BASE_PATH}/board/${newName}`);
       } catch (e) {
         backdrop.style.display = 'flex'; errEl.textContent = 'Failed to rename.'; errEl.style.display = 'block';
       }
@@ -1478,7 +1478,7 @@ document.getElementById('menuSettings').addEventListener('click', () => {
       backdrop.style.display = 'none';
       if (await showConfirm(`Delete board "${BOARD_NAME}" and all its cards? This cannot be undone.`, { okLabel: 'Delete', danger: true })) {
         await fetch(`/api/boards/${encodeURIComponent(BOARD_NAME)}`, { method: 'DELETE' });
-        window.location.href = '/';
+        window.location.href = appUrl('/');
       } else {
         backdrop.style.display = 'flex';
       }
@@ -1938,7 +1938,7 @@ function makeBoardCard({ name, description, columnBadges = [], archived = false 
   }).join('');
   const a = document.createElement('a');
   a.className = 'board-card' + (archived ? ' board-card--archived' : '');
-  a.href = `/board/${escHtml(name)}`;
+  a.href = `${BASE_PATH}/board/${escHtml(name)}`;
   a.innerHTML = `
     <div class="board-card-info">
       <span class="board-card-name">${escHtml(name)}</span>
@@ -2012,7 +2012,7 @@ document.getElementById('newBoardBtn').addEventListener('click', async () => {
     const r = await fetch(`/api/boards/${encodeURIComponent(name)}`, { method: 'POST' });
     const data = await r.json();
     if (!r.ok) { errEl.textContent = data.error || 'Failed to create board.'; errEl.style.display = 'block'; return; }
-    window.location.href = `/board/${name}`;
+    window.location.href = `${BASE_PATH}/board/${name}`;
   } catch (e) {
     errEl.textContent = 'Failed to create board.'; errEl.style.display = 'block';
   }
@@ -2030,8 +2030,8 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
 
   async function toggleBoardMenu(e) {
     e.preventDefault();
-    if (window.location.pathname === '/focus') {
-      window.location.href = '/';
+    if (APP_PATH === '/focus') {
+      window.location.href = appUrl('/');
       return;
     }
     if (menu.classList.contains('open')) {
@@ -2042,13 +2042,13 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
     try {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
-      const isDashboard = window.location.pathname === '/focus';
+      const isDashboard = APP_PATH === '/focus';
       const isDesktop = window.matchMedia('(min-width: 640px)').matches;
-      const dashEntry = isDashboard || isDesktop ? '' : '<a class="board-switch-item" href="/focus">Focus</a>';
-      const allEntry  = '<a class="board-switch-item" href="/">all boards</a>';
+      const dashEntry = isDashboard || isDesktop ? '' : `<a class="board-switch-item" href="${BASE_PATH}/focus">Focus</a>`;
+      const allEntry  = `<a class="board-switch-item" href="${BASE_PATH}/">all boards</a>`;
       const sep = others.length ? '<div class="header-dd-separator"></div>' : '';
       menu.innerHTML = dashEntry + allEntry + sep + others
-        .map(b => `<a class="board-switch-item" href="/board/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
+        .map(b => `<a class="board-switch-item" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
         .join('');
     } catch { return; }
     menu.classList.add('open');

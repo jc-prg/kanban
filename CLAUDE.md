@@ -104,6 +104,7 @@ All configuration is via `.env` (forwarded to both containers by `docker-compose
 | `COUCHDB_PORT` | `5984` | CouchDB port |
 | `BACKUP_DIR` | `data/` | Directory for JSON backups (`kanban-<name>-board.json`, `kanban-<name>-notes.json`, `extension-prompts.json`) |
 | `BACKUP_INTERVAL_MS` | `600000` | How often backups run (ms); default 10 min |
+| `BASE_PATH` | _(empty)_ | URL prefix when served from a subdirectory (e.g. `/folder`). Routes are mounted both under the prefix and at `/`, so proxies may forward or strip it. `index.html` asset URLs are rewritten server-side; frontend code uses app-absolute paths (`/api/…`, `/board/…`) — the fetch interceptor in `state.js` prefixes `/api/` calls, and navigation links must use `appUrl(path)` / `${BASE_PATH}` |
 | `TRUST_PROXY` | _(unset)_ | Set to `1` when running behind exactly one trusted reverse proxy (nginx/caddy); enables correct `req.ip` for rate limiting via `X-Forwarded-For` |
 
 The Fauxton admin UI is available at `http://localhost:5984/_utils`.

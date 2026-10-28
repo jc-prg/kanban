@@ -330,12 +330,12 @@ async function initDashboard() {
     const boards = _cardSourcesMeta;
     const items  = [];
     if (boards.length === 1) {
-      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`, action: () => window.open(`/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer') });
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`, action: () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer') });
     } else if (boards.length > 1) {
       items.push({
         labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`,
-        action:    () => window.open(`/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer'),
-        children:  boards.map(b => ({ label: b, action: () => window.open(`/board/${encodeURIComponent(b)}`, '_blank', 'noopener,noreferrer') })),
+        action:    () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer'),
+        children:  boards.map(b => ({ label: b, action: () => window.open(`${BASE_PATH}/board/${encodeURIComponent(b)}`, '_blank', 'noopener,noreferrer') })),
       });
     }
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _reloadCardsPanel() });
@@ -605,11 +605,11 @@ async function initDashboard() {
     openContextMenu(e, [
       {
         labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`,
-        action: () => { window.location.href = `/board/${encodeURIComponent(name)}`; },
+        action: () => { window.location.href = `${BASE_PATH}/board/${encodeURIComponent(name)}`; },
       },
       {
         labelHtml: `<span class="ctx-icon">${_svgMoreOptions()}</span>Board settings`,
-        action: () => { window.location.href = `/board/${encodeURIComponent(name)}#settings`; },
+        action: () => { window.location.href = `${BASE_PATH}/board/${encodeURIComponent(name)}#settings`; },
       },
     ]);
   });
@@ -753,7 +753,7 @@ function _boardItemHtml(b) {
     const style = b.color ? `background:${b.color}22;color:${b.color}` : '';
     return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(b.title)} ${b.count}</span>`;
   }).join('');
-  return `<a class="dashboard-board-item" href="/board/${encodeURIComponent(name)}">
+  return `<a class="dashboard-board-item" href="${BASE_PATH}/board/${encodeURIComponent(name)}">
     <div class="board-card-info">
       <span class="board-card-name">${escHtml(name)}</span>
       ${description ? `<span class="board-card-desc">${escHtml(description)}</span>` : ''}
@@ -834,8 +834,8 @@ function _fmtRecentDate(at) {
 
 function _recentItemHtml(item) {
   const href = item.type === 'note'
-    ? `/board/${encodeURIComponent(item.board)}#note:${encodeURIComponent(item.id)}`
-    : `/board/${encodeURIComponent(item.board)}`;
+    ? `${BASE_PATH}/board/${encodeURIComponent(item.board)}#note:${encodeURIComponent(item.id)}`
+    : `${BASE_PATH}/board/${encodeURIComponent(item.board)}`;
   const icon = item.type === 'note' ? SVGICONS.notePages(10, 10) : SVGICONS.card(14, 10);
   const color = item.type === 'note' ? COLORS_NEUTRAL[0] : (item.color || '');
   const colorStyle = color ? ` style="--card-color:${escHtml(color)}"` : '';
@@ -922,7 +922,7 @@ async function _renderBoardsPanel(boards, achievements) {
       const r    = await fetch(`/api/boards/${encodeURIComponent(name)}`, { method: 'POST' });
       const data = await r.json();
       if (!r.ok) { errEl.textContent = data.error || 'Failed to create board.'; errEl.style.display = ''; return; }
-      window.location.href = `/board/${name}`;
+      window.location.href = `${BASE_PATH}/board/${name}`;
     } catch {
       errEl.textContent = 'Failed to create board.'; errEl.style.display = '';
     }
@@ -985,7 +985,7 @@ function _renderCardsPanel(groups) {
     const countClass    = hasOverdue ? ' dash-group-count--overdue' : hasWarning ? ' dash-group-count--warning' : '';
     const headerLabel   = _cardGrouped
       ? `\xb7 ${escHtml(group.column)}`
-      : `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}`;
+      : `<a class="dashboard-group-board-link" href="${BASE_PATH}/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}`;
     const groupHeader =
       `<div class="dashboard-group-header dashboard-group-header--collapsible" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}">` +
       headerLabel +
@@ -1060,7 +1060,7 @@ function _renderCardsPanel(groups) {
     });
     panel.innerHTML = [...boardMap.entries()].map(([board, bGroups]) => {
       const boardHeader = `<div class="dashboard-group-header dashboard-group-header--board">` +
-        `<a class="dashboard-group-board-link" href="/board/${encodeURIComponent(board)}">${escHtml(board)}</a></div>`;
+        `<a class="dashboard-group-board-link" href="${BASE_PATH}/board/${encodeURIComponent(board)}">${escHtml(board)}</a></div>`;
       return `<div class="dashboard-board-group">${boardHeader}${bGroups.map(renderOneGroup).join('')}</div>`;
     }).join('');
   } else {
@@ -1537,7 +1537,7 @@ async function _openCardDetail(board, card) {
   else _cardTitlebar.style.removeProperty('--detail-accent');
 
   document.getElementById('dashboardDetailTitle').textContent = card.text || '';
-  editBtn.href = `/board/${encodeURIComponent(board)}#card:${encodeURIComponent(card.id)}`;
+  editBtn.href = `${BASE_PATH}/board/${encodeURIComponent(board)}#card:${encodeURIComponent(card.id)}`;
   editBtn.style.display = '';
   webUrlBtn.style.display = 'none';
   body.innerHTML = '';
@@ -1640,7 +1640,7 @@ async function _openCardDetail(board, card) {
     section.className = 'dash-card-detail-section';
     section.innerHTML = '<div class="dash-card-detail-section-hdr">Linked notes</div>' +
       linkedPages.map(p => {
-        const href = `/board/${encodeURIComponent(board)}#note:${encodeURIComponent(p.id)}`;
+        const href = `${BASE_PATH}/board/${encodeURIComponent(board)}#note:${encodeURIComponent(p.id)}`;
         return `<a class="dash-card-note-link" href="${escHtml(href)}">${SVGICONS.noteDoc(9, 11)} ${escHtml(p.title || 'Untitled')}</a>`;
       }).join('');
     body.appendChild(section);

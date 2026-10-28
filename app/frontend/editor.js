@@ -17,7 +17,7 @@ import {
   markdown,
   tags,
   GFM,
-} from '/vendor-libs/codemirror-bundle.js';
+} from './vendor-libs/codemirror-bundle.js';
 
 // ---- syntax highlight style (adapts to app dark/light theme) ----
 const _darkStyle = HighlightStyle.define([

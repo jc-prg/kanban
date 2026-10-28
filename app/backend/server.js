@@ -2,8 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const helmet  = require('helmet');
 const path    = require('path');
+const fs      = require('fs');
 
-const { PORT, HOST, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES, ATTACHMENTS_DIR } = require('./config');
+const { PORT, HOST, BASE_PATH, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES, ATTACHMENTS_DIR } = require('./config');
 const { initDb, getCouch, withBoard, withExistingBoard } = require('./db');
 const { initGlobalDb }                    = require('./global-db');
 const { authenticate, parseCookies, writeRateLimit, uploadRateLimit } = require('./auth');
@@ -58,8 +59,25 @@ app.use(helmet({
 }));
 
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, '..', 'frontend')));
-app.use('/notes-webdav', express.static(path.join(__dirname, '..', 'notes-webdav', 'frontend')));
+// Everything below lives on a router so it can be mounted under BASE_PATH
+// (proxy forwards the prefix) and at "/" (proxy strips the prefix).
+const site = express.Router();
+
+const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
+// index.html references assets with root-absolute URLs; prefix them with
+// BASE_PATH and expose it to the frontend via <meta name="base-path">.
+async function sendSpa(req, res, next) {
+  try {
+    const html = (await fs.promises.readFile(SPA_HTML, 'utf8'))
+      .replace(/(\s(?:href|src))="\/(?!\/)/g, `$1="${BASE_PATH}/`)
+      .replace('<head>', `<head>\n<meta name="base-path" content="${BASE_PATH}">`);
+    res.type('html').send(html);
+  } catch (err) { next(err); }
+}
+
+site.get(['/', '/index.html'], sendSpa);
+site.use(express.static(path.join(__dirname, '..', 'frontend'), { index: false }));
+site.use('/notes-webdav', express.static(path.join(__dirname, '..', 'notes-webdav', 'frontend')));
 
 if (LOG_API_RESPONSES) {
   const REDACT_REQ_KEYS = new Set(['password']);
@@ -68,7 +86,7 @@ if (LOG_API_RESPONSES) {
     if (!obj || typeof obj !== 'object') return obj;
     return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, keys.has(k) ? '[redacted]' : v]));
   }
-  app.use('/api', (req, res, next) => {
+  site.use('/api', (req, res, next) => {
     const originalJson = res.json.bind(res);
     res.json = (body) => {
       console.log(`[API] ${req.method} ${req.originalUrl}`);
@@ -80,11 +98,11 @@ if (LOG_API_RESPONSES) {
   });
 }
 
-app.use('/api', authenticate);
+site.use('/api', authenticate);
 
 // 2FA middleware — skips auth routes; enforces device-token cookie for external IPs.
 // Completely inactive when TWO_FA_EMAIL / SMTP_HOST are not configured.
-app.use('/api', (req, res, next) => {
+site.use('/api', (req, res, next) => {
   if (!isTwoFactorEnabled()) return next();
   if (req.path === '/auth' || req.path.startsWith('/auth/')) return next();
   if (req.authedByApiKey) return next();
@@ -94,29 +112,32 @@ app.use('/api', (req, res, next) => {
   return res.status(403).json({ error: '2FA_REQUIRED', autoSend: isAutoSend() });
 });
 
-app.use('/api', require('./routes/auth'));
-app.use('/api', require('./routes/prompts'));
-app.use('/api', require('./routes/boards'));
-app.use('/api', require('./routes/board'));
-app.use('/api', createNotesRouter({ adapter: notesAdapter, withBoard, withExistingBoard, writeRateLimit, attachmentsDir: ATTACHMENTS_DIR, resolveCards }));
-app.use('/api', require('./routes/attachments'));
-app.use('/api', require('./routes/dashboard'));
-app.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit }));
-app.use('/api', require('./routes/recurring'));
-app.use('/api', require('./routes/templates'));
+site.use('/api', require('./routes/auth'));
+site.use('/api', require('./routes/prompts'));
+site.use('/api', require('./routes/boards'));
+site.use('/api', require('./routes/board'));
+site.use('/api', createNotesRouter({ adapter: notesAdapter, withBoard, withExistingBoard, writeRateLimit, attachmentsDir: ATTACHMENTS_DIR, resolveCards,
+  baseUrl: req => `${req.protocol}://${req.get('host')}${BASE_PATH}/board` }));
+site.use('/api', require('./routes/attachments'));
+site.use('/api', require('./routes/dashboard'));
+site.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit }));
+site.use('/api', require('./routes/recurring'));
+site.use('/api', require('./routes/templates'));
 
-const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
-app.get('/focus',              (req, res) => res.sendFile(SPA_HTML));
-app.get('/dashboard',          (req, res) => res.redirect(301, '/focus'));
-app.get('/inbox',              (req, res) => res.sendFile(SPA_HTML));
-app.get('/board/:board',       (req, res) => res.sendFile(SPA_HTML));
-app.get('/board/:board/*path', (req, res) => res.sendFile(SPA_HTML));
+site.get('/focus',              sendSpa);
+site.get('/dashboard',          (req, res) => res.redirect(301, `${BASE_PATH}/focus`));
+site.get('/inbox',              sendSpa);
+site.get('/board/:board',       sendSpa);
+site.get('/board/:board/*path', sendSpa);
+
+if (BASE_PATH) app.use(BASE_PATH, site);
+app.use(site);
 
 initDb()
   .then(() => initGlobalDb())
   .then(() => {
     checkDataDirectories();
-    app.listen(PORT, () => console.log(`Kanban server running at http://${HOST}:${PORT}`));
+    app.listen(PORT, () => console.log(`Kanban server running at http://${HOST}:${PORT}${BASE_PATH}/`));
     runBackup();                    setInterval(runBackup,                    BACKUP_INTERVAL_MS);
     runPromptsBackup();             setInterval(runPromptsBackup,             BACKUP_INTERVAL_MS);
     refreshDbSize();                setInterval(refreshDbSize,                DB_SIZE_INTERVAL_MS);

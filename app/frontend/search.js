@@ -293,7 +293,7 @@
       el.innerHTML = `<div class="search-result-col-label">${escHtml(colLabel)}</div>
         <div class="search-result-text">${escHtml(card.text)}</div>${metaHtml}`;
       if (dashMode) {
-        el.addEventListener('click', () => window.open(`/board/${encodeURIComponent(boardName)}#card:${card.id}`, '_blank', 'noopener,noreferrer'));
+        el.addEventListener('click', () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boardName)}#card:${card.id}`, '_blank', 'noopener,noreferrer'));
       } else {
         el.addEventListener('click', () => { closeSearch(); openEditModal(col.id, card); });
         el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showContextMenu(e.clientX, e.clientY, col.id, card); });
@@ -326,7 +326,7 @@
         `<div class="search-result-text">${escHtml(page.title)}</div>` +
         (preview ? `<div class="search-result-preview">${escHtml(preview)}${(page.description?.length ?? 0) > 80 ? '…' : ''}</div>` : '');
       if (dashMode) {
-        el.addEventListener('click', () => window.open(`/board/${encodeURIComponent(boardName)}#note:${page.id}`, '_blank', 'noopener,noreferrer'));
+        el.addEventListener('click', () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boardName)}#note:${page.id}`, '_blank', 'noopener,noreferrer'));
       } else {
         el.addEventListener('click', () => { closeSearch(); window._notesModule?.openNoteModal(page.id); });
       }

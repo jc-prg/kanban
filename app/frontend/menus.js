@@ -260,7 +260,7 @@ document.getElementById('ctxEdit').addEventListener('click', () => {
   const board = _dashCtxBoard, colId = ctxColId, card = ctxCard;
   hideContextMenu();
   if (board && card) {
-    window.location.href = `/board/${encodeURIComponent(board)}#card:${card.id}`;
+    window.location.href = `${BASE_PATH}/board/${encodeURIComponent(board)}#card:${card.id}`;
   } else if (colId && card) {
     openEditModal(colId, card);
   }

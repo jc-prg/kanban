@@ -131,8 +131,14 @@ function _insertItem(item, parentId, items, targetId = null, position = null) {
   return true;
 }
 
+/** Resolve the link base: baseUrl may be a string or a (req) => string function. */
+function _origin(req, baseUrl) {
+  if (typeof baseUrl === 'function') return baseUrl(req);
+  return baseUrl || `${req.protocol}://${req.get('host')}`;
+}
+
 function _sourceUrl(req, baseUrl, board, pageId) {
-  const origin = baseUrl || `${req.protocol}://${req.get('host')}`;
+  const origin = _origin(req, baseUrl);
   return `${origin}/${board}#note:${pageId}`;
 }
 
@@ -143,7 +149,7 @@ async function _buildLinkedCardEntries(linkedCards, boardName, req, resolveCards
   if (!resolveCards) return linkedCards;
   try {
     const cardMap = await resolveCards(boardName);
-    const origin  = baseUrl || `${req.protocol}://${req.get('host')}`;
+    const origin  = _origin(req, baseUrl);
     return linkedCards.map(id => {
       const rawText = cardMap.get(id);
       if (!rawText) return id;
@@ -169,7 +175,8 @@ async function _buildLinkedCardEntries(linkedCards, boardName, req, resolveCards
  * @param {string}   [options.attachmentsDir] - Absolute path to local attachments directory
  * @param {number}   [options.maxFileSize]    - Max upload size in bytes (default: 50 MB)
  * @param {function} [options.resolveCards]   - async (boardName) => Map<cardId, cardText>
- * @param {string}   [options.baseUrl]        - Base URL for links in WebDAV frontmatter
+ * @param {string|function} [options.baseUrl] - Base URL for links in WebDAV frontmatter,
+ *   or (req) => string; links are "<baseUrl>/<board>#note:<id>"
  */
 function createNotesRouter(options = {}) {
   const {
@@ -348,7 +355,7 @@ function createNotesRouter(options = {}) {
     const raw       = await adapter.loadNotes(board);
     const notes     = normalizeNotes(raw);
     const boardDir  = attachmentsDir ? path.join(attachmentsDir, board) : null;
-    const origin    = baseUrl || `${req.protocol}://${req.get('host')}`;
+    const origin    = _origin(req, baseUrl);
 
     // Resolve card map for linkedCards
     const cardMap = new Map();
@@ -925,7 +932,7 @@ function createNotesRouter(options = {}) {
     if (action === 'use-db') {
       try {
         const attachFiles = _getAttachmentFiles(attachmentsDir, board, page.id, getAttachmentPrefix(page, notes.items));
-        const source      = `${baseUrl || ''}/${board}#note:${page.id}`;
+        const source      = _sourceUrl(req, baseUrl, board, page.id);
         const lcEntries   = await _buildLinkedCardEntries(page.linkedCards, board, req, resolveCards, baseUrl);
         await wdPut(cfg, pagePath, renderMd(page, attachFiles, source, lcEntries));
       } catch (err) {
