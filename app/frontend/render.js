@@ -87,6 +87,9 @@ function _buildNoteLinkedSet() {
 
 function render() {
   const board = document.getElementById('board');
+  // Preserve per-column (and board) scroll positions across the full rebuild
+  const _scrolls = typeof saveColScrolls === 'function' ? saveColScrolls() : {};
+  const _boardScrollLeft = board.scrollLeft;
   board.innerHTML = '';
   const builtCols = [];
   const noteLinkedCards = _buildNoteLinkedSet();
@@ -509,4 +512,6 @@ function render() {
     board.appendChild(addColBtn);
   }
 
+  board.scrollLeft = _boardScrollLeft;
+  if (typeof restoreColScrolls === 'function') restoreColScrolls(_scrolls);
 }
