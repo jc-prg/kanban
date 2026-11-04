@@ -2425,6 +2425,24 @@ async function openCalEventModal(accountId, ev, acc, scope) {
   allDayCb.onchange = toggleAllDay;
   toggleAllDay();
 
+  // Shifting the start moves the end by the same amount (keeps the duration)
+  const pad2 = n => String(n).padStart(2, '0');
+  const readDt = (d, t) => d.value ? new Date(`${d.value}T${t.value || '00:00'}`) : null;
+  let prevStart = readDt(startDate, startTime);
+  const shiftEnd = () => {
+    const newStart = readDt(startDate, startTime);
+    if (!newStart || isNaN(newStart)) return;
+    const end = readDt(endDate, endTime);
+    if (prevStart && !isNaN(prevStart) && end && !isNaN(end)) {
+      const e = new Date(end.getTime() + (newStart - prevStart));
+      endDate.value = `${e.getFullYear()}-${pad2(e.getMonth() + 1)}-${pad2(e.getDate())}`;
+      if (endTime.value) endTime.value = `${pad2(e.getHours())}:${pad2(e.getMinutes())}`;
+    }
+    prevStart = newStart;
+  };
+  startDate.onchange = shiftEnd;
+  startTime.onchange = shiftEnd;
+
   modal.showModal();
 }
 
