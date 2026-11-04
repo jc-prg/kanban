@@ -1609,7 +1609,8 @@ async function _openCardDetail(board, card) {
     div.className = 'cm-preview card-desc-preview dash-card-desc-preview';
     div.innerHTML = renderMarkdown(fullDescription);
     body.appendChild(div);
-    buildToc(div);
+    // buildToc is exposed by the notes module, which isn't initialised in focus mode
+    if (window.buildToc) window.buildToc(div);
     _resolveDashCardAttachments(div, board, card.id);
   }
 
