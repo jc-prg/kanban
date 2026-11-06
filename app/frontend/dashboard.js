@@ -1807,13 +1807,27 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
     else titlebar.style.removeProperty('--detail-accent');
     const rows = [];
     if (ev.start) {
-      const startStr = ev.allDay
-        ? new Date(ev.start).toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-        : new Date(ev.start).toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      const endStr = (!ev.allDay && ev.end)
-        ? '\u2013 ' + new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : '';
-      rows.push(['When', escHtml(startStr + endStr)]);
+      // All-day dates are 'YYYY-MM-DD' (end exclusive) \u2192 local midnight, not UTC
+      const day = s => { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
+      const dateFmt = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+      const timeFmt = { hour: '2-digit', minute: '2-digit' };
+      let when;
+      if (ev.allDay) {
+        const s = day(ev.start);
+        const last = ev.end ? new Date(day(ev.end).getTime() - 86_400_000) : s;
+        when = last > s
+          ? `${s.toLocaleDateString([], dateFmt)} \u2013 ${last.toLocaleDateString([], dateFmt)}`
+          : s.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      } else {
+        const s = new Date(ev.start), e = ev.end ? new Date(ev.end) : null;
+        const startStr = s.toLocaleString([], { ...dateFmt, ...timeFmt });
+        // Multi-day: full date + time on both ends; same day: end time only
+        when = !e ? startStr
+          : new Date(e - 1).toDateString() !== s.toDateString() ?   // ending at midnight still counts as one day
+           `${startStr} \u2013 ${e.toLocaleString([], { ...dateFmt, ...timeFmt })}`
+          : `${startStr} \u2013 ${e.toLocaleTimeString([], timeFmt)}`;
+      }
+      rows.push(['When', escHtml(when)]);
     }
     if (ev.location) {
       const locSafe = safeLink(ev.location);
