@@ -1850,6 +1850,10 @@ async function initOverview() {
   document.querySelector('.header-menu').style.marginLeft = 'auto';
   document.getElementById('menuFindCard').style.display = 'none';
   document.getElementById('dashboardBtn').style.display = '';
+  // Calendar button: jump to Focus with the calendar view open (last used mode, today)
+  const calBtn = document.getElementById('dashboardCalBtn');
+  calBtn.style.display = '';
+  calBtn.onclick = () => { window.location.href = appUrl(`/focus?cal=${_cvStoredMode() || 'week'}`); };
   document.getElementById('overview').style.display = 'flex';
 
   document.getElementById('achPrev').onclick  = () => loadAchievements(achDayOffset - 1);
