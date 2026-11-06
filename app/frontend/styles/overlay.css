@@ -773,6 +773,9 @@
   padding: 28px;
 }
 
+.dialog--wide { width: 480px; }
+.dialog .modal-actions { flex-wrap: wrap; }
+
 .dialog-msg {
   font-size: 0.88rem;
   line-height: 1.65;

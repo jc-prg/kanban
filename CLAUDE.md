@@ -59,6 +59,7 @@ Single-page kanban board with a minimal three-layer design:
 | `notes.css` | Notes sidebar, resizer, tree/list, note modal |
 | `markdown.css` | Markdown preview pane (card modal + note modal) |
 | `dashboard.css` | Dashboard layout, panels, mail/calendar/card items, detail modal, settings drag handles |
+| `calview.css` | Calendar view — panel covering the dashboard grid (full-screen on phones), week/work-week time grid, all-day row, month grid |
 
 ### JS (`app/frontend/`) — load order matters, no bundler
 
@@ -77,6 +78,7 @@ Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.
 | `inbox.js` | Add-to-inbox modal (`openInboxModal`, `submitInboxCard`) used from the overview and board menu |
 | `search.js` | Find-card dialog (`openSearch`, `closeSearch`) — text (all-words, accent-folding), priority, date range, and column filters; results open the edit modal |
 | `dashboard.js` | Dashboard view — `initDashboard`, `loadDashboard`, card/mail/calendar panel renderers, detail panel, API helpers (`_dashPatchCard`, `_dashDeleteCard`, `_dashMoveCard`) |
+| `calview.js` | Calendar view (week / work week / month) opened from the Focus calendar menu — `openCalView`, `_cvLoad` (`?from&to`), pointer drag/resize/create, `_cvBuildMoveBody`, hour zoom (Ctrl +/-/0, Ctrl+wheel; 24 h … 6 h visible, stored in `localStorage`); calendar legend (2+ accounts: footer; on phones view modes, New event and calendar toggles live in a burger menu) hides accounts via `localStorage` `cal-view-hidden`; URL state `/focus?cal=<mode>&date=<YYYY-MM-DD>`. Loaded after `dashboard.js` (uses its globals) |
 | `init.js` | Entry point — calls `initTitleChars()` and `checkAuth()` |
 
 ## CouchDB
@@ -211,7 +213,7 @@ Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`
 | `POST` | `/api/dashboard/mail/:accountId/message/:uid/move` | Move to folder; body: `{ folder: string }` |
 | `DELETE` | `/api/dashboard/mail/:accountId/message/:uid` | Move to trash (uses `trashFolder` account config, default `'Trash'`) |
 | `GET` | `/api/dashboard/calendar` | Events from all calendar accounts |
-| `GET` | `/api/dashboard/calendar/:accountId` | Events for one account |
+| `GET` | `/api/dashboard/calendar/:accountId` | Events for one account; `?days=n` (lookahead from today) or `?from=YYYY-MM-DD&to=YYYY-MM-DD` (explicit range, `to` exclusive, ≤ 62 days — used by the calendar view) |
 | `GET` | `/api/dashboard/calendar/:accountId/event/:uid` | Full event detail |
 | `POST` | `/api/dashboard/calendar/:accountId/test` | Test CalDAV/iCal connectivity; returns `{ ok, error? }` |
 

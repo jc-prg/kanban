@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="/styles/markdown.css">
 <link rel="stylesheet" href="/styles/print.css">
 <link rel="stylesheet" href="/styles/dashboard.css">
+<link rel="stylesheet" href="/styles/calview.css">
 </head>
 <body>
 
@@ -40,6 +41,7 @@
     <button class="header-menu-btn header-menu-btn--hide-mobile" id="schedToggleBtn" title="Toggle scheduled column" style="display:none"><span data-icon="schedule" data-icon-w="14" data-icon-h="14"></span></button>
     <a class="header-menu-btn" id="dashboardBtn" href="/focus" title="Focus" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh focus" style="display:none"><span data-icon="sync"></span></button>
+    <button class="header-menu-btn" id="dashboardCalBtn" title="Show / hide calendar" style="display:none"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span></button>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
       <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
       <div class="board-switch-menu" id="boardSwitchMenu"></div>
@@ -72,6 +74,26 @@
       </div>
       <div class="dashboard-detail-body" id="dashboardDetailBody"></div>
     </div>
+  </div>
+  <div class="calview" id="calView" style="display:none">
+    <div class="calview-bar">
+      <div class="calview-nav">
+        <button class="btn calview-navbtn" id="calViewPrev" title="Previous (←)">&#x2039;</button>
+        <button class="btn" id="calViewToday" title="Today (t)">Today</button>
+        <button class="btn calview-navbtn" id="calViewNext" title="Next (→)">&#x203a;</button>
+      </div>
+      <h2 class="calview-title" id="calViewTitle"></h2>
+      <div class="calview-modes" role="group" aria-label="View">
+        <button class="calview-mode" data-cv-mode="week">Week</button>
+        <button class="calview-mode" data-cv-mode="workweek">Work week</button>
+        <button class="calview-mode" data-cv-mode="month">Month</button>
+      </div>
+      <button class="btn btn-accent" id="calViewNew">+ New event</button>
+      <button class="btn calview-navbtn calview-menu-btn" id="calViewMenuBtn" title="Menu"><span data-icon="menu"></span></button>
+      <button class="dashboard-detail-close" id="calViewClose" title="Close (Esc)"><span data-icon="close"></span></button>
+    </div>
+    <div class="calview-body" id="calViewBody"></div>
+    <div class="calview-legend" id="calViewLegend"></div>
   </div>
   <div class="dashboard-grid">
     <div class="dashboard-panel">
@@ -1597,6 +1619,7 @@
 <script src="/search.js"></script>
 <script src="/analytics.js"></script>
 <script src="/dashboard.js"></script>
+<script src="/calview.js"></script>
 <script src="/recurring.js"></script>
 <script src="/templates.js"></script>
 <script src="/scheduled.js"></script>

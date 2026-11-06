@@ -46,6 +46,7 @@ The app is then reachable at `https://subdomain.domain.de/folder/`. Note that th
 - Full-text search across all cards with priority, date-range, and column filters
 - Card and note attachments (upload, download, paste image)
 - **Dashboard** — personal overview page showing cards from configured board columns, IMAP mail accounts, and CalDAV / iCal calendar accounts; right-click card context menu; drag-to-reorder sources
+- **Calendar view** (Focus → calendar header button or Calendar ⋮ menu) — week / work week / month; create events by dragging, move and resize them with the mouse or touch (recurring events ask: this occurrence or entire series); multi-day bars in the month view; Ctrl +/− or Ctrl+wheel to zoom the hours; legend to hide individual calendars
 - WebDAV sync: sync notes with a WebDAV server (e.g. Nextcloud) per board — credentials stored server-side
 - Webhook trigger: configure a URL and label per board; fires a server-side HTTP request and shows the response
 - Auto-save (debounced 600 ms); print view for cards and notes

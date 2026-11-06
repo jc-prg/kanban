@@ -444,13 +444,34 @@ router.get('/dashboard/calendar', withHandler(async (req, res) => {
   res.json(result);
 }));
 
-// GET /api/dashboard/calendar/:accountId — fetch one account's events (supports ?days=n)
+// GET /api/dashboard/calendar/:accountId — fetch one account's events
+// Supports ?days=n (lookahead from today) or ?from=YYYY-MM-DD&to=YYYY-MM-DD (explicit range, `to` exclusive)
+const CAL_RANGE_MAX_DAYS = 62;
+const _ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 router.get('/dashboard/calendar/:accountId', withHandler(async (req, res) => {
   const account = await getCalAccount(req.params.accountId);
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
-  // Optional ?days=n override — clamped to [1, 365]; non-numeric → use account default
   let opts = {};
+  const { from, to } = req.query;
+  if (from !== undefined || to !== undefined) {
+    if (typeof from !== 'string' || typeof to !== 'string' || !_ISO_DAY.test(from) || !_ISO_DAY.test(to)) {
+      return res.status(400).json({ error: 'from and to must both be YYYY-MM-DD' });
+    }
+    const rangeStart = new Date(`${from}T00:00:00Z`);
+    const rangeEnd   = new Date(`${to}T00:00:00Z`);
+    if (isNaN(rangeStart) || isNaN(rangeEnd) || rangeEnd <= rangeStart) {
+      return res.status(400).json({ error: 'to must be after from' });
+    }
+    if (rangeEnd - rangeStart > CAL_RANGE_MAX_DAYS * 86_400_000) {
+      return res.status(400).json({ error: `Range must not exceed ${CAL_RANGE_MAX_DAYS} days` });
+    }
+    opts = { rangeStart, rangeEnd };
+    const result = await fetchCalendarAccount(account, opts);
+    return res.json({ type: account.type || 'caldav', ...result });
+  }
+
+  // Optional ?days=n override — clamped to [1, 365]; non-numeric → use account default
   const daysParam = parseInt(req.query.days, 10);
   if (!isNaN(daysParam)) opts.lookaheadDays = Math.min(365, Math.max(1, daysParam));
 

@@ -393,14 +393,20 @@ function filterEvents(events, lookaheadDays, referenceDate) {
   const ref = referenceDate ?? new Date();
   const today     = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate()));
   const windowEnd = new Date(today.getTime() + lookaheadDays * 86_400_000);
+  return filterRange(events, today, windowEnd);
+}
 
+/**
+ * Filter events to those overlapping [rangeStart, rangeEnd).
+ * For all-day events ical.js sets DTEND to the exclusive next day, so end > rangeStart is correct.
+ * Exported for unit tests.
+ */
+function filterRange(events, rangeStart, rangeEnd) {
   return events.filter(ev => {
     if (!ev.start) return false;
     const start = new Date(ev.start);
     const end   = ev.end ? new Date(ev.end) : start;
-    // Include events that overlap with [today, windowEnd)
-    // For all-day events ical.js sets DTEND to the exclusive next day, so end > today is correct.
-    return start < windowEnd && end > today;
+    return start < rangeEnd && end > rangeStart;
   });
 }
 
@@ -566,12 +572,10 @@ const _REPORT_BODY_ALL = `<?xml version="1.0" encoding="utf-8"?>\
 <C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VEVENT"/>\
 </C:comp-filter></C:filter></C:calendar-query>`;
 
-/** REPORT body restricted to [today, today + lookaheadDays). */
-function _buildReportBody(lookaheadDays) {
-  const now     = new Date();
-  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const start   = _fmtCalDavDate(new Date(todayMs));
-  const end     = _fmtCalDavDate(new Date(todayMs + lookaheadDays * 86_400_000));
+/** REPORT body restricted to [windowStart, windowEnd). */
+function _buildReportBody(windowStart, windowEnd) {
+  const start = _fmtCalDavDate(windowStart);
+  const end   = _fmtCalDavDate(windowEnd);
   return `<?xml version="1.0" encoding="utf-8"?>\
 <C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">\
 <D:prop><D:getetag/><C:calendar-data/></D:prop>\
@@ -595,7 +599,7 @@ function clearCalendarUrlCache(accountId) {
   else _urlCache.clear();
 }
 
-async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookaheadDays } = {}) {
+async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookaheadDays, rangeStart, rangeEnd } = {}) {
   const { type, url, user, password } = account;
   const headers = {};
   if (user && password) {
@@ -608,8 +612,9 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
   try {
     let allEvents = [];
 
-    // Compute the time window for recurring-event expansion when lookaheadDays is known
+    // Compute the time window for recurring-event expansion: an explicit range wins over lookaheadDays
     const parseOpts = (() => {
+      if (rangeStart && rangeEnd) return { windowStart: rangeStart, windowEnd: rangeEnd };
       if (lookaheadDays == null) return {};
       const now         = new Date();
       const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -627,8 +632,8 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
       const { url: calUrl } = await _resolveCalendarUrl(account, headers, controller.signal);
       const targetUrl = calUrl || _calendarUrlFallback(account);
 
-      const reportBody = lookaheadDays != null
-        ? _buildReportBody(lookaheadDays)
+      const reportBody = parseOpts.windowStart
+        ? _buildReportBody(parseOpts.windowStart, parseOpts.windowEnd)
         : _REPORT_BODY_ALL;
 
       const res = await fetch(targetUrl, {
@@ -666,8 +671,12 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
  * Fetch events for an account, filtered to the lookahead window.
  * Returns { events: Event[], error: string|null } — never throws.
  */
-async function fetchCalendarAccount(account, { lookaheadDays } = {}) {
+async function fetchCalendarAccount(account, { lookaheadDays, rangeStart, rangeEnd } = {}) {
   try {
+    if (rangeStart && rangeEnd) {
+      const { events } = await fetchRawEvents(account, FETCH_TIMEOUT_MS, { rangeStart, rangeEnd });
+      return { events: filterRange(events, rangeStart, rangeEnd), error: null };
+    }
     const days = lookaheadDays ?? account.lookaheadDays ?? 7;
     const { events } = await fetchRawEvents(account, FETCH_TIMEOUT_MS, { lookaheadDays: days });
     return { events: filterEvents(events, days), error: null };
@@ -1062,6 +1071,7 @@ function buildDeleteOccurrenceIcs(masterIcs, occurrenceStart) {
 module.exports = {
   parseEvents,
   filterEvents,
+  filterRange,
   fetchRawEvents,
   fetchCalendarAccount,
   testCalendarAccount,

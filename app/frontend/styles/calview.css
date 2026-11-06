@@ -1,0 +1,393 @@
+/* ---- Calendar view (week / work week / month) ---- */
+
+.calview {
+  position: fixed;
+  inset: 0;
+  z-index: 95;               /* below .modal-backdrop (100) so the event detail opens on top */
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  animation: fadeIn 0.15s ease;
+}
+body.calview-open { overflow: hidden; }
+
+/* Large screens: a panel covering exactly the dashboard grid (same insets as #dashboard padding
+   and .dashboard-grid padding-bottom); the app header stays visible. Phones (portrait and landscape) keep the full-screen overlay. */
+@media (min-width: 640px) and (min-height: 501px) {
+  #dashboard { position: relative; }
+  .calview {
+    position: absolute;
+    inset: 16px 20px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+}
+.calview.cv-dragging, .calview.cv-dragging * { user-select: none; cursor: grabbing !important; }
+
+.calview-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+.calview-nav { display: flex; gap: 4px; }
+.calview-navbtn { padding: 6px 12px; font-size: 1rem; line-height: 1; }
+.calview-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.calview-modes {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.calview-mode {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.75rem;
+  padding: 7px 12px;
+  background: var(--surface2);
+  color: var(--text-muted);
+  border: none;
+  cursor: pointer;
+}
+.calview-mode + .calview-mode { border-left: 1px solid var(--border); }
+.calview-mode:hover { color: var(--text); }
+.calview-mode.active { background: var(--accent); color: #fff; }
+
+.calview-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.15s ease;
+}
+.calview-body.calview-loading { opacity: 0.6; }
+.calview-body > .dashboard-source-error { margin: 8px 16px 0; }
+
+/* ---- Legend (2+ calendars): footer on large screens; phones toggle calendars in the toolbar menu ---- */
+
+.calview-legend, .calview-menu-btn { display: none; }
+.calview--multi .calview-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.calview-menu-btn { align-items: center; justify-content: center; }
+.cv-legend-item {
+  --cv-c: var(--card-color, var(--accent));
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.cv-legend-item:hover { border-color: var(--cv-c); }
+.cv-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--cv-c);
+  border: 2px solid var(--cv-c);
+  box-sizing: border-box;
+}
+.cv-legend-off { color: var(--text-muted); background: transparent; text-decoration: line-through; }
+.cv-legend-off .cv-legend-swatch { background: transparent; }
+.cv-legend-check { color: var(--card-color, var(--accent)); }
+
+/* ---- Events (shared) ---- */
+
+.cv-ev {
+  --cv-c: var(--card-color, var(--accent));
+  background: color-mix(in srgb, var(--cv-c) 28%, var(--surface2));
+  border-left: 3px solid var(--cv-c);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.cv-ev:hover { background: color-mix(in srgb, var(--cv-c) 40%, var(--surface2)); }
+.cv-ev.cv-readonly { cursor: pointer; touch-action: auto; }
+.cv-ev--dragging { opacity: 0.85; box-shadow: 0 4px 16px rgb(0 0 0 / 35%); z-index: 5; }
+.cv-ev-time { color: var(--text-muted); font-size: 0.66rem; white-space: nowrap; }
+.cv-ev-title { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Week / work week ---- */
+
+.cv-week {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  --cv-gutter: 52px;
+}
+/* Header rows reserve the same scrollbar gutter as .cv-scroll so the day columns line up */
+.cv-weekhead, .cv-allday {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
+.cv-gutter { width: var(--cv-gutter); flex-shrink: 0; }
+.cv-dayheads, .cv-allday-grid, .cv-daycols {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(var(--cv-days), minmax(0, 1fr));
+}
+.cv-dayhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  border-left: 1px solid var(--border);
+}
+.cv-dayhead-num { font-size: 1.05rem; font-weight: 600; color: var(--text); }
+.cv-dayhead.cv-today .cv-dayhead-num {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 7px;
+}
+.cv-allday-label {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  text-align: right;
+  padding: 5px 6px 0 0;
+}
+.cv-allday-grid { row-gap: 2px; padding: 2px 0; min-height: 26px; }
+.cv-allday-cell { border-left: 1px solid var(--border); }
+.cv-allday-cell.cv-drop-target { background: var(--accent-glow); }
+.cv-bar {
+  margin: 0 3px;
+  padding: 3px 6px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  z-index: 1;
+}
+.cv-ev.cv-cont-left  { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 0; }
+.cv-ev.cv-cont-right { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: 0; }
+
+.cv-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.cv-grid { display: flex; position: relative; }
+.cv-hours { width: var(--cv-gutter); flex-shrink: 0; }
+.cv-hour {
+  height: var(--cv-hour);
+  position: relative;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+.cv-hour span { position: absolute; top: -0.5em; right: 6px; }
+.cv-daycol {
+  position: relative;
+  height: calc(24 * var(--cv-hour));
+  border-left: 1px solid var(--border);
+  background-image: repeating-linear-gradient(to bottom,
+    var(--border) 0 1px, transparent 1px calc(var(--cv-hour) / 2),
+    color-mix(in srgb, var(--border) 45%, transparent) calc(var(--cv-hour) / 2) calc(var(--cv-hour) / 2 + 1px),
+    transparent calc(var(--cv-hour) / 2 + 1px) var(--cv-hour));
+  cursor: cell;
+}
+/* Saturday / Sunday: slightly tinted background (week, work week and month) */
+.cv-dayhead.cv-weekend, .cv-allday-cell.cv-weekend, .cv-daycol.cv-weekend,
+.cv-month-cell.cv-weekend, .cv-month-cell.cv-other-month.cv-weekend {
+  background-color: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.cv-daycol.cv-today { background-color: color-mix(in srgb, var(--accent) 5%, transparent); }
+.cv-timed {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 2px 5px;
+  border: 1px solid var(--surface);
+  border-left: 3px solid var(--cv-c);
+  display: flex;
+  flex-direction: column;
+}
+.cv-timed.cv-short { flex-direction: row; gap: 4px; align-items: baseline; white-space: nowrap; }
+.cv-timed.cv-past { opacity: 0.6; }
+.cv-timed .cv-ev-title { font-weight: 500; }
+.cv-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 7px;
+  cursor: ns-resize;
+}
+.cv-resize::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 16px;
+  height: 2px;
+  margin-left: -8px;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0;
+}
+.cv-timed:hover .cv-resize::after { opacity: 0.7; }
+.cv-selection {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background: var(--accent-glow);
+  border: 1px dashed var(--accent);
+  border-radius: 5px;
+  font-size: 0.66rem;
+  padding: 2px 5px;
+  color: var(--text);
+  pointer-events: none;
+}
+.cv-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--danger);
+  z-index: 3;
+  pointer-events: none;
+}
+.cv-now::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+/* ---- Month ---- */
+
+.cv-month { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cv-month-head {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border);
+}
+.cv-month-wd { padding: 6px 8px; font-size: 0.72rem; color: var(--text-muted); }
+.cv-month-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: repeat(var(--cv-weeks), minmax(110px, 1fr));
+  overflow-y: auto;
+  --cv-lane: 21px;
+}
+/* One grid per week: row 1 = day numbers, then one row per lane; day cells span all rows
+   underneath the events so multi-day bars run continuously across the days of a week */
+.cv-month-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: 26px repeat(var(--cv-lanes), var(--cv-lane)) 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+.cv-month-cell {
+  grid-row: 1 / -1;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 3px 4px;
+  min-width: 0;
+}
+.cv-month-cell.cv-other-month { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.cv-month-cell.cv-other-month .cv-month-num { color: var(--text-muted); }
+.cv-month-cell.cv-drop-target, .cv-month-cell.cv-other-month.cv-drop-target { background: var(--accent-glow); }
+.cv-month-num {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.cv-month-num:hover { background: var(--surface2); }
+.cv-month-cell.cv-today .cv-month-num { background: var(--accent); color: #fff; }
+.cv-month-ev {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  min-width: 0;
+  margin: 0 3px 2px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.cv-month-ev:not(.cv-month-bar) { background: transparent; border-left-width: 0; }
+.cv-month-ev:not(.cv-month-bar)::before {
+  content: '';
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cv-c);
+  align-self: center;
+}
+.cv-month-ev:not(.cv-month-bar):hover { background: var(--surface2); }
+.cv-month-more {
+  justify-self: start;
+  align-self: start;
+  margin: 0 3px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  padding: 0 5px;
+  cursor: pointer;
+}
+.cv-month-more:hover { color: var(--text); text-decoration: underline; }
+
+/* ---- Mobile ---- */
+
+/* Phones (portrait or landscape — same condition as the full-screen overlay): view modes, "New event"
+   and calendar toggles move into the burger menu */
+@media (max-width: 639px), (max-height: 500px) {
+  .calview--multi .calview-legend, .calview-modes, #calViewNew { display: none; }
+  .calview-menu-btn { display: inline-flex; order: -1; }   /* first in the row */
+  #calViewClose { margin-left: auto; }
+}
+
+@media (max-width: 639px) {
+  .calview-bar { gap: 8px; padding: 8px; }
+  .calview-title { order: 5; flex-basis: 100%; font-size: 0.9rem; }
+  .cv-week { overflow-x: auto; }
+  /* Three days fill the width; the rest scrolls horizontally (% = width of .cv-week) */
+  .cv-weekhead, .cv-allday, .cv-scroll { min-width: calc(var(--cv-gutter) + var(--cv-days) * (100% - var(--cv-gutter)) / 3); }
+  .cv-week { --cv-gutter: 40px; }
+  .cv-month-grid { grid-template-rows: repeat(var(--cv-weeks), minmax(64px, 1fr)); --cv-lane: 9px; }
+  .cv-month-week { grid-template-rows: 24px repeat(var(--cv-lanes), var(--cv-lane)) 1fr; }
+  .cv-month-more { font-size: 0.55rem; line-height: 1; }
+  .cv-month-ev .cv-ev-time, .cv-month-ev .cv-ev-title { display: none; }
+  .cv-month-ev:not(.cv-month-bar) { padding: 1px 2px; }
+  .cv-month-bar { height: 6px; padding: 0; }
+}

@@ -318,13 +318,21 @@ async function initDashboard() {
   // Show board-switch wrap (headerHomeBtn) and refresh button for navigation
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('dashboardRefreshBtn').style.display = '';
+  document.getElementById('dashboardCalBtn').style.display = '';
 
   // Match overview menu: hide board-specific items; Inbox/Analyze/Settings stay visible
   ['menuWebhook', 'menuDashboardSettings'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  document.getElementById('dashboardRefreshBtn').addEventListener('click', loadDashboard);
+  // Refresh also reloads the calendar view while it is open
+  document.getElementById('dashboardRefreshBtn').addEventListener('click', () => {
+    loadDashboard();
+    if (_cvIsOpen()) _cvLoad();
+  });
+  document.getElementById('dashboardCalBtn').addEventListener('click', () => {
+    if (_cvIsOpen()) closeCalView(); else openCalView();
+  });
   document.getElementById('dashCardsMenuBtn').addEventListener('click', e => {
     e.stopPropagation();
     const boards = _cardSourcesMeta;
@@ -386,6 +394,15 @@ async function initDashboard() {
     }
     const lookaheads = accounts.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7));
     const minDays = lookaheads.length ? Math.min(...lookaheads) : 7;
+    items.push({
+      labelHtml: `<span class="ctx-icon">${SVGICONS.date()}</span>Calendar view`,
+      action:    () => openCalView(),
+      children:  [
+        { label: 'Week',      action: () => openCalView('week') },
+        { label: 'Work week', action: () => openCalView('workweek') },
+        { label: 'Month',     action: () => openCalView('month') },
+      ],
+    });
     items.push(
       { labelHtml: `<span class="ctx-icon">${_calGrouped ? ICONS.done : '\u00a0\u00a0'}</span>Group by account`, action: () => { _setCalGrouped(!_calGrouped); _renderCalendarPanel(_calAccountsMeta); } },
       { separator: true },
@@ -648,6 +665,7 @@ async function initDashboard() {
 
   _initCardsDragDrop();
   await loadDashboard();
+  _cvInitFromUrl();
 }
 
 async function _reloadPanel(url, renderFn, panelId) {
@@ -1739,12 +1757,13 @@ function _formatRRule(rruleStr, seriesStart) {
   return str;
 }
 
-function _showCalEventContextMenu(e, accountId, uid, webUrl) {
-  const ev          = _calEventMap.get(`${accountId}\0${uid}`);
+// evOverride: a specific occurrence (calendar view) — _calEventMap holds only one entry per uid
+function _showCalEventContextMenu(e, accountId, uid, webUrl, evOverride) {
+  const ev          = evOverride || _calEventMap.get(`${accountId}\0${uid}`);
   const isIcal      = (ev?._accountType || 'caldav') === 'ical-url';
   const isRecurring = !!ev?.hasRrule;
   const items = [
-    { labelHtml: `<span class="ctx-icon">${SVGICONS.cardInfo()}</span>Open`, action: () => _openEventDetail(accountId, uid, webUrl) },
+    { labelHtml: `<span class="ctx-icon">${SVGICONS.cardInfo()}</span>Open`, action: () => _openEventDetail(accountId, uid, webUrl, evOverride) },
   ];
   if (!isIcal) {
     if (isRecurring) {
@@ -1760,7 +1779,7 @@ function _showCalEventContextMenu(e, accountId, uid, webUrl) {
   openContextMenu(e, items);
 }
 
-function _openEventDetail(accountId, uid, webUrl) {
+function _openEventDetail(accountId, uid, webUrl, evOverride) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
@@ -1901,7 +1920,7 @@ function _openEventDetail(accountId, uid, webUrl) {
   }
 
   // Use cached event data if available — avoids a full CalDAV round-trip
-  const cached = _calEventMap.get(`${accountId}\0${uid}`);
+  const cached = evOverride || _calEventMap.get(`${accountId}\0${uid}`);
   if (cached) { _renderEventDetail(cached); return; }
 
   fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(uid)}`)
@@ -2273,7 +2292,8 @@ function _populateTzSelect(sel, selected) {
  * accountId + ev:  edit mode (ev is the cached event from _calEventMap).
  * scope: 'occurrence' | 'series' | null — for recurring event edits.
  */
-async function openCalEventModal(accountId, ev, acc, scope) {
+// prefill (create mode only): { start: Date, end: Date, allDay } — e.g. a slot picked in the calendar view
+async function openCalEventModal(accountId, ev, acc, scope, prefill) {
   const modal      = document.getElementById('calEventModal');
   const titleEl    = document.getElementById('calEventModalTitle');
   const accField   = document.getElementById('calEventAccountField');
@@ -2412,6 +2432,13 @@ async function openCalEventModal(accountId, ev, acc, scope) {
     const startH = now.getHours() + 1;
     startDate.value = todayDate; startTime.value = `${pad(startH % 24)}:00`;
     endDate.value   = todayDate; endTime.value   = `${pad((startH + 1) % 24)}:00`;
+    if (prefill) {
+      const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      const hm  = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      allDayCb.checked = !!prefill.allDay;
+      startDate.value  = ymd(prefill.start); endDate.value = ymd(prefill.end);
+      if (!prefill.allDay) { startTime.value = hm(prefill.start); endTime.value = hm(prefill.end); }
+    }
 
     _populateTzSelect(tzSel, _defaultTimezone || browserTz);
   }
@@ -2522,6 +2549,7 @@ async function _submitCalEvent() {
     document.getElementById('calEventModal').close();
     await _refreshCalendarAccount(accountId);
     _closeDetail();
+    if (_cvIsOpen()) _cvLoad();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;
@@ -2578,6 +2606,7 @@ async function _deleteCalEvent(accountId, uid, etag, href, scope, occurrenceDate
     }
     _closeDetail();
     await _refreshCalendarAccount(accountId);
+    if (_cvIsOpen()) _cvLoad();
   } catch (err) {
     await showConfirm(err.message, { okLabel: 'OK', hideCancel: true });
   }

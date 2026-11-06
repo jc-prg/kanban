@@ -77,6 +77,9 @@ function showConfirm(msg, { okLabel = 'Confirm', cancelLabel = 'Cancel', altLabe
     const altBtn = document.getElementById('dialogAltBtn');
     altBtn.textContent = altLabel || '';
     altBtn.style.display = altLabel ? '' : 'none';
+    // Three buttons don't fit the default 360px dialog
+    const box = okBtn.closest?.('.dialog');
+    box?.classList.toggle('dialog--wide', !!altLabel);
     const backdrop = document.getElementById('dialogBackdrop');
     backdrop.style.display = 'flex';
 
@@ -84,6 +87,7 @@ function showConfirm(msg, { okLabel = 'Confirm', cancelLabel = 'Cancel', altLabe
       backdrop.style.display = 'none';
       cancelBtn.textContent = 'Cancel';
       altBtn.style.display = 'none';
+      box?.classList.remove('dialog--wide');
       resolve(result);
     };
 

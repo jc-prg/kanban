@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Dashboard API tests — section DB-1 … DB-29 + DB-13..DB-20 (mail)
+ * Dashboard API tests — section DB-1 … DB-37 + DB-13..DB-20 (mail)
  *
  * global-db is injected into require.cache before createApp loads any routes.
  * The db mock's mockCouch.use() returns a per-name board document so card-source
@@ -697,4 +697,68 @@ test('DB-32 GET /api/dashboard/data — all sources fail → 200 with all error 
 test('DB-33 GET /api/dashboard/data — unauthenticated → 401', async () => {
   const res = await request(app).get('/api/dashboard/data')
   expect(res.status).toBe(401)
+})
+
+// ---- Calendar range (?from&to) — used by the calendar view ----
+
+test('DB-34 GET /api/dashboard/calendar/:id?from&to — past event in range returned, REPORT uses range', async () => {
+  _storedConfig = {
+    mailAccounts: [], cardSources: [], autoRefreshMs: 0,
+    calendarAccounts: [_calAccount()],
+  }
+  const ics = makeIcs('uid-past@ex', '20260302T090000Z', '20260302T100000Z', 'Past meeting')
+  const bodies = []
+  vi.stubGlobal('fetch', async (url, opts = {}) => {
+    if (opts.body) bodies.push(String(opts.body))
+    return { ok: true, status: 207, text: async () => calDavXml(ics) }
+  })
+
+  const res = await request(app).get('/api/dashboard/calendar/ca-1?from=2026-03-02&to=2026-03-09').set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.events).toHaveLength(1)
+  expect(res.body.events[0].uid).toBe('uid-past@ex')
+  expect(bodies.some(b => b.includes('start="20260302T000000Z"') && b.includes('end="20260309T000000Z"'))).toBe(true)
+})
+
+test('DB-35 GET /api/dashboard/calendar/:id?from&to — events outside range excluded', async () => {
+  _storedConfig = {
+    mailAccounts: [], cardSources: [], autoRefreshMs: 0,
+    calendarAccounts: [_calAccount()],
+  }
+  const icsIn  = makeIcs('uid-in@ex',  '20260304T090000Z', '20260304T100000Z', 'Inside')
+  const icsOut = makeIcs('uid-out@ex', '20260309T090000Z', '20260309T100000Z', 'Outside')
+  vi.stubGlobal('fetch', async () => ({ ok: true, status: 207, text: async () => calDavXml(icsIn, icsOut) }))
+
+  const res = await request(app).get('/api/dashboard/calendar/ca-1?from=2026-03-02&to=2026-03-09').set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.events.map(e => e.uid)).toEqual(['uid-in@ex'])
+})
+
+test('DB-36 GET /api/dashboard/calendar/:id?from&to — recurring event expanded within range', async () => {
+  _storedConfig = {
+    mailAccounts: [], cardSources: [], autoRefreshMs: 0,
+    calendarAccounts: [_calAccount()],
+  }
+  // Daily series starting long before the range
+  const ics = makeIcs('uid-rr@ex', '20260101T080000Z', '20260101T083000Z', 'Daily', 'RRULE:FREQ=DAILY')
+  vi.stubGlobal('fetch', async () => ({ ok: true, status: 207, text: async () => calDavXml(ics) }))
+
+  const res = await request(app).get('/api/dashboard/calendar/ca-1?from=2026-03-02&to=2026-03-09').set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.events).toHaveLength(7)
+  expect(res.body.events[0].start.slice(0, 10)).toBe('2026-03-02')
+  expect(res.body.events.every(e => e.hasRrule)).toBe(true)
+})
+
+test('DB-37 GET /api/dashboard/calendar/:id?from&to — invalid or oversized range → 400', async () => {
+  _storedConfig = {
+    mailAccounts: [], cardSources: [], autoRefreshMs: 0,
+    calendarAccounts: [_calAccount()],
+  }
+  vi.stubGlobal('fetch', async () => ({ ok: true, status: 207, text: async () => calDavXml() }))
+
+  for (const qs of ['from=2026-03-02', 'from=x&to=2026-03-09', 'from=2026-03-09&to=2026-03-02', 'from=2026-01-01&to=2026-04-01']) {
+    const res = await request(app).get(`/api/dashboard/calendar/ca-1?${qs}`).set(AUTH)
+    expect(res.status, qs).toBe(400)
+  }
 })
