@@ -28,3 +28,9 @@ services:
     volumes:
       - ./data:/app/data
 
+# Fixed subnet so INTRANET_CIDR in .env (2FA bypass) stays valid
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.10.3.0/24
