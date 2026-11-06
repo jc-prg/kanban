@@ -77,6 +77,7 @@ function _summary(msg, withPreview) {
     from:           _fmtAddr(msg.envelope?.from?.[0]),
     to:             _fmtAddrList(msg.envelope?.to),
     date:           _fmtDate(msg.envelope?.date),
+    messageId:      msg.envelope?.messageId || '',
     ...(withPreview ? { preview: _preview(msg.bodyParts?.get('text')) } : {}),
     unread:         !flags?.has('\\Seen'),
     flagged:        !!flags?.has('\\Flagged'),
@@ -461,6 +462,44 @@ async function fetchFolderSize(account, folder) {
   });
 }
 
+// ---- Find a message by Message-ID ----
+
+/** Message-ID header of one message (by UID), '' when it has none; null when the message is missing. */
+async function fetchMessageId(account, uid, folder) {
+  return _withMailbox(account, folder, async client => {
+    const meta = await client.fetchOne(String(uid), { uid: true, envelope: true }, { uid: true });
+    return meta ? (meta.envelope?.messageId || '') : null;
+  });
+}
+
+/**
+ * Locate a message by its Message-ID header. Searches `folder` (hint, e.g. where the
+ * card was created) first, then the account folder / INBOX, then every other selectable
+ * folder. Returns { folder, uid } or null.
+ */
+async function findMailByMessageId(account, messageId, folder) {
+  return _withClient(account, async client => {
+    let paths = [];
+    try {
+      paths = (await client.list())
+        .filter(f => !(f.flags instanceof Set ? f.flags.has('\\Noselect') : (f.flags || []).includes('\\Noselect')))
+        .map(f => f.path);
+    } catch { /* fall back to the hints */ }
+    const order = [...new Set([folder, account.folder || 'INBOX', ...paths].filter(Boolean))];
+    for (const path of order) {
+      let lock;
+      try { lock = await client.getMailboxLock(path, { readOnly: true }); } catch { continue; }
+      try {
+        const uids = await client.search({ header: { 'message-id': messageId } }, { uid: true });
+        if (uids?.length) return { folder: path, uid: String(Math.max(...uids)) };
+      } catch { /* folder not searchable — try the next one */ } finally {
+        lock.release();
+      }
+    }
+    return null;
+  });
+}
+
 // ---- Mutate messages ----
 
 /**
@@ -606,6 +645,8 @@ async function sendMail(account, mail) {
 module.exports = {
   fetchMailAccount,
   fetchMailMessage,
+  fetchMessageId,
+  findMailByMessageId,
   fetchMailAttachment,
   fetchMailAttachments,
   fetchFolderMessages,

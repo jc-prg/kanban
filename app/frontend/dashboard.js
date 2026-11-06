@@ -95,7 +95,8 @@ let _calModalAccId   = null;
 let _calModalUid     = null;
 let _calModalEtag    = null;
 let _calModalHref    = null;
-let _calModalScope   = null;    // 'occurrence' | 'series' | null
+let _calModalCardRefs = null;   // hidden X-JC-KANBAN-CARD links of the edited event
+let _calModalScope  = null;    // 'occurrence' | 'series' | null
 let _calModalOccDate = null;    // ISO start of the occurrence being edited
 
 async function _dashPatchCard(board, cardId, patchFn) {
@@ -1101,6 +1102,8 @@ function _renderCardsPanel(groups) {
   }
 }
 
+const _mailCardRefs = new Map();   // `${accountId}\0${msgId}` → [{ board, cardId }] (dashboard mail panel)
+
 function _renderMailPanel(accounts) {
   const panel   = document.getElementById('dashboardMailPanel');
   const menuBtn = document.getElementById('dashMailMenuBtn');
@@ -1115,6 +1118,7 @@ function _renderMailPanel(accounts) {
     return;
   }
 
+  _mailCardRefs.clear();
   panel.innerHTML = accounts.map(acc => {
     const header = `<div class="dashboard-group-header"><strong>${escHtml(acc.label)}</strong></div>`;
 
@@ -1141,6 +1145,10 @@ function _renderMailPanel(accounts) {
       const fromStr = msg.from ? (msg.from.match(/^(.+?)\s*<[^>]+>$/) || [])[1]?.trim() || msg.from : '';
       const metaParts = [];
       if (msg.hasAttachments) metaParts.push(`<span class="dashboard-mail-attach" title="Has attachments">${_svgAttachment(11, 11)}</span>`);
+      if (msg.cardRefs?.length) {
+        _mailCardRefs.set(`${acc.accountId}\0${msg.id}`, msg.cardRefs);
+        metaParts.push(`<span class="dashboard-mail-attach" title="Linked to a card">${SVGICONS.card(13, 9)}</span>`);
+      }
       if (fromStr) metaParts.push(`<span class="dashboard-mail-from">${escHtml(fromStr)}</span>`);
       if (dateStr) metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
       const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
@@ -1235,10 +1243,12 @@ function _openMailDetail(accountId, msgId, webUrl) {
         }).join('');
         rows.push(['Attachments', links]);
       }
+      if (msg.cardRefs?.length) rows.push([msg.cardRefs.length > 1 ? 'Cards' : 'Card', _linkedCardLinksHtml(msg.cardRefs)]);
 
       body.innerHTML = `<table class="dashboard-detail-table">${
         rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
       }</table>`;
+      _resolveLinkedCardLinks(body);
 
       body.querySelectorAll('.dash-attachment-link[data-ft]').forEach(a => {
         a.addEventListener('click', e => {
@@ -1656,6 +1666,34 @@ async function _openCardDetail(board, card) {
     _resolveDashCardAttachments(div, board, card.id);
   }
 
+  const fullCard = (boardData?.columns || []).flatMap(c => c.cards || []).find(c => c.id === card.id);
+  // Mail the card was created from
+  const mailRef = fullCard?.mailRef;
+  if (mailRef) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<th>Mail</th><td><a href="${escHtml(mailRefUrl(mailRef))}" class="dash-linked-mail">${escHtml(mailRef.subject || '(no subject)')}</a></td>`;
+    tr.querySelector('a').addEventListener('click', e => {
+      if (typeof openMailViewMessage !== 'function') return;   // fall back to navigation
+      e.preventDefault();
+      _closeDetail();
+      openMailViewMessage(mailRef.accountId, mailRef.messageId, mailRef.folder);
+    });
+    body.querySelector('.dashboard-detail-table tbody, .dashboard-detail-table')?.appendChild(tr);
+  }
+
+  // Calendar event the card was created from
+  const calRef = fullCard?.calEvent;
+  if (calRef) {
+    const cached = _calEventMap.get(`${calRef.accountId}\0${calRef.uid}`);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<th>Event</th><td><a href="#" class="dash-linked-event">${escHtml(cached?.title || 'Open event')}</a></td>`;
+    tr.querySelector('a').addEventListener('click', e => {
+      e.preventDefault();
+      _openEventDetail(calRef.accountId, calRef.uid, cached?._webUrl || '');
+    });
+    body.querySelector('.dashboard-detail-table tbody, .dashboard-detail-table')?.appendChild(tr);
+  }
+
   // Collect pages that link to this card
   const linkedPages = [];
   function _collectLinked(items) {
@@ -1782,13 +1820,30 @@ function _formatRRule(rruleStr, seriesStart) {
 }
 
 // evOverride: a specific occurrence (calendar view) — _calEventMap holds only one entry per uid
-function _showCalEventContextMenu(e, accountId, uid, webUrl, evOverride) {
+async function _showCalEventContextMenu(e, accountId, uid, webUrl, evOverride) {
   const ev          = evOverride || _calEventMap.get(`${accountId}\0${uid}`);
   const isIcal      = (ev?._accountType || 'caldav') === 'ical-url';
   const isRecurring = !!ev?.hasRrule;
+  const boards      = await _dashActiveBoards();
   const items = [
     { labelHtml: `<span class="ctx-icon">${SVGICONS.cardInfo()}</span>Open`, action: () => _openEventDetail(accountId, uid, webUrl, evOverride) },
   ];
+  if (ev) {
+    items.push({
+      labelHtml: `<span class="ctx-icon">${SVGICONS.card()}</span>Create card`,
+      action:    () => _createCardFromEvent(accountId, ev),
+      ...(boards.length ? { children: boards.map(b => ({ label: b, action: () => _createCardFromEvent(accountId, ev, b) })) } : {}),
+    });
+  }
+  const refs = ev?.cardRefs || [];
+  if (refs.length === 1) {
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open card`, action: () => _openLinkedCard(refs[0].board, refs[0].cardId) });
+  } else if (refs.length > 1) {
+    items.push({
+      labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open card`,
+      children:  refs.map(r => ({ label: `${r.board} \u00b7 ${r.cardId}`, action: () => _openLinkedCard(r.board, r.cardId) })),
+    });
+  }
   if (!isIcal) {
     if (isRecurring) {
       items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit this occurrence`, action: () => openCalEventModal(accountId, ev, null, 'occurrence') });
@@ -1801,6 +1856,147 @@ function _showCalEventContextMenu(e, accountId, uid, webUrl, evOverride) {
     }
   }
   openContextMenu(e, items);
+}
+
+/** Human-readable date/time range of an event ("When" row, card description). */
+function _calEventWhen(ev) {
+  // All-day dates are 'YYYY-MM-DD' (end exclusive) \u2192 local midnight, not UTC
+  const day = s => { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
+  const dateFmt = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+  const timeFmt = { hour: '2-digit', minute: '2-digit' };
+  if (ev.allDay) {
+    const s = day(ev.start);
+    const last = ev.end ? new Date(day(ev.end).getTime() - 86_400_000) : s;
+    return last > s
+      ? `${s.toLocaleDateString([], dateFmt)} \u2013 ${last.toLocaleDateString([], dateFmt)}`
+      : s.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  }
+  const s = new Date(ev.start), e = ev.end ? new Date(ev.end) : null;
+  const startStr = s.toLocaleString([], { ...dateFmt, ...timeFmt });
+  // Multi-day: full date + time on both ends; same day: end time only
+  return !e ? startStr
+    : new Date(e - 1).toDateString() !== s.toDateString() ?   // ending at midnight still counts as one day
+     `${startStr} \u2013 ${e.toLocaleString([], { ...dateFmt, ...timeFmt })}`
+    : `${startStr} \u2013 ${e.toLocaleTimeString([], timeFmt)}`;
+}
+
+let _dashBoardsCache = null;
+/** Active (non-archived) board names for "Create card" submenus; cached per page load. */
+async function _dashActiveBoards() {
+  if (_dashBoardsCache) return _dashBoardsCache;
+  try {
+    const boards = await fetch('/api/boards').then(r => r.ok ? r.json() : []);
+    _dashBoardsCache = (Array.isArray(boards) ? boards : []).filter(b => !b.archived).map(b => b.name);
+  } catch { return []; }
+  return _dashBoardsCache;
+}
+
+/**
+ * Card fields prefilled from a calendar event: title, details as Markdown, start/end date,
+ * location as link (http/https only) and the hidden reference back to the event (calEvent).
+ */
+function _calEventCardPrefill(accountId, ev) {
+  const lines = [];
+  if (ev.start)     lines.push(`**When:** ${_calEventWhen(ev)}`);
+  if (ev.location)  lines.push(`**Where:** ${ev.location}`);
+  if (ev._label)    lines.push(`**Calendar:** ${ev._label}`);
+  if (ev.organizer) lines.push(`**Organiser:** ${String(ev.organizer).replace(/^mailto:/i, '')}`);
+  let bodyText = '';
+  if (ev.description) {
+    bodyText = /<[a-z][\s\S]*>/i.test(ev.description)
+      ? (() => { try { return new DOMParser().parseFromString(ev.description, 'text/html').body.innerText.trim(); } catch { return ev.description; } })()
+      : ev.description.trim();
+  }
+
+  let startDate = '', endDate = '';
+  if (ev.start) {
+    if (ev.allDay) {
+      startDate = ev.start.slice(0, 10);
+      if (ev.end) {
+        const [y, m, d] = ev.end.slice(0, 10).split('-').map(Number);
+        endDate = _ymdLocal(new Date(y, m - 1, d - 1));   // DTEND is exclusive
+      }
+    } else {
+      startDate = _ymdLocal(new Date(ev.start));
+      if (ev.end) endDate = _ymdLocal(new Date(new Date(ev.end).getTime() - 1));
+    }
+    if (endDate && endDate <= startDate) endDate = '';
+  }
+
+  return {
+    text:        ev.title || '',
+    description: lines.join('  \n') + (bodyText ? '\n\n---\n\n' + bodyText : ''),
+    link:        safeLink(ev.location || '') ? ev.location : '',
+    startDate,
+    endDate,
+    extra:       { calEvent: { accountId, uid: ev.uid } },
+  };
+}
+
+/**
+ * Open the add-to-inbox modal prefilled from a calendar event. After the card was saved the
+ * event gets a hidden X-JC-KANBAN-CARD reference (CalDAV only; iCal-URL feeds are read-only).
+ */
+async function _createCardFromEvent(accountId, ev, boardName = null) {
+  const writable = (ev._accountType || 'caldav') !== 'ical-url';
+  await openInboxModal(boardName, _calEventCardPrefill(accountId, ev), async (board, cardId) => {
+    if (!writable || !board || !cardId) return;
+    try {
+      const res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(ev.uid)}/cards`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board, cardId, ...(ev.href ? { href: ev.href } : {}) }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      await _refreshCalendarAccount(accountId);
+      if (_cvIsOpen()) _cvLoad();
+    } catch (err) {
+      showMessage(`Card created, but linking it to the event failed: ${err.message}`);
+    }
+  });
+}
+
+/** Board data per name for resolving linked cards; short-lived (one detail render). */
+async function _findBoardCard(board, cardId, cache = new Map()) {
+  if (!cache.has(board)) {
+    cache.set(board, fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.ok ? r.json() : null).catch(() => null));
+  }
+  const data = await cache.get(board);
+  for (const col of data?.columns || []) {
+    const card = (col.cards || []).find(c => c.id === cardId);
+    if (card) return { card, column: col.title };
+  }
+  return null;
+}
+
+/** Placeholder links for linked cards ([{ board, cardId }]); resolved by _resolveLinkedCardLinks. */
+function _linkedCardLinksHtml(refs) {
+  return refs.map(r =>
+    `<a href="#" class="dash-linked-card" data-board="${escHtml(r.board)}" data-card-id="${escHtml(r.cardId)}">${escHtml(r.board)}</a>`
+  ).join('<br>');
+}
+
+/** Replace the board-name placeholders of `.dash-linked-card` links with the card titles; wire clicks. */
+function _resolveLinkedCardLinks(container) {
+  const cache = new Map();
+  for (const a of container.querySelectorAll('.dash-linked-card')) {
+    const { board, cardId } = a.dataset;
+    a.addEventListener('click', e => { e.preventDefault(); _openLinkedCard(board, cardId); });
+    _findBoardCard(board, cardId, cache).then(found => {
+      if (found) a.textContent = `${found.card.text || '(untitled)'} \u00b7 ${board} / ${found.column}`;
+      else { a.textContent = `${board}: card not found`; a.classList.add('dash-linked-card--missing'); }
+    });
+  }
+}
+
+/** Open a card referenced by a calendar event in the detail panel. */
+async function _openLinkedCard(board, cardId) {
+  const found = await _findBoardCard(board, cardId);
+  if (!found) { showMessage('The linked card no longer exists.'); return; }
+  const c = found.card;
+  _openCardDetail(board, { ...c, description: !!c.description });
 }
 
 function _openEventDetail(accountId, uid, webUrl, evOverride) {
@@ -1830,29 +2026,7 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
     if (ev._color) titlebar.style.setProperty('--detail-accent', ev._color);
     else titlebar.style.removeProperty('--detail-accent');
     const rows = [];
-    if (ev.start) {
-      // All-day dates are 'YYYY-MM-DD' (end exclusive) \u2192 local midnight, not UTC
-      const day = s => { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
-      const dateFmt = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
-      const timeFmt = { hour: '2-digit', minute: '2-digit' };
-      let when;
-      if (ev.allDay) {
-        const s = day(ev.start);
-        const last = ev.end ? new Date(day(ev.end).getTime() - 86_400_000) : s;
-        when = last > s
-          ? `${s.toLocaleDateString([], dateFmt)} \u2013 ${last.toLocaleDateString([], dateFmt)}`
-          : s.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-      } else {
-        const s = new Date(ev.start), e = ev.end ? new Date(ev.end) : null;
-        const startStr = s.toLocaleString([], { ...dateFmt, ...timeFmt });
-        // Multi-day: full date + time on both ends; same day: end time only
-        when = !e ? startStr
-          : new Date(e - 1).toDateString() !== s.toDateString() ?   // ending at midnight still counts as one day
-           `${startStr} \u2013 ${e.toLocaleString([], { ...dateFmt, ...timeFmt })}`
-          : `${startStr} \u2013 ${e.toLocaleTimeString([], timeFmt)}`;
-      }
-      rows.push(['When', escHtml(when)]);
-    }
+    if (ev.start) rows.push(['When', escHtml(_calEventWhen(ev))]);
     if (ev.location) {
       const locSafe = safeLink(ev.location);
       const locHtml = locSafe
@@ -1864,9 +2038,14 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
     if (ev.organizer) rows.push(['Organiser',  escHtml(ev.organizer)]);
     if (ev._label)    rows.push(['Calendar',   escHtml(ev._label)]);
     if (ev.hasRrule)  rows.push(['Recurrence', escHtml(_formatRRule(ev.rruleStr || null, ev.seriesStart || ev.start))]);
+    const cardRefs = ev.cardRefs || [];
+    if (cardRefs.length) {
+      rows.push([cardRefs.length > 1 ? 'Cards' : 'Card', _linkedCardLinksHtml(cardRefs)]);
+    }
     body.innerHTML = `<table class="dashboard-detail-table">${
       rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
     }</table>`;
+    _resolveLinkedCardLinks(body);
     if (ev.description) {
       const iframe = document.createElement('iframe');
       iframe.className = 'dashboard-mail-iframe';
@@ -1990,6 +2169,24 @@ function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
   const webmailEl = document.getElementById('mailCtxWebmail');
   if (webUrl) { webmailEl.href = webUrl; webmailEl.style.display = ''; }
   else        { webmailEl.style.display = 'none'; }
+  const refs = _mailCardRefs.get(`${accountId}\0${msgId}`) || [];
+  const openWrap = document.getElementById('mailCtxOpenCardWrap');
+  openWrap.style.display = refs.length ? '' : 'none';
+  const openList = document.getElementById('mailCtxOpenCardList');
+  openList.innerHTML = '';
+  for (const r of refs) {
+    const btn = document.createElement('button');
+    btn.className = 'ctx-item';
+    btn.textContent = `${r.board} \u00b7 ${r.cardId}`;
+    btn.addEventListener('click', e => { e.stopPropagation(); hideMailContextMenu(); _openLinkedCard(r.board, r.cardId); });
+    openList.appendChild(btn);
+    _findBoardCard(r.board, r.cardId).then(f => { if (f) btn.textContent = `${f.card.text || '(untitled)'} \u00b7 ${r.board}`; });
+  }
+  openWrap.onclick = e => {
+    if (e.target.closest('.ctx-submenu') || !refs.length) return;
+    hideMailContextMenu();
+    _openLinkedCard(refs[0].board, refs[0].cardId);
+  };
   const menu = document.getElementById('mailContextMenu');
   menu.style.display = 'block';
   const mw   = menu.offsetWidth  || 160;
@@ -2002,6 +2199,7 @@ function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
   const toLeft = menuLeft + mw + 160 > window.innerWidth - edge;
   document.getElementById('mailCtxMoveWrap').classList.toggle('ctx-submenu-left', toLeft);
   document.getElementById('mailCtxCreateCardWrap').classList.toggle('ctx-submenu-left', toLeft);
+  document.getElementById('mailCtxOpenCardWrap').classList.toggle('ctx-submenu-left', toLeft);
 }
 
 function hideMailContextMenu() {
@@ -2138,7 +2336,7 @@ async function _mailMove(accountId, msgId, folder) {
  * `folder` = IMAP folder of the message (default: the account's folder);
  * `markRead` replaces the default "mark read in the dashboard panel" after the card was created.
  */
-async function _createCardFromMail(accountId, msgId, boardName = null, { folder = null, markRead = null } = {}) {
+async function _createCardFromMail(accountId, msgId, boardName = null, { folder = null, markRead = null, onLinked = null } = {}) {
   let prefill = { text: '', description: '' };
   let msg = null;
   const folderQs = folder ? `?folder=${encodeURIComponent(folder)}` : '';
@@ -2172,6 +2370,14 @@ async function _createCardFromMail(accountId, msgId, boardName = null, { folder 
 
       prefill.description = headerLines.join('  \n') +
         (bodyText ? '\n\n---\n\n' + bodyText : '');
+      // Hidden reference to the mail: Message-ID survives folder moves (IMAP UIDs don't)
+      if (msg.messageId) {
+        prefill.extra = { mailRef: {
+          accountId, messageId: msg.messageId,
+          ...(folder ? { folder } : {}),   // only a search hint; the panel shows the account's folder
+          subject: (msg.subject || '').slice(0, 1000),
+        } };
+      }
     }
   } catch { /* proceed with empty prefill */ }
 
@@ -2188,11 +2394,41 @@ async function _createCardFromMail(accountId, msgId, boardName = null, { folder 
 
   await openInboxModal(boardName, prefill, async (board, cardId) => {
     if (markRead) markRead(); else _mailToggleRead(accountId, msgId, true);
+    if (msg?.messageId && board && cardId) _linkMailToCard(accountId, msgId, folder, board, cardId, onLinked);
     // Re-upload only if board was changed (new cardId differs from pre-uploaded temp)
     if (attachments.length && board && cardId && cardId !== preTempCardId) {
       await _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId, folder);
     }
   }, null, preTempCardId);
+}
+
+/** Store the mail → card link server-side (keyed by Message-ID) and mark the mail in the panel. */
+async function _linkMailToCard(accountId, msgId, folder, board, cardId, onLinked) {
+  const folderQs = folder ? `?folder=${encodeURIComponent(folder)}` : '';
+  try {
+    const res = await fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/cards${folderQs}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ board, cardId }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+  } catch (err) {
+    showMessage(`Card created, but linking it to the mail failed: ${err.message}`);
+    return;
+  }
+  const ref = { board, cardId };
+  if (!folder) {
+    const key = `${accountId}\0${msgId}`;
+    _mailCardRefs.set(key, [...(_mailCardRefs.get(key) || []), ref]);
+    const meta = document.querySelector(`.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"] .card-meta`);
+    if (meta && !meta.querySelector('[title="Linked to a card"]')) {
+      meta.insertAdjacentHTML('afterbegin', `<span class="dashboard-mail-attach" title="Linked to a card">${SVGICONS.card(13, 9)}</span>`);
+    }
+  } else if (typeof _mvDashStale !== 'undefined') {
+    _mvDashStale = true;   // the dashboard panel reloads when the mail view closes
+  }
+  if (onLinked) onLinked(ref);
 }
 
 async function _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId, folder = null) {
@@ -2376,6 +2612,7 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
     _calModalUid     = ev.uid;
     _calModalEtag    = ev.etag || null;
     _calModalHref    = ev.href || null;
+    _calModalCardRefs = ev.cardRefs || null;
     _calModalScope   = (ev.hasRrule && scope) ? scope : null;
     _calModalOccDate = (_calModalScope === 'occurrence') ? (ev.start || null) : null;
 
@@ -2418,7 +2655,7 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
     saveBtn.disabled = true; saveBtn.textContent = 'Loading\u2026';
     fetch(`/api/dashboard/calendar/${encodeURIComponent(_calModalAccId)}/event/${encodeURIComponent(ev.uid)}`)
       .then(r => r.ok ? r.json() : null)
-      .then(fresh => { if (fresh) { _calModalEtag = fresh.etag ?? _calModalEtag; _calModalHref = fresh.href ?? _calModalHref; } })
+      .then(fresh => { if (fresh) { _calModalEtag = fresh.etag ?? _calModalEtag; _calModalHref = fresh.href ?? _calModalHref; _calModalCardRefs = fresh.cardRefs || null; } })
       .catch(() => { /* keep cached values */ })
       .finally(() => { if (modal.open) { saveBtn.disabled = false; saveBtn.textContent = 'Save event'; } });
 
@@ -2450,6 +2687,7 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
     _calModalAccId   = accountId;
     _calModalUid     = null;
     _calModalEtag    = null;
+    _calModalCardRefs = null;
     _calModalScope   = null;
     _calModalOccDate = null;
     titleEl.textContent = 'New event';
@@ -2560,6 +2798,8 @@ async function _submitCalEvent() {
   if (_calModalMode === 'edit' && _calModalHref)    body.href = _calModalHref;
   if (_calModalMode === 'edit' && _calModalScope)   body.editScope = _calModalScope;
   if (_calModalMode === 'edit' && _calModalOccDate) body.occurrenceDate = _calModalOccDate;
+  // Non-recurring edits rebuild the ICS — carry the hidden card links over
+  if (_calModalMode === 'edit' && _calModalCardRefs?.length) body.cardRefs = _calModalCardRefs;
   // Include rrule for create mode and series edits (not for single-occurrence edits)
   if (_calModalScope !== 'occurrence') {
     const rrule = _buildRRule();

@@ -27,6 +27,13 @@ let _cvHidden     = _cvLoadHidden(); // Set of hidden accountIds
 let _cvAccountList = [];            // accounts of the last load (legend)
 let _cvMonthLanes = _CV_MONTH_MAX;  // entry rows that fit into a month week row (measured)
 let _cvZoomPending = null;          // { factor, clientY } batched per animation frame
+let _cvFocusDay   = null;           // YYYY-MM-DD centred horizontally in week views (phones, after a month double tap)
+let _cvTap        = null;           // pending month tap on phones: { ymd, timer }
+let _cvDayListDay = null;           // day shown in the phone day overview (Date) or null
+
+// Phones: same condition as the phone layout in calview.css
+const _CV_PHONE_MQ   = '(max-width: 639px), (max-height: 500px)';
+const _CV_DBL_TAP_MS = 300;         // second tap on the same day within this time = double tap
 
 // ---- Pure date helpers (unit-tested) ----
 
@@ -178,6 +185,7 @@ function _cvBuildMoveBody(ev, newStart, newEnd, scope, tz) {
   const body = { title: ev.title || '(no title)', allDay: !!ev.allDay };
   if (ev.location)    body.location    = ev.location;
   if (ev.description) body.description = ev.description;
+  if (ev.cardRefs?.length) body.cardRefs = ev.cardRefs;   // hidden card links survive the rebuild
 
   let s = newStart, e = newEnd;
   if (scope === 'series') {
@@ -212,7 +220,38 @@ function _cvBuildMoveBody(ev, newStart, newEnd, scope, tz) {
   return body;
 }
 
+/** Events touching `day` (local midnight): all-day / multi-day first, then by start and title. */
+function _cvEventsOnDay(events, day) {
+  const end = _cvAddDays(day, 1);
+  return events.filter(ev => ev._s < end && ev._e > day).sort((a, b) =>
+    (_cvIsBar(b) - _cvIsBar(a)) || (a._s - b._s) || (a.title || '').localeCompare(b.title || ''));
+}
+
+/** Time column of the day overview: "All day", "09:00 – 10:00", "… – 10:00" / "09:00 – …" when continuing. */
+function _cvDayListTime(ev, day) {
+  if (_cvIsBar(ev)) return 'All day';
+  const end = _cvAddDays(day, 1);
+  const from = ev._s < day ? '\u2026' : _cvTimeLabel(ev._s);
+  const to   = ev._e > end ? '\u2026' : _cvTimeLabel(ev._e);
+  return `${from} \u2013 ${to}`;
+}
+
+function _cvIsPhone() {
+  return !!window.matchMedia?.(_CV_PHONE_MQ).matches;
+}
+
 // ---- Open / close / URL state ----
+
+/**
+ * Phones: calendar and mail view start below the app header (CSS var --app-header-h).
+ * Uses the header's bottom edge, so a scrolled page leaves no gap. Shared with mailview.js.
+ */
+function _overlaySyncHeaderOffset() {
+  const header = document.querySelector('header');
+  if (!header) return;
+  const bottom = Math.max(0, Math.round(header.getBoundingClientRect().bottom));
+  document.documentElement.style.setProperty('--app-header-h', `${bottom}px`);
+}
 
 function _cvIsOpen() {
   const el = document.getElementById('calView');
@@ -252,6 +291,7 @@ function _cvStoredMode() {
 }
 
 function _cvShow() {
+  _overlaySyncHeaderOffset();
   const el = document.getElementById('calView');
   el.style.display = '';
   document.body.classList.add('calview-open');
@@ -271,6 +311,7 @@ function _cvHide() {
   document.getElementById('dashboardCalBtn')?.classList.remove('open');
   clearInterval(_cvNowTimer);
   _cvDrag = null;
+  _cvCloseDayList();
 }
 
 function closeCalView() {
@@ -294,7 +335,9 @@ function _cvInitFromUrl() {
   if (_cvIsOpen()) { _cvRender(); _cvLoad(); } else _cvShow();
 }
 
-function _cvNavigate(anchor, mode) {
+/** `focusDay` (YYYY-MM-DD): week views scroll horizontally so this day is centred (phones). */
+function _cvNavigate(anchor, mode, focusDay = null) {
+  _cvFocusDay = focusDay;
   if (mode) {
     _cvMode = mode;
     try { localStorage.setItem(_CV_MODE_KEY, mode); } catch { /* ignore */ }
@@ -432,8 +475,10 @@ function _cvRender() {
     if (!_cvScrolled || prevScroll == null) { scroll.scrollTop = 7 * _cvHourPx - 10; _cvScrolled = true; }   // -10: room so the 07:00 label is not clipped
     else scroll.scrollTop = prevScroll;
   }
+  if (_cvFocusDay && _cvMode !== 'month') _cvCenterDay(_cvFocusDay);
   _cvUpdateNowLine();
   _cvRenderLegend();
+  if (_cvDayListDay) _cvRenderDayList();
   // Month: re-render once if more / fewer entry rows fit than assumed (row height is only known after layout)
   if (_cvMode === 'month') {
     const fit = _cvFitMonthLanes();
@@ -441,6 +486,68 @@ function _cvRender() {
   }
   // Window may have shrunk / grown since the zoom was stored — keep it within the visible bounds
   if (scroll && Math.floor(_cvClampZoom(_cvZoomRaw, scroll)) !== _cvHourPx) _cvApplyZoom(_cvZoomRaw, null);
+}
+
+/** Scroll the (horizontally scrollable, phones) week grid so the day's column is centred if possible. */
+function _cvCenterDay(ymd) {
+  const week = document.querySelector('#calViewBody .cv-week');
+  const col  = week?.querySelector(`.cv-daycol[data-date="${ymd}"]`);
+  if (!col || week.scrollWidth <= week.clientWidth) return;
+  const w = week.getBoundingClientRect(), c = col.getBoundingClientRect();
+  week.scrollLeft += (c.left + c.width / 2) - (w.left + w.width / 2);
+}
+
+// ---- Phones: month taps → day overview (single) / week (double) ----
+
+function _cvMonthTap(day, cell) {
+  const ymd = _cvYmd(day);
+  if (_cvTap && _cvTap.ymd === ymd) {
+    clearTimeout(_cvTap.timer);
+    _cvTap = null;
+    _cvNavigate(day, 'week', ymd);
+    return;
+  }
+  if (_cvTap) clearTimeout(_cvTap.timer);
+  document.querySelectorAll('#calViewBody .cv-tap').forEach(n => n.classList.remove('cv-tap'));
+  cell?.classList.add('cv-tap');   // immediate feedback while waiting for a possible second tap
+  _cvTap = { ymd, timer: setTimeout(() => {
+    _cvTap = null;
+    cell?.classList.remove('cv-tap');
+    _cvOpenDayList(day);
+  }, _CV_DBL_TAP_MS) };
+}
+
+function _cvOpenDayList(day) {
+  _cvDayListDay = day;
+  document.getElementById('calViewDayList').hidden = false;
+  _cvRenderDayList();
+}
+
+function _cvCloseDayList() {
+  _cvDayListDay = null;
+  const el = document.getElementById('calViewDayList');
+  if (el) el.hidden = true;
+}
+
+function _cvRenderDayList() {
+  const day = _cvDayListDay;
+  if (!day) return;
+  document.getElementById('calViewDayListTitle').textContent =
+    day.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const evs = _cvEventsOnDay(_cvVisibleEvents(), day);
+  const multi = _cvAccountList.length > 1;
+  document.getElementById('calViewDayListItems').innerHTML = evs.length
+    ? evs.map(ev => {
+        const range = _cvIsBar(ev) && _cvDayDiff(_cvStartOfDay(ev._s), _cvStartOfDay(new Date(ev._e - 1))) > 0
+          ? `${fmtDate(_cvYmd(ev._s))} \u2192 ${fmtDate(_cvYmd(ev.allDay ? _cvAddDays(ev._e, -1) : ev._e))}` : '';
+        const sub = [range, ev.location, multi ? ev._label : ''].filter(Boolean).join(' \u00b7 ');
+        return `<button class="cv-daylist-item" data-cv-key="${escHtml(ev._key)}" style="${_cvColorCss(ev)}">
+          <span class="cv-daylist-time">${escHtml(_cvDayListTime(ev, day))}</span>
+          <span class="cv-daylist-main"><span class="cv-daylist-title">${escHtml(ev.title || '(no title)')}</span>
+          ${sub ? `<span class="cv-daylist-sub">${escHtml(sub)}</span>` : ''}</span></button>`;
+      }).join('')
+    : '<p class="dashboard-empty">No events on this day.</p>';
+  document.querySelector('#calViewDayList [data-cv-daylist-new]').hidden = !_cvDefaultAccount();
 }
 
 /** Number of entry rows that fit into a month week row (day-number row excluded); null before layout. */
@@ -705,7 +812,8 @@ async function _cvSaveMove(ev, newStart, newEnd) {
     fresh = await fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(ev.uid)}`)
       .then(r => r.ok ? r.json() : null);
   } catch { /* fall back to cached etag/href */ }
-  const body = _cvBuildMoveBody({ ...ev, etag: fresh?.etag ?? ev.etag, href: fresh?.href ?? ev.href }, newStart, newEnd, scope, tz);
+  const body = _cvBuildMoveBody({ ...ev, etag: fresh?.etag ?? ev.etag, href: fresh?.href ?? ev.href,
+    cardRefs: fresh ? fresh.cardRefs : ev.cardRefs }, newStart, newEnd, scope, tz);
 
   try {
     const res  = await fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}/event/${encodeURIComponent(ev.uid)}`, {
@@ -752,6 +860,8 @@ function _cvDateAt(clientX, clientY) {
 
 function _cvPointerDown(e) {
   if (e.button !== 0 || _cvDrag) return;
+  // Phones, month: taps open the day overview instead of single entries (see _cvMonthTap)
+  if (_cvMode === 'month' && _cvIsPhone() && e.target.closest('.cv-month-grid')) return;
   const evEl = e.target.closest('.cv-ev');
   if (evEl) {
     const ev = _cvEvents.get(evEl.dataset.cvKey);
@@ -868,6 +978,10 @@ function _cvPointerUp(e) {
 // ---- Wiring ----
 
 document.addEventListener('DOMContentLoaded', () => {
+  const header = document.querySelector('header');
+  if (header && typeof ResizeObserver === 'function') new ResizeObserver(_overlaySyncHeaderOffset).observe(header);
+  window.addEventListener('resize', _overlaySyncHeaderOffset);
+
   const view = document.getElementById('calView');
   if (!view) return;
   const body = document.getElementById('calViewBody');
@@ -897,12 +1011,37 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('pointercancel', _cvPointerUp);
 
   body.addEventListener('click', e => {
+    if (_cvMode === 'month' && _cvIsPhone() && e.target.closest('.cv-month-grid')) {
+      const day = _cvDateAt(e.clientX, e.clientY);
+      if (day) {
+        e.preventDefault();
+        _cvMonthTap(day, body.querySelector(`.cv-month-cell[data-date="${_cvYmd(day)}"]`));
+      }
+      return;
+    }
     const go = e.target.closest('[data-cv-goto]');
     if (go) _cvNavigate(_cvParseYmd(go.dataset.cvGoto), 'week');
   });
 
+  // Day overview (phones)
+  const dayList = document.getElementById('calViewDayList');
+  dayList.addEventListener('click', e => {
+    if (e.target === dayList || e.target.closest('[data-cv-daylist-close]')) { _cvCloseDayList(); return; }
+    const day = _cvDayListDay;
+    if (e.target.closest('[data-cv-daylist-week]')) { _cvCloseDayList(); _cvNavigate(day, 'week', _cvYmd(day)); return; }
+    if (e.target.closest('[data-cv-daylist-new]')) {
+      const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9);
+      _cvCreate({ start, end: new Date(start.getTime() + 3_600_000), allDay: false });
+      return;
+    }
+    const item = e.target.closest('[data-cv-key]');
+    const ev = item && _cvEvents.get(item.dataset.cvKey);
+    if (ev) _openEventDetail(ev._accountId, ev.uid, ev._webUrl, ev);   // opens above the overview
+  });
+
   // Month / all-day row: double-click on a free spot creates an all-day event
   body.addEventListener('dblclick', e => {
+    if (_cvMode === 'month' && _cvIsPhone()) return;   // double tap → week (see _cvMonthTap)
     if (e.target.closest('.cv-ev, [data-cv-goto]')) return;
     const cell = e.target.closest('.cv-month-cell, .cv-allday-cell');
     if (!cell) return;
@@ -928,13 +1067,18 @@ document.addEventListener('DOMContentLoaded', () => {
     _showCalEventContextMenu(e, ev._accountId, ev.uid, ev._webUrl, ev);
   });
 
-  document.addEventListener('keydown', e => {
+  // Capture phase: runs before modal handlers, so a modal that closes itself on Escape
+  // is still visible here and the view (or the day overview) stays open
+  window.addEventListener('keydown', e => {
     if (!_cvIsOpen()) return;
     // Leave keys to dialogs / menus stacked above the view
     if (document.querySelector('dialog[open]')) return;
-    if (document.getElementById('dashboardDetail')?.style.display !== 'none') return;
-    if (document.getElementById('dialogBackdrop')?.style.display === 'flex') return;
+    if ([...document.querySelectorAll('.modal-backdrop')].some(m => getComputedStyle(m).display !== 'none')) return;
     if ([...document.querySelectorAll('.context-menu')].some(m => getComputedStyle(m).display !== 'none')) return;
+    if (_cvDayListDay) {
+      if (e.key === 'Escape') { e.preventDefault(); _cvCloseDayList(); }
+      return;
+    }
     if (e.target.closest?.('input, textarea, select')) return;
     // Ctrl/Cmd + / - / 0 zoom the time grid instead of the page (week views only)
     if ((e.ctrlKey || e.metaKey) && _cvMode !== 'month' && ['+', '=', '-', '0'].includes(e.key)) {
@@ -947,7 +1091,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.key === 'ArrowLeft')  _cvNavigate(_cvStep(_cvMode, _cvAnchor, -1));
     else if (e.key === 'ArrowRight') _cvNavigate(_cvStep(_cvMode, _cvAnchor, 1));
     else if (e.key === 't')          _cvNavigate(new Date());
-  });
+  }, true);
 
   // Window resize changes the month row height → recompute how many entries fit
   let resizeFrame = 0;

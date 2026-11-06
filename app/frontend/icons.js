@@ -212,6 +212,31 @@ function _svgEmail(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="2.5" width="10.6" height="7.5" rx="1.2"/><polyline points="0.7,2.5 6,7 11.3,2.5"/></svg>`;
 }
 
+// Arrow curving back to the left — reply to a mail
+function _svgReply(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4.5,2.5 1.5,5.5 4.5,8.5"/><path d="M1.5 5.5h5.5a3.5 3.5 0 0 1 3.5 3.5v1"/></svg>`;
+}
+
+// Double arrow curving back to the left — reply to all recipients
+function _svgReplyAll(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4,2.5 1,5.5 4,8.5"/><polyline points="6.5,2.5 3.5,5.5 6.5,8.5"/><path d="M3.5 5.5h4a3.5 3.5 0 0 1 3.5 3.5v1"/></svg>`;
+}
+
+// Arrow curving to the right — forward a mail
+function _svgForward(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7.5,2.5 10.5,5.5 7.5,8.5"/><path d="M10.5 5.5H5a3.5 3.5 0 0 0-3.5 3.5v1"/></svg>`;
+}
+
+// Opened envelope — mark a mail as read
+function _svgMarkRead(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M0.9 5L6 1.5 11.1 5v5.3a.8.8 0 0 1-.8.8H1.7a.8.8 0 0 1-.8-.8z"/><polyline points="0.9,5 6,8.4 11.1,5"/></svg>`;
+}
+
+// Closed envelope with a filled dot — mark a mail as unread
+function _svgMarkUnread(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="3" width="9.6" height="7" rx="1.1"/><polyline points="0.7,3 5.5,7 10.3,3"/><circle cx="10" cy="2.6" r="1.7" fill="currentColor" stroke="none"/></svg>`;
+}
+
 // Arrow leaving a box — open external link in a new tab
 function _svgOpenLink(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 1.5H2.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V7"/><path d="M7.5 1.5h3v3"/><line x1="5.5" y1="6.5" x2="10.5" y2="1.5"/></svg>`;
@@ -245,6 +270,11 @@ const SVGICONS = {
   dragHandle:     _svgDragHandle,
   menu:           _svgMenu,
   email:          _svgEmail,
+  reply:          _svgReply,
+  replyAll:       _svgReplyAll,
+  forward:        _svgForward,
+  markRead:       _svgMarkRead,
+  markUnread:     _svgMarkUnread,
   attachment:   _svgAttachment,
   link:         _svgLink,
   noteDoc:      _svgNoteDoc,
@@ -324,6 +354,11 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgPrint(16, 16),         name: 'Print',            usage: 'Print a card or column' },
   { type: 'svg', svg: _svgDashboard(16, 16),    name: 'Dashboard',        usage: 'Navigate to the dashboard view' },
   { type: 'svg', svg: _svgEmail(16, 16),        name: 'Email',            usage: 'Mail account / email message' },
+  { type: 'svg', svg: _svgReply(16, 16),        name: 'Reply',            usage: 'Reply to a mail (mail view)' },
+  { type: 'svg', svg: _svgReplyAll(16, 16),     name: 'Reply all',        usage: 'Reply to all recipients of a mail (mail view)' },
+  { type: 'svg', svg: _svgForward(16, 16),      name: 'Forward',          usage: 'Forward a mail (mail view)' },
+  { type: 'svg', svg: _svgMarkRead(16, 16),     name: 'Mark read',        usage: 'Mark a mail as read (mail view)' },
+  { type: 'svg', svg: _svgMarkUnread(16, 16),   name: 'Mark unread',      usage: 'Mark a mail as unread (mail view)' },
 ];
 
 // ---- Render icon library grid ----

@@ -3,14 +3,15 @@ const express = require('express');
 const multer  = require('multer');
 const router  = express.Router();
 const { writeRateLimit, uploadRateLimit }         = require('../auth');
-const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder } = require('../global-db');
+const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder,
+        getMailCardLinks, addMailCardLink } = require('../global-db');
 const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
         buildIcs, fetchRawIcs, patchMasterIcs, buildOccurrenceOverrideIcs, buildDeleteOccurrenceIcs,
-        resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
-const { validateCalendarEvent, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
-const { fetchMailAccount, fetchMailMessage, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
+        addCardRefIcs, resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
+const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
+const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
         markMailMessage, markFolderRead, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
 
@@ -325,6 +326,21 @@ async function _mailCtx(req, res, { multi = false } = {}) {
   return { account, folder };
 }
 
+/**
+ * Add `cardRefs` ([{ board, cardId }]) to messages that a kanban card was created from.
+ * Links are keyed by Message-ID; lookup failures never break the mail listing.
+ */
+async function _withCardRefs(accountId, messages) {
+  let links;
+  try { links = await getMailCardLinks(accountId); } catch { return messages; }
+  if (!links || !Object.keys(links).length) return messages;
+  for (const m of messages) {
+    const refs = m?.messageId && links[m.messageId];
+    if (Array.isArray(refs) && refs.length) m.cardRefs = refs;
+  }
+  return messages;
+}
+
 const _SEND_MAX_BYTES = 50 * 1024 * 1024;   // all attachments of one message together
 
 const _sendUpload = multer({
@@ -346,6 +362,7 @@ router.get('/dashboard/mail', withHandler(async (req, res) => {
     }
     return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: [], error: r.reason?.message || 'Unknown error' };
   });
+  await Promise.all(result.map(acc => _withCardRefs(acc.accountId, acc.messages)));
 
   res.json(result);
 }));
@@ -357,7 +374,7 @@ router.get('/dashboard/mail/:accountId', withHandler(async (req, res) => {
 
   try {
     const messages = await fetchMailAccount(account);
-    res.json({ messages, error: null });
+    res.json({ messages: await _withCardRefs(account.id, messages), error: null });
   } catch (err) {
     res.json({ messages: [], error: err.message });
   }
@@ -375,7 +392,50 @@ router.get('/dashboard/mail/:accountId/message/:uid', withHandler(async (req, re
     return res.status(502).json({ error: err.message });
   }
   if (!msg) return res.status(404).json({ error: 'Message not found' });
+  await _withCardRefs(ctx.account.id, [msg]);
   res.json(msg);
+}));
+
+// POST /api/dashboard/mail/:accountId/message/:uid/cards?folder= — link a kanban card to the mail.
+// Body: { board, cardId }. Stored server-side under the message's Message-ID (mails are immutable).
+router.post('/dashboard/mail/:accountId/message/:uid/cards', writeRateLimit, withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
+  if (!validateMailCardLink(req.body)) return res.status(400).json({ error: schemaError(validateMailCardLink) });
+
+  let messageId;
+  try {
+    messageId = await fetchMessageId(ctx.account, req.params.uid, ctx.folder);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  if (messageId === null) return res.status(404).json({ error: 'Message not found' });
+  if (!messageId) return res.status(422).json({ error: 'The message has no Message-ID header' });
+
+  const added = await addMailCardLink(ctx.account.id, messageId, req.body.board, req.body.cardId);
+  res.json({ ok: true, messageId, ...(added ? {} : { unchanged: true }) });
+}));
+
+// GET /api/dashboard/mail/:accountId/locate?messageId=&folder= — find a message by Message-ID
+// (folder = hint searched first). Returns { folder, uid }.
+router.get('/dashboard/mail/:accountId/locate', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const { messageId } = req.query;
+  if (typeof messageId !== 'string' || !messageId.trim() || messageId.length > 998 || /[\r\n]/.test(messageId)) {
+    return res.status(400).json({ error: 'Invalid messageId' });
+  }
+  const folder = _folderParam(req);
+  if (folder === null) return res.status(400).json({ error: 'Invalid folder' });
+
+  let found;
+  try {
+    found = await findMailByMessageId(account, messageId, folder);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  if (!found) return res.status(404).json({ error: 'Message not found (deleted?)' });
+  res.json(found);
 }));
 
 // GET /api/dashboard/mail/:accountId/message/:uid/attachment/:part — download attachment
@@ -505,7 +565,9 @@ router.get('/dashboard/mail/:accountId/messages', withHandler(async (req, res) =
   const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 200) : '';
 
   try {
-    res.json(await fetchFolderMessages(ctx.account, ctx.folder || 'INBOX', { page, query }));
+    const data = await fetchFolderMessages(ctx.account, ctx.folder || 'INBOX', { page, query });
+    await _withCardRefs(ctx.account.id, data.messages);
+    res.json(data);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -782,6 +844,45 @@ router.put('/dashboard/calendar/:accountId/event/:uid', writeRateLimit, async (r
   } catch (err) {
     if (err.name === 'AbortError') return res.status(502).json({ error: 'CalDAV request timed out' });
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dashboard/calendar/:accountId/event/:uid/cards — link a kanban card to the event.
+// Body: { board, cardId, href? }. Adds a hidden X-JC-KANBAN-CARD property to the stored ICS
+// (all other properties kept). Retries once when the event changed in between (HTTP 412).
+router.post('/dashboard/calendar/:accountId/event/:uid/cards', writeRateLimit, async (req, res) => {
+  try {
+    const account = await getCalAccount(req.params.accountId);
+    if (!account) return res.status(404).json({ error: 'Account not found' });
+    if (account.type === 'ical-url') return res.status(400).json({ error: 'iCal-URL accounts are read-only' });
+    if (!validateCalendarCardLink(req.body)) {
+      return res.status(400).json({ error: schemaError(validateCalendarCardLink) });
+    }
+    const { board, cardId, href } = req.body;
+    const headers = _calHeaders(account);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const raw = await fetchRawIcs(account, req.params.uid, href || null, 10_000);
+      const ics = addCardRefIcs(raw.ics, board, cardId);
+      if (!ics) return res.json({ ok: true, unchanged: true });
+      const putHeaders = { ...headers, 'Content-Type': 'text/calendar; charset=utf-8' };
+      if (raw.etag) putHeaders['If-Match'] = raw.etag;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const r = await fetch(raw.url, { method: 'PUT', headers: putHeaders, body: ics, signal: controller.signal });
+        if (r.status === 204 || r.status === 201 || r.status === 200) return res.json({ ok: true });
+        if (r.status === 412 && attempt === 0) continue;
+        if (r.status === 412) return res.status(409).json({ error: 'Event was modified by someone else — please reload.' });
+        const detail = await r.text().catch(() => '');
+        return res.status(502).json({ error: `CalDAV error (HTTP ${r.status})`, detail });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return res.status(502).json({ error: 'CalDAV request timed out' });
+    res.status(502).json({ error: err.message });
   }
 });
 

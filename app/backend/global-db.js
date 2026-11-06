@@ -110,4 +110,36 @@ async function addRecentFolder(accountId, folder) {
   return upsertDoc(globalDb, RECENT_FOLDERS_ID, current);
 }
 
-module.exports = { getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder };
+// Mail → card links, keyed by Message-ID (stable across folder moves, unlike IMAP UIDs):
+// { [accountId]: { [messageId]: [{ board, cardId }] } }
+const MAIL_CARD_LINKS_ID = 'mail-card-links';
+
+async function _getMailCardLinksDoc() {
+  try {
+    const { _id, _rev, ...data } = await globalDb.get(MAIL_CARD_LINKS_ID);
+    return data;
+  } catch (err) {
+    if (err.statusCode === 404) return {};
+    throw err;
+  }
+}
+
+/** Links of one account: { [messageId]: [{ board, cardId }] }. */
+async function getMailCardLinks(accountId) {
+  const doc = await _getMailCardLinksDoc();
+  return doc[accountId] && typeof doc[accountId] === 'object' ? doc[accountId] : {};
+}
+
+/** Add a card link to a message; returns false when it already existed. */
+async function addMailCardLink(accountId, messageId, board, cardId) {
+  const doc  = await _getMailCardLinksDoc();
+  const acc  = doc[accountId] && typeof doc[accountId] === 'object' ? doc[accountId] : {};
+  const list = Array.isArray(acc[messageId]) ? acc[messageId] : [];
+  if (list.some(r => r.board === board && r.cardId === cardId)) return false;
+  acc[messageId] = [...list, { board, cardId }];
+  doc[accountId] = acc;
+  await upsertDoc(globalDb, MAIL_CARD_LINKS_ID, doc);
+  return true;
+}
+
+module.exports = { getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink };

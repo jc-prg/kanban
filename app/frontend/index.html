@@ -81,7 +81,7 @@
     <div class="calview-bar mailview-bar">
       <button class="btn calview-navbtn mv-folders-btn" id="mailViewFoldersBtn" title="Folders"><span data-icon="folder"></span></button>
       <h2 class="calview-title mailview-title" id="mailViewTitle">Mail</h2>
-      <button class="btn btn-accent" id="mailViewCompose" title="New message (c)">+ New message</button>
+      <button class="btn btn-accent" id="mailViewCompose" title="New message (c)">+ New<span class="mv-compose-long"> message</span></button>
       <button class="dashboard-detail-close" id="mailViewClose" title="Close (Esc)"><span data-icon="close"></span></button>
     </div>
     <div class="mailview-body">
@@ -133,6 +133,19 @@
     </div>
     <div class="calview-body" id="calViewBody"></div>
     <div class="calview-legend" id="calViewLegend"></div>
+    <div class="cv-daylist" id="calViewDayList" hidden>
+      <div class="cv-daylist-box" role="dialog" aria-modal="true" aria-labelledby="calViewDayListTitle">
+        <div class="cv-daylist-head">
+          <h3 class="cv-daylist-heading" id="calViewDayListTitle"></h3>
+          <button class="dashboard-detail-close" data-cv-daylist-close="1" title="Close (Esc)"><span data-icon="close"></span></button>
+        </div>
+        <div class="cv-daylist-items" id="calViewDayListItems"></div>
+        <div class="cv-daylist-foot">
+          <button class="btn" data-cv-daylist-week="1">Show week</button>
+          <button class="btn btn-accent" data-cv-daylist-new="1">+ New event</button>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="dashboard-grid">
     <div class="dashboard-panel">
@@ -385,6 +398,11 @@
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
     <div class="ctx-submenu" id="mailCtxBoardList"></div>
   </div>
+  <div class="ctx-submenu-trigger ctx-item" id="mailCtxOpenCardWrap" style="display:none">
+    <span data-icon="openLink"></span>  Open card
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
+    <div class="ctx-submenu" id="mailCtxOpenCardList"></div>
+  </div>
   <button class="ctx-item" id="mailCtxToggleRead"><span data-icon="done"></span>  <span id="mailCtxToggleReadLabel">Mark as read</span></button>
   <div class="ctx-submenu-trigger ctx-item" id="mailCtxMoveWrap">
     <span data-icon="moveTo"></span>  Move to folder
@@ -555,6 +573,14 @@
             <input id="cardLink" type="url" placeholder="https://…">
             <button class="btn modal-link-open" id="cardLinkOpen" title="Open link" tabindex="-1"><span data-icon="openLink"></span></button>
           </div>
+        </div>
+        <div class="modal-field" id="cardCalEventField" style="display:none">
+          <label>Calendar event</label>
+          <a class="card-cal-event" id="cardCalEventLink" href="#" title="Open in the calendar view"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span><span id="cardCalEventText"></span></a>
+        </div>
+        <div class="modal-field" id="cardMailRefField" style="display:none">
+          <label>Mail</label>
+          <a class="card-cal-event" id="cardMailRefLink" href="#" title="Open in the mail view"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span><span id="cardMailRefText"></span></a>
         </div>
         <div class="card-section-header">Properties</div>
         <div class="card-section-toggles">

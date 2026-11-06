@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Dashboard API tests — section DB-1 … DB-37 + DB-13..DB-20 (mail)
+ * Dashboard API tests — section DB-1 … DB-46 + DB-13..DB-20 (mail)
  *
  * global-db is injected into require.cache before createApp loads any routes.
  * The db mock's mockCouch.use() returns a per-name board document so card-source
@@ -761,4 +761,150 @@ test('DB-37 GET /api/dashboard/calendar/:id?from&to — invalid or oversized ran
     const res = await request(app).get(`/api/dashboard/calendar/ca-1?${qs}`).set(AUTH)
     expect(res.status, qs).toBe(400)
   }
+})
+
+// ---------------------------------------------------------------------------
+// Calendar ↔ card links (hidden X-JC-KANBAN-CARD property)
+// ---------------------------------------------------------------------------
+
+/** fetch mock for the link route: GET returns `ics` with an ETag, PUT answers with the next status. */
+function _linkFetchMock(ics, putStatuses = [204]) {
+  const calls = []
+  const fn = async (url, opts = {}) => {
+    const method = opts.method || 'GET'
+    calls.push({ url, method, headers: opts.headers || {}, body: opts.body })
+    if (method === 'GET') {
+      return { ok: true, status: 200, text: async () => ics, headers: { get: h => (h.toLowerCase() === 'etag' ? '"etag-1"' : null) } }
+    }
+    const status = putStatuses.shift() ?? 204
+    return { ok: status < 300, status, text: async () => '' }
+  }
+  return { fn, calls }
+}
+
+test('DB-38 GET /api/dashboard/calendar/:id/event/:uid — X-JC-KANBAN-CARD exposed as cardRefs', async () => {
+  _storedConfig = { mailAccounts: [], cardSources: [], autoRefreshMs: 0, calendarAccounts: [_calAccount()] }
+  const ics = makeIcs('uid-ref@ex', icalTs(TOMORROW), icalTs(TOMORROW), 'Linked',
+    'X-JC-KANBAN-CARD:cards/id-abc123\r\nX-JC-KANBAN-CARD:work/id-def456\r\nX-JC-KANBAN-CARD:garbage')
+  vi.stubGlobal('fetch', async () => ({ ok: true, status: 207, text: async () => calDavXml(ics) }))
+
+  const res = await request(app).get('/api/dashboard/calendar/ca-1/event/uid-ref@ex').set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.cardRefs).toEqual([
+    { board: 'cards', cardId: 'id-abc123' },
+    { board: 'work',  cardId: 'id-def456' },
+  ])
+})
+
+test('DB-39 POST /api/dashboard/calendar/:id/event/:uid/cards — adds the reference, keeps other properties, uses If-Match', async () => {
+  _storedConfig = { mailAccounts: [], cardSources: [], autoRefreshMs: 0, calendarAccounts: [_calAccount()] }
+  const ics = makeIcs('uid-link@ex', icalTs(TOMORROW), icalTs(TOMORROW), 'Meeting',
+    'LOCATION:Room 1\r\nX-OTHER-CLIENT:keep-me')
+  const { fn, calls } = _linkFetchMock(ics)
+  vi.stubGlobal('fetch', fn)
+
+  const res = await request(app).post('/api/dashboard/calendar/ca-1/event/uid-link@ex/cards').set(AUTH)
+    .send({ board: 'cards', cardId: 'id-abc123', href: '/cal/uid-link.ics' })
+  expect(res.status).toBe(200)
+  expect(res.body.ok).toBe(true)
+
+  const put = calls.find(c => c.method === 'PUT')
+  expect(put.url).toBe('https://dav.example.com/cal/uid-link.ics')
+  expect(put.headers['If-Match']).toBe('"etag-1"')
+  expect(put.body).toMatch(/X-JC-KANBAN-CARD:cards\/id-abc123/)
+  expect(put.body).toMatch(/LOCATION:Room 1/)
+  expect(put.body).toMatch(/X-OTHER-CLIENT:keep-me/)
+  expect(put.body).toMatch(/DTSTART:/)
+})
+
+test('DB-40 POST …/cards — reference already present → unchanged, no PUT', async () => {
+  _storedConfig = { mailAccounts: [], cardSources: [], autoRefreshMs: 0, calendarAccounts: [_calAccount()] }
+  const ics = makeIcs('uid-dup@ex', icalTs(TOMORROW), icalTs(TOMORROW), 'Meeting', 'X-JC-KANBAN-CARD:cards/id-abc123')
+  const { fn, calls } = _linkFetchMock(ics)
+  vi.stubGlobal('fetch', fn)
+
+  const res = await request(app).post('/api/dashboard/calendar/ca-1/event/uid-dup@ex/cards').set(AUTH)
+    .send({ board: 'cards', cardId: 'id-abc123', href: '/cal/uid-dup.ics' })
+  expect(res.status).toBe(200)
+  expect(res.body.unchanged).toBe(true)
+  expect(calls.some(c => c.method === 'PUT')).toBe(false)
+})
+
+test('DB-41 POST …/cards — invalid body or iCal-URL account → 400', async () => {
+  _storedConfig = {
+    mailAccounts: [], cardSources: [], autoRefreshMs: 0,
+    calendarAccounts: [_calAccount(), _calAccount({ id: 'ca-ical', type: 'ical-url' })],
+  }
+  const { fn, calls } = _linkFetchMock('')
+  vi.stubGlobal('fetch', fn)
+
+  for (const body of [{ board: 'Bad Board', cardId: 'id-1' }, { board: 'cards', cardId: 'id/../x' }, { board: 'cards' }, { board: 'cards', cardId: 'id-1', extra: 1 }]) {
+    const res = await request(app).post('/api/dashboard/calendar/ca-1/event/u@ex/cards').set(AUTH).send(body)
+    expect(res.status, JSON.stringify(body)).toBe(400)
+  }
+  const res = await request(app).post('/api/dashboard/calendar/ca-ical/event/u@ex/cards').set(AUTH).send({ board: 'cards', cardId: 'id-1' })
+  expect(res.status).toBe(400)
+  expect(calls).toHaveLength(0)
+})
+
+test('DB-42 POST …/cards — 412 on the first PUT → re-fetches and retries once', async () => {
+  _storedConfig = { mailAccounts: [], cardSources: [], autoRefreshMs: 0, calendarAccounts: [_calAccount()] }
+  const ics = makeIcs('uid-race@ex', icalTs(TOMORROW), icalTs(TOMORROW), 'Meeting')
+  const { fn, calls } = _linkFetchMock(ics, [412, 204])
+  vi.stubGlobal('fetch', fn)
+
+  const res = await request(app).post('/api/dashboard/calendar/ca-1/event/uid-race@ex/cards').set(AUTH)
+    .send({ board: 'cards', cardId: 'id-abc123', href: '/cal/uid-race.ics' })
+  expect(res.status).toBe(200)
+  expect(calls.filter(c => c.method === 'GET')).toHaveLength(2)
+  expect(calls.filter(c => c.method === 'PUT')).toHaveLength(2)
+})
+
+test('DB-43 PUT /api/dashboard/calendar/:id/event/:uid — rebuilt ICS keeps cardRefs (event moved)', async () => {
+  _storedConfig = { mailAccounts: [], cardSources: [], autoRefreshMs: 0, calendarAccounts: [_calAccount()] }
+  const { fn, calls } = _linkFetchMock('')
+  vi.stubGlobal('fetch', fn)
+
+  const res = await request(app).put('/api/dashboard/calendar/ca-1/event/uid-move@ex').set(AUTH).send({
+    title: 'Moved', allDay: false, start: '2026-11-10T09:00:00Z', end: '2026-11-10T10:00:00Z',
+    href: '/cal/uid-move.ics', cardRefs: [{ board: 'cards', cardId: 'id-abc123' }],
+  })
+  expect(res.status).toBe(200)
+  const put = calls.find(c => c.method === 'PUT')
+  expect(put.body).toMatch(/UID:uid-move@ex/)
+  expect(put.body).toMatch(/DTSTART:20261110T090000Z/)
+  expect(put.body).toMatch(/X-JC-KANBAN-CARD:cards\/id-abc123/)
+})
+
+test('DB-44 calendar helpers — series patch and occurrence override keep the card reference', () => {
+  const { patchMasterIcs, buildOccurrenceOverrideIcs, parseEvents } = require('../../backend/dashboard/calendar')
+  const master = makeIcs('uid-ser@ex', '20261102T090000Z', '20261102T100000Z', 'Weekly',
+    'RRULE:FREQ=WEEKLY;COUNT=4\r\nX-JC-KANBAN-CARD:cards/id-abc123')
+
+  const patched = patchMasterIcs(master, { title: 'Weekly (moved)', start: '2026-11-03T09:00:00Z', end: '2026-11-03T10:00:00Z' })
+  expect(parseEvents(patched)[0].cardRefs).toEqual([{ board: 'cards', cardId: 'id-abc123' }])
+
+  const override = buildOccurrenceOverrideIcs(master, '2026-11-09T09:00:00Z',
+    { title: 'Moved once', allDay: false, start: '2026-11-09T11:00:00Z', end: '2026-11-09T12:00:00Z' })
+  const occ = parseEvents(override, { windowStart: new Date('2026-11-09T00:00:00Z'), windowEnd: new Date('2026-11-10T00:00:00Z') })
+  expect(occ).toHaveLength(1)
+  expect(occ[0].title).toBe('Moved once')
+  expect(occ[0].cardRefs).toEqual([{ board: 'cards', cardId: 'id-abc123' }])
+})
+
+test('DB-45 board schema — card.calEvent accepted, malformed calEvent rejected', () => {
+  const { validateBoard } = require('../../backend/schemas')
+  const board = calEvent => ({ columns: [{ id: 'c1', title: 'INBOX', cards: [{ id: 'id-1', text: 'x', calEvent }] }] })
+  expect(validateBoard(board({ accountId: 'ca-1', uid: 'uid@ex' }))).toBe(true)
+  expect(validateBoard(board({ accountId: 'ca-1' }))).toBe(false)
+  expect(validateBoard(board({ accountId: 'ca-1', uid: 'u', title: 'extra' }))).toBe(false)
+})
+
+test('DB-46 board schema — card.mailRef accepted, malformed mailRef rejected', () => {
+  const { validateBoard } = require('../../backend/schemas')
+  const board = mailRef => ({ columns: [{ id: 'c1', title: 'INBOX', cards: [{ id: 'id-1', text: 'x', mailRef }] }] })
+  expect(validateBoard(board({ accountId: 'ma-1', messageId: '<a@b>' }))).toBe(true)
+  expect(validateBoard(board({ accountId: 'ma-1', messageId: '<a@b>', folder: 'Archive', subject: 'Hi' }))).toBe(true)
+  expect(validateBoard(board({ accountId: 'ma-1' }))).toBe(false)
+  expect(validateBoard(board({ accountId: 'ma-1', messageId: '<a@b>', uid: 7 }))).toBe(false)
 })

@@ -112,8 +112,9 @@ test('MV-7 _mvQuoteHtml — plain text escaped, HTML sanitised, inside a blockqu
 
 test('MV-8 _mvParseUrl / _mvFmtSize / _mvFolderLabel', () => {
   expect(ctx._mvParseUrl('?cal=week')).toBeNull()
-  expect(plain(ctx._mvParseUrl('?mail=ma-1&folder=INBOX%2FSub'))).toEqual({ accountId: 'ma-1', folder: 'INBOX/Sub' })
-  expect(plain(ctx._mvParseUrl('?mail='))).toEqual({ accountId: null, folder: 'INBOX' })
+  expect(plain(ctx._mvParseUrl('?mail=ma-1&folder=INBOX%2FSub'))).toEqual({ accountId: 'ma-1', folder: 'INBOX/Sub', mid: null })
+  expect(plain(ctx._mvParseUrl('?mail='))).toEqual({ accountId: null, folder: 'INBOX', mid: null })
+  expect(plain(ctx._mvParseUrl('?mail=ma-1&folder=Archive&mid=%3Cabc%40ex.com%3E'))).toEqual({ accountId: 'ma-1', folder: 'Archive', mid: '<abc@ex.com>' })
   expect(ctx._mvFmtSize(0)).toBe('')
   expect(ctx._mvFmtSize(512)).toBe('512 B')
   expect(ctx._mvFmtSize(48213)).toBe('47 KB')

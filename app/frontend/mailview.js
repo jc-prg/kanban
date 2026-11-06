@@ -205,7 +205,7 @@ function _mvFolderLabel(f) {
 function _mvParseUrl(search) {
   const params = new URLSearchParams(search);
   if (!params.has('mail')) return null;
-  return { accountId: params.get('mail') || null, folder: params.get('folder') || 'INBOX' };
+  return { accountId: params.get('mail') || null, folder: params.get('folder') || 'INBOX', mid: params.get('mid') || null };
 }
 
 /**
@@ -263,6 +263,7 @@ function _mvSetUrl(push) {
   const url = new URL(window.location.href);
   url.searchParams.delete('cal');
   url.searchParams.delete('date');
+  url.searchParams.delete('mid');
   url.searchParams.set('mail', _mvAccountId || '');
   url.searchParams.set('folder', _mvFolder);
   if (push) history.pushState({ mailView: true }, '', url);
@@ -294,10 +295,33 @@ async function closeMailView() {
   const url = new URL(window.location.href);
   url.searchParams.delete('mail');
   url.searchParams.delete('folder');
+  url.searchParams.delete('mid');
   history.replaceState(history.state, '', url);
 }
 
+/** Open the mail view on the message with this Message-ID (e.g. from a card's mailRef). */
+function openMailViewMessage(accountId, messageId, folderHint) {
+  openMailView(accountId, folderHint || 'INBOX');
+  _mvOpenByMessageId(accountId, messageId, folderHint);
+}
+
+/** Locate a message by Message-ID (it may have been moved), switch to its folder and open it. */
+async function _mvOpenByMessageId(accountId, messageId, folderHint) {
+  let found;
+  try {
+    const qs = new URLSearchParams({ messageId, ...(folderHint ? { folder: folderHint } : {}) });
+    found = await _mvJson(_mvApi(accountId, `/locate?${qs}`));
+  } catch (err) {
+    _mvFlash(`Mail not found: ${err.message}`, true);
+    return;
+  }
+  if (!_mvIsOpen()) return;
+  if (found.folder !== _mvFolder || accountId !== _mvAccountId) _mvSelectFolder(accountId, found.folder);
+  _mvOpenMessage(found.uid);
+}
+
 function _mvShow() {
+  _overlaySyncHeaderOffset();
   const view = document.getElementById('mailView');
   view.style.display = '';
   view.dataset.pane = 'list';
@@ -327,6 +351,10 @@ function _mvInitFromUrl() {
   _mvFolder    = req.folder;
   if (!_mvIsOpen()) _mvShow();
   else if (changed) _mvSelectFolder(_mvAccountId, _mvFolder, { url: false });
+  if (req.mid && req.accountId) {
+    _mvSetUrl(false);   // drop ?mid= so reloads / back navigation don't reopen it
+    _mvOpenByMessageId(req.accountId, req.mid, req.folder);
+  }
 }
 
 // ---- Data ----
@@ -652,6 +680,14 @@ function _mvCreateCard(id, board = null) {
   _createCardFromMail(accountId, id, board, {
     folder,
     markRead: () => { if (accountId === _mvAccountId && folder === _mvFolder) _mvSetUnread([id], false); },
+    onLinked: ref => {
+      if (accountId !== _mvAccountId || folder !== _mvFolder) return;
+      for (const m of [_mvMsgs.find(x => x.id === id), _mvMsg?.id === id ? _mvMsg : null]) {
+        if (m && !(m.cardRefs || []).some(r => r.cardId === ref.cardId)) m.cardRefs = [...(m.cardRefs || []), ref];
+      }
+      _mvRenderList();
+      if (_mvMsg?.id === id) _mvRenderReader();
+    },
   });
 }
 
@@ -666,7 +702,7 @@ async function _mvMessageMenu(e, id) {
   const items = [];
   if (!multi && _mvAccounts.some(a => a.canSend)) {
     // Forwarding needs the full message (body + attachment list) → open it first
-    items.push({ labelHtml: `<span class="ctx-icon">↪</span>Forward`, action: async () => {
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.forward()}</span>Forward`, action: async () => {
       if (_mvMsg?.id !== id) await _mvOpenMessage(id);
       if (_mvMsg?.id === id) _mvOpenCompose('forward');
     } });
@@ -678,12 +714,21 @@ async function _mvMessageMenu(e, id) {
       action:    () => _mvCreateCard(id),
       ...(boards.length ? { children: boards.map(b => ({ label: b, action: () => _mvCreateCard(id, b) })) } : {}),
     });
+    const refs = m.cardRefs || [];
+    if (refs.length === 1) {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open card`, action: () => _openLinkedCard(refs[0].board, refs[0].cardId) });
+    } else if (refs.length > 1) {
+      items.push({
+        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open card`,
+        children:  refs.map(r => ({ label: `${r.board} \u00b7 ${r.cardId}`, action: () => _openLinkedCard(r.board, r.cardId) })),
+      });
+    }
   }
   if (msgs.some(x => x.unread)) {
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Mark as read${count}`, action: () => _mvSetUnread(ids, false) });
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.markRead()}</span>Mark as read${count}`, action: () => _mvSetUnread(ids, false) });
   }
   if (msgs.some(x => !x.unread)) {
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Mark as unread${count}`, action: () => _mvSetUnread(ids, true) });
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.markUnread()}</span>Mark as unread${count}`, action: () => _mvSetUnread(ids, true) });
   }
   items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.moveTo()}</span>Move to…${count}`, action: () => _mvPickAndMoveMessages(ids) });
   const recents = _getRecentFolders(_mvAccountId).filter(p => p !== _mvFolder && _mvFolderInfo(_mvAccountId, p));
@@ -993,6 +1038,10 @@ function _mvRenderToolbar() {
   title.innerHTML = acc
     ? `<span class="mv-title-folder">${escHtml(f ? _mvFolderLabel(f) : _mvLeafName(_mvFolder, '/'))}</span><span class="mv-title-acc" style="${acc.color ? `--card-color:${escHtml(acc.color)}` : ''}">${escHtml(acc.label)}</span>`
     : 'Mail';
+  // Phones: the folders button carries the account colour (the swatch is hidden there)
+  const foldersBtn = document.getElementById('mailViewFoldersBtn');
+  if (acc?.color) foldersBtn.style.setProperty('--mv-acc-color', acc.color);
+  else foldersBtn.style.removeProperty('--mv-acc-color');
   document.getElementById('mailViewCompose').disabled = !_mvAccounts.some(a => a.canSend);
   document.getElementById('mailViewCompose').title = _mvAccounts.some(a => a.canSend)
     ? 'New message (c)' : 'Configure an SMTP server in the mail settings to write messages';
@@ -1072,6 +1121,7 @@ function _mvListItemHtml(m) {
   if (m.answered)       meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Answered">\u21a9</span>');
   if (m.forwarded)      meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Forwarded">\u21aa</span>');
   if (m.hasAttachments) meta.push(`<span class="dashboard-mail-attach" title="Has attachments">${SVGICONS.attachment(11, 11)}</span>`);
+  if (m.cardRefs?.length) meta.push(`<span class="dashboard-mail-attach" title="Linked to a card">${SVGICONS.card(13, 9)}</span>`);
   if (who)              meta.push(`<span class="dashboard-mail-from">${escHtml(who)}</span>`);
   const date = _mvFmtListDate(m.date);
   if (date)             meta.push(`<span class="card-date">${escHtml(date)}</span>`);
@@ -1119,15 +1169,22 @@ function _mvRenderReaderActions() {
   if (!bar || !_mvMsg) return;
   const acc = _mvAccounts.find(a => a.accountId === _mvAccountId);
   const unread = _mvMsgs.find(m => m.id === _mvMsg.id)?.unread;
-  const send = acc?.canSend ? '' : ' disabled title="No SMTP server configured for this account"';
-  const fwd  = _mvAccounts.some(a => a.canSend) ? '' : ' disabled title="No SMTP server configured"';
-  bar.innerHTML = `
-    <button class="btn" data-mv-act="reply"${send}>Reply</button>
-    <button class="btn" data-mv-act="replyall"${send}>Reply all</button>
-    <button class="btn" data-mv-act="forward"${fwd}>Forward</button>
-    <button class="btn" data-mv-act="unread">${unread ? 'Mark read' : 'Mark unread'}</button>
-    <button class="btn" data-mv-act="move">${SVGICONS.moveTo(12, 12)} Move</button>
-    <button class="btn btn-danger-soft" data-mv-act="delete">${SVGICONS.delete(12, 12)} Delete</button>`;
+  // Icon + label; phones show the icon only (label stays as tooltip / aria-label)
+  const btn = (act, icon, label, { key = '', disabled = '', cls = '' } = {}) => {
+    const tip = disabled || (key ? `${label} (${key})` : label);
+    return `<button class="btn${cls}" data-mv-act="${act}" title="${escHtml(tip)}" aria-label="${escHtml(label)}"${disabled ? ' disabled' : ''}>`
+      + `${icon(12, 12)}<span class="mv-act-label">${label}</span></button>`;
+  };
+  const noSmtp = acc?.canSend ? '' : 'No SMTP server configured for this account';
+  const noFwd  = _mvAccounts.some(a => a.canSend) ? '' : 'No SMTP server configured';
+  bar.innerHTML = [
+    btn('reply',    SVGICONS.reply,    'Reply',     { key: 'r', disabled: noSmtp }),
+    btn('replyall', SVGICONS.replyAll, 'Reply all', { key: 'a', disabled: noSmtp }),
+    btn('forward',  SVGICONS.forward,  'Forward',   { key: 'f', disabled: noFwd }),
+    unread ? btn('unread', SVGICONS.markRead, 'Mark read', { key: 'u' }) : btn('unread', SVGICONS.markUnread, 'Mark unread', { key: 'u' }),
+    btn('move',     SVGICONS.moveTo,   'Move'),
+    btn('delete',   SVGICONS.delete,   'Delete',    { key: 'Del', cls: ' btn-danger-soft' }),
+  ].join('');
 }
 
 function _mvRenderReader(mode, error) {
@@ -1145,6 +1202,7 @@ function _mvRenderReader(mode, error) {
   if (msg.to) rows.push(['To', _foldAddresses(msg.to)]);
   if (msg.cc) rows.push(['Cc', _foldAddresses(msg.cc)]);
   if (msg.date) rows.push(['Date', escHtml(new Date(msg.date).toLocaleString())]);
+  if (msg.cardRefs?.length) rows.push([msg.cardRefs.length > 1 ? 'Cards' : 'Card', _linkedCardLinksHtml(msg.cardRefs)]);
   const atts = (msg.attachments || []).map((a, i) => {
     const ft = _attachType(a.name);
     const action = _mvAttAction(ft);
@@ -1167,6 +1225,7 @@ function _mvRenderReader(mode, error) {
     ${atts ? `<div class="mv-atts">${atts}</div>` : ''}
     <div class="mv-reader-body"></div>`;
   _mvRenderReaderActions();
+  _resolveLinkedCardLinks(el.querySelector('.mv-headers'));
   _renderMailBody(el.querySelector('.mv-reader-body'), msg);
 }
 

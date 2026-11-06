@@ -3,6 +3,7 @@
 .mailview {
   position: fixed;
   inset: 0;
+  top: var(--app-header-h, 0px);   /* phones: the app header stays visible above the view */
   z-index: 95;               /* below .modal-backdrop (100): confirm dialogs and the attachment viewer open on top */
   background: var(--bg);
   display: flex;
@@ -11,10 +12,12 @@
 }
 body.mailview-open { overflow: hidden; }
 
+/* The header (and its dropdown) stays above the view on every screen size */
+body.mailview-open header { z-index: 96; }
+
 /* Large screens: a panel covering exactly the dashboard grid (same as .calview) */
 @media (min-width: 640px) and (min-height: 501px) {
   #dashboard { position: relative; }
-  body.mailview-open header { z-index: 96; }
   .mailview {
     position: absolute;
     inset: 16px 20px 16px;
@@ -445,12 +448,19 @@ button.mv-att-name:hover { color: var(--accent); }
   .mailview[data-pane="folders"] .mailview-foldercol,
   .mailview[data-pane="list"] .mailview-listcol { display: flex; flex-direction: column; }
   .mailview[data-pane="reader"] .mailview-reader { display: block; }
-  .mv-folders-btn { display: inline-flex !important; order: -1; }
+  .mv-folders-btn { display: inline-flex !important; }
   .mv-back { display: inline-block; }
-  .mailview-bar { gap: 6px; padding: 8px; }
-  .mailview-title { order: 5; flex-basis: 100%; font-size: 0.9rem; }
-  #mailViewCompose { padding: 6px 10px; }
-  #mailViewClose { margin-left: auto; }
+  /* One row: folders button (border = account colour) · folder name · "+ New" · close */
+  .mailview-bar { gap: 8px; padding: 8px; flex-wrap: nowrap; }
+  .mailview-title { order: 0; flex: 1 1 0; min-width: 0; align-items: center; font-size: 0.9rem; gap: 8px; }   /* order: overrides .calview-title */
+  .mv-title-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mv-title-acc { display: none; }   /* account shown as the folders button's border colour instead */
+  .mv-folders-btn { border-color: var(--mv-acc-color, var(--border)); }
+  .mv-compose-long { display: none; }
+  /* Opened mail: action buttons show their icon only */
+  .mv-act-label { display: none; }
+  .mv-reader-actions .btn { padding: 7px 11px; }
+  #mailViewCompose { padding: 6px 10px; flex-shrink: 0; }
   .mailview-reader { padding: 10px 12px 20px; }
   .mv-folder { padding-top: 8px; padding-bottom: 8px; }
   .mv-account-more { opacity: 1; }

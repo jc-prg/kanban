@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view API tests — MVA-1 … MVA-21
+ * Mail view API tests — MVA-1 … MVA-25
  *
  * Folder management, paged/searchable message lists, ?folder= on message routes,
  * trash handling and sending via SMTP (nodemailer mocked) with a sent copy.
@@ -19,6 +19,7 @@ const request = require('supertest')
 
 // ---- global-db mock ----
 let _storedConfig = null
+let _mailLinks = {}
 const _cfg = () => _storedConfig ?? { mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }
 const GLOBAL_DB_MODULE = path.resolve(__dirname, '../../backend/global-db.js')
 require.cache[GLOBAL_DB_MODULE] = {
@@ -30,6 +31,12 @@ require.cache[GLOBAL_DB_MODULE] = {
     getCalAccount:       async () => null,
     getRecentFolders:    async () => ({}),
     addRecentFolder:     async () => {},
+    getMailCardLinks:    async (acc) => _mailLinks[acc] || {},
+    addMailCardLink:     async (acc, mid, board, cardId) => {
+      const list = ((_mailLinks[acc] ||= {})[mid] ||= [])
+      if (list.some(r => r.board === board && r.cardId === cardId)) return false
+      list.push({ board, cardId }); return true
+    },
     initGlobalDb:        async () => {},
     getGlobalDb:         () => ({}),
   },
@@ -43,6 +50,8 @@ function _resetImap() {
     messages: [],      // in sequence order (seq = index + 1)
     folders:  [],      // raw LIST entries
     search:   [],      // UIDs returned by search()
+    searchByFolder: null,   // { [folder]: [uids] } — overrides `search` per locked folder
+    locked:   null,
   }
 }
 
@@ -51,9 +60,12 @@ class MockImapFlow {
   async connect() {}
   async logout() {}
   get mailbox() { return { exists: imap.messages.length } }
-  async getMailboxLock(folder) { imap.calls.push(['lock', folder]); return { release: () => {} } }
+  async getMailboxLock(folder, opts) { imap.calls.push(['lock', folder, opts]); imap.locked = folder; return { release: () => {} } }
   async list(opts) { imap.calls.push(['list', opts]); return imap.folders }
-  async search(query, opts) { imap.calls.push(['search', query, opts]); return imap.search }
+  async search(query, opts) {
+    imap.calls.push(['search', query, opts])
+    return imap.searchByFolder ? (imap.searchByFolder[imap.locked] || []) : imap.search
+  }
   async * fetch(range, query, opts) {
     imap.calls.push(['fetch', range, opts])
     if (opts?.uid) {
@@ -130,6 +142,7 @@ const calls = (name) => imap.calls.filter(c => c[0] === name)
 beforeEach(() => {
   _storedConfig = { mailAccounts: [_account()], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }
   _resetImap()
+  _mailLinks = {}
   smtp = { transport: null, sent: [] }
 })
 
@@ -506,4 +519,67 @@ test('MVA-21 POST folders/mark-read — whole folder flagged \\Seen; empty folde
 
   expect((await request(app).post(`${API}/folders/mark-read`).set(AUTH).send({})).status).toBe(400)
   expect((await request(app).post('/api/dashboard/mail/nope/folders/mark-read').set(AUTH).send({ path: 'INBOX' })).status).toBe(404)
+})
+
+// ---------------------------------------------------------------------------
+// Mail ↔ card links (keyed by Message-ID)
+// ---------------------------------------------------------------------------
+
+test('MVA-22 POST message/:uid/cards — link stored under the Message-ID; listing and message carry cardRefs', async () => {
+  imap.messages = [_msg(7, { envelope: { messageId: '<abc@ex.com>' } }), _msg(8, { envelope: { messageId: '<other@ex.com>' } })]
+
+  const res = await request(app).post(`${API}/message/7/cards?folder=Projects`).set(AUTH).send({ board: 'cards', cardId: 'id-abc123' })
+  expect(res.status).toBe(200)
+  expect(res.body.messageId).toBe('<abc@ex.com>')
+  expect(_mailLinks['ma-1']).toEqual({ '<abc@ex.com>': [{ board: 'cards', cardId: 'id-abc123' }] })
+  expect(calls('lock')[0][1]).toBe('Projects')
+
+  const again = await request(app).post(`${API}/message/7/cards`).set(AUTH).send({ board: 'cards', cardId: 'id-abc123' })
+  expect(again.body.unchanged).toBe(true)
+
+  const list = await request(app).get(`${API}/messages?folder=INBOX`).set(AUTH)
+  const byId = Object.fromEntries(list.body.messages.map(m => [m.id, m]))
+  expect(byId['7'].cardRefs).toEqual([{ board: 'cards', cardId: 'id-abc123' }])
+  expect(byId['8'].cardRefs).toBeUndefined()
+
+  const msg = await request(app).get(`${API}/message/7`).set(AUTH)
+  expect(msg.body.cardRefs).toEqual([{ board: 'cards', cardId: 'id-abc123' }])
+  const panel = await request(app).get(API).set(AUTH)
+  expect(panel.body.messages.find(m => m.id === '7').cardRefs).toHaveLength(1)
+})
+
+test('MVA-23 POST message/:uid/cards — invalid body 400; missing message 404; no Message-ID 422', async () => {
+  imap.messages = [_msg(7, { envelope: { messageId: '' } })]
+  for (const body of [{}, { board: 'Bad', cardId: 'id-1' }, { board: 'cards', cardId: 'a/b' }, { board: 'cards', cardId: 'id-1', x: 1 }]) {
+    expect((await request(app).post(`${API}/message/7/cards`).set(AUTH).send(body)).status, JSON.stringify(body)).toBe(400)
+  }
+  expect((await request(app).post(`${API}/message/99/cards`).set(AUTH).send({ board: 'cards', cardId: 'id-1' })).status).toBe(404)
+  expect((await request(app).post(`${API}/message/7/cards`).set(AUTH).send({ board: 'cards', cardId: 'id-1' })).status).toBe(422)
+  expect(_mailLinks).toEqual({})
+})
+
+test('MVA-24 GET locate — searches the hint folder first, then the other selectable folders', async () => {
+  imap.folders = [
+    { path: 'INBOX',   name: 'INBOX',   delimiter: '/', flags: new Set() },
+    { path: 'Archive', name: 'Archive', delimiter: '/', flags: new Set() },
+    { path: 'Parent',  name: 'Parent',  delimiter: '/', flags: new Set(['\\Noselect']) },
+  ]
+  imap.searchByFolder = { Archive: [12, 15] }
+
+  const res = await request(app).get(`${API}/locate?messageId=${encodeURIComponent('<abc@ex.com>')}&folder=Projects`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body).toEqual({ folder: 'Archive', uid: '15' })
+  const locked = calls('lock').map(c => c[1])
+  expect(locked).toEqual(['Projects', 'INBOX', 'Archive'])
+  expect(locked).not.toContain('Parent')
+  expect(calls('search')[0][1]).toEqual({ header: { 'message-id': '<abc@ex.com>' } })
+})
+
+test('MVA-25 GET locate — not found 404; invalid messageId / folder 400', async () => {
+  imap.folders = [{ path: 'INBOX', name: 'INBOX', delimiter: '/', flags: new Set() }]
+  imap.searchByFolder = {}
+  expect((await request(app).get(`${API}/locate?messageId=%3Cx%40y%3E`).set(AUTH)).status).toBe(404)
+  expect((await request(app).get(`${API}/locate`).set(AUTH)).status).toBe(400)
+  expect((await request(app).get(`${API}/locate?messageId=a%0Db`).set(AUTH)).status).toBe(400)
+  expect((await request(app).get(`${API}/locate?messageId=x&folder=bad%01`).set(AUTH)).status).toBe(400)
 })

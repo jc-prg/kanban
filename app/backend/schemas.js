@@ -40,6 +40,24 @@ const _cardSchema = {
     recurrence:      _schedRecurrenceSchema,
     nextDueDate:     { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     lastCreatedDate: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    // Calendar event the card was created from (CalDAV UID — stable across moves/edits)
+    calEvent: {
+      type: 'object', required: ['accountId', 'uid'], additionalProperties: false,
+      properties: {
+        accountId: { type: 'string', minLength: 1, maxLength: 200 },
+        uid:       { type: 'string', minLength: 1, maxLength: 1000 },
+      },
+    },
+    // Mail the card was created from (Message-ID — stable across folder moves; folder is a search hint)
+    mailRef: {
+      type: 'object', required: ['accountId', 'messageId'], additionalProperties: false,
+      properties: {
+        accountId: { type: 'string', minLength: 1, maxLength: 200 },
+        messageId: { type: 'string', minLength: 1, maxLength: 998 },
+        folder:    { type: 'string', maxLength: 1000 },
+        subject:   { type: 'string', maxLength: 1000 },
+      },
+    },
   }
 };
 const _columnSchema = {
@@ -189,7 +207,28 @@ const validateCalendarEvent = ajv.compile({
     editScope:      { type: 'string', enum: ['occurrence', 'series'] },
     occurrenceDate: { type: 'string' },
     rrule:          { type: 'string', maxLength: 500 },
+    // Hidden links to kanban cards (X-JC-KANBAN-CARD) — passed through on full rebuilds
+    cardRefs: {
+      type: 'array', maxItems: 50,
+      items: {
+        type: 'object', required: ['board', 'cardId'], additionalProperties: false,
+        properties: { board: { type: 'string', maxLength: 64 }, cardId: { type: 'string', maxLength: 64 } },
+      },
+    },
   },
+});
+
+const _cardLinkProps = {
+  board:  { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,63}$' },
+  cardId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' },
+};
+const validateCalendarCardLink = ajv.compile({
+  type: 'object', required: ['board', 'cardId'], additionalProperties: false,
+  properties: { ..._cardLinkProps, href: { type: 'string', maxLength: 2000 } },
+});
+const validateMailCardLink = ajv.compile({
+  type: 'object', required: ['board', 'cardId'], additionalProperties: false,
+  properties: _cardLinkProps,
 });
 
 const _recurringTaskSchema = {
@@ -266,4 +305,4 @@ function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, schemaError };

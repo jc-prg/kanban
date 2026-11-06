@@ -486,6 +486,20 @@
 
 .modal-link-row input { flex: 1; }
 
+/* Calendar event a card was created from (card modal, below the link field) */
+.card-cal-event {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.card-cal-event:hover span:last-child { text-decoration: underline; }
+#cardCalEventText, #cardMailRefText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-cal-event--missing { color: var(--text-muted); pointer-events: none; }
+
 .modal-link-open {
   flex-shrink: 0;
   padding: 8px 10px;

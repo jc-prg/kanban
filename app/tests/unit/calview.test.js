@@ -191,3 +191,28 @@ test('CV-11 _cvClipLanes — full days show "+N more", bars are split around the
   expect(r.segs.filter(s => s.item === hidden).map(s => [s.from, s.to])).toEqual([[1, 2], [3, 4]])
   expect(r.more[2]).toBe(2)
 })
+
+test('CV-12 _cvEventsOnDay — events touching the day; all-day / multi-day first, then by start', () => {
+  const day = new Date(2026, 10, 6)
+  const ev = (title, s, e, allDay = false) => ({ title, _s: s, _e: e, allDay })
+  const events = [
+    ev('late',      new Date(2026, 10, 6, 15), new Date(2026, 10, 6, 16)),
+    ev('early',     new Date(2026, 10, 6, 8),  new Date(2026, 10, 6, 9)),
+    ev('allday',    new Date(2026, 10, 6),     new Date(2026, 10, 7), true),
+    ev('overnight', new Date(2026, 10, 5, 22), new Date(2026, 10, 6, 2)),
+    ev('trip',      new Date(2026, 10, 4),     new Date(2026, 10, 9), true),
+    ev('yesterday', new Date(2026, 10, 5, 9),  new Date(2026, 10, 5, 10)),
+    ev('tomorrow',  new Date(2026, 10, 7),     new Date(2026, 10, 7, 1)),
+  ]
+  expect(ctx._cvEventsOnDay(events, day).map(e => e.title)).toEqual(['trip', 'allday', 'overnight', 'early', 'late'])
+})
+
+test('CV-13 _cvDayListTime — all day, time range, continuing ends shown as …', () => {
+  const day = new Date(2026, 10, 6)
+  const t = d => ctx._cvTimeLabel(d)
+  expect(ctx._cvDayListTime({ allDay: true, _s: day, _e: new Date(2026, 10, 7) }, day)).toBe('All day')
+  const a = new Date(2026, 10, 6, 9), b = new Date(2026, 10, 6, 10, 30)
+  expect(ctx._cvDayListTime({ _s: a, _e: b }, day)).toBe(`${t(a)} \u2013 ${t(b)}`)
+  expect(ctx._cvDayListTime({ _s: new Date(2026, 10, 5, 22), _e: new Date(2026, 10, 6, 2) }, day)).toBe(`\u2026 \u2013 ${t(new Date(2026, 10, 6, 2))}`)
+  expect(ctx._cvDayListTime({ _s: new Date(2026, 10, 6, 23), _e: new Date(2026, 10, 7, 1) }, day)).toBe(`${t(new Date(2026, 10, 6, 23))} \u2013 \u2026`)
+})

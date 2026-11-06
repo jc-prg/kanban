@@ -533,6 +533,7 @@ let selectedPriority = 0;
 let modalDone        = false;
 let modalOriginalData = null;
 let _inboxOnSuccess  = null; // optional callback fired after a successful inbox card submit
+let _inboxExtra      = null; // hidden card fields from the prefill (e.g. calEvent); first card only
 let _cardFullscreen  = false;
 
 function toggleCardFullscreen() {
@@ -632,6 +633,60 @@ function resetCardSections() {
   setCardSection('cardInfoInline', 'cardInfoBtn', false);
 }
 
+// ---- Calendar event a card was created from ----
+let _cardCalEventSeq = 0;
+/** Show the linked calendar event (card.calEvent) below the link field; resolves title + date via the API. */
+function renderCardCalEvent(ref) {
+  const field = document.getElementById('cardCalEventField');
+  const link  = document.getElementById('cardCalEventLink');
+  const text  = document.getElementById('cardCalEventText');
+  if (!field || !link || !text) return;
+  const seq = ++_cardCalEventSeq;
+  field.style.display = ref ? '' : 'none';
+  if (!ref) return;
+  text.textContent = 'Loading\u2026';
+  link.href = appUrl('/focus?cal=week');
+  link.classList.remove('card-cal-event--missing');
+  fetch(`/api/dashboard/calendar/${encodeURIComponent(ref.accountId)}/event/${encodeURIComponent(ref.uid)}`)
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null)
+    .then(ev => {
+      if (seq !== _cardCalEventSeq) return;
+      if (!ev) {
+        text.textContent = 'Event not found';
+        link.classList.add('card-cal-event--missing');
+        return;
+      }
+      const day = (ev.allDay ? (ev.start || '').slice(0, 10) : _ymdLocal(new Date(ev.start))) || '';
+      text.textContent = `${ev.title || '(no title)'}${day ? ' \u2014 ' + fmtDate(day) : ''}`;
+      if (day) link.href = appUrl(`/focus?cal=week&date=${day}`);
+    });
+}
+
+/** Focus URL that opens the mail view on a message identified by its Message-ID. */
+function mailRefUrl(ref) {
+  const qs = new URLSearchParams({ mail: ref.accountId, folder: ref.folder || 'INBOX', mid: ref.messageId });
+  return appUrl(`/focus?${qs}`);
+}
+
+/** Show the mail a card was created from (card.mailRef) below the link field. */
+function renderCardMailRef(ref) {
+  const field = document.getElementById('cardMailRefField');
+  const link  = document.getElementById('cardMailRefLink');
+  const text  = document.getElementById('cardMailRefText');
+  if (!field || !link || !text) return;
+  field.style.display = ref ? '' : 'none';
+  if (!ref) return;
+  text.textContent = ref.subject || '(no subject)';
+  link.href = mailRefUrl(ref);
+}
+
+/** Local calendar day of a Date as YYYY-MM-DD. */
+function _ymdLocal(d) {
+  if (!(d instanceof Date) || isNaN(d)) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // ---- Linked note pages on a card ----
 function renderCardLinkedPages(cardId) {
   const section = document.getElementById('cardNotePagesSection');
@@ -707,6 +762,8 @@ function openModal(colId) {
   document.getElementById('cardEnd').value   = '';
   document.getElementById('cardDoneBtn').style.display = 'none';
   document.getElementById('cardInfoBtn').style.display  = 'none';
+  renderCardCalEvent(null);
+  renderCardMailRef(null);
   document.getElementById('modalPrintBtn').style.display = 'none';
   document.getElementById('modalSaveAsTemplateBtn').style.display = 'none';
   const _fromTplBtn = document.getElementById('cardFromTemplateBtn');
@@ -758,6 +815,8 @@ function openEditModal(colId, card) {
   renderColorRow();
   renderPriorityRow();
   renderCardLinkedPages(card.id);
+  renderCardCalEvent(card.calEvent);
+  renderCardMailRef(card.mailRef);
   if (CARD_ATTACH_API) loadCardAttachments(card.id);
   captureModalOriginal();
   const autoSaveEl  = document.getElementById('cardAutoSave');
@@ -777,6 +836,7 @@ function openEditModal(colId, card) {
 function closeModal() {
   window.closeModalFind?.('cardDesc');
   _inboxOnSuccess = null;
+  _inboxExtra     = null;
   // Clean up inbox temp attachments immediately on close (card was not saved)
   if (_inboxTempCardId && _inboxTempBoard) {
     const _b = _inboxTempBoard, _id = _inboxTempCardId;
@@ -827,6 +887,7 @@ function submitCard() {
 
 async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null, preselectedColumn = null, existingTempCardId = null) {
   _inboxOnSuccess = onSuccess;
+  _inboxExtra     = prefill?.extra || null;
   // Set up a fresh temp card ID for inbox attachments; cancel any leftover cleanup timer
   _cancelInboxTempTimer();
   if (_inboxTempCardId && _inboxTempBoard && _inboxTempCardId !== existingTempCardId) {
@@ -840,10 +901,12 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
   selectedPriority = 0;
   document.getElementById('cardText').value  = prefill?.text || '';
   setEditorValue('cardDesc', prefill?.description || '');
-  document.getElementById('cardLink').value  = '';
-  document.getElementById('cardStart').value = '';
-  document.getElementById('cardEnd').value   = '';
+  document.getElementById('cardLink').value  = prefill?.link      || '';
+  document.getElementById('cardStart').value = prefill?.startDate || '';
+  document.getElementById('cardEnd').value   = prefill?.endDate   || '';
   _updateLinkBtn();
+  renderCardCalEvent(_inboxExtra?.calEvent || null);
+  renderCardMailRef(_inboxExtra?.mailRef || null);
   modalOriginalData = null;
   document.getElementById('modalTitle').textContent     = 'Add to Inbox';
   const _inboxSubmitBtn = document.getElementById('modalSubmitBtn');
@@ -969,7 +1032,7 @@ async function submitInboxCard(closeAfter = false) {
     }
 
     const today   = new Date().toISOString().slice(0, 10);
-    const newCard = { ...cardData, id: _inboxTempCardId || uid(), created: today };
+    const newCard = { ...cardData, ..._inboxExtra, id: _inboxTempCardId || uid(), created: today };
     col.cards = [newCard, ...(col.cards || [])];
 
     const patchBody = newColumnCreated
@@ -988,6 +1051,9 @@ async function submitInboxCard(closeAfter = false) {
       _cancelInboxTempTimer();
       const savedCardId = _inboxTempCardId;
       _inboxTempCardId  = null;
+      _inboxExtra       = null;
+      renderCardCalEvent(null);
+      renderCardMailRef(null);
       if (_inboxOnSuccess) { _inboxOnSuccess(board, savedCardId); _inboxOnSuccess = null; }
       if (closeAfter) {
         closeModal();

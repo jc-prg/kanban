@@ -168,6 +168,51 @@ function _buildVTimezone(tzid) {
   return lines.join('\r\n');
 }
 
+// ---- Card references ----
+
+// Hidden link event → kanban card: one `X-JC-KANBAN-CARD:<board>/<cardId>` per linked card.
+// Tied to the VEVENT (not to its dates), so it survives moves and edits; other clients ignore it.
+const CARD_REF_PROP = 'x-jc-kanban-card';
+const _CARD_REF_BOARD = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const _CARD_REF_ID    = /^[A-Za-z0-9_-]{1,64}$/;
+
+function _validCardRefs(refs) {
+  if (!Array.isArray(refs)) return [];
+  return refs.filter(r => r && _CARD_REF_BOARD.test(r.board) && _CARD_REF_ID.test(r.cardId));
+}
+
+/** Card references of a VEVENT component → [{ board, cardId }] (deduplicated). */
+function _readCardRefs(ve) {
+  const out = [];
+  for (const p of ve.getAllProperties(CARD_REF_PROP)) {
+    const v = String(p.getFirstValue() ?? '').trim();
+    const i = v.lastIndexOf('/');
+    const ref = { board: v.slice(0, i), cardId: v.slice(i + 1) };
+    if (i > 0 && _validCardRefs([ref]).length && !out.some(r => r.board === ref.board && r.cardId === ref.cardId)) out.push(ref);
+  }
+  return out;
+}
+
+/**
+ * Add a card reference to every VEVENT of an ICS (master + overrides), keeping all other
+ * properties untouched. Returns the new ICS, or null when the reference is already present.
+ */
+function addCardRefIcs(ics, board, cardId) {
+  if (!_validCardRefs([{ board, cardId }]).length) throw new Error('invalid card reference');
+  const vcal    = new ICAL.Component(ICAL.parse(ics));
+  const vevents = vcal.getAllSubcomponents('vevent');
+  if (!vevents.length) throw new Error('VEVENT not found in ICS');
+  let changed = false;
+  for (const ve of vevents) {
+    if (_readCardRefs(ve).some(r => r.board === board && r.cardId === cardId)) continue;
+    const prop = new ICAL.Property(CARD_REF_PROP);
+    prop.setValue(`${board}/${cardId}`);
+    ve.addProperty(prop);
+    changed = true;
+  }
+  return changed ? ICAL.stringify(vcal.jCal).replace(/\r?\n/g, '\r\n') : null;
+}
+
 // ---- ICS generation ----
 
 /**
@@ -176,7 +221,7 @@ function _buildVTimezone(tzid) {
  * Returns { ics: string, uid: string }.
  */
 function buildIcs(event, uid) {
-  const { title, allDay, start, end, location, description, timezone, rrule } = event;
+  const { title, allDay, start, end, location, description, timezone, rrule, cardRefs } = event;
 
   const startMs = new Date(start).getTime();
   const endMs   = new Date(end).getTime();
@@ -235,6 +280,7 @@ function buildIcs(event, uid) {
   if (rrule)       lines.push(_icsFold(`RRULE:${rrule}`));
   if (location)    lines.push(_icsFold(`LOCATION:${_icsEscape(location)}`));
   if (description) lines.push(_icsFold(`DESCRIPTION:${_icsEscape(description)}`));
+  for (const ref of _validCardRefs(cardRefs)) lines.push(_icsFold(`${CARD_REF_PROP.toUpperCase()}:${ref.board}/${ref.cardId}`));
 
   lines.push('END:VEVENT');
   lines.push('END:VCALENDAR');
@@ -283,6 +329,12 @@ function parseEvents(icsString, { windowStart, windowEnd } = {}) {
     const rruleStr    = hasRrule
       ? (() => { try { return ve.getFirstProperty('rrule').getFirstValue().toString(); } catch { return null; } })()
       : null;
+    const masterRefs  = _readCardRefs(ve);
+    const refsOf      = comp => {
+      const refs = [...masterRefs];
+      if (comp && comp !== ve) for (const r of _readCardRefs(comp)) if (!refs.some(x => x.board === r.board && x.cardId === r.cardId)) refs.push(r);
+      return refs.length ? { cardRefs: refs } : {};
+    };
 
     if (hasRrule && expand && ev.startDate) {
       // Register exceptions so the iterator skips deleted / uses modified occurrences
@@ -319,6 +371,7 @@ function parseEvents(icsString, { windowStart, windowEnd } = {}) {
             hasRrule,
             rruleStr,
             seriesStart: _icalTimeToString(ev.startDate),
+            ...refsOf(occVe),
           });
         }
       } catch {
@@ -337,6 +390,7 @@ function parseEvents(icsString, { windowStart, windowEnd } = {}) {
           hasRrule,
           rruleStr,
           seriesStart: _icalTimeToString(ev.startDate),
+          ...refsOf(ve),
         });
       }
     } else {
@@ -353,6 +407,7 @@ function parseEvents(icsString, { windowStart, windowEnd } = {}) {
         timezone,
         hasRrule,
         rruleStr,
+        ...refsOf(ve),
       });
     }
   }
@@ -377,6 +432,7 @@ function parseEvents(icsString, { windowStart, windowEnd } = {}) {
         organizer:   excVe.getFirstPropertyValue('organizer')   || '',
         timezone,
         hasRrule: false,
+        ...(() => { const refs = _readCardRefs(excVe); return refs.length ? { cardRefs: refs } : {}; })(),
       });
     }
   }
@@ -837,7 +893,7 @@ async function fetchRawIcs(account, uid, href, timeoutMs = 10_000) {
     const res = await fetch(eventUrl, { headers, signal: controller.signal });
     if (res.status === 404) throw new Error('Event not found on CalDAV server');
     if (!res.ok) throw new Error(`CalDAV error (HTTP ${res.status})`);
-    return { ics: await res.text(), url: eventUrl };
+    return { ics: await res.text(), url: eventUrl, etag: res.headers?.get?.('etag') || null };
   } catch (err) {
     if (err.name === 'AbortError') throw new Error(`Connection timed out (${timeoutMs / 1000} s)`);
     throw err;
@@ -1004,6 +1060,7 @@ function buildOccurrenceOverrideIcs(masterIcs, occurrenceStart, event) {
   lines.push(_icsFold(`SUMMARY:${_icsEscape(title)}`));
   if (location)    lines.push(_icsFold(`LOCATION:${_icsEscape(location)}`));
   if (description) lines.push(_icsFold(`DESCRIPTION:${_icsEscape(description)}`));
+  for (const ref of _readCardRefs(master)) lines.push(_icsFold(`${CARD_REF_PROP.toUpperCase()}:${ref.board}/${ref.cardId}`));
   lines.push('END:VEVENT');
 
   const overrideBlock = lines.join('\r\n');
@@ -1081,6 +1138,7 @@ module.exports = {
   patchMasterIcs,
   buildOccurrenceOverrideIcs,
   buildDeleteOccurrenceIcs,
+  addCardRefIcs,
   resolveEventUrl,
   hrefToUrl,
   _buildVTimezone, // exported for unit tests
