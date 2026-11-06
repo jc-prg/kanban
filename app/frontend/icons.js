@@ -59,6 +59,10 @@ function _svgColorPalette(w = 12, h = 12) {
 }
 
 // Circle with i dot — card info / history
+function _svgSettings(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="6" cy="6" r="3.4"/><circle cx="6" cy="6" r="1.3"/><g stroke-width="1.9" stroke-linecap="butt"><line x1="9.30" y1="6.00" x2="11.10" y2="6.00"/><line x1="8.33" y1="8.33" x2="9.61" y2="9.61"/><line x1="6.00" y1="9.30" x2="6.00" y2="11.10"/><line x1="3.67" y1="8.33" x2="2.39" y2="9.61"/><line x1="2.70" y1="6.00" x2="0.90" y2="6.00"/><line x1="3.67" y1="3.67" x2="2.39" y2="2.39"/><line x1="6.00" y1="2.70" x2="6.00" y2="0.90"/><line x1="8.33" y1="3.67" x2="9.61" y2="2.39"/></g></svg>`;
+}
+
 function _svgCardInfo(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><line x1="6" y1="5.5" x2="6" y2="8.5"/><circle cx="6" cy="3.5" r="0.5" fill="currentColor" stroke="none"/></svg>`;
 }
@@ -250,6 +254,7 @@ const SVGICONS = {
   priority:     _svgPriority,
   colorPalette: _svgColorPalette,
   cardInfo:     _svgCardInfo,
+  settings:     _svgSettings,
   create:       _svgCreate,
   edit:         _svgEdit,
   duplicate:    _svgDuplicate,
@@ -286,6 +291,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgFullscreen(16, 16),  name: 'Full screen',    usage: 'Toggle distraction-free full screen mode in card/note modal' },
   { type: 'svg', svg: _svgMoveTo(16, 16),      name: 'Move to',        usage: 'Move card(s) to another column' },
   { type: 'svg', svg: _svgMenu(16, 16),        name: 'Menu',           usage: 'Open the header dropdown menu' },
+  { type: 'svg', svg: _svgSettings(16, 16),    name: 'Settings',       usage: 'Open calendar account settings from the calendar view legend' },
   { type: 'svg', svg: _svgDescription(16, 16), name: 'Description',    usage: 'Card has a text description' },
   { type: 'svg', svg: _svgMoreOptions(16, 16), name: 'More options',   usage: 'Open column context menu' },
   { type: 'svg', svg: _svgDragHandle(16, 16),  name: 'Drag handle',    usage: 'Grab to reorder columns' },

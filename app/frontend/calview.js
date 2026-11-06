@@ -6,7 +6,7 @@ const _CV_HOUR_PX    = 48;          // default height of one hour in the time gr
 const _CV_ZOOM_KEY   = 'cal-view-hour-px';
 const _CV_MIN_HOURS  = 6;           // max zoom: at least this many hours visible
 const _CV_SNAP_MIN   = 15;          // drag / resize / create snapping
-const _CV_MONTH_MAX  = 4;           // max entries per month cell before "+N more"
+const _CV_MONTH_MAX  = 4;           // entry rows per month cell until the real row height is measured
 const _CV_MODE_KEY   = 'cal-view-mode';
 const _CV_MODES      = ['week', 'workweek', 'month'];
 const _CV_HIDDEN_KEY = 'cal-view-hidden';   // accountIds switched off in the legend
@@ -25,6 +25,7 @@ let _cvZoomRaw    = _cvLoadZoom();   // requested hour height (fractional, Ctrl 
 let _cvHourPx     = Math.floor(_cvZoomRaw);   // rendered hour height — whole pixels keep grid lines crisp
 let _cvHidden     = _cvLoadHidden(); // Set of hidden accountIds
 let _cvAccountList = [];            // accounts of the last load (legend)
+let _cvMonthLanes = _CV_MONTH_MAX;  // entry rows that fit into a month week row (measured)
 let _cvZoomPending = null;          // { factor, clientY } batched per animation frame
 
 // ---- Pure date helpers (unit-tested) ----
@@ -374,7 +375,7 @@ function _cvRenderLegend() {
     return `<button class="cv-legend-item${off ? ' cv-legend-off' : ''}" data-cv-acc="${escHtml(acc.accountId)}"
       style="${_cvAccColorCss(acc)}" aria-pressed="${!off}" title="${off ? 'Show' : 'Hide'} ${escHtml(acc.label || acc.accountId)}">
       <span class="cv-legend-swatch"></span>${escHtml(acc.label || acc.accountId)}</button>`;
-  }).join('');
+  }).join('') + `<button class="cv-legend-settings" data-cv-settings="1" title="Calendar settings">${SVGICONS.settings(14, 14)}</button>`;
 }
 
 /** Phone toolbar menu: view modes, new event and (with 2+ calendars) calendar toggles. */
@@ -386,6 +387,7 @@ function _cvOpenMenu(pos) {
   }));
   items.push({ separator: true });
   items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`, action: () => _cvCreate(null) });
+  items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.settings()}</span>Calendar settings`, action: () => openSettingsDialog('calendar-accounts') });
   if (_cvAccountList.length > 1) {
     items.push({ separator: true });
     for (const acc of _cvAccountList) {
@@ -421,8 +423,23 @@ function _cvRender() {
   }
   _cvUpdateNowLine();
   _cvRenderLegend();
+  // Month: re-render once if more / fewer entry rows fit than assumed (row height is only known after layout)
+  if (_cvMode === 'month') {
+    const fit = _cvFitMonthLanes();
+    if (fit && fit !== _cvMonthLanes) { _cvMonthLanes = fit; _cvRender(); return; }
+  }
   // Window may have shrunk / grown since the zoom was stored — keep it within the visible bounds
   if (scroll && Math.floor(_cvClampZoom(_cvZoomRaw, scroll)) !== _cvHourPx) _cvApplyZoom(_cvZoomRaw, null);
+}
+
+/** Number of entry rows that fit into a month week row (day-number row excluded); null before layout. */
+function _cvFitMonthLanes() {
+  const week = document.querySelector('#calViewBody .cv-month-week');
+  if (!week || !week.clientHeight) return null;
+  const headRow = parseFloat(getComputedStyle(week).gridTemplateRows);   // first track = day numbers
+  const lane    = parseFloat(getComputedStyle(week).getPropertyValue('--cv-lane'));
+  if (!(lane > 0)) return null;
+  return Math.max(1, Math.floor((week.clientHeight - headRow) / lane));
 }
 
 // ---- Zoom (hour height) ----
@@ -597,13 +614,14 @@ function _cvMonthHtml(range) {
       }
     }
     _cvLaneBars(items);
-    const { segs, more, limit } = _cvClipLanes(items, 7, _CV_MONTH_MAX);
+    const { segs, more, limit } = _cvClipLanes(items, 7, _cvMonthLanes);
 
     const cells = days.map((d, i) => {
       const ymd = _cvYmd(d);
       const cls = `cv-month-cell${d.getMonth() !== month ? ' cv-other-month' : ''}${ymd === today ? ' cv-today' : ''}${_cvWeekendCls(d)}`;
       return `<div class="${cls}" data-date="${ymd}" style="grid-column:${i + 1}">
-        <button class="cv-month-num" data-cv-goto="${ymd}" title="Show week">${d.getDate()}</button></div>`;
+        <button class="cv-month-num" data-cv-goto="${ymd}" title="Show week">${d.getDate()}</button>${i === 0
+          ? `<button class="cv-month-cw" data-cv-goto="${ymd}" title="Show week">CW ${_cvIsoWeek(d)}</button>` : ''}</div>`;
     }).join('');
 
     const evHtml = segs.map(({ item, from, to }) => {
@@ -622,7 +640,7 @@ function _cvMonthHtml(range) {
     return `<div class="cv-month-week">${cells}${evHtml}${moreHtml}</div>`;
   }).join('');
 
-  return `<div class="cv-month" style="--cv-weeks:${range.days / 7};--cv-lanes:${_CV_MONTH_MAX}">
+  return `<div class="cv-month" style="--cv-weeks:${range.days / 7};--cv-lanes:${_cvMonthLanes}">
     <div class="cv-month-head">${wdHead}</div>
     <div class="cv-month-grid">${weeks}</div>
   </div>`;
@@ -849,6 +867,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('calViewToday').addEventListener('click', () => _cvNavigate(new Date()));
   document.getElementById('calViewNew').addEventListener('click', () => _cvCreate(null));
   document.getElementById('calViewLegend').addEventListener('click', e => {
+    if (e.target.closest('[data-cv-settings]')) { openSettingsDialog('calendar-accounts'); return; }
     const item = e.target.closest('[data-cv-acc]');
     if (item) _cvToggleAccount(item.dataset.cvAcc);
   });
@@ -917,6 +936,14 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.key === 'ArrowLeft')  _cvNavigate(_cvStep(_cvMode, _cvAnchor, -1));
     else if (e.key === 'ArrowRight') _cvNavigate(_cvStep(_cvMode, _cvAnchor, 1));
     else if (e.key === 't')          _cvNavigate(new Date());
+  });
+
+  // Window resize changes the month row height → recompute how many entries fit
+  let resizeFrame = 0;
+  window.addEventListener('resize', () => {
+    if (!_cvIsOpen() || _cvMode !== 'month' || _cvDrag) return;
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => { if (_cvFitMonthLanes() !== _cvMonthLanes) _cvRender(); });
   });
 
   window.addEventListener('popstate', () => {
