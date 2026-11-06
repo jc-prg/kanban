@@ -1110,6 +1110,17 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('mailFolder').value      = acc.folder || '';
     document.getElementById('mailMaxMessages').value = acc.maxMessages ?? 20;
     document.getElementById('mailWebUrl').value      = acc.webInterfaceUrl || '';
+    document.getElementById('mailSentFolder').value  = acc.sentFolder || '';
+    document.getElementById('mailTrashFolder').value = acc.trashFolder || '';
+    const smtp = acc.smtp || {};
+    document.getElementById('mailSmtpHost').value    = smtp.host || '';
+    document.getElementById('mailSmtpPort').value    = smtp.port || '';
+    document.getElementById('mailSmtpSecure').value  = smtp.secure === true ? 'ssl' : smtp.secure === false ? 'starttls' : 'auto';
+    document.getElementById('mailSmtpUser').value    = smtp.user || '';
+    document.getElementById('mailSmtpPass').value    = '';
+    document.getElementById('mailSmtpPass').placeholder = smtp.hasPassword ? '••••••••' : 'same as IMAP';
+    document.getElementById('mailFromName').value    = smtp.fromName || '';
+    document.getElementById('mailFromAddress').value = smtp.fromAddress || '';
     _mailColor = acc.color || COLORS[0];
     _renderMailColorRow();
     document.getElementById('mailTestResult').style.display = 'none';
@@ -1160,9 +1171,25 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       folder:         document.getElementById('mailFolder').value.trim() || undefined,
       maxMessages:    parseInt(document.getElementById('mailMaxMessages').value, 10) || 20,
       webInterfaceUrl: document.getElementById('mailWebUrl').value.trim() || undefined,
+      sentFolder:     document.getElementById('mailSentFolder').value.trim() || undefined,
+      trashFolder:    document.getElementById('mailTrashFolder').value.trim() || undefined,
       color:          _mailColor,
     };
     if (pass) acc.password = pass;
+    const smtpHost = document.getElementById('mailSmtpHost').value.trim();
+    if (smtpHost) {
+      const secure   = document.getElementById('mailSmtpSecure').value;
+      const smtpPass = document.getElementById('mailSmtpPass').value;
+      acc.smtp = {
+        host:        smtpHost,
+        port:        parseInt(document.getElementById('mailSmtpPort').value, 10) || undefined,
+        secure:      secure === 'ssl' ? true : secure === 'starttls' ? false : 'auto',
+        user:        document.getElementById('mailSmtpUser').value.trim() || undefined,
+        fromName:    document.getElementById('mailFromName').value.trim() || undefined,
+        fromAddress: document.getElementById('mailFromAddress').value.trim() || undefined,
+      };
+      if (smtpPass) acc.smtp.password = smtpPass;
+    }
 
     if (_mailEditIdx >= 0) {
       _mailAccounts[_mailEditIdx] = acc;
@@ -1854,6 +1881,10 @@ async function initOverview() {
   const calBtn = document.getElementById('dashboardCalBtn');
   calBtn.style.display = '';
   calBtn.onclick = () => { window.location.href = appUrl(`/focus?cal=${_cvStoredMode() || 'week'}`); };
+  const mailBtn = document.getElementById('dashboardMailBtn');
+  mailBtn.style.display = '';
+  // Empty account → the mail view opens the first account's inbox
+  mailBtn.onclick = () => { window.location.href = appUrl('/focus?mail='); };
   document.getElementById('overview').style.display = 'flex';
 
   document.getElementById('achPrev').onclick  = () => loadAchievements(achDayOffset - 1);

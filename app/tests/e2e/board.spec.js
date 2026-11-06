@@ -24,6 +24,16 @@ function authHeaders(extra = {}) {
   const cookie = state.cookies.find(c => c.name === 'kanban-session');
   return { Cookie: cookie ? `kanban-session=${cookie.value}` : '', ...extra };
 }
+/**
+ * Resolves when the board autosave (debounced PATCH / PUT /api/:board/board) has been answered.
+ * Call BEFORE the action that triggers the save, await it before reloading.
+ */
+function waitForBoardSave(page) {
+  return page.waitForResponse(r =>
+    ['PATCH', 'PUT'].includes(r.request().method()) &&
+    new URL(r.url()).pathname.endsWith(`/api/${BOARD}/board`) && r.ok());
+}
+
 async function apiPost(urlPath, body) {
   return fetch(`${BASE_URL}${urlPath}`, {
     method: 'POST',
@@ -91,10 +101,10 @@ test.describe('3.3 Column & card CRUD', () => {
   // E-B-2 ------------------------------------------------------------------
   test('E-B-2: rename column → title persists after reload', async ({ page }) => {
     const titleInput = page.locator('.column-title').first();
+    const saved = waitForBoardSave(page);
     await titleInput.fill('Renamed Column');
     await titleInput.blur();
-    // Wait for autosave debounce + network round-trip
-    await page.waitForTimeout(1200);
+    await saved;   // autosave answered (a fixed delay was flaky under load)
     await page.reload();
     await expect(page.locator('.column-title').first()).toHaveValue('RENAMED COLUMN');
   });
@@ -194,11 +204,12 @@ test.describe('3.3 Column & card CRUD', () => {
   test('UR-E-1: unread card is marked; opening it marks it read (persisted)', async ({ page }) => {
     await seedUnread(page);
     await expect(page.locator('.card--unread').filter({ hasText: 'First Card' })).toBeVisible();
+    const saved = waitForBoardSave(page);
     await page.locator('.card').filter({ hasText: 'First Card' }).first().click();
     await expect(page.locator('#modal')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('.card--unread')).toHaveCount(0);
-    await page.waitForTimeout(1200);
+    await saved;
     await page.reload();
     await expect(page.locator('.card').filter({ hasText: 'First Card' })).toBeVisible();
     await expect(page.locator('.card--unread')).toHaveCount(0);
@@ -241,11 +252,12 @@ test.describe('3.3 Column & card CRUD', () => {
     await expect(page.locator('.card--unread')).toHaveCount(1, { timeout: 10_000 });
 
     const popup = context.waitForEvent('page');
+    const saved = waitForBoardSave(page);
     await page.locator('.card').filter({ hasText: 'First Card' }).first().locator('.card-link-badge').click();
     await (await popup).close();
     await expect(page.locator('.card--unread')).toHaveCount(0);
     await expect(page.locator('#modal')).toBeHidden();
-    await page.waitForTimeout(1200);
+    await saved;
     await page.reload();
     await expect(page.locator('.card').filter({ hasText: 'First Card' })).toBeVisible();
     await expect(page.locator('.card--unread')).toHaveCount(0);

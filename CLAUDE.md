@@ -18,6 +18,8 @@ Or via Docker (from project root):
 docker compose up -d --build
 ```
 
+The `kanban` container bind-mounts only `app/frontend/` and `app/backend/server.js`; every other backend file is baked into the image. After changing routes or helpers under `app/backend/`, rebuild (`docker compose up -d --build kanban`), otherwise the live frontend calls routes the running backend does not know (plain `HTTP 404`).
+
 No build step, no linter. Tests: `npm test` (Vitest, unit + API) and `npm run test:e2e` (Playwright, requires running server).
 
 ## Architecture
@@ -44,7 +46,7 @@ Single-page kanban board with a minimal three-layer design:
 | `routes/notes.js` | All `/:board/notes*` including ZIP export |
 | `routes/attachments.js` | All notes/card attachment routes + `GET /api/db-size` |
 | `routes/dashboard.js` | All `/api/dashboard/*` routes (config, data, mail, calendar) |
-| `dashboard/mail.js` | IMAP helpers — `fetchMailAccount`, `fetchMailMessage`, `testMailAccount` |
+| `dashboard/mail.js` | IMAP/SMTP helpers — `fetchMailAccount` (dashboard panel), `fetchFolderMessages` (paged/search), `fetchMailMessage`, folder CRUD (`listMailFolders`, `createMailFolder`, `renameMailFolder`, `deleteMailFolder`), `sendMail` (nodemailer + IMAP APPEND to the sent folder); every message function takes an optional `folder` |
 | `dashboard/calendar.js` | CalDAV/iCal helpers — `fetchCalendarAccount`, `fetchCalendarEvent`, `testCalendarAccount` |
 
 ### CSS (`app/frontend/styles/`)
@@ -59,6 +61,7 @@ Single-page kanban board with a minimal three-layer design:
 | `notes.css` | Notes sidebar, resizer, tree/list, note modal |
 | `markdown.css` | Markdown preview pane (card modal + note modal) |
 | `dashboard.css` | Dashboard layout, panels, mail/calendar/card items, detail modal, settings drag handles |
+| `mailview.css` | Mail view — same overlay slot as `calview.css`; folder tree, message list, reader, compose editor, folder picker; one column at a time on phones (`data-pane`) |
 | `calview.css` | Calendar view — panel covering the dashboard grid (full-screen on phones), week/work-week time grid, all-day row, month grid |
 
 ### JS (`app/frontend/`) — load order matters, no bundler
@@ -79,6 +82,7 @@ Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.
 | `search.js` | Find-card dialog (`openSearch`, `closeSearch`) — text (all-words, accent-folding), priority, date range, and column filters; results open the edit modal |
 | `dashboard.js` | Dashboard view — `initDashboard`, `loadDashboard`, card/mail/calendar panel renderers, detail panel, API helpers (`_dashPatchCard`, `_dashDeleteCard`, `_dashMoveCard`) |
 | `calview.js` | Calendar view (week / work week / month) opened from the Focus calendar menu — `openCalView`, `_cvLoad` (`?from&to`), pointer drag/resize/create, `_cvBuildMoveBody`, hour zoom (Ctrl +/-/0, Ctrl+wheel; 24 h … 6 h visible, stored in `localStorage`); calendar legend (2+ accounts: footer; on phones view modes, New event and calendar toggles live in a burger menu) hides accounts via `localStorage` `cal-view-hidden`; URL state `/focus?cal=<mode>&date=<YYYY-MM-DD>`. Loaded after `dashboard.js` (uses its globals) |
+| `mailview.js` | Mail view opened from the Focus mail panel / header mail button — `openMailView`, `closeMailView`, `_mvInitFromUrl`; folder tree for all accounts (collapse state in `localStorage` `mail-view-collapsed`, context menu: new/rename/move/delete, mark all as read (folders with unread mail), empty for trash / spam folders — destructive actions confirm via `showConfirm`, drag messages or folders onto folders), paged list with server-side search and multi-selection (Shift+click adds a range, Ctrl/Cmd+click toggles; context menu, Delete key, `u` and drag & drop act on the selection with one UID-set request), reader (uses `_renderMailBody` from `dashboard.js`, attachments via `openAttachmentViewer`), compose in the reader pane (contenteditable + `execCommand` toolbar, attachments, reply / reply all / forward — forward keeps the original attachments as removable chips, attached server-side). Exclusive with the calendar view: opening one hides the other and takes over its history entry. URL state `/focus?mail=<accountId>&folder=<path>`. Loaded after `calview.js` |
 | `init.js` | Entry point — calls `initTitleChars()` and `checkAuth()` |
 
 ## CouchDB
@@ -206,18 +210,29 @@ Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`
 | `GET` | `/api/dashboard/cards` | Cards from configured card sources |
 | `GET` | `/api/dashboard/mail` | Summaries from all mail accounts |
 | `GET` | `/api/dashboard/mail/:accountId` | Messages for one account |
-| `GET` | `/api/dashboard/mail/:accountId/message/:uid` | Full message (envelope + body) |
+| `GET` | `/api/dashboard/mail/:accountId/messages` | One page of a folder for the mail view: `?folder=&page=&q=` (50/page, newest first; `q` = IMAP search in subject/from/to/body); returns `{ messages, total, page, pageSize }` |
+| `GET` | `/api/dashboard/mail/:accountId/folder-size` | `?folder=` → `{ size, messages }`; size = sum of `RFC822.SIZE` (no `STATUS=SIZE` in imapflow). Shown in the mail view's folder-column footer |
+| `GET` | `/api/dashboard/mail/:accountId/message/:uid` | Full message (envelope + body, `messageId`, `inReplyTo`, `references`, `replyTo`) |
+| `GET` | `/api/dashboard/mail/:accountId/message/:uid/attachment/:part` | Download one attachment |
 | `POST` | `/api/dashboard/mail/:accountId/test` | Test IMAP connectivity; returns `{ ok, error? }` |
-| `GET` | `/api/dashboard/mail/:accountId/folders` | List IMAP folders; returns `{ folders: [{ path, name }] }` |
+| `GET` | `/api/dashboard/mail/:accountId/folders` | List IMAP folders; returns `{ folders: [{ path, name, delimiter, parent, specialUse, noselect }] }`; `?status=1` adds `messages`, `unseen` |
+| `POST` | `/api/dashboard/mail/:accountId/folders` | Create folder; body: `{ path }` |
+| `POST` | `/api/dashboard/mail/:accountId/folders/rename` | Rename or move a folder; body: `{ from, to }` (INBOX refused) |
+| `DELETE` | `/api/dashboard/mail/:accountId/folders?path=` | Delete folder (INBOX refused) |
+| `POST` | `/api/dashboard/mail/:accountId/folders/mark-read` | Mark all messages of a folder read (`\Seen` on `1:*`); body: `{ path }`; returns `{ ok, messages }` |
+| `POST` | `/api/dashboard/mail/:accountId/folders/empty` | Permanently delete all messages of a trash / spam folder; body: `{ path }`. Only folders with special use `\Trash` / `\Junk`, the configured `trashFolder` or a well-known name (Trash, Spam, Junk, Junk-E-Mail, Gelöschte Elemente, Deleted Items, Papierkorb, …) — others 400. Returns `{ ok, deleted }` |
+| `POST` | `/api/dashboard/mail/:accountId/send` | Send via the account's SMTP server; multipart: `payload` (JSON `{ to, cc?, bcc?, subject, html, text, inReplyTo?, references?, replyUid?, replyFolder?, forwardUid?, forwardFolder?, forwardParts?, forwardAccount? }`) + `files` (≤ 10 × 25 MB, all attachments ≤ 50 MB). `forwardParts` = IMAP parts of the original that the server attaches itself (from `forwardAccount`, default the sending account). Copy appended to the sent folder; replied message gets `\Answered`, forwarded one `$Forwarded` (same account only). Returns `{ ok, messageId, warning? }` |
 | `PATCH` | `/api/dashboard/mail/:accountId/message/:uid` | Mark read/unread; body: `{ seen: bool }` |
 | `POST` | `/api/dashboard/mail/:accountId/message/:uid/move` | Move to folder; body: `{ folder: string }` |
-| `DELETE` | `/api/dashboard/mail/:accountId/message/:uid` | Move to trash (uses `trashFolder` account config, default `'Trash'`) |
+| `DELETE` | `/api/dashboard/mail/:accountId/message/:uid` | Move to trash (`trashFolder` account config, else the server's `\Trash` folder, else `'Trash'`); inside the trash it deletes permanently. Returns `{ ok, permanent }` |
 | `GET` | `/api/dashboard/calendar` | Events from all calendar accounts |
 | `GET` | `/api/dashboard/calendar/:accountId` | Events for one account; `?days=n` (lookahead from today) or `?from=YYYY-MM-DD&to=YYYY-MM-DD` (explicit range, `to` exclusive, ≤ 62 days — used by the calendar view) |
 | `GET` | `/api/dashboard/calendar/:accountId/event/:uid` | Full event detail |
 | `POST` | `/api/dashboard/calendar/:accountId/test` | Test CalDAV/iCal connectivity; returns `{ ok, error? }` |
 
-Dashboard config is stored in `jc-config-dashboard`. Card sources reference board names and column titles. Mail and calendar credentials are stored server-side and never sent to the browser.
+All mail message routes accept an optional `?folder=<path>` (default: the account's `folder` or `INBOX`). `PATCH`, `…/move` and `DELETE` on `message/:uid` also accept a UID set (`3,7,9`, ≤ 500) for bulk actions from the mail view's multi-selection.
+
+Dashboard config is stored in `jc-config-dashboard`. Card sources reference board names and column titles. Mail and calendar credentials are stored server-side and never sent to the browser. Mail accounts may carry `sentFolder`, `trashFolder` and `smtp: { host, port, secure (true | false | 'auto'), user?, password?, fromName?, fromAddress? }` — SMTP user/password fall back to the IMAP credentials; `smtp.password` is stripped like `password` (`smtp.hasPassword` instead) and preserved on PUT when omitted.
 
 ## Move-to endpoint
 

@@ -221,6 +221,8 @@ function _cvIsOpen() {
 
 function _cvSetUrl(push) {
   const url = new URL(window.location.href);
+  url.searchParams.delete('mail');
+  url.searchParams.delete('folder');
   url.searchParams.set('cal', _cvMode);
   url.searchParams.set('date', _cvYmd(_cvAnchor));
   if (push) history.pushState({ calView: true }, '', url);
@@ -231,8 +233,17 @@ function openCalView(mode) {
   _cvMode   = _CV_MODES.includes(mode) ? mode : (_cvStoredMode() || 'week');
   _cvAnchor = new Date();
   try { localStorage.setItem(_CV_MODE_KEY, _cvMode); } catch { /* ignore */ }
-  _cvPushed = true;
-  _cvSetUrl(true);
+  // Exclusive with the mail view (mailview.js): take over its history entry instead of stacking another
+  let push = true;
+  if (typeof _mvIsOpen === 'function' && _mvIsOpen()) {
+    _cvPushed = _mvPushed;
+    _mvPushed = false;
+    _mvHide();
+    push = false;
+  } else {
+    _cvPushed = true;
+  }
+  _cvSetUrl(push);
   _cvShow();
 }
 

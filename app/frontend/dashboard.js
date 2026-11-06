@@ -319,6 +319,7 @@ async function initDashboard() {
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('dashboardRefreshBtn').style.display = '';
   document.getElementById('dashboardCalBtn').style.display = '';
+  document.getElementById('dashboardMailBtn').style.display = '';
 
   // Match overview menu: hide board-specific items; Inbox/Analyze/Settings stay visible
   ['menuWebhook', 'menuDashboardSettings'].forEach(id => {
@@ -329,9 +330,13 @@ async function initDashboard() {
   document.getElementById('dashboardRefreshBtn').addEventListener('click', () => {
     loadDashboard();
     if (_cvIsOpen()) _cvLoad();
+    if (_mvIsOpen()) _mvReload();
   });
   document.getElementById('dashboardCalBtn').addEventListener('click', () => {
     if (_cvIsOpen()) closeCalView(); else openCalView();
+  });
+  document.getElementById('dashboardMailBtn').addEventListener('click', () => {
+    if (_mvIsOpen()) closeMailView(); else openMailView();
   });
   document.getElementById('dashCardsMenuBtn').addEventListener('click', e => {
     e.stopPropagation();
@@ -363,6 +368,15 @@ async function initDashboard() {
         action:    () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer'),
         children:  urlAccs.map(a => ({ label: a.label || a.accountId, action: () => window.open(a.webInterfaceUrl, '_blank', 'noopener,noreferrer') })),
       });
+    }
+    if (accounts.length > 1) {
+      items.push({
+        labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Mail view`,
+        action:    () => openMailView(),
+        children:  accounts.map(a => ({ label: a.label || a.accountId, action: () => openMailView(a.accountId) })),
+      });
+    } else {
+      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Mail view`, action: () => openMailView(accounts[0]?.accountId) });
     }
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _reloadMailPanel() });
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('mail-accounts') });
@@ -666,6 +680,7 @@ async function initDashboard() {
   _initCardsDragDrop();
   await loadDashboard();
   _cvInitFromUrl();
+  _mvInitFromUrl();
 }
 
 async function _reloadPanel(url, renderFn, panelId) {
@@ -1243,42 +1258,51 @@ function _openMailDetail(accountId, msgId, webUrl) {
         });
       });
 
-      if (msg.bodyHtml) {
-        const iframe = document.createElement('iframe');
-        iframe.className = 'dashboard-mail-iframe';
-        // allow-same-origin lets us write content and read scrollHeight;
-        // scripts are still blocked (no allow-scripts), so this is safe.
-        iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
-        iframe.setAttribute('referrerpolicy', 'no-referrer');
-        body.appendChild(iframe);
-        const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#222;background:white;padding:8px;margin:0;word-break:break-word}'
-          + ' a{color:#4f46e5} img{max-width:100%;height:auto}'
-          + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
-          + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
-        const { emailStyles, bodyClass } = (() => {
-          try {
-            const parsed = new DOMParser().parseFromString(msg.bodyHtml, 'text/html');
-            return {
-              emailStyles: [...parsed.querySelectorAll('style')].map(s => s.textContent).join('\n'),
-              bodyClass:   parsed.body.className || '',
-            };
-          } catch { return { emailStyles: '', bodyClass: '' }; }
-        })();
-        const safeHtml    = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
-        const emailStyleTag = emailStyles ? `<style>${emailStyles}</style>` : '';
-        const bodyAttr    = bodyClass ? ` class="${bodyClass.replace(/"/g, '&quot;')}"` : '';
-        iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${safeHtml}</body></html>`;
-        const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
-        iframe.addEventListener('load', resize);
-      } else if (msg.body) {
-        const pre = document.createElement('pre');
-        pre.className = 'dashboard-mail-body';
-        pre.textContent = msg.body;
-        body.appendChild(pre);
-      }
+      _renderMailBody(body, msg);
 
     })
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load message.</p>'; });
+}
+
+/**
+ * Append a mail body to `container`: HTML in a sandboxed, auto-sized iframe
+ * (DOMPurify-sanitised, no scripts), plain text in a <pre>.
+ * Used by the dashboard detail panel and the mail view.
+ */
+function _renderMailBody(container, msg) {
+  if (msg.bodyHtml) {
+    const iframe = document.createElement('iframe');
+    iframe.className = 'dashboard-mail-iframe';
+    // allow-same-origin lets us write content and read scrollHeight;
+    // scripts are still blocked (no allow-scripts), so this is safe.
+    iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+    container.appendChild(iframe);
+    const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#222;background:white;padding:8px;margin:0;word-break:break-word}'
+      + ' a{color:#4f46e5} img{max-width:100%;height:auto}'
+      + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
+      + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
+    const { emailStyles, bodyClass } = (() => {
+      try {
+        const parsed = new DOMParser().parseFromString(msg.bodyHtml, 'text/html');
+        return {
+          emailStyles: [...parsed.querySelectorAll('style')].map(s => s.textContent).join('\n'),
+          bodyClass:   parsed.body.className || '',
+        };
+      } catch { return { emailStyles: '', bodyClass: '' }; }
+    })();
+    const safeHtml    = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
+    const emailStyleTag = emailStyles ? `<style>${emailStyles}</style>` : '';
+    const bodyAttr    = bodyClass ? ` class="${bodyClass.replace(/"/g, '&quot;')}"` : '';
+    iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${safeHtml}</body></html>`;
+    const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
+    iframe.addEventListener('load', resize);
+  } else if (msg.body) {
+    const pre = document.createElement('pre');
+    pre.className = 'dashboard-mail-body';
+    pre.textContent = msg.body;
+    container.appendChild(pre);
+  }
 }
 
 function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
@@ -2109,12 +2133,18 @@ async function _mailMove(accountId, msgId, folder) {
   }
 }
 
-async function _createCardFromMail(accountId, msgId, boardName = null) {
+/**
+ * Open the add-to-inbox modal prefilled from a mail (subject, headers, body; attachments copied to the card).
+ * `folder` = IMAP folder of the message (default: the account's folder);
+ * `markRead` replaces the default "mark read in the dashboard panel" after the card was created.
+ */
+async function _createCardFromMail(accountId, msgId, boardName = null, { folder = null, markRead = null } = {}) {
   let prefill = { text: '', description: '' };
   let msg = null;
+  const folderQs = folder ? `?folder=${encodeURIComponent(folder)}` : '';
   try {
     msg = await fetch(
-      `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`
+      `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}${folderQs}`
     ).then(r => r.ok ? r.json() : null);
 
     if (msg) {
@@ -2152,24 +2182,25 @@ async function _createCardFromMail(accountId, msgId, boardName = null) {
   let preTempCardId = null;
   if (boardName && attachments.length) {
     preTempCardId = uid();
-    _uploadMailAttachmentsToCard(accountId, msgId, attachments, boardName, preTempCardId)
+    _uploadMailAttachmentsToCard(accountId, msgId, attachments, boardName, preTempCardId, folder)
       .then(() => { if (typeof _inboxTempCardId !== 'undefined' && _inboxTempCardId === preTempCardId) loadCardAttachments(preTempCardId); });
   }
 
   await openInboxModal(boardName, prefill, async (board, cardId) => {
-    _mailToggleRead(accountId, msgId, true);
+    if (markRead) markRead(); else _mailToggleRead(accountId, msgId, true);
     // Re-upload only if board was changed (new cardId differs from pre-uploaded temp)
     if (attachments.length && board && cardId && cardId !== preTempCardId) {
-      await _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId);
+      await _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId, folder);
     }
   }, null, preTempCardId);
 }
 
-async function _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId) {
+async function _uploadMailAttachmentsToCard(accountId, msgId, attachments, board, cardId, folder = null) {
   const base = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
+  const folderQs = folder ? `?folder=${encodeURIComponent(folder)}` : '';
   for (const att of attachments) {
     try {
-      const blob = await fetch(base + encodeURIComponent(att.part)).then(r => r.ok ? r.blob() : null);
+      const blob = await fetch(base + encodeURIComponent(att.part) + folderQs).then(r => r.ok ? r.blob() : null);
       if (!blob) continue;
       const form = new FormData();
       form.append('file', blob, att.name);

@@ -22,6 +22,7 @@
 <link rel="stylesheet" href="/styles/print.css">
 <link rel="stylesheet" href="/styles/dashboard.css">
 <link rel="stylesheet" href="/styles/calview.css">
+<link rel="stylesheet" href="/styles/mailview.css">
 </head>
 <body>
 
@@ -41,6 +42,7 @@
     <button class="header-menu-btn header-menu-btn--hide-mobile" id="schedToggleBtn" title="Toggle scheduled column" style="display:none"><span data-icon="schedule" data-icon-w="14" data-icon-h="14"></span></button>
     <a class="header-menu-btn" id="dashboardBtn" href="/focus" title="Focus" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh focus" style="display:none"><span data-icon="sync"></span></button>
+    <button class="header-menu-btn" id="dashboardMailBtn" title="Show / hide mail" style="display:none"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span></button>
     <button class="header-menu-btn" id="dashboardCalBtn" title="Show / hide calendar" style="display:none"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span></button>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
       <a class="header-menu-btn" id="headerHomeBtn" href="/" title="All boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
@@ -73,6 +75,43 @@
         <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close"><span data-icon="close"></span></button>
       </div>
       <div class="dashboard-detail-body" id="dashboardDetailBody"></div>
+    </div>
+  </div>
+  <div class="mailview" id="mailView" style="display:none" data-pane="list">
+    <div class="calview-bar mailview-bar">
+      <button class="btn calview-navbtn mv-folders-btn" id="mailViewFoldersBtn" title="Folders"><span data-icon="folder"></span></button>
+      <h2 class="calview-title mailview-title" id="mailViewTitle">Mail</h2>
+      <button class="btn btn-accent" id="mailViewCompose" title="New message (c)">+ New message</button>
+      <button class="dashboard-detail-close" id="mailViewClose" title="Close (Esc)"><span data-icon="close"></span></button>
+    </div>
+    <div class="mailview-body">
+      <div class="mailview-foldercol">
+        <nav class="mailview-folders" id="mailViewFolders" aria-label="Folders"></nav>
+        <div class="mailview-foldersfooter">
+          <span class="mailview-foldersize" id="mailViewFolderSize"></span>
+          <button class="mv-footer-btn" id="mailViewSettings" title="Mail settings"><span data-icon="settings"></span></button>
+        </div>
+        <div class="mv-resizer" data-mv-resize="folders" title="Drag to resize (double-click: reset)"></div>
+      </div>
+      <section class="mailview-listcol">
+        <div class="mv-resizer" data-mv-resize="list" title="Drag to resize (double-click: reset)"></div>
+        <div class="mailview-listsearch">
+          <button class="btn calview-navbtn" id="mailViewRefresh" title="Reload"><span data-icon="sync"></span></button>
+          <input type="search" class="modal-input mailview-search" id="mailViewSearch" placeholder="Search folder… (/)" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="mailview-list" id="mailViewList"></div>
+        <div class="mailview-listfooter"><span id="mailViewCount"></span></div>
+      </section>
+      <section class="mailview-reader" id="mailViewReader"></section>
+    </div>
+    <div class="mailview-flash" id="mailViewFlash" role="status" hidden></div>
+    <div class="mv-picker" id="mailViewPicker" hidden>
+      <div class="mv-picker-box" role="dialog" aria-modal="true">
+        <div class="mv-picker-title"></div>
+        <input type="search" class="modal-input mv-picker-filter" placeholder="Filter folders…" autocomplete="off" spellcheck="false">
+        <div class="mv-picker-list"></div>
+        <div class="mv-picker-foot"><button class="btn" data-mv-pick-cancel="1">Cancel</button></div>
+      </div>
     </div>
   </div>
   <div class="calview" id="calView" style="display:none">
@@ -1275,6 +1314,47 @@
                     <label class="settings-field-label" for="mailWebUrl">Web interface URL</label>
                     <input id="mailWebUrl" class="new-board-input" type="url" placeholder="https://mail.example.com" autocomplete="off" spellcheck="false">
                   </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailSentFolder">Sent folder</label>
+                    <input id="mailSentFolder" class="new-board-input" type="text" placeholder="auto-detect" autocomplete="off" spellcheck="false">
+                  </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailTrashFolder">Trash folder</label>
+                    <input id="mailTrashFolder" class="new-board-input" type="text" placeholder="auto-detect" autocomplete="off" spellcheck="false">
+                  </div>
+                  <p class="settings-item-desc mail-form-subhead">Sending (SMTP) — required to write mails in the mail view</p>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailSmtpHost">SMTP host</label>
+                    <input id="mailSmtpHost" class="new-board-input" type="text" placeholder="smtp.example.com" autocomplete="off" spellcheck="false">
+                  </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailSmtpPort">Port</label>
+                    <input id="mailSmtpPort" class="new-board-input" type="number" min="1" max="65535" placeholder="587">
+                  </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailSmtpSecure">Encryption</label>
+                    <select id="mailSmtpSecure" class="new-board-input">
+                      <option value="auto">Auto (SSL on 465, else STARTTLS)</option>
+                      <option value="ssl">SSL/TLS</option>
+                      <option value="starttls">STARTTLS</option>
+                    </select>
+                  </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailSmtpUser">Username</label>
+                    <input id="mailSmtpUser" class="new-board-input" type="text" placeholder="same as IMAP" autocomplete="off" spellcheck="false">
+                  </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailSmtpPass">Password</label>
+                    <input id="mailSmtpPass" class="new-board-input" type="password" placeholder="same as IMAP" autocomplete="new-password">
+                  </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailFromName">Sender name</label>
+                    <input id="mailFromName" class="new-board-input" type="text" placeholder="e.g. Jane Doe" autocomplete="off">
+                  </div>
+                  <div class="settings-field-row">
+                    <label class="settings-field-label" for="mailFromAddress">Sender address</label>
+                    <input id="mailFromAddress" class="new-board-input" type="email" placeholder="same as IMAP username" autocomplete="off" spellcheck="false">
+                  </div>
                   <div class="settings-webdav-actions">
                     <button class="btn btn-accent" id="mailSaveAccountBtn">Save account</button>
                     <button class="btn" id="mailTestAccountBtn">Test connection</button>
@@ -1620,6 +1700,7 @@
 <script src="/analytics.js"></script>
 <script src="/dashboard.js"></script>
 <script src="/calview.js"></script>
+<script src="/mailview.js"></script>
 <script src="/recurring.js"></script>
 <script src="/templates.js"></script>
 <script src="/scheduled.js"></script>

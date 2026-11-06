@@ -313,6 +313,70 @@ async function _openInNewTab(url) {
   window.open(URL.createObjectURL(await r.blob()), '_blank');
 }
 
+// ---- Fallback attachment viewer / download ----
+// initNotes() (notes-webdav/frontend/notes.js) replaces both via window.* on board pages;
+// pages without the notes module (e.g. /focus: dashboard mail detail, mail view) use these.
+
+async function _downloadAttachment(url, name) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const u = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = u;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 5000);
+  } catch (e) { console.error('Download failed:', e.message); }
+}
+
+function _closeFallbackViewer() {
+  const viewer = document.getElementById('attachViewer');
+  if (viewer) viewer.style.display = 'none';
+  const content = document.getElementById('attachViewerContent');
+  if (content) content.innerHTML = '';
+}
+
+/** Images and PDFs in #attachViewer; other types are downloaded. */
+async function openAttachmentViewer(url, name, type) {
+  const viewer  = document.getElementById('attachViewer');
+  const content = document.getElementById('attachViewerContent');
+  if (!viewer || !content) return;
+  if (!viewer.dataset.fallbackWired) {
+    viewer.dataset.fallbackWired = '1';
+    document.getElementById('attachViewerClose')?.addEventListener('click', _closeFallbackViewer);
+    viewer.addEventListener('click', e => { if (e.target === viewer) _closeFallbackViewer(); });
+    // Capture phase: Escape closes only the viewer, not views below it (e.g. the mail view)
+    window.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || viewer.style.display !== 'flex') return;
+      e.preventDefault();
+      e.stopPropagation();
+      _closeFallbackViewer();
+    }, true);
+  }
+  const isImage = ['image', 'svg', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(type);
+  if (!isImage && type !== 'pdf') { _downloadAttachment(url, name); return; }
+  document.getElementById('attachViewerName').textContent = name;
+  content.innerHTML = '<span class="note-attach-empty">Loading\u2026</span>';
+  viewer.style.display = 'flex';
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    const obj  = URL.createObjectURL(blob);
+    content.innerHTML = '';
+    const el = document.createElement(isImage ? 'img' : 'iframe');
+    el.src = obj;
+    el.className = isImage ? 'attach-viewer-img' : 'attach-viewer-iframe';
+    content.appendChild(el);
+    document.getElementById('attachViewerDl').onclick = () => _downloadAttachment(url, name);
+  } catch (e) {
+    content.innerHTML = `<span class="note-attach-empty">Failed to load file (${escHtml(e.message)})</span>`;
+  }
+}
+
 // ---- Card attachment functions ----
 async function loadCardAttachments(cardId) {
   const list = document.getElementById('cardAttachList');

@@ -1,5 +1,9 @@
 'use strict';
+const crypto       = require('crypto');
 const { ImapFlow } = require('imapflow');
+const nodemailer   = require('nodemailer');
+const MailComposer = require('nodemailer/lib/mail-composer');
+const addressparser = require('nodemailer/lib/addressparser');
 
 const TIMEOUT_MS = 10_000;
 
@@ -36,6 +40,53 @@ function _makeClient(account) {
   });
 }
 
+function _folderOf(account, folder) {
+  return folder || account.folder || 'INBOX';
+}
+
+/** Connect, lock `folder`, run fn(client), always release + logout. */
+async function _withMailbox(account, folder, fn) {
+  const client = _makeClient(account);
+  await client.connect();
+  const lock = await client.getMailboxLock(_folderOf(account, folder));
+  try {
+    return await fn(client);
+  } finally {
+    lock.release();
+    await client.logout();
+  }
+}
+
+/** Connect without selecting a mailbox (folder management). */
+async function _withClient(account, fn) {
+  const client = _makeClient(account);
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    await client.logout();
+  }
+}
+
+function _summary(msg, withPreview) {
+  const { attachments } = _findBodyParts(msg.bodyStructure);
+  const flags = msg.flags;
+  return {
+    id:             String(msg.uid),
+    subject:        msg.envelope?.subject || '(no subject)',
+    from:           _fmtAddr(msg.envelope?.from?.[0]),
+    to:             _fmtAddrList(msg.envelope?.to),
+    date:           _fmtDate(msg.envelope?.date),
+    ...(withPreview ? { preview: _preview(msg.bodyParts?.get('text')) } : {}),
+    unread:         !flags?.has('\\Seen'),
+    flagged:        !!flags?.has('\\Flagged'),
+    answered:       !!flags?.has('\\Answered'),
+    forwarded:      !!flags?.has('$Forwarded'),
+    hasAttachments: attachments.length > 0,
+    size:           msg.size || 0,
+  };
+}
+
 // ---- Fetch message summaries ----
 
 /**
@@ -62,16 +113,8 @@ async function fetchMailAccount(account) {
       bodyStructure: true,
       flags:         true,
     })) {
-      const { attachments } = _findBodyParts(msg.bodyStructure);
-      msgs.push({
-        id:             String(msg.uid),
-        subject:        msg.envelope?.subject || '(no subject)',
-        from:           _fmtAddr(msg.envelope?.from?.[0]),
-        date:           _fmtDate(msg.envelope?.date),
-        preview:        _preview(msg.bodyParts?.get('text')),
-        unread:         !msg.flags?.has('\\Seen'),
-        hasAttachments: attachments.length > 0,
-      });
+      const { to, flagged, answered, forwarded, size, ...summary } = _summary(msg, true);
+      msgs.push(summary);
     }
 
     return msgs.reverse();   // newest first
@@ -100,7 +143,10 @@ function _findBodyParts(struct) {
     if (node.type === 'text/html'  && !html && part) html = { part, encoding: (node.encoding || '7bit').toLowerCase() };
     const name = node.dispositionParameters?.filename || node.parameters?.name;
     if (part && name) {
-      attachments.push({ part, name, type: node.type || 'application/octet-stream', encoding: (node.encoding || 'base64').toLowerCase() });
+      const encoding = (node.encoding || 'base64').toLowerCase();
+      // bodyStructure reports the encoded size; base64 inflates by 4/3
+      const size = Math.round((node.size || 0) * (encoding === 'base64' ? 0.75 : 1));
+      attachments.push({ part, name, type: node.type || 'application/octet-stream', encoding, size });
     }
     (node.childNodes || []).forEach(c => visit(c, false));
   }
@@ -136,21 +182,29 @@ function _decodePart(buf, encoding) {
 }
 
 /**
- * Fetch a single message's full fields by UID.
+ * Parse a raw "References:" header block into an array of message ids.
+ */
+function _parseReferences(headers) {
+  if (!headers) return [];
+  const raw = headers.toString('utf8').replace(/\r?\n[ \t]+/g, ' ');
+  const m = raw.match(/^references:\s*(.*)$/im);
+  return m ? (m[1].match(/<[^<>\s]+>/g) || []) : [];
+}
+
+/**
+ * Fetch a single message's full fields by UID from `folder`
+ * (default: the account's configured folder).
  * Returns null if the message is not found.
  */
-async function fetchMailMessage(account, uid) {
-  const { folder = 'INBOX' } = account;
-  const client = _makeClient(account);
-
-  await client.connect();
-  const lock = await client.getMailboxLock(folder);
-  try {
+async function fetchMailMessage(account, uid, folder) {
+  return _withMailbox(account, folder, async client => {
     // Step 1: envelope + body structure to discover part numbers
     const meta = await client.fetchOne(String(uid), {
-      uid:          true,
-      envelope:     true,
+      uid:           true,
+      envelope:      true,
       bodyStructure: true,
+      flags:         true,
+      headers:       ['references'],
     }, { uid: true });
 
     if (!meta) return null;
@@ -180,56 +234,70 @@ async function fetchMailMessage(account, uid) {
       } catch { /* ignore */ }
     }
 
+    const env = meta.envelope || {};
     return {
       id:          String(meta.uid),
-      subject:     meta.envelope?.subject || '(no subject)',
-      from:        _fmtAddr(meta.envelope?.from?.[0]),
-      to:          _fmtAddrList(meta.envelope?.to),
-      cc:          _fmtAddrList(meta.envelope?.cc),
-      date:        _fmtDate(meta.envelope?.date),
+      subject:     env.subject || '(no subject)',
+      from:        _fmtAddr(env.from?.[0]),
+      replyTo:     _fmtAddrList(env.replyTo),
+      to:          _fmtAddrList(env.to),
+      cc:          _fmtAddrList(env.cc),
+      date:        _fmtDate(env.date),
+      messageId:   env.messageId || '',
+      inReplyTo:   env.inReplyTo || '',
+      references:  _parseReferences(meta.headers),
+      unread:      meta.flags ? !meta.flags.has('\\Seen') : false,
       bodyHtml,
       body,
-      attachments: attachments.map(a => ({ name: a.name, part: a.part, type: a.type })),
+      attachments: attachments.map(a => ({ name: a.name, part: a.part, type: a.type, size: a.size })),
     };
-  } finally {
-    lock.release();
-    await client.logout();
-  }
+  });
 }
 
 // ---- Fetch one attachment ----
+
+/** Read and decode one attachment part with an open, locked client; null if missing. */
+async function _readAttachment(client, uid, part, attachments) {
+  const att = attachments.find(a => a.part === part);
+  if (!att) return null;
+  const msg = await client.fetchOne(String(uid), { bodyParts: [part] }, { uid: true });
+  const buf = msg?.bodyParts?.get(part);
+  if (!buf) return null;
+  const data = att.encoding === 'base64'
+    ? Buffer.from(buf.toString('ascii').replace(/\s+/g, ''), 'base64')
+    : (Buffer.isBuffer(buf) ? buf : Buffer.from(buf));
+  return { data, name: att.name, type: att.type };
+}
 
 /**
  * Fetch a single attachment part by UID and IMAP part number.
  * Returns { data: Buffer, name, type } or null if not found.
  */
-async function fetchMailAttachment(account, uid, part) {
-  const { folder = 'INBOX' } = account;
-  const client = _makeClient(account);
-  await client.connect();
-  const lock = await client.getMailboxLock(folder);
-  try {
+async function fetchMailAttachment(account, uid, part, folder) {
+  return _withMailbox(account, folder, async client => {
+    const meta = await client.fetchOne(String(uid), { bodyStructure: true }, { uid: true });
+    if (!meta) return null;
+    return _readAttachment(client, uid, part, _findBodyParts(meta.bodyStructure).attachments);
+  });
+}
+
+/**
+ * Fetch several attachment parts of one message over a single connection
+ * (used when forwarding). Returns null if the message or any part is missing.
+ */
+async function fetchMailAttachments(account, uid, parts, folder) {
+  return _withMailbox(account, folder, async client => {
     const meta = await client.fetchOne(String(uid), { bodyStructure: true }, { uid: true });
     if (!meta) return null;
     const { attachments } = _findBodyParts(meta.bodyStructure);
-    const att = attachments.find(a => a.part === part);
-    if (!att) return null;
-
-    const msg = await client.fetchOne(String(uid), { bodyParts: [part] }, { uid: true });
-    const buf = msg?.bodyParts?.get(part);
-    if (!buf) return null;
-
-    let data;
-    if (att.encoding === 'base64') {
-      data = Buffer.from(buf.toString('ascii').replace(/\s+/g, ''), 'base64');
-    } else {
-      data = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+    const out = [];
+    for (const part of parts) {
+      const att = await _readAttachment(client, uid, part, attachments);
+      if (!att) return null;
+      out.push(att);
     }
-    return { data, name: att.name, type: att.type };
-  } finally {
-    lock.release();
-    await client.logout();
-  }
+    return out;
+  });
 }
 
 // ---- Test connectivity ----
@@ -255,23 +323,142 @@ async function testMailAccount(account) {
   }
 }
 
-// ---- List folders ----
+// ---- Folders ----
+
+function _mapFolder(f) {
+  const flags = f.flags instanceof Set ? f.flags : new Set(f.flags || []);
+  return {
+    path:       f.path,
+    name:       f.name || f.path,
+    delimiter:  f.delimiter || '/',
+    parent:     f.parentPath || '',
+    specialUse: f.specialUse || null,
+    noselect:   flags.has('\\Noselect') || flags.has('\\NonExistent'),
+    ...(f.status ? { messages: f.status.messages ?? 0, unseen: f.status.unseen ?? 0 } : {}),
+  };
+}
 
 /**
- * List all IMAP folders for an account.
- * Returns [{ path, name }] sorted by path.
+ * List all IMAP folders for an account, sorted by path.
+ * With { status: true } every entry also carries { messages, unseen }; servers
+ * that reject LIST-STATUS fall back to the plain listing.
  */
-async function listMailFolders(account) {
-  const client = _makeClient(account);
-  await client.connect();
+async function listMailFolders(account, { status = false } = {}) {
+  return _withClient(account, async client => {
+    let list;
+    if (status) {
+      try { list = await client.list({ statusQuery: { messages: true, unseen: true } }); }
+      catch { list = await client.list(); }
+    } else {
+      list = await client.list();
+    }
+    return list.map(_mapFolder).sort((a, b) => a.path.localeCompare(b.path));
+  });
+}
+
+async function createMailFolder(account, path) {
+  return _withClient(account, client => client.mailboxCreate(path));
+}
+
+async function deleteMailFolder(account, path) {
+  return _withClient(account, client => client.mailboxDelete(path));
+}
+
+/** Rename a folder; a different parent path moves it in the hierarchy. */
+async function renameMailFolder(account, from, to) {
+  return _withClient(account, client => client.mailboxRename(from, to));
+}
+
+// Trash / spam folders that may be emptied (special-use flag, configured trash or a well-known name)
+const _EMPTYABLE_USES  = new Set(['\\Trash', '\\Junk']);
+const _EMPTYABLE_NAMES = new Set([
+  'trash', 'spam', 'junk', 'junk-e-mail', 'junk e-mail', 'junk-mail', 'gelöschte elemente',
+  'gelöschte objekte', 'deleted items', 'deleted messages', 'papierkorb', 'bulk mail',
+]);
+
+function isEmptyableFolder(folder, account = {}) {
+  if (_EMPTYABLE_USES.has(folder.specialUse)) return true;
+  if (account.trashFolder && folder.path === account.trashFolder) return true;
+  return _EMPTYABLE_NAMES.has(String(folder.name || folder.path).trim().toLowerCase());
+}
+
+/**
+ * Permanently delete every message in a trash / spam folder.
+ * Other folders are refused (status 400); unknown folders give 404. Returns { deleted }.
+ */
+async function emptyMailFolder(account, path) {
+  return _withClient(account, async client => {
+    const folder = (await client.list()).find(f => f.path === path);
+    if (!folder) throw Object.assign(new Error('Folder not found'), { status: 404 });
+    if (!isEmptyableFolder(folder, account)) throw Object.assign(new Error('Only trash and spam folders can be emptied'), { status: 400 });
+    const lock = await client.getMailboxLock(path);
+    try {
+      const deleted = client.mailbox?.exists ?? 0;
+      if (deleted) await client.messageDelete('1:*');
+      return { deleted };
+    } finally {
+      lock.release();
+    }
+  });
+}
+
+/** Resolve a special-use folder (e.g. '\\Sent') via LIST; null if unknown. */
+async function _specialFolder(client, use) {
   try {
-    const list = await client.list('', '*');
-    return list
-      .map(f => ({ path: f.path, name: f.name || f.path }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-  } finally {
-    await client.logout();
-  }
+    const list = await client.list();
+    return list.find(f => f.specialUse === use)?.path || null;
+  } catch { return null; }
+}
+
+// ---- Folder message listing ----
+
+const _LIST_QUERY = { uid: true, envelope: true, bodyStructure: true, flags: true, size: true };
+
+/**
+ * One page of message summaries in `folder`, newest first.
+ * With `query`, the folder is searched server-side (subject, from, to, body).
+ * Returns { messages, total, page, pageSize }.
+ */
+async function fetchFolderMessages(account, folder, { page = 0, pageSize = 50, query = '' } = {}) {
+  return _withMailbox(account, folder, async client => {
+    const msgs = [];
+    let total;
+    if (query) {
+      const uids = (await client.search({
+        or: [{ subject: query }, { from: query }, { to: query }, { body: query }],
+      }, { uid: true })) || [];
+      uids.sort((a, b) => b - a);
+      total = uids.length;
+      const slice = uids.slice(page * pageSize, (page + 1) * pageSize);
+      if (slice.length) {
+        for await (const msg of client.fetch(slice.join(','), _LIST_QUERY, { uid: true })) msgs.push(_summary(msg));
+      }
+    } else {
+      total = client.mailbox?.exists ?? 0;
+      const end   = total - page * pageSize;
+      const start = Math.max(1, end - pageSize + 1);
+      if (end >= 1) {
+        for await (const msg of client.fetch(`${start}:${end}`, _LIST_QUERY)) msgs.push(_summary(msg));
+      }
+    }
+    msgs.sort((a, b) => Number(b.id) - Number(a.id));
+    return { messages: msgs, total, page, pageSize };
+  });
+}
+
+/**
+ * Total size of a folder in bytes (sum of RFC822.SIZE — STATUS=SIZE is not widely supported).
+ * Returns { size, messages }.
+ */
+async function fetchFolderSize(account, folder) {
+  return _withMailbox(account, folder, async client => {
+    const messages = client.mailbox?.exists ?? 0;
+    let size = 0;
+    if (messages) {
+      for await (const msg of client.fetch('1:*', { size: true })) size += msg.size || 0;
+    }
+    return { size, messages };
+  });
 }
 
 // ---- Mutate messages ----
@@ -279,54 +466,163 @@ async function listMailFolders(account) {
 /**
  * Mark a message as read (seen=true) or unread (seen=false) by UID.
  */
-async function markMailMessage(account, uid, seen) {
-  const { folder = 'INBOX' } = account;
-  const client = _makeClient(account);
-  await client.connect();
-  const lock = await client.getMailboxLock(folder);
-  try {
+async function markMailMessage(account, uid, seen, folder) {
+  return _withMailbox(account, folder, async client => {
     if (seen) {
       await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
     } else {
       await client.messageFlagsRemove(String(uid), ['\\Seen'], { uid: true });
     }
-  } finally {
-    lock.release();
-    await client.logout();
-  }
+  });
 }
 
 /**
- * Move a message by UID to targetFolder.
+ * Mark every message in `folder` as read. Returns { messages } (count in the folder).
  */
-async function moveMailMessage(account, uid, targetFolder) {
-  const { folder = 'INBOX' } = account;
-  const client = _makeClient(account);
-  await client.connect();
-  const lock = await client.getMailboxLock(folder);
-  try {
+async function markFolderRead(account, folder) {
+  return _withMailbox(account, folder, async client => {
+    const messages = client.mailbox?.exists ?? 0;
+    if (messages) await client.messageFlagsAdd('1:*', ['\\Seen']);
+    return { messages };
+  });
+}
+
+/**
+ * Move a message by UID from `folder` to targetFolder.
+ */
+async function moveMailMessage(account, uid, targetFolder, folder) {
+  return _withMailbox(account, folder, async client => {
     await client.messageMove(String(uid), targetFolder, { uid: true });
-  } finally {
-    lock.release();
-    await client.logout();
-  }
+  });
 }
 
 /**
- * Delete a message by UID — moves it to the configured trash folder
- * (account.trashFolder, default: 'Trash').
+ * Delete a message by UID — moves it to the trash folder (account.trashFolder,
+ * else the server's \Trash folder, else 'Trash'). A message that already is in
+ * the trash is deleted permanently. Returns { permanent }.
  */
-async function deleteMailMessage(account, uid) {
-  return moveMailMessage(account, uid, account.trashFolder || 'Trash');
+async function deleteMailMessage(account, uid, folder) {
+  const source = _folderOf(account, folder);
+  return _withMailbox(account, source, async client => {
+    const trash = account.trashFolder || (await _specialFolder(client, '\\Trash')) || 'Trash';
+    if (source === trash) {
+      await client.messageDelete(String(uid), { uid: true });
+      return { permanent: true };
+    }
+    await client.messageMove(String(uid), trash, { uid: true });
+    return { permanent: false };
+  });
+}
+
+// ---- Send ----
+
+function _smtpSettings(account) {
+  const smtp   = account.smtp || {};
+  const port   = Number(smtp.port) || 587;
+  const secure = smtp.secure === undefined || smtp.secure === 'auto' ? port === 465 : !!smtp.secure;
+  return {
+    host:   smtp.host,
+    port,
+    secure,
+    auth:   { user: smtp.user || account.user, pass: smtp.password || account.password },
+    connectionTimeout: TIMEOUT_MS,
+  };
+}
+
+/** Bare addresses of a recipient string ("A <a@x>, b@y"). */
+function _addresses(str) {
+  const out = [];
+  (function walk(list) {
+    for (const a of list) {
+      if (a.group) walk(a.group);
+      else if (a.address) out.push(a.address);
+    }
+  })(addressparser(str || ''));
+  return out;
+}
+
+/**
+ * Send a message via the account's SMTP server and store a copy in the sent
+ * folder (account.sentFolder, else the server's \Sent folder). When the mail
+ * answers `replyUid` in `replyFolder`, that message gets the \Answered flag;
+ * a forwarded `forwardUid` in `forwardFolder` gets $Forwarded.
+ * Returns { ok, messageId, warning? } — a failed sent-copy is only a warning.
+ */
+async function sendMail(account, mail) {
+  if (!account.smtp?.host) throw Object.assign(new Error('No SMTP server configured for this account'), { status: 400 });
+  const smtp = _smtpSettings(account);
+  const fromAddress = account.smtp.fromAddress || account.user;
+  const from = account.smtp.fromName ? { name: account.smtp.fromName, address: fromAddress } : fromAddress;
+  const domain = (fromAddress.split('@')[1] || 'localhost').replace(/[^\w.-]/g, '');
+  const messageId = `<${crypto.randomUUID()}@${domain}>`;
+  const date = new Date();
+
+  const opts = {
+    from,
+    to:        mail.to,
+    cc:        mail.cc || undefined,
+    bcc:       mail.bcc || undefined,
+    subject:   mail.subject || '',
+    html:      mail.html || undefined,
+    text:      mail.text || '',
+    messageId,
+    date,
+    inReplyTo:  mail.inReplyTo || undefined,
+    references: mail.references?.length ? mail.references : undefined,
+    attachments: (mail.attachments || []).map(a => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
+  };
+
+  const recipients = [..._addresses(mail.to), ..._addresses(mail.cc), ..._addresses(mail.bcc)];
+  if (!recipients.length) throw Object.assign(new Error('No valid recipient'), { status: 400 });
+
+  const raw = await new MailComposer(opts).compile().build();
+  const transporter = nodemailer.createTransport(smtp);
+  await transporter.sendMail({ envelope: { from: fromAddress, to: recipients }, raw });
+
+  const result = { ok: true, messageId };
+  try {
+    const copyNode = new MailComposer(opts).compile();
+    copyNode.keepBcc = true;
+    const copy = await copyNode.build();
+    await _withClient(account, async client => {
+      const sent = account.sentFolder || (await _specialFolder(client, '\\Sent')) || 'Sent';
+      await client.append(sent, copy, ['\\Seen'], date);
+      // Mark the original: \Answered for replies, $Forwarded for forwards (same account only)
+      const marks = [];
+      if (mail.replyUid && mail.replyFolder) marks.push([mail.replyFolder, mail.replyUid, '\\Answered']);
+      if (mail.forwardUid && mail.forwardFolder && !mail.forwardAccount) marks.push([mail.forwardFolder, mail.forwardUid, '$Forwarded']);
+      for (const [folder, uid, flag] of marks) {
+        const lock = await client.getMailboxLock(folder);
+        try { await client.messageFlagsAdd(String(uid), [flag], { uid: true }); }
+        finally { lock.release(); }
+      }
+    });
+  } catch (err) {
+    result.warning = `Sent, but storing a copy failed: ${err.message}`;
+  }
+  return result;
 }
 
 module.exports = {
   fetchMailAccount,
   fetchMailMessage,
   fetchMailAttachment,
+  fetchMailAttachments,
+  fetchFolderMessages,
+  fetchFolderSize,
   testMailAccount,
   listMailFolders,
+  createMailFolder,
+  deleteMailFolder,
+  renameMailFolder,
+  emptyMailFolder,
+  isEmptyableFolder,
   markMailMessage,
+  markFolderRead,
   moveMailMessage,
   deleteMailMessage,
+  sendMail,
+  _parseReferences,
+  _addresses,
+  _smtpSettings,
 };

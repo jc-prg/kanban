@@ -234,8 +234,36 @@ const validateRecurringTasks = ajv.compile({
   },
 });
 
+const _mailAddrList = { type: 'string', maxLength: 4000 };
+const validateMailSend = ajv.compile({
+  type: 'object',
+  required: ['to'],
+  additionalProperties: false,
+  properties: {
+    to:          { ..._mailAddrList, minLength: 3 },
+    cc:          _mailAddrList,
+    bcc:         _mailAddrList,
+    subject:     { type: 'string', maxLength: 998 },
+    html:        { type: 'string', maxLength: 5_000_000 },
+    text:        { type: 'string', maxLength: 5_000_000 },
+    inReplyTo:   { type: 'string', maxLength: 998 },
+    references:  { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 998 } },
+    replyUid:    { type: 'string', pattern: '^[0-9]{1,10}$' },
+    replyFolder: { type: 'string', minLength: 1, maxLength: 255 },
+    forwardAccount: { type: 'string', minLength: 1, maxLength: 64 },
+    forwardUid:     { type: 'string', pattern: '^[0-9]{1,10}$' },
+    forwardFolder:  { type: 'string', minLength: 1, maxLength: 255 },
+    forwardParts:   { type: 'array', maxItems: 50, uniqueItems: true, items: { type: 'string', pattern: '^[0-9]+(\\.[0-9]+)*$' } },
+  },
+});
+
+/** IMAP folder path: 1–255 chars, no control characters. */
+function validMailFolderPath(path) {
+  return typeof path === 'string' && path.length >= 1 && path.length <= 255 && !/[\x00-\x1f\x7f]/.test(path);
+}
+
 function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateRecurringTasks, validateTemplates, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, schemaError };

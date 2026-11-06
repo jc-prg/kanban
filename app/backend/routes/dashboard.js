@@ -1,26 +1,32 @@
 'use strict';
 const express = require('express');
+const multer  = require('multer');
 const router  = express.Router();
-const { writeRateLimit }                          = require('../auth');
+const { writeRateLimit, uploadRateLimit }         = require('../auth');
 const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder } = require('../global-db');
 const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
         buildIcs, fetchRawIcs, patchMasterIcs, buildOccurrenceOverrideIcs, buildDeleteOccurrenceIcs,
         resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
-const { validateCalendarEvent, schemaError } = require('../schemas');
-const { fetchMailAccount, fetchMailMessage, fetchMailAttachment, testMailAccount,
-        listMailFolders, markMailMessage, moveMailMessage, deleteMailMessage } = require('../dashboard/mail');
+const { validateCalendarEvent, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
+const { fetchMailAccount, fetchMailMessage, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
+        listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
+        markMailMessage, markFolderRead, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
 
 // ---- Password utilities (also exported for unit tests) ----
 
 function stripPasswords(config) {
   return {
     ...config,
-    mailAccounts: (config.mailAccounts || []).map(({ password, ...a }) => ({
-      ...a,
-      hasPassword: !!password,
-    })),
+    mailAccounts: (config.mailAccounts || []).map(({ password, ...a }) => {
+      const out = { ...a, hasPassword: !!password };
+      if (a.smtp) {
+        const { password: smtpPassword, ...smtp } = a.smtp;
+        out.smtp = { ...smtp, hasPassword: !!smtpPassword };
+      }
+      return out;
+    }),
     calendarAccounts: (config.calendarAccounts || []).map(({ password, ...a }) => ({
       ...a,
       hasPassword: !!password,
@@ -32,10 +38,19 @@ function mergePasswords(stored, incoming) {
   function mergeList(storedList, incomingList) {
     return (incomingList || []).map(acc => {
       const storedAcc = (storedList || []).find(s => s.id === acc.id);
+      let out = acc;
       if (storedAcc && (!('password' in acc) || acc.password === '')) {
-        return { ...acc, password: storedAcc.password || '' };
+        out = { ...out, password: storedAcc.password || '' };
       }
-      return acc;
+      // Mail accounts: same rule for the nested SMTP password
+      if (acc.smtp && storedAcc?.smtp?.password && (!('password' in acc.smtp) || acc.smtp.password === '')) {
+        out = { ...out, smtp: { ...acc.smtp, password: storedAcc.smtp.password } };
+      }
+      if (out.smtp) {
+        const { hasPassword, ...smtp } = out.smtp;
+        out = { ...out, smtp };
+      }
+      return out;
     });
   }
   const merged = {
@@ -289,6 +304,34 @@ router.post('/dashboard/mail/:accountId/recent-folders', writeRateLimit, withHan
 
 // ---- Mail routes ----
 
+/** Optional ?folder= query param; undefined when absent, null when invalid. */
+function _folderParam(req) {
+  const f = req.query.folder;
+  if (f === undefined || f === '') return undefined;
+  return validMailFolderPath(f) ? f : null;
+}
+
+// One UID, or with { multi } a comma-separated UID set (≤ 500) for bulk actions
+const _UID_RE       = /^\d{1,10}$/;
+const _UID_SET_RE   = /^\d{1,10}(,\d{1,10}){0,499}$/;
+
+/** Load the account and the optional folder param; sends 404/400 itself and returns null. */
+async function _mailCtx(req, res, { multi = false } = {}) {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) { res.status(404).json({ error: 'Account not found' }); return null; }
+  const folder = _folderParam(req);
+  if (folder === null) { res.status(400).json({ error: 'Invalid folder' }); return null; }
+  if (!(multi ? _UID_SET_RE : _UID_RE).test(req.params.uid ?? '0')) { res.status(400).json({ error: 'Invalid uid' }); return null; }
+  return { account, folder };
+}
+
+const _SEND_MAX_BYTES = 50 * 1024 * 1024;   // all attachments of one message together
+
+const _sendUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 25 * 1024 * 1024, files: 10, fields: 5, fieldSize: 6 * 1024 * 1024 },
+}).array('files', 10);
+
 // GET /api/dashboard/mail — aggregate all mail accounts
 router.get('/dashboard/mail', withHandler(async (req, res) => {
   const config   = await getDashboardConfig();
@@ -322,12 +365,12 @@ router.get('/dashboard/mail/:accountId', withHandler(async (req, res) => {
 
 // GET /api/dashboard/mail/:accountId/message/:uid — fetch one full message
 router.get('/dashboard/mail/:accountId/message/:uid', withHandler(async (req, res) => {
-  const account = await getMailAccount(req.params.accountId);
-  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
 
   let msg;
   try {
-    msg = await fetchMailMessage(account, req.params.uid);
+    msg = await fetchMailMessage(ctx.account, req.params.uid, ctx.folder);
   } catch (err) {
     return res.status(502).json({ error: err.message });
   }
@@ -337,15 +380,15 @@ router.get('/dashboard/mail/:accountId/message/:uid', withHandler(async (req, re
 
 // GET /api/dashboard/mail/:accountId/message/:uid/attachment/:part — download attachment
 router.get('/dashboard/mail/:accountId/message/:uid/attachment/:part', withHandler(async (req, res) => {
-  const account = await getMailAccount(req.params.accountId);
-  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
 
   const { part } = req.params;
   if (!/^[\d.]+$/.test(part)) return res.status(400).json({ error: 'Invalid part' });
 
   let att;
   try {
-    att = await fetchMailAttachment(account, req.params.uid, part);
+    att = await fetchMailAttachment(ctx.account, req.params.uid, part, ctx.folder);
   } catch (err) {
     return res.status(502).json({ error: err.message });
   }
@@ -371,53 +414,202 @@ router.get('/dashboard/mail/:accountId/folders', withHandler(async (req, res) =>
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
   try {
-    const folders = await listMailFolders(account);
+    const folders = await listMailFolders(account, { status: req.query.status === '1' });
     res.json({ folders });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
 }));
 
-// PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread
-router.patch('/dashboard/mail/:accountId/message/:uid', writeRateLimit, withHandler(async (req, res) => {
+// POST /api/dashboard/mail/:accountId/folders — create folder; body: { path }
+router.post('/dashboard/mail/:accountId/folders', writeRateLimit, withHandler(async (req, res) => {
   const account = await getMailAccount(req.params.accountId);
   if (!account) return res.status(404).json({ error: 'Account not found' });
+  const { path } = req.body || {};
+  if (!validMailFolderPath(path)) return res.status(400).json({ error: 'Invalid folder path' });
+
+  try {
+    await createMailFolder(account, path);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// DELETE /api/dashboard/mail/:accountId/folders?path= — delete folder
+router.delete('/dashboard/mail/:accountId/folders', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const { path } = req.query;
+  if (!validMailFolderPath(path)) return res.status(400).json({ error: 'Invalid folder path' });
+  if (path.toUpperCase() === 'INBOX') return res.status(400).json({ error: 'The inbox cannot be deleted' });
+
+  try {
+    await deleteMailFolder(account, path);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// POST /api/dashboard/mail/:accountId/folders/rename — rename or move; body: { from, to }
+router.post('/dashboard/mail/:accountId/folders/rename', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const { from, to } = req.body || {};
+  if (!validMailFolderPath(from) || !validMailFolderPath(to)) return res.status(400).json({ error: 'Invalid folder path' });
+  if (from.toUpperCase() === 'INBOX') return res.status(400).json({ error: 'The inbox cannot be renamed' });
+
+  try {
+    await renameMailFolder(account, from, to);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// POST /api/dashboard/mail/:accountId/folders/mark-read — mark all messages of a folder read; body: { path }
+router.post('/dashboard/mail/:accountId/folders/mark-read', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const { path } = req.body || {};
+  if (!validMailFolderPath(path)) return res.status(400).json({ error: 'Invalid folder path' });
+
+  try {
+    res.json({ ok: true, ...(await markFolderRead(account, path)) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// POST /api/dashboard/mail/:accountId/folders/empty — delete all messages of a trash / spam folder; body: { path }
+router.post('/dashboard/mail/:accountId/folders/empty', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const { path } = req.body || {};
+  if (!validMailFolderPath(path)) return res.status(400).json({ error: 'Invalid folder path' });
+
+  try {
+    const { deleted } = await emptyMailFolder(account, path);
+    res.json({ ok: true, deleted });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+}));
+
+// GET /api/dashboard/mail/:accountId/messages?folder=&page=&q= — one page of a folder
+router.get('/dashboard/mail/:accountId/messages', withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
+  const page  = Math.max(0, Math.min(10_000, parseInt(req.query.page, 10) || 0));
+  const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 200) : '';
+
+  try {
+    res.json(await fetchFolderMessages(ctx.account, ctx.folder || 'INBOX', { page, query }));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// GET /api/dashboard/mail/:accountId/folder-size?folder= — { size (bytes), messages }
+router.get('/dashboard/mail/:accountId/folder-size', withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
+  try {
+    res.json(await fetchFolderSize(ctx.account, ctx.folder || 'INBOX'));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
+// POST /api/dashboard/mail/:accountId/send — multipart: `payload` (JSON) + `files`
+router.post('/dashboard/mail/:accountId/send', uploadRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  try {
+    await new Promise((resolve, reject) => _sendUpload(req, res, err => err ? reject(err) : resolve()));
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  let payload;
+  try { payload = JSON.parse(req.body?.payload || 'null'); } catch { payload = null; }
+  if (!payload || typeof payload !== 'object') return res.status(400).json({ error: 'payload is required' });
+  if (!validateMailSend(payload)) return res.status(400).json({ error: schemaError(validateMailSend) });
+
+  const attachments = (req.files || []).map(f => ({
+    filename:    Buffer.from(f.originalname, 'latin1').toString('utf8'),
+    content:     f.buffer,
+    contentType: f.mimetype || 'application/octet-stream',
+  }));
+
+  // Forward: the original's attachments are fetched server-side (from the same or another account)
+  if (payload.forwardParts?.length) {
+    if (!payload.forwardUid || !validMailFolderPath(payload.forwardFolder)) {
+      return res.status(400).json({ error: 'forwardUid and forwardFolder are required with forwardParts' });
+    }
+    const source = payload.forwardAccount ? await getMailAccount(payload.forwardAccount) : account;
+    if (!source) return res.status(404).json({ error: 'Forward source account not found' });
+    let forwarded;
+    try {
+      forwarded = await fetchMailAttachments(source, payload.forwardUid, payload.forwardParts, payload.forwardFolder);
+    } catch (err) {
+      return res.status(502).json({ error: err.message });
+    }
+    if (!forwarded) return res.status(404).json({ error: 'Forwarded attachment not found' });
+    attachments.push(...forwarded.map(a => ({ filename: a.name, content: a.data, contentType: a.type })));
+  }
+  const totalSize = attachments.reduce((n, a) => n + a.content.length, 0);
+  if (totalSize > _SEND_MAX_BYTES) return res.status(413).json({ error: 'Attachments exceed 50 MB in total' });
+
+  try {
+    res.json(await sendMail(account, { ...payload, attachments }));
+  } catch (err) {
+    res.status(err.status || 502).json({ error: err.message });
+  }
+}));
+
+// PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread (:uid may be a set "3,7,9")
+router.patch('/dashboard/mail/:accountId/message/:uid', writeRateLimit, withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res, { multi: true });
+  if (!ctx) return;
 
   const { seen } = req.body;
   if (typeof seen !== 'boolean') return res.status(400).json({ error: 'seen must be boolean' });
 
   try {
-    await markMailMessage(account, req.params.uid, seen);
+    await markMailMessage(ctx.account, req.params.uid, seen, ctx.folder);
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
 }));
 
-// POST /api/dashboard/mail/:accountId/message/:uid/move — move to folder
+// POST /api/dashboard/mail/:accountId/message/:uid/move — move to folder (:uid may be a set)
 router.post('/dashboard/mail/:accountId/message/:uid/move', writeRateLimit, withHandler(async (req, res) => {
-  const account = await getMailAccount(req.params.accountId);
-  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const ctx = await _mailCtx(req, res, { multi: true });
+  if (!ctx) return;
 
   const { folder } = req.body;
   if (!folder || typeof folder !== 'string') return res.status(400).json({ error: 'folder is required' });
 
   try {
-    await moveMailMessage(account, req.params.uid, folder);
+    await moveMailMessage(ctx.account, req.params.uid, folder, ctx.folder);
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
 }));
 
-// DELETE /api/dashboard/mail/:accountId/message/:uid — move to trash
+// DELETE /api/dashboard/mail/:accountId/message/:uid — move to trash (:uid may be a set)
 router.delete('/dashboard/mail/:accountId/message/:uid', writeRateLimit, withHandler(async (req, res) => {
-  const account = await getMailAccount(req.params.accountId);
-  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const ctx = await _mailCtx(req, res, { multi: true });
+  if (!ctx) return;
 
   try {
-    await deleteMailMessage(account, req.params.uid);
-    res.json({ ok: true });
+    const { permanent } = await deleteMailMessage(ctx.account, req.params.uid, ctx.folder);
+    res.json({ ok: true, permanent });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }

@@ -1,0 +1,166 @@
+'use strict'
+/**
+ * Mail view unit tests — MV-1 … MV-12
+ *
+ * mailview.js is loaded via vm.runInContext with minimal browser-global stubs.
+ * Only the pure helpers are exercised (folder tree, addresses, reply fields, URL state).
+ */
+
+const vm   = require('vm')
+const fs   = require('fs')
+const path = require('path')
+
+const FRONTEND = path.resolve(__dirname, '../../frontend')
+
+let ctx
+
+beforeAll(() => {
+  const noop = () => {}
+  ctx = vm.createContext({
+    document: { addEventListener: noop, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
+    window:   { addEventListener: noop, location: { href: 'http://x/focus', search: '' } },
+    history:  { pushState: noop, replaceState: noop, back: noop },
+    localStorage: { getItem: () => null, setItem: noop },
+    DOMPurify: { sanitize: html => html.replace(/<script[\s\S]*?<\/script>/gi, '') },
+    escHtml:   s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    Intl, Date, Math, JSON, Object, Array, String, Number, Set, Map, URL, URLSearchParams,
+    setTimeout: noop, clearTimeout: noop,
+  })
+  vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'mailview.js'), 'utf8'), ctx)
+})
+
+const plain = v => JSON.parse(JSON.stringify(v))
+const f = (p, extra = {}) => ({ path: p, name: p.split(extra.delimiter || '/').pop(), delimiter: '/', ...extra })
+
+test('MV-1 _mvBuildTree — nesting by delimiter, inbox + special folders first, then by name', () => {
+  const tree = ctx._mvBuildTree([
+    f('zeta'), f('Archive', { specialUse: '\\Archive' }), f('alpha'),
+    f('Trash', { specialUse: '\\Trash' }), f('INBOX'), f('INBOX/Sub'), f('INBOX/Sub/Deep'),
+    f('Sent', { specialUse: '\\Sent' }),
+  ])
+  expect(tree.map(n => n.folder.path)).toEqual(['INBOX', 'Sent', 'Archive', 'Trash', 'alpha', 'zeta'])
+  expect(tree[0].children[0].folder.path).toBe('INBOX/Sub')
+  expect(tree[0].children[0].children[0].folder.path).toBe('INBOX/Sub/Deep')
+})
+
+test('MV-2 _mvBuildTree — "." delimiter; orphans (missing parent) become roots', () => {
+  const tree = ctx._mvBuildTree([
+    f('INBOX', { delimiter: '.' }), f('INBOX.Lists', { delimiter: '.', name: 'Lists' }),
+    f('Old.2020', { delimiter: '.', name: '2020' }),
+  ])
+  expect(tree.map(n => n.folder.path)).toEqual(['INBOX', 'Old.2020'])
+  expect(tree[0].children.map(n => n.folder.path)).toEqual(['INBOX.Lists'])
+  expect(ctx._mvLeafName('INBOX.Lists', '.')).toBe('Lists')
+  expect(ctx._mvParentPath({ path: 'INBOX.Lists', delimiter: '.' })).toBe('INBOX')
+  expect(ctx._mvParentPath({ path: 'INBOX', delimiter: '.' })).toBe('')
+})
+
+test('MV-3 _mvSubtreeUnseen — sums descendants but not Trash / Junk below the top', () => {
+  const [inbox] = ctx._mvBuildTree([
+    f('INBOX', { unseen: 2 }), f('INBOX/A', { unseen: 3 }), f('INBOX/A/B', { unseen: 1 }),
+    f('INBOX/Trash', { specialUse: '\\Trash', unseen: 9 }),
+  ])
+  expect(ctx._mvSubtreeUnseen(inbox)).toBe(6)
+})
+
+test('MV-4 _mvSplitAddrs / _mvAddrOf / _mvDisplayName — quoted commas and angle brackets', () => {
+  const list = ctx._mvSplitAddrs('"Doe, Jane" <jane@ex.com>, bob@ex.com; Carol <Carol@Ex.com>')
+  expect(plain(list)).toEqual(['"Doe, Jane" <jane@ex.com>', 'bob@ex.com', 'Carol <Carol@Ex.com>'])
+  expect(ctx._mvAddrOf(list[2])).toBe('carol@ex.com')
+  expect(ctx._mvAddrOf('bob@ex.com')).toBe('bob@ex.com')
+  expect(ctx._mvDisplayName('"Doe, Jane" <jane@ex.com>')).toBe('Doe, Jane')
+  expect(ctx._mvDisplayName('<x@ex.com>')).toBe('x@ex.com')
+  expect(ctx._mvDisplayName('')).toBe('')
+})
+
+test('MV-5 _mvReplySubject — adds Re: once, recognises AW:', () => {
+  expect(ctx._mvReplySubject('Plan')).toBe('Re: Plan')
+  expect(ctx._mvReplySubject('RE: Plan')).toBe('RE: Plan')
+  expect(ctx._mvReplySubject('AW: Plan')).toBe('AW: Plan')
+  expect(ctx._mvReplySubject('')).toBe('Re: ')
+})
+
+test('MV-6 _mvReplyFields — reply vs. reply all; own addresses and duplicates dropped; references chained', () => {
+  const msg = {
+    from: 'Bob <bob@ex.com>', replyTo: '', subject: 'Plan',
+    to: 'me@ex.com, Alice <alice@ex.com>, bob@ex.com', cc: 'carol@ex.com, ME@ex.com',
+    messageId: '<m2@ex.com>', references: ['<m1@ex.com>'],
+  }
+  const one = ctx._mvReplyFields(msg, false, ['me@ex.com'])
+  expect(plain(one)).toEqual({
+    to: 'Bob <bob@ex.com>', cc: '', subject: 'Re: Plan',
+    inReplyTo: '<m2@ex.com>', references: ['<m1@ex.com>', '<m2@ex.com>'],
+  })
+  const all = ctx._mvReplyFields(msg, true, ['me@ex.com'])
+  expect(all.to).toBe('Bob <bob@ex.com>, Alice <alice@ex.com>')
+  expect(all.cc).toBe('carol@ex.com')
+
+  // Reply-To wins over From
+  expect(ctx._mvReplyFields({ ...msg, replyTo: 'list@ex.com' }, false, []).to).toBe('list@ex.com')
+  // Answering one's own sent mail goes to its recipients
+  expect(ctx._mvReplyFields({ from: 'me@ex.com', to: 'bob@ex.com', subject: 'x' }, false, ['me@ex.com']).to).toBe('bob@ex.com')
+})
+
+test('MV-7 _mvQuoteHtml — plain text escaped, HTML sanitised, inside a blockquote', () => {
+  const q = ctx._mvQuoteHtml({ from: 'Bob <bob@ex.com>', date: null, body: 'a < b\nline 2' })
+  expect(q).toContain('Bob &lt;bob@ex.com&gt; wrote:')
+  expect(q).toContain('<blockquote type="cite">a &lt; b<br>line 2</blockquote>')
+  const h = ctx._mvQuoteHtml({ from: 'x', bodyHtml: '<p>ok</p><script>alert(1)</script>' })
+  expect(h).toContain('<p>ok</p>')
+  expect(h).not.toContain('<script')
+})
+
+test('MV-8 _mvParseUrl / _mvFmtSize / _mvFolderLabel', () => {
+  expect(ctx._mvParseUrl('?cal=week')).toBeNull()
+  expect(plain(ctx._mvParseUrl('?mail=ma-1&folder=INBOX%2FSub'))).toEqual({ accountId: 'ma-1', folder: 'INBOX/Sub' })
+  expect(plain(ctx._mvParseUrl('?mail='))).toEqual({ accountId: null, folder: 'INBOX' })
+  expect(ctx._mvFmtSize(0)).toBe('')
+  expect(ctx._mvFmtSize(512)).toBe('512 B')
+  expect(ctx._mvFmtSize(48213)).toBe('47 KB')
+  expect(ctx._mvFmtSize(5 * 1024 * 1024)).toBe('5.0 MB')
+  expect(ctx._mvFmtSize(3 * 1024 ** 3)).toBe('3.00 GB')
+  expect(ctx._mvFolderLabel({ path: 'INBOX', name: 'INBOX' })).toBe('Inbox')
+  expect(ctx._mvFolderLabel({ path: 'A/B', name: 'B' })).toBe('B')
+})
+
+test('MV-9 _mvClampWidths — minimums kept, folders + list ≤ half the width (list gives way first)', () => {
+  expect(plain(ctx._mvClampWidths({ folders: 210, list: 340 }, 1400))).toEqual({ folders: 210, list: 340 })
+  // Too wide together: list shrinks to the remaining half
+  expect(plain(ctx._mvClampWidths({ folders: 300, list: 600 }, 1400))).toEqual({ folders: 300, list: 400 })
+  // Folders alone too wide: capped so the list keeps its minimum
+  expect(plain(ctx._mvClampWidths({ folders: 900, list: 340 }, 1400))).toEqual({ folders: 520, list: 180 })
+  // Below the minimums
+  expect(plain(ctx._mvClampWidths({ folders: 10, list: 10 }, 1400))).toEqual({ folders: 120, list: 180 })
+})
+
+test('MV-10 _mvForwardSubject / _mvForwardHtml — Fwd: once; header block + original body', () => {
+  expect(ctx._mvForwardSubject('Report')).toBe('Fwd: Report')
+  expect(ctx._mvForwardSubject('FW: Report')).toBe('FW: Report')
+  expect(ctx._mvForwardSubject('WG: Bericht')).toBe('WG: Bericht')
+  const html = ctx._mvForwardHtml({ from: 'Bob <bob@ex.com>', subject: 'Report', to: 'me@ex.com', cc: '', date: null, body: 'a < b' })
+  expect(html).toContain('-------- Forwarded message --------')
+  expect(html).toContain('From: Bob &lt;bob@ex.com&gt;<br>Subject: Report<br>To: me@ex.com</p>')
+  expect(html).not.toContain('Cc:')
+  expect(html).not.toContain('Date:')
+  expect(html.endsWith('a &lt; b')).toBe(true)
+})
+
+test('MV-11 _mvIsEmptyable — special use, configured trash or well-known names only', () => {
+  expect(ctx._mvIsEmptyable({ path: 'X', name: 'X', specialUse: '\\Trash' })).toBe(true)
+  expect(ctx._mvIsEmptyable({ path: 'X', name: 'X', specialUse: '\\Junk' })).toBe(true)
+  for (const name of ['Spam', 'Trash', 'Gelöschte Elemente', 'Junk-E-Mail', 'Deleted Items', 'Papierkorb']) {
+    expect(ctx._mvIsEmptyable({ path: `INBOX/${name}`, name })).toBe(true)
+  }
+  expect(ctx._mvIsEmptyable({ path: 'INBOX', name: 'INBOX', specialUse: '\\Inbox' })).toBe(false)
+  expect(ctx._mvIsEmptyable({ path: 'Trash notes', name: 'Trash notes' })).toBe(false)
+  expect(ctx._mvIsEmptyable({ path: 'Ablage', name: 'Ablage' }, 'Ablage')).toBe(true)
+})
+
+test('MV-12 _mvRangeIds — inclusive range in list order, either direction', () => {
+  const ids = ['9', '8', '7', '6', '5']
+  expect(plain(ctx._mvRangeIds(ids, '8', '6'))).toEqual(['8', '7', '6'])
+  expect(plain(ctx._mvRangeIds(ids, '5', '8'))).toEqual(['8', '7', '6', '5'])
+  expect(plain(ctx._mvRangeIds(ids, '7', '7'))).toEqual(['7'])
+  expect(plain(ctx._mvRangeIds(ids, 'gone', '6'))).toEqual(['6'])
+  expect(plain(ctx._mvRangeIds(ids, '8', 'gone'))).toEqual([])
+})
