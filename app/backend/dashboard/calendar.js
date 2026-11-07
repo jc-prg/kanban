@@ -61,111 +61,125 @@ function _icsFold(line) {
 
 // ---- VTIMEZONE generation ----
 
+const _WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+/** UTC offset of an IANA timezone at a UTC instant, in minutes. */
+function _tzOffset(tzid, utcMs) {
+  const dtf = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tzid,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(new Date(utcMs)).map(p => [p.type, p.value]));
+  const h = parts.hour === '24' ? 0 : +parts.hour;
+  return Math.round((Date.UTC(+parts.year, +parts.month - 1, +parts.day, h, +parts.minute, +parts.second) - utcMs) / 60000);
+}
+
 /**
- * Build a VTIMEZONE ICS block for a given IANA timezone, using Intl.DateTimeFormat
- * to derive the UTC offsets and DST transition times for the current year.
- * Returns an empty string for UTC (no VTIMEZONE needed per RFC 5545).
+ * One DAYLIGHT / STANDARD block for a transition at UTC instant `ts`, as a yearly rule
+ * (e.g. last Sunday of March) whose DTSTART lies in 1970 — so the zone resolves for every
+ * year, not only the year it was generated in. Times are local wall-clock before the change.
+ */
+function _vtzRule(kind, ts, fromOffset, toOffset) {
+  const local = new Date(ts + fromOffset * 60000);            // read with getUTC* = local time
+  const month = local.getUTCMonth(), day = local.getUTCDate(), wd = local.getUTCDay();
+  const daysInMonth = new Date(Date.UTC(local.getUTCFullYear(), month + 1, 0)).getUTCDate();
+  const nth   = day + 7 > daysInMonth ? -1 : Math.ceil(day / 7);
+  // Same rule in 1970
+  let d;
+  if (nth > 0) {
+    const first = new Date(Date.UTC(1970, month, 1)).getUTCDay();
+    d = 1 + ((wd - first + 7) % 7) + (nth - 1) * 7;
+  } else {
+    const lastDay = new Date(Date.UTC(1970, month + 1, 0));
+    d = lastDay.getUTCDate() - ((lastDay.getUTCDay() - wd + 7) % 7);
+  }
+  const time = `${_pad(local.getUTCHours())}${_pad(local.getUTCMinutes())}00`;
+  return [
+    `BEGIN:${kind}`,
+    `DTSTART:1970${_pad(month + 1)}${_pad(d)}T${time}`,
+    `RRULE:FREQ=YEARLY;BYMONTH=${month + 1};BYDAY=${nth}${_WEEKDAYS[wd]}`,
+    `TZOFFSETFROM:${_offsetStr(fromOffset)}`,
+    `TZOFFSETTO:${_offsetStr(toOffset)}`,
+    `END:${kind}`,
+  ];
+}
+
+/**
+ * Build a VTIMEZONE ICS block for an IANA timezone. Offsets and DST transitions are taken from
+ * Intl.DateTimeFormat for the current year and emitted as yearly RRULEs (valid for all years
+ * under today's rules). Returns '' for UTC (no VTIMEZONE needed per RFC 5545) and unknown zones.
  */
 function _buildVTimezone(tzid) {
   if (!tzid || tzid === 'UTC') return '';
+  try { new Intl.DateTimeFormat('en', { timeZone: tzid }); } catch { return ''; }
 
   const year = new Date().getUTCFullYear();
+  const off  = ms => _tzOffset(tzid, ms);
 
-  // Get UTC offset in minutes for a given UTC timestamp in the target timezone
-  function getOffset(utcMs) {
-    const dtf = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tzid,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    });
-    const parts = Object.fromEntries(
-      dtf.formatToParts(new Date(utcMs)).map(p => [p.type, p.value])
-    );
-    const h = parts.hour === '24' ? 0 : +parts.hour;
-    const localMs = Date.UTC(+parts.year, +parts.month - 1, +parts.day, h, +parts.minute, +parts.second);
-    return Math.round((localMs - utcMs) / 60000);
-  }
-
-  // Format a UTC timestamp as iCal local datetime in the given timezone (YYYYMMDDTHHMMSS)
-  function fmtLocal(utcMs) {
-    const dtf = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tzid,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    });
-    const parts = Object.fromEntries(
-      dtf.formatToParts(new Date(utcMs)).map(p => [p.type, p.value])
-    );
-    const h = parts.hour === '24' ? '00' : parts.hour;
-    return `${parts.year}${parts.month}${parts.day}T${h}${parts.minute}${parts.second}`;
-  }
-
-  // Find transitions by sampling every 2 weeks throughout the year
+  // Transitions: sample weekly through the year, then binary-search to the minute
   const transitions = [];
-  let prevOffset = getOffset(Date.UTC(year, 0, 1));
-  for (let week = 1; week <= 26; week++) {
-    const ts = Date.UTC(year, 0, 1) + week * 14 * 86_400_000;
-    const offset = getOffset(ts);
+  let prevTs = Date.UTC(year, 0, 1), prevOffset = off(prevTs);
+  for (let w = 1; w <= 53; w++) {
+    const ts = Math.min(Date.UTC(year, 0, 1) + w * 7 * 86_400_000, Date.UTC(year + 1, 0, 1));
+    const offset = off(ts);
     if (offset !== prevOffset) {
-      // Binary-search for the hour of transition
-      let lo = ts - 14 * 86_400_000, hi = ts;
-      const offLo = getOffset(lo);
-      while (hi - lo > 3_600_000) {
+      let lo = prevTs, hi = ts;
+      while (hi - lo > 60_000) {
         const mid = Math.floor((lo + hi) / 2);
-        if (getOffset(mid) === offLo) lo = mid;
-        else hi = mid;
+        if (off(mid) === prevOffset) lo = mid; else hi = mid;
       }
+      hi = Math.round(hi / 60_000) * 60_000;
       transitions.push({ ts: hi, fromOffset: prevOffset, toOffset: offset });
       prevOffset = offset;
     }
+    prevTs = ts;
   }
 
-  const stdOffset = getOffset(Date.UTC(year, 0, 15)); // January ≈ standard for most zones
-
-  // No DST — emit a single STANDARD component
-  if (transitions.length === 0) {
-    return [
-      'BEGIN:VTIMEZONE',
-      `TZID:${tzid}`,
-      'BEGIN:STANDARD',
-      'DTSTART:19700101T000000',
-      `TZOFFSETFROM:${_offsetStr(stdOffset)}`,
-      `TZOFFSETTO:${_offsetStr(stdOffset)}`,
-      'END:STANDARD',
-      'END:VTIMEZONE',
-    ].join('\r\n');
-  }
-
-  // DST zone — find the spring-forward (DST start) and fall-back (standard start) transitions
   const dstTrans = transitions.find(t => t.toOffset > t.fromOffset); // clocks spring forward
   const stdTrans = transitions.find(t => t.toOffset < t.fromOffset); // clocks fall back
 
-  const lines = ['BEGIN:VTIMEZONE', `TZID:${tzid}`];
-
-  if (dstTrans) {
-    lines.push(
-      'BEGIN:DAYLIGHT',
-      `DTSTART:${fmtLocal(dstTrans.ts)}`,
-      `TZOFFSETFROM:${_offsetStr(dstTrans.fromOffset)}`,
-      `TZOFFSETTO:${_offsetStr(dstTrans.toOffset)}`,
-      'END:DAYLIGHT',
-    );
+  // No DST (or an irregular one-off change) — a single STANDARD component with today's offset
+  if (!dstTrans || !stdTrans) {
+    const o = off(Date.now());
+    return [
+      'BEGIN:VTIMEZONE', `TZID:${tzid}`,
+      'BEGIN:STANDARD', 'DTSTART:19700101T000000',
+      `TZOFFSETFROM:${_offsetStr(o)}`, `TZOFFSETTO:${_offsetStr(o)}`,
+      'END:STANDARD', 'END:VTIMEZONE',
+    ].join('\r\n');
   }
 
-  if (stdTrans) {
-    lines.push(
-      'BEGIN:STANDARD',
-      `DTSTART:${fmtLocal(stdTrans.ts)}`,
-      `TZOFFSETFROM:${_offsetStr(stdTrans.fromOffset)}`,
-      `TZOFFSETTO:${_offsetStr(stdTrans.toOffset)}`,
-      'END:STANDARD',
-    );
-  }
+  return [
+    'BEGIN:VTIMEZONE', `TZID:${tzid}`,
+    ..._vtzRule('DAYLIGHT', dstTrans.ts, dstTrans.fromOffset, dstTrans.toOffset),
+    ..._vtzRule('STANDARD', stdTrans.ts, stdTrans.fromOffset, stdTrans.toOffset),
+    'END:VTIMEZONE',
+  ].join('\r\n');
+}
 
-  lines.push('END:VTIMEZONE');
-  return lines.join('\r\n');
+/**
+ * Parse an ICS string into an ICAL.Component. TZIDs without a VTIMEZONE in the file are
+ * registered with ical.js from Intl data — otherwise ical.js treats them as floating times
+ * (= the server's local zone, wrong in a UTC container).
+ */
+function _parseIcs(ics) {
+  const vcal = new ICAL.Component(ICAL.parse(ics));
+  const embedded = new Set(vcal.getAllSubcomponents('vtimezone').map(c => c.getFirstPropertyValue('tzid')));
+  const used = new Set();
+  for (const ve of vcal.getAllSubcomponents('vevent')) {
+    for (const prop of ve.getAllProperties()) {
+      const tz = prop.getParameter('tzid');
+      if (tz) used.add(tz);
+    }
+  }
+  for (const tzid of used) {
+    if (embedded.has(tzid) || ICAL.TimezoneService.has(tzid)) continue;
+    const vtz = _buildVTimezone(tzid);
+    if (vtz) ICAL.TimezoneService.register(new ICAL.Component(ICAL.parse(`BEGIN:VCALENDAR\r\n${vtz}\r\nEND:VCALENDAR`)).getFirstSubcomponent('vtimezone'));
+  }
+  return vcal;
 }
 
 // ---- Card references ----
@@ -298,8 +312,7 @@ function buildIcs(event, uid) {
  * Exported for unit tests.
  */
 function parseEvents(icsString, { windowStart, windowEnd } = {}) {
-  const jcal    = ICAL.parse(icsString);
-  const vcal    = new ICAL.Component(jcal);
+  const vcal    = _parseIcs(icsString);
   const vevents = vcal.getAllSubcomponents('vevent');
 
   // Separate master events from exception overrides (those with RECURRENCE-ID)
@@ -908,8 +921,7 @@ async function fetchRawIcs(account, uid, href, timeoutMs = 10_000) {
  * Returns modified ICS string (CRLF line endings).
  */
 function patchMasterIcs(masterIcs, event) {
-  const jcal   = ICAL.parse(masterIcs);
-  const vcal   = new ICAL.Component(jcal);
+  const vcal   = _parseIcs(masterIcs);
   const master = vcal.getAllSubcomponents('vevent').find(ve => !ve.getFirstProperty('recurrence-id'));
   if (!master) throw new Error('Master VEVENT not found in ICS');
 
@@ -1002,8 +1014,7 @@ function patchMasterIcs(masterIcs, event) {
  * event: { title, allDay, start, end, location, description, timezone }.
  */
 function buildOccurrenceOverrideIcs(masterIcs, occurrenceStart, event) {
-  const jcal    = ICAL.parse(masterIcs);
-  const vcal    = new ICAL.Component(jcal);
+  const vcal    = _parseIcs(masterIcs);
   const vevents = vcal.getAllSubcomponents('vevent');
   const master  = vevents.find(ve => !ve.getFirstProperty('recurrence-id'));
   if (!master) throw new Error('Master VEVENT not found in ICS');
@@ -1087,8 +1098,7 @@ function buildOccurrenceOverrideIcs(masterIcs, occurrenceStart, event) {
  * occurrenceStart: ISO string (UTC) of the occurrence's original DTSTART.
  */
 function buildDeleteOccurrenceIcs(masterIcs, occurrenceStart) {
-  const jcal    = ICAL.parse(masterIcs);
-  const vcal    = new ICAL.Component(jcal);
+  const vcal    = _parseIcs(masterIcs);
   const vevents = vcal.getAllSubcomponents('vevent');
   const master  = vevents.find(ve => !ve.getFirstProperty('recurrence-id'));
   if (!master) throw new Error('Master VEVENT not found in ICS');

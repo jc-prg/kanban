@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Dashboard API tests — section DB-1 … DB-49 + DB-13..DB-20 (mail)
+ * Dashboard API tests — section DB-1 … DB-52 + DB-13..DB-20 (mail)
  *
  * global-db is injected into require.cache before createApp loads any routes.
  * The db mock's mockCouch.use() returns a per-name board document so card-source
@@ -944,7 +944,7 @@ test('DB-48 patchMasterIcs — UTC instants (calendar-view drag) converted into 
 })
 
 test('DB-49 patchMasterIcs — UTC series edited with a dialog timezone gets TZID + VTIMEZONE', () => {
-  const { patchMasterIcs } = require('../../backend/dashboard/calendar')
+  const { patchMasterIcs, parseEvents } = require('../../backend/dashboard/calendar')
   const master = makeIcs('uid-utc@ex', '20260120T173000Z', '20260120T183000Z', 'Weekly', 'RRULE:FREQ=WEEKLY;COUNT=3')
   const out = patchMasterIcs(master, {
     title: 'Weekly', allDay: false, timezone: 'Europe/Berlin',
@@ -953,4 +953,55 @@ test('DB-49 patchMasterIcs — UTC series edited with a dialog timezone gets TZI
   expect(out).toMatch(/DTSTART;TZID=Europe\/Berlin:20260120T190000/)
   expect(out).toMatch(/BEGIN:VTIMEZONE[\s\S]*TZID:Europe\/Berlin/)
   expect(out.match(/BEGIN:VTIMEZONE/g)).toHaveLength(1)
+  // Generated VTIMEZONE resolves dates before this year's DST change (was: read back as UTC)
+  const occ = parseEvents(out, { windowStart: new Date('2026-01-20T00:00:00Z'), windowEnd: new Date('2026-01-21T00:00:00Z') })
+  expect(occ[0].start).toBe('2026-01-20T18:00:00.000Z')
+})
+
+test('DB-50 _buildVTimezone — yearly RRULEs from 1970 (northern + southern hemisphere, no DST)', () => {
+  const { _buildVTimezone } = require('../../backend/dashboard/calendar')
+  const berlin = _buildVTimezone('Europe/Berlin')
+  expect(berlin).toMatch(/BEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nTZOFFSETFROM:\+0100\r\nTZOFFSETTO:\+0200/)
+  expect(berlin).toMatch(/BEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nTZOFFSETFROM:\+0200\r\nTZOFFSETTO:\+0100/)
+  const sydney = _buildVTimezone('Australia/Sydney')
+  expect(sydney).toMatch(/RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=1SU\r\nTZOFFSETFROM:\+1000\r\nTZOFFSETTO:\+1100/)
+  expect(sydney).toMatch(/RRULE:FREQ=YEARLY;BYMONTH=4;BYDAY=1SU\r\nTZOFFSETFROM:\+1100\r\nTZOFFSETTO:\+1000/)
+  const tokyo = _buildVTimezone('Asia/Tokyo')
+  expect(tokyo).toMatch(/BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:\+0900\r\nTZOFFSETTO:\+0900/)
+  expect(tokyo).not.toMatch(/DAYLIGHT|RRULE/)
+  expect(_buildVTimezone('UTC')).toBe('')
+  expect(_buildVTimezone('Not/AZone')).toBe('')
+})
+
+test('DB-51 parseEvents — TZID without VTIMEZONE resolves independently of the server timezone', () => {
+  const { parseEvents } = require('../../backend/dashboard/calendar')
+  const ics = tz => [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'UID:uid-notz@ex',
+    `DTSTART;TZID=${tz}:20260120T183000`, `DTEND;TZID=${tz}:20260120T193000`, 'SUMMARY:x',
+    'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n')
+  const prevTz = process.env.TZ
+  try {
+    for (const hostTz of ['UTC', 'America/New_York']) {
+      process.env.TZ = hostTz   // e.g. a UTC Docker container
+      expect(parseEvents(ics('Europe/Berlin'))[0].start).toBe('2026-01-20T17:30:00.000Z')
+      expect(parseEvents(ics('America/Chicago'))[0].start).toBe('2026-01-21T00:30:00.000Z')
+    }
+  } finally {
+    if (prevTz === undefined) delete process.env.TZ; else process.env.TZ = prevTz
+  }
+})
+
+test('DB-52 parseEvents — embedded VTIMEZONE from the server wins over the generated one', () => {
+  const { parseEvents } = require('../../backend/dashboard/calendar')
+  // Fictitious fixed +0300 zone under a real IANA name: the file's definition must be used
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VTIMEZONE', 'TZID:Europe/Paris', 'BEGIN:STANDARD', 'DTSTART:19700101T000000',
+    'TZOFFSETFROM:+0300', 'TZOFFSETTO:+0300', 'END:STANDARD', 'END:VTIMEZONE',
+    'BEGIN:VEVENT', 'UID:uid-emb@ex',
+    'DTSTART;TZID=Europe/Paris:20260120T183000', 'DTEND;TZID=Europe/Paris:20260120T193000', 'SUMMARY:x',
+    'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n')
+  expect(parseEvents(ics)[0].start).toBe('2026-01-20T15:30:00.000Z')
 })
