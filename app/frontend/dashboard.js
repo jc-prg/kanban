@@ -2610,6 +2610,18 @@ function _populateTzSelect(sel, selected) {
  * accountId + ev:  edit mode (ev is the cached event from _calEventMap).
  * scope: 'occurrence' | 'series' | null — for recurring event edits.
  */
+/**
+ * Start / end shown when editing an entire series: the series start (DTSTART) plus the clicked
+ * occurrence's duration. The server writes these values back as the master's DTSTART / DTEND,
+ * so prefilling the occurrence would move the series start and drop all earlier occurrences.
+ */
+function _calSeriesDates(ev) {
+  if (!ev.seriesStart || !ev.start) return { start: ev.start, end: ev.end };
+  const dur = (ev.end ? new Date(ev.end) : new Date(ev.start)) - new Date(ev.start);
+  const end = new Date(new Date(ev.seriesStart).getTime() + dur).toISOString();
+  return { start: ev.seriesStart, end: ev.allDay ? end.slice(0, 10) : end };
+}
+
 // prefill (create mode only): { start: Date, end: Date, allDay } — e.g. a slot picked in the calendar view
 async function openCalEventModal(accountId, ev, acc, scope, prefill) {
   const modal      = document.getElementById('calEventModal');
@@ -2696,9 +2708,10 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
       .catch(() => { /* keep cached values */ })
       .finally(() => { if (modal.open) { saveBtn.disabled = false; saveBtn.textContent = 'Save event'; } });
 
-    // Dates
-    const startDt  = ev.start ? new Date(ev.start) : new Date();
-    const endDt    = ev.end   ? new Date(ev.end)   : new Date(startDt.getTime() + 3600000);
+    // Dates — a series edit shows the series start, not the clicked occurrence (see _calSeriesDates)
+    const { start: evStart, end: evEnd } = _calModalScope === 'series' ? _calSeriesDates(ev) : { start: ev.start, end: ev.end };
+    const startDt  = evStart ? new Date(evStart) : new Date();
+    const endDt    = evEnd   ? new Date(evEnd)   : new Date(startDt.getTime() + 3600000);
     const isoLocal = dt => {
       const y = dt.getFullYear(), mo = dt.getMonth() + 1, d = dt.getDate();
       const h = dt.getHours(), mi = dt.getMinutes();
@@ -2708,8 +2721,8 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
       };
     };
     if (ev.allDay) {
-      startDate.value = (ev.start || '').slice(0, 10);
-      endDate.value   = (ev.end   || '').slice(0, 10) || startDate.value;
+      startDate.value = (evStart || '').slice(0, 10);
+      endDate.value   = (evEnd   || '').slice(0, 10) || startDate.value;
     } else {
       const s = isoLocal(startDt), e = isoLocal(endDt);
       startDate.value = s.date; startTime.value = s.time;

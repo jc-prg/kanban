@@ -1,9 +1,10 @@
 'use strict'
 /**
- * Dashboard unit tests — DU-1 … DU-10
+ * Dashboard unit tests — DU-1 … DU-13
  *
  * Tests the pure password-utility functions exported from routes/dashboard.js
- * without starting the HTTP server or touching CouchDB.
+ * without starting the HTTP server or touching CouchDB, plus the pure frontend
+ * helper _calSeriesDates (DU-11 … DU-13, extracted from frontend/dashboard.js).
  */
 
 vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -115,4 +116,29 @@ test('DU-9 filterEvents — event started yesterday, ended yesterday → exclude
 
 test('DU-10 filterEvents — empty events array → returns []', () => {
   expect(filterEvents([], 7, REF)).toEqual([])
+})
+
+// ---------------------------------------------------------------------------
+// _calSeriesDates (frontend dashboard.js) — "Edit entire series" prefills the series start
+// ---------------------------------------------------------------------------
+
+const _dashSrc = require('fs').readFileSync(path.resolve(__dirname, '../../frontend/dashboard.js'), 'utf8')
+const _calSeriesDates = new Function(`${_dashSrc.match(/function _calSeriesDates\(ev\) \{[\s\S]*?\n\}/)[0]}; return _calSeriesDates;`)()
+
+test('DU-11 _calSeriesDates — timed occurrence → series start with the occurrence duration', () => {
+  const r = _calSeriesDates({
+    start: '2026-11-12T08:00:00.000Z', end: '2026-11-12T09:30:00.000Z',
+    seriesStart: '2026-10-01T08:00:00.000Z', allDay: false,
+  })
+  expect(r).toEqual({ start: '2026-10-01T08:00:00.000Z', end: '2026-10-01T09:30:00.000Z' })
+})
+
+test('DU-12 _calSeriesDates — all-day occurrence → series start date, same day span', () => {
+  const r = _calSeriesDates({ start: '2026-11-12', end: '2026-11-14', seriesStart: '2026-10-01', allDay: true })
+  expect(r).toEqual({ start: '2026-10-01', end: '2026-10-03' })
+})
+
+test('DU-13 _calSeriesDates — no seriesStart → occurrence dates unchanged', () => {
+  const ev = { start: '2026-11-12T08:00:00.000Z', end: '2026-11-12T09:00:00.000Z' }
+  expect(_calSeriesDates(ev)).toEqual({ start: ev.start, end: ev.end })
 })

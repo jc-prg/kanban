@@ -991,7 +991,17 @@
   font-size: 0.88rem;
   cursor: pointer;
 }
-.cal-event-ends-input {
+/* Override the generic .modal-field input (width 100%, padding) so radio and label sit in one row */
+.cal-event-ends-row input[type=radio] {
+  width: auto;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.cal-event-ends-row .cal-event-ends-input {
+  width: auto;
   padding: 4px 7px;
   font-size: 0.82rem;
   background: var(--surface2);
