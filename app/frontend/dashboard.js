@@ -309,6 +309,58 @@ function _initCardsDragDrop() {
   });
 }
 
+/** Close / full-screen buttons of the detail panel (Focus panels, calendar view, mail view). */
+function _wireDetailPanel() {
+  const close = document.getElementById('dashboardDetailClose');
+  if (close.dataset.wired) return;
+  close.dataset.wired = '1';
+  close.addEventListener('click', _closeDetail);
+  document.getElementById('dashboardDetailFsBtn').addEventListener('click', () => {
+    document.querySelector('#dashboardDetail .modal').classList.toggle('modal--fullscreen');
+  });
+}
+
+// ---- Overlay host on the overview (/) ----
+// The calendar and mail views open directly over the overview: #dashboard (which contains them and
+// the detail panel) is shown with its panel grid hidden while one of them is open.
+
+/** Paths whose page hosts the calendar / mail overlays (URL state + back button). */
+function _isOverlayHostPage() {
+  return APP_PATH === '/focus' || APP_PATH === '/';
+}
+
+let _overlayHostReady = null;
+/** Overview only: prepare the overlays once — detail panel, config the views read from dashboard.js globals. */
+function _initOverlayHost() {
+  if (_overlayHostReady) return _overlayHostReady;
+  document.getElementById('dashboard').classList.add('dashboard--overlay-host');
+  _wireDetailPanel();
+  _overlayHostReady = (async () => {
+    try {
+      const [cfg, recentFolders] = await Promise.all([
+        fetch('/api/dashboard/config').then(r => r.json()),
+        fetch('/api/dashboard/mail-recent-folders').then(r => r.ok ? r.json() : {}).catch(() => {}),
+      ]);
+      _defaultTimezone     = cfg.defaultTimezone || '';
+      _calAccountsConfig   = cfg.calendarAccounts || [];
+      _calAccountsMeta     = _calAccountsConfig.map(a => ({
+        accountId: a.id, label: a.label, type: a.type || 'caldav', color: a.color || null,
+        webInterfaceUrl: a.webInterfaceUrl || null, lookaheadDays: a.lookaheadDays || 7,
+      }));
+      _serverRecentFolders = recentFolders || {};
+    } catch { /* the views fall back to their own config fetch */ }
+  })();
+  return _overlayHostReady;
+}
+
+/** Overview only: show the overlay host while the calendar or mail view is open, the overview otherwise. */
+function _syncOverlayHost() {
+  if (APP_PATH !== '/') return;
+  const open = _cvIsOpen() || _mvIsOpen();
+  document.getElementById('dashboard').style.display = open ? 'flex' : 'none';
+  document.getElementById('overview').style.display  = open ? 'none' : 'flex';
+}
+
 async function initDashboard() {
   document.querySelector('.board-area').style.display = 'none';
   document.getElementById('saveIndicator').style.display = 'none';
@@ -429,10 +481,7 @@ async function initDashboard() {
     );
     openContextMenu(e, items);
   });
-  document.getElementById('dashboardDetailClose').addEventListener('click', _closeDetail);
-  document.getElementById('dashboardDetailFsBtn').addEventListener('click', () => {
-    document.querySelector('#dashboardDetail .modal').classList.toggle('modal--fullscreen');
-  });
+  _wireDetailPanel();
 
   // Calendar event click → detail panel (skipped on touch; handled by touchend below)
   document.getElementById('dashboardCalendarPanel').addEventListener('click', e => {

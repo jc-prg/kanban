@@ -300,6 +300,7 @@ function _cvShow() {
   _overlaySyncHeaderOffset();
   const el = document.getElementById('calView');
   el.style.display = '';
+  _syncOverlayHost();
   document.body.classList.add('calview-open');
   document.getElementById('dashboardCalBtn')?.classList.add('open');
   _cvScrolled = false;
@@ -313,6 +314,7 @@ function _cvHide() {
   const el = document.getElementById('calView');
   if (!el) return;
   el.style.display = 'none';
+  _syncOverlayHost();
   document.body.classList.remove('calview-open');
   document.getElementById('dashboardCalBtn')?.classList.remove('open');
   clearInterval(_cvNowTimer);
@@ -1126,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   window.addEventListener('popstate', () => {
-    if (APP_PATH !== '/focus') return;
+    if (!_isOverlayHostPage()) return;
     const mode = new URLSearchParams(window.location.search).get('cal');
     if (!mode) { _cvPushed = false; _cvHide(); return; }
     _cvInitFromUrl();

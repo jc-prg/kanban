@@ -1888,15 +1888,25 @@ async function initOverview() {
   document.querySelector('.header-menu').style.marginLeft = 'auto';
   document.getElementById('menuFindCard').style.display = 'none';
   document.getElementById('dashboardBtn').style.display = '';
-  // Calendar button: jump to Focus with the calendar view open (last used mode, today)
+  // Calendar / mail buttons open the views as overlays over the overview (no switch to Focus)
   const calBtn = document.getElementById('dashboardCalBtn');
   calBtn.style.display = '';
-  calBtn.onclick = () => { window.location.href = appUrl(`/focus?cal=${_cvStoredMode() || 'week'}`); };
+  calBtn.onclick = async () => {
+    if (_cvIsOpen()) { closeCalView(); return; }
+    await _initOverlayHost();
+    openCalView();
+  };
   const mailBtn = document.getElementById('dashboardMailBtn');
   mailBtn.style.display = '';
-  // Empty account → the mail view opens the first account's inbox
-  mailBtn.onclick = () => { window.location.href = appUrl('/focus?mail='); };
+  mailBtn.onclick = async () => {
+    if (_mvIsOpen()) { closeMailView(); return; }
+    await _initOverlayHost();
+    openMailView();   // no account yet → the first account's inbox
+  };
   document.getElementById('overview').style.display = 'flex';
+  // Reload / shared link with ?cal= or ?mail= → reopen the view
+  const qs = new URLSearchParams(window.location.search);
+  if (qs.has('cal') || qs.has('mail')) _initOverlayHost().then(() => { _cvInitFromUrl(); _mvInitFromUrl(); });
 
   document.getElementById('achPrev').onclick  = () => loadAchievements(achDayOffset - 1);
   document.getElementById('achNext').onclick  = () => loadAchievements(achDayOffset + 1);

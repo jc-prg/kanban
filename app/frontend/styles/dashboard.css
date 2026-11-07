@@ -1020,3 +1020,6 @@
   font-size: 0.72rem;
   min-width: 3.2em;
 }
+
+/* Overview: #dashboard only hosts the calendar / mail overlays and the detail panel */
+#dashboard.dashboard--overlay-host .dashboard-grid { display: none; }

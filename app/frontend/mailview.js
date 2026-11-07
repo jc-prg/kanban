@@ -347,6 +347,7 @@ function _mvShow() {
   _overlaySyncHeaderOffset();
   const view = document.getElementById('mailView');
   view.style.display = '';
+  _syncOverlayHost();
   view.dataset.pane = 'list';
   _mvApplyWidths();
   document.body.classList.add('mailview-open');
@@ -358,11 +359,12 @@ function _mvHide() {
   const view = document.getElementById('mailView');
   if (!view) return;
   view.style.display = 'none';
+  _syncOverlayHost();
   document.body.classList.remove('mailview-open');
   document.getElementById('dashboardMailBtn')?.classList.remove('open');
   _mvCompose = null;
   _mvClosePicker(null);
-  if (_mvDashStale) { _mvDashStale = false; _reloadMailPanel(); }
+  if (_mvDashStale) { _mvDashStale = false; if (APP_PATH === '/focus') _reloadMailPanel(); }
 }
 
 /** Open the view if the URL asks for it (called once the dashboard is initialised). */
@@ -1779,7 +1781,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }, true);
 
   window.addEventListener('popstate', () => {
-    if (APP_PATH !== '/focus') return;
+    if (!_isOverlayHostPage()) return;
     if (!_mvParseUrl(window.location.search)) { _mvPushed = false; if (_mvIsOpen()) _mvHide(); return; }
     _mvInitFromUrl();
   });
