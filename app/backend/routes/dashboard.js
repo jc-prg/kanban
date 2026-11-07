@@ -11,7 +11,7 @@ const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendar
         buildIcs, fetchRawIcs, patchMasterIcs, buildOccurrenceOverrideIcs, buildDeleteOccurrenceIcs,
         addCardRefIcs, resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
 const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
-const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
+const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
         markMailMessage, markFolderRead, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
 
@@ -205,9 +205,11 @@ router.get('/dashboard/cards', withHandler(async (req, res) => {
         board:              source.board,
         column:             col.title,
         initiallyCollapsed: source.collapsed || false,
-        cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
+        cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link, mailRef, calEvent }) => ({
           id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
           hasLinkedNotes: linkedCards.has(id),
+          hasMailRef:     !!mailRef,
+          hasCalEvent:    !!calEvent,
         })),
         error: null,
       }));
@@ -246,9 +248,11 @@ router.get('/dashboard/data', withHandler(async (req, res) => {
           board:             source.board,
           column:            col.title,
           initiallyCollapsed: source.collapsed || false,
-          cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link }) => ({
+          cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link, mailRef, calEvent }) => ({
             id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
             hasLinkedNotes: linkedCards.has(id),
+            hasMailRef:     !!mailRef,
+            hasCalEvent:    !!calEvent,
           })),
           error: null,
         }));
@@ -396,6 +400,23 @@ router.get('/dashboard/mail/:accountId/message/:uid', withHandler(async (req, re
   res.json(msg);
 }));
 
+// GET /api/dashboard/mail/:accountId/message/:uid/source — raw RFC 822 source (shown as plain text)
+router.get('/dashboard/mail/:accountId/message/:uid/source', withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
+
+  let source;
+  try {
+    source = await fetchMailSource(ctx.account, req.params.uid, ctx.folder);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  if (!source) return res.status(404).json({ error: 'Message not found' });
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.send(source);
+}));
+
 // POST /api/dashboard/mail/:accountId/message/:uid/cards?folder= — link a kanban card to the mail.
 // Body: { board, cardId }. Stored server-side under the message's Message-ID (mails are immutable).
 router.post('/dashboard/mail/:accountId/message/:uid/cards', writeRateLimit, withHandler(async (req, res) => {
@@ -416,8 +437,8 @@ router.post('/dashboard/mail/:accountId/message/:uid/cards', writeRateLimit, wit
   res.json({ ok: true, messageId, ...(added ? {} : { unchanged: true }) });
 }));
 
-// GET /api/dashboard/mail/:accountId/locate?messageId=&folder= — find a message by Message-ID
-// (folder = hint searched first). Returns { folder, uid }.
+// GET /api/dashboard/mail/:accountId/locate?messageId=&folder=&scope= — find a message by Message-ID
+// (folder = hint searched first; scope=hint searches only the hint folder). Returns { folder, uid }.
 router.get('/dashboard/mail/:accountId/locate', withHandler(async (req, res) => {
   const account = await getMailAccount(req.params.accountId);
   if (!account) return res.status(404).json({ error: 'Account not found' });
@@ -430,7 +451,7 @@ router.get('/dashboard/mail/:accountId/locate', withHandler(async (req, res) => 
 
   let found;
   try {
-    found = await findMailByMessageId(account, messageId, folder);
+    found = await findMailByMessageId(account, messageId, folder, { hintOnly: req.query.scope === 'hint' });
   } catch (err) {
     return res.status(502).json({ error: err.message });
   }

@@ -148,6 +148,8 @@
 
 .card-attach-badge,
 .card-note-badge,
+.card-mail-badge,
+.card-cal-badge,
 .card-task-badge {
   font-size: 0.75rem;
   color: var(--text-muted);

@@ -281,6 +281,32 @@ header h1 span { color: var(--accent); }
 .save-indicator.saving { color: var(--accent); }
 .save-indicator.save-error { color: #ef4444; }
 
+/* Phones: board save status / dashboard load status float as a toast at the bottom instead of taking header space */
+@media (max-width: 639px) {
+  #saveIndicator,
+  #dashboardFetchedAt {
+    position: fixed;
+    left: 50%;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    transform: translate(-50%, 8px);
+    z-index: 1000;
+    padding: 8px 16px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    pointer-events: none;
+    transition: opacity 0.3s, transform 0.3s;
+  }
+  #saveIndicator.show,
+  #dashboardFetchedAt.show { opacity: 0.8; transform: translate(-50%, 0); }
+  /* Calendar / mail view cover the dashboard (and the calendar's floating nav sits here) */
+  body:has(#calView:not([style*="display:none"]):not([style*="display: none"]),
+            #mailView:not([style*="display:none"]):not([style*="display: none"])) #dashboardFetchedAt { display: none; }
+}
+
 /* Board */
 .board-wrapper {
   flex: 1;

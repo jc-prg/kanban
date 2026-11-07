@@ -129,6 +129,37 @@ function showMessage(msg) {
   });
 }
 
+// ---- Progress dialog (info + Cancel only) ----
+/** Show `msg` with a single Cancel button. Returns { cancelled: Promise<void>, close() }. */
+function showProgress(msg, { cancelLabel = 'Cancel' } = {}) {
+  document.getElementById('dialogMsg').textContent = msg;
+  const okBtn     = document.getElementById('dialogOkBtn');
+  const cancelBtn = document.getElementById('dialogCancelBtn');
+  okBtn.style.display = 'none';
+  document.getElementById('dialogAltBtn').style.display = 'none';
+  cancelBtn.textContent = cancelLabel;
+  const backdrop = document.getElementById('dialogBackdrop');
+  backdrop.style.display = 'flex';
+
+  let onCancel;
+  const cancelled = new Promise(resolve => { onCancel = resolve; });
+  const onKey = e => { if (e.key === 'Escape') finish(true); };
+  let done = false;
+  function finish(byUser) {
+    if (done) return;
+    done = true;
+    document.removeEventListener('keydown', onKey);
+    backdrop.style.display = 'none';
+    okBtn.style.display    = '';
+    cancelBtn.textContent  = 'Cancel';
+    cancelBtn.onclick      = null;
+    if (byUser) onCancel();
+  }
+  cancelBtn.onclick = () => finish(true);
+  document.addEventListener('keydown', onKey);
+  return { cancelled, close: () => finish(false) };
+}
+
 // ---- Constants ----
 const COLORS         = ['#7c6af7','#f59e0b','#10b981','#ec4899','#3b82f6','#f97316','#14b8a6','#ef4444'];
 const COLORS_NEUTRAL = ['#6b7280'];

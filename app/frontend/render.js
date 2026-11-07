@@ -279,6 +279,12 @@ function render() {
         if (noteLinkedCards.has(card.id)) {
           metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
         }
+        if (card.mailRef) {
+          metaParts.push(`<span class="card-mail-badge" title="${escHtml('Linked mail: ' + (card.mailRef.subject || '(no subject)'))}">${SVGICONS.email(11, 11)}</span>`);
+        }
+        if (card.calEvent) {
+          metaParts.push(`<span class="card-cal-badge" title="Linked calendar event">${SVGICONS.date(10, 10)}</span>`);
+        }
         if (card.priority) {
           const pc = PRIORITY_COLORS[card.priority];
           metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);

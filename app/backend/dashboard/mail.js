@@ -255,6 +255,16 @@ async function fetchMailMessage(account, uid, folder) {
   });
 }
 
+// ---- Raw source ----
+
+/** Full RFC 822 source of a message by UID (Buffer), or null if not found. */
+async function fetchMailSource(account, uid, folder) {
+  return _withMailbox(account, folder, async client => {
+    const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+    return msg?.source || null;
+  });
+}
+
 // ---- Fetch one attachment ----
 
 /** Read and decode one attachment part with an open, locked client; null if missing. */
@@ -477,20 +487,23 @@ async function fetchMessageId(account, uid, folder) {
  * card was created) first, then the account folder / INBOX, then every other selectable
  * folder. Returns { folder, uid } or null.
  */
-async function findMailByMessageId(account, messageId, folder) {
+async function findMailByMessageId(account, messageId, folder, { hintOnly = false } = {}) {
   return _withClient(account, async client => {
     let paths = [];
-    try {
+    if (!hintOnly) try {
       paths = (await client.list())
         .filter(f => !(f.flags instanceof Set ? f.flags.has('\\Noselect') : (f.flags || []).includes('\\Noselect')))
         .map(f => f.path);
     } catch { /* fall back to the hints */ }
-    const order = [...new Set([folder, account.folder || 'INBOX', ...paths].filter(Boolean))];
+    const order = hintOnly
+      ? [folder || account.folder || 'INBOX']
+      : [...new Set([folder, account.folder || 'INBOX', ...paths].filter(Boolean))];
     for (const path of order) {
       let lock;
       try { lock = await client.getMailboxLock(path, { readOnly: true }); } catch { continue; }
       try {
-        const uids = await client.search({ header: { 'message-id': messageId } }, { uid: true });
+        // deleted: false — a client that moves by copy + \Deleted leaves a stale copy behind
+        const uids = await client.search({ header: { 'message-id': messageId }, deleted: false }, { uid: true });
         if (uids?.length) return { folder: path, uid: String(Math.max(...uids)) };
       } catch { /* folder not searchable — try the next one */ } finally {
         lock.release();
@@ -647,6 +660,7 @@ module.exports = {
   fetchMailMessage,
   fetchMessageId,
   findMailByMessageId,
+  fetchMailSource,
   fetchMailAttachment,
   fetchMailAttachments,
   fetchFolderMessages,

@@ -1000,3 +1000,13 @@
   color: var(--text);
 }
 .cal-event-ends-input:focus { outline: none; border-color: var(--accent); }
+
+/* TXT ⇄ </> toggle above a mail body with both an HTML and a plain-text part */
+.mail-format-toggle {
+  display: block;
+  margin: 0 0 6px auto;
+  padding: 3px 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  min-width: 3.2em;
+}

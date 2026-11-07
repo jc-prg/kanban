@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view API tests — MVA-1 … MVA-25
+ * Mail view API tests — MVA-1 … MVA-27
  *
  * Folder management, paged/searchable message lists, ?folder= on message routes,
  * trash handling and sending via SMTP (nodemailer mocked) with a sent copy.
@@ -572,7 +572,7 @@ test('MVA-24 GET locate — searches the hint folder first, then the other selec
   const locked = calls('lock').map(c => c[1])
   expect(locked).toEqual(['Projects', 'INBOX', 'Archive'])
   expect(locked).not.toContain('Parent')
-  expect(calls('search')[0][1]).toEqual({ header: { 'message-id': '<abc@ex.com>' } })
+  expect(calls('search')[0][1]).toEqual({ header: { 'message-id': '<abc@ex.com>' }, deleted: false })
 })
 
 test('MVA-25 GET locate — not found 404; invalid messageId / folder 400', async () => {
@@ -582,4 +582,33 @@ test('MVA-25 GET locate — not found 404; invalid messageId / folder 400', asyn
   expect((await request(app).get(`${API}/locate`).set(AUTH)).status).toBe(400)
   expect((await request(app).get(`${API}/locate?messageId=a%0Db`).set(AUTH)).status).toBe(400)
   expect((await request(app).get(`${API}/locate?messageId=x&folder=bad%01`).set(AUTH)).status).toBe(400)
+})
+
+test('MVA-26 GET locate?scope=hint — only the hint folder is searched (no folder listing)', async () => {
+  imap.folders = [
+    { path: 'INBOX',   name: 'INBOX',   delimiter: '/', flags: new Set() },
+    { path: 'Archive', name: 'Archive', delimiter: '/', flags: new Set() },
+  ]
+  imap.searchByFolder = { Archive: [12] }
+  const mid = encodeURIComponent('<abc@ex.com>')
+  expect((await request(app).get(`${API}/locate?messageId=${mid}&folder=INBOX&scope=hint`).set(AUTH)).status).toBe(404)
+  expect(calls('lock').map(c => c[1])).toEqual(['INBOX'])
+
+  imap.searchByFolder = { INBOX: [3] }
+  const res = await request(app).get(`${API}/locate?messageId=${mid}&scope=hint`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body).toEqual({ folder: 'INBOX', uid: '3' })
+})
+
+test('MVA-27 GET message/:uid/source — raw source as plain text in the given folder; 404 / 400', async () => {
+  const raw = 'Subject: Hi\r\nMessage-ID: <s@ex.com>\r\n\r\n<script>alert(1)</script>\r\n'
+  imap.messages = [{ ..._msg(8), source: Buffer.from(raw) }]
+  const res = await request(app).get(`${API}/message/8/source?folder=Projects`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.headers['content-type']).toMatch(/^text\/plain/)
+  expect(res.headers['x-content-type-options']).toBe('nosniff')
+  expect(res.text).toBe(raw)
+  expect(calls('lock')[0][1]).toBe('Projects')
+  expect((await request(app).get(`${API}/message/99/source`).set(AUTH)).status).toBe(404)
+  expect((await request(app).get(`${API}/message/abc/source`).set(AUTH)).status).toBe(400)
 })

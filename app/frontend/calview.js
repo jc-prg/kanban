@@ -33,6 +33,8 @@ let _cvDayListDay = null;           // day shown in the phone day overview (Date
 
 // Phones: same condition as the phone layout in calview.css
 const _CV_PHONE_MQ   = '(max-width: 639px), (max-height: 500px)';
+// Narrow phones (portrait): month dots of a day sit side by side — same condition as the compact month in calview.css
+const _CV_NARROW_MQ  = '(max-width: 639px)';
 const _CV_DBL_TAP_MS = 300;         // second tap on the same day within this time = double tap
 
 // ---- Pure date helpers (unit-tested) ----
@@ -238,6 +240,10 @@ function _cvDayListTime(ev, day) {
 
 function _cvIsPhone() {
   return !!window.matchMedia?.(_CV_PHONE_MQ).matches;
+}
+
+function _cvIsNarrow() {
+  return !!window.matchMedia?.(_CV_NARROW_MQ).matches;
 }
 
 // ---- Open / close / URL state ----
@@ -704,12 +710,23 @@ function _cvWeekHtml(range) {
   </div>`;
 }
 
+/** One month entry (bar segment or dot); `place` = grid placement, empty inside a .cv-month-dots row. */
+function _cvMonthEvHtml(item, from, to, place = '') {
+  const { ev } = item;
+  const cls = `cv-ev cv-month-ev${item.bar ? ' cv-month-bar' : ''}${_cvEditable(ev) ? '' : ' cv-readonly'}`
+    + `${item.bar && item.contLeft && from === 0 ? ' cv-cont-left' : ''}${item.bar && item.contRight && to === 7 ? ' cv-cont-right' : ''}`;
+  const time = item.bar ? '' : `<span class="cv-ev-time">${escHtml(_cvTimeLabel(ev._s < item.day ? item.day : ev._s))}</span>`;
+  return `<div class="${cls}" ${_cvEvAttrs(ev)} title="${escHtml(_cvTooltip(ev))}"
+    style="${place}${_cvColorCss(ev)}">${time}<span class="cv-ev-title">${escHtml(ev.title)}</span></div>`;
+}
+
 function _cvMonthHtml(range) {
   const today   = _cvYmd(new Date());
   const month   = _cvAnchor.getMonth();
   // Bars first, then by start — _cvLaneBars' sort is stable, so this order breaks its ties
   const evs     = _cvVisibleEvents().sort((a, b) =>
     (_cvIsBar(b) - _cvIsBar(a)) || (a._s - b._s) || (a.title || '').localeCompare(b.title || ''));
+  const narrow  = _cvIsNarrow();
   const wdHead  = Array.from({ length: 7 }, (_, i) =>
     `<div class="cv-month-wd">${escHtml(_cvAddDays(range.start, i).toLocaleDateString([], { weekday: 'short' }))}</div>`).join('');
 
@@ -731,8 +748,11 @@ function _cvMonthHtml(range) {
         days.forEach((d, i) => { if (ev._s < _cvAddDays(d, 1) && ev._e > d) items.push({ ev, bar: false, from: i, to: i + 1, day: d }); });
       }
     }
-    _cvLaneBars(items);
-    const { segs, more, limit } = _cvClipLanes(items, 7, _cvMonthLanes);
+    // Narrow phones: only bars take lanes (one lane kept free); each day's dots share one wrapping row below them
+    const laned = narrow ? items.filter(it => it.bar) : items;
+    const dots  = narrow ? items.filter(it => !it.bar) : [];
+    _cvLaneBars(laned);
+    const { segs, more, limit } = _cvClipLanes(laned, 7, narrow ? Math.max(1, _cvMonthLanes - 1) : _cvMonthLanes);
 
     const cells = days.map((d, i) => {
       const ymd = _cvYmd(d);
@@ -742,23 +762,24 @@ function _cvMonthHtml(range) {
           ? `<button class="cv-month-cw" data-cv-goto="${ymd}" title="Show week">CW ${_cvIsoWeek(d)}</button>` : ''}</div>`;
     }).join('');
 
-    const evHtml = segs.map(({ item, from, to }) => {
-      const { ev } = item;
-      const cls = `cv-ev cv-month-ev${item.bar ? ' cv-month-bar' : ''}${_cvEditable(ev) ? '' : ' cv-readonly'}`
-        + `${item.bar && item.contLeft && from === 0 ? ' cv-cont-left' : ''}${item.bar && item.contRight && to === 7 ? ' cv-cont-right' : ''}`;
-      const time = item.bar ? '' : `<span class="cv-ev-time">${escHtml(_cvTimeLabel(ev._s < item.day ? item.day : ev._s))}</span>`;
-      return `<div class="${cls}" ${_cvEvAttrs(ev)} title="${escHtml(_cvTooltip(ev))}"
-        style="grid-column:${from + 1}/${to + 1};grid-row:${item.lane + 2};${_cvColorCss(ev)}">${time}<span class="cv-ev-title">${escHtml(ev.title)}</span></div>`;
-    }).join('');
+    const evHtml = segs.map(({ item, from, to }) =>
+      _cvMonthEvHtml(item, from, to, `grid-column:${from + 1}/${to + 1};grid-row:${item.lane + 2};`)).join('');
 
-    const moreHtml = more.map((n, i) => n
-      ? `<button class="cv-month-more" data-cv-goto="${_cvYmd(days[i])}" style="grid-column:${i + 1};grid-row:${limit[i] + 2}">+${n} more</button>`
-      : '').join('');
+    const moreBtn  = (n, i, style = '') =>
+      `<button class="cv-month-more" data-cv-goto="${_cvYmd(days[i])}"${style}>+${n} more</button>`;
+    const moreHtml = narrow
+      ? days.map((d, i) => {
+          const dayDots = dots.filter(it => it.from === i).map(item => _cvMonthEvHtml(item, i, i + 1)).join('');
+          if (!dayDots && !more[i]) return '';
+          const row = segs.reduce((r, sg) => sg.from <= i && i < sg.to ? Math.max(r, sg.item.lane + 1) : r, 0);
+          return `<div class="cv-month-dots" style="grid-column:${i + 1};grid-row:${row + 2}/-1">${dayDots}${more[i] ? moreBtn(more[i], i) : ''}</div>`;
+        }).join('')
+      : more.map((n, i) => n ? moreBtn(n, i, ` style="grid-column:${i + 1};grid-row:${limit[i] + 2}"`) : '').join('');
 
     return `<div class="cv-month-week">${cells}${evHtml}${moreHtml}</div>`;
   }).join('');
 
-  return `<div class="cv-month" style="--cv-weeks:${range.days / 7};--cv-lanes:${_cvMonthLanes}">
+  return `<div class="cv-month${narrow ? ' cv-month--narrow' : ''}" style="--cv-weeks:${range.days / 7};--cv-lanes:${_cvMonthLanes}">
     <div class="cv-month-head">${wdHead}</div>
     <div class="cv-month-grid">${weeks}</div>
   </div>`;
@@ -1098,7 +1119,10 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', () => {
     if (!_cvIsOpen() || _cvMode !== 'month' || _cvDrag) return;
     cancelAnimationFrame(resizeFrame);
-    resizeFrame = requestAnimationFrame(() => { if (_cvFitMonthLanes() !== _cvMonthLanes) _cvRender(); });
+    resizeFrame = requestAnimationFrame(() => {
+      const narrowChanged = !!document.querySelector('#calViewBody .cv-month--narrow') !== _cvIsNarrow();
+      if (narrowChanged || _cvFitMonthLanes() !== _cvMonthLanes) _cvRender();
+    });
   });
 
   window.addEventListener('popstate', () => {

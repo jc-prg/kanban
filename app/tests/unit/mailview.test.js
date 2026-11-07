@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view unit tests — MV-1 … MV-12
+ * Mail view unit tests — MV-1 … MV-13
  *
  * mailview.js is loaded via vm.runInContext with minimal browser-global stubs.
  * Only the pure helpers are exercised (folder tree, addresses, reply fields, URL state).
@@ -164,4 +164,69 @@ test('MV-12 _mvRangeIds — inclusive range in list order, either direction', ()
   expect(plain(ctx._mvRangeIds(ids, '7', '7'))).toEqual(['7'])
   expect(plain(ctx._mvRangeIds(ids, 'gone', '6'))).toEqual(['6'])
   expect(plain(ctx._mvRangeIds(ids, '8', 'gone'))).toEqual([])
+})
+
+describe('MV-13 _mvOpenByMessageId — hint folder first, then a cancellable search of all folders', () => {
+  // Fresh context: the navigation helpers are replaced with recorders
+  function load(responses) {
+    const noop = () => {}
+    const log = { urls: [], progress: [], closed: 0, messages: [], selected: [], opened: [] }
+    let cancel
+    const c = vm.createContext({
+      document: { addEventListener: noop, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
+      window:   { addEventListener: noop, location: { href: 'http://x/focus', search: '' } },
+      history:  { pushState: noop, replaceState: noop, back: noop },
+      localStorage: { getItem: () => null, setItem: noop },
+      Intl, Date, Math, JSON, Object, Array, String, Number, Set, Map, URL, URLSearchParams, Promise, Error, AbortController,
+      setTimeout: noop, clearTimeout: noop,
+      fetch: async (url, opts) => {
+        log.urls.push(url)
+        const r = responses.shift()
+        if (r === 'hang') return new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(new Error('aborted'))))
+        return { ok: r.status === 200, status: r.status, json: async () => r.body }
+      },
+      showProgress: msg => { log.progress.push(msg); return { cancelled: new Promise(res => { cancel = res }), close: () => { log.closed++ } } },
+      showMessage:  msg => { log.messages.push(msg) },
+    })
+    vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'mailview.js'), 'utf8'), c)
+    vm.runInContext(`_mvIsOpen = () => true; _mvAccountId = 'a1'; _mvFolder = 'INBOX';
+      _mvSelectFolder = (acc, f) => { __log.selected.push(f); _mvFolder = f; };
+      _mvOpenMessage  = uid => { __log.opened.push(uid); };`, Object.assign(c, { __log: log }))
+    return { c, log, cancel: () => cancel() }
+  }
+
+  test('found in the hint folder — no dialog', async () => {
+    const { c, log } = load([{ status: 200, body: { folder: 'INBOX', uid: '5' } }])
+    await c._mvOpenByMessageId('a1', '<m@x>', 'INBOX')
+    expect(log.urls[0]).toContain('scope=hint')
+    expect(log.progress).toEqual([])
+    expect(log.opened).toEqual(['5'])
+  })
+
+  test('moved — progress dialog, full search, opens the new folder', async () => {
+    const { c, log } = load([{ status: 404, body: { error: 'Message not found (deleted?)' } }, { status: 200, body: { folder: 'INBOX.Sub', uid: '9' } }])
+    await c._mvOpenByMessageId('a1', '<m@x>', 'INBOX')
+    expect(log.urls[1]).not.toContain('scope=')
+    expect(log.progress).toHaveLength(1)
+    expect(log.closed).toBe(1)
+    expect(log.selected).toEqual(['INBOX.Sub'])
+    expect(log.opened).toEqual(['9'])
+  })
+
+  test('not found anywhere — information dialog', async () => {
+    const { c, log } = load([{ status: 404, body: { error: 'Message not found (deleted?)' } }, { status: 404, body: { error: 'Message not found (deleted?)' } }])
+    await c._mvOpenByMessageId('a1', '<m@x>', 'INBOX')
+    expect(log.messages[0]).toMatch(/could not be found/)
+    expect(log.opened).toEqual([])
+  })
+
+  test('cancelled — search aborted, nothing opened, no message', async () => {
+    const { c, log, cancel } = load([{ status: 404, body: { error: 'Message not found (deleted?)' } }, 'hang'])
+    const p = c._mvOpenByMessageId('a1', '<m@x>', 'INBOX')
+    await new Promise(r => setImmediate(r))
+    cancel()
+    await p
+    expect(log.messages).toEqual([])
+    expect(log.opened).toEqual([])
+  })
 })

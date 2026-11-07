@@ -799,6 +799,10 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
           <strong>${escHtml(cs.board || '(no board)')}</strong>
           <span class="settings-item-desc">${escHtml((cs.columns || []).join(', ') || 'all columns')}</span>
         </div>
+        <label class="settings-toggle" title="Initially opened">
+          <input type="checkbox" data-cs-open="${i}"${cs.collapsed ? '' : ' checked'}>
+          <span class="settings-toggle-track"></span>
+        </label>
         <div class="calendar-account-actions">
           <button class="btn btn--icon" data-cs-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
           <button class="btn btn--icon" data-cs-del="${i}" title="Delete">${_svgDelete()}</button>
@@ -807,6 +811,13 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
 
     list.querySelectorAll('[data-cs-edit]').forEach(btn => {
       btn.addEventListener('click', () => _openCsForm(parseInt(btn.dataset.csEdit, 10)));
+    });
+    list.querySelectorAll('[data-cs-open]').forEach(chk => {
+      chk.addEventListener('change', () => {
+        const cs = _cardSources[parseInt(chk.dataset.csOpen, 10)];
+        if (chk.checked) delete cs.collapsed; else cs.collapsed = true;
+        _saveCardSourcesConfig();
+      });
     });
     list.querySelectorAll('[data-cs-del]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -868,7 +879,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     _csEditIdx = idx;
     const cs = idx >= 0 ? _cardSources[idx] : {};
     document.getElementById('csEditId').value = cs.id || '';
-    document.getElementById('csCollapsed').checked = !!cs.collapsed;
+    document.getElementById('csOpened').checked = !cs.collapsed;
     document.getElementById('cardSourcesForm').style.display = '';
 
     // Populate board select
@@ -1003,7 +1014,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     if (!board) return;
     const colVal  = document.getElementById('csColumn').value;
     const columns = colVal ? [colVal] : [];
-    const collapsed = document.getElementById('csCollapsed').checked;
+    const collapsed = !document.getElementById('csOpened').checked;
     const cs = { id, board, columns, ...(collapsed ? { collapsed: true } : {}) };
     if (_csEditIdx >= 0) {
       _cardSources[_csEditIdx] = cs;

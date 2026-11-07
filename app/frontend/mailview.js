@@ -29,6 +29,7 @@ let _mvMsg         = null;        // full selected message
 let _mvCollapsed   = _mvLoadCollapsed();
 let _mvPushed      = false;       // true when open() pushed a history entry
 let _mvListSeq     = 0;           // discards responses of superseded list loads
+let _mvPlain       = false;       // open message shown as plain text (HTML is the default)
 let _mvMsgSeq      = 0;
 let _mvCompose     = null;        // { files: [File], reply: { uid, folder } | null, dirty }
 let _mvDashStale   = false;       // something changed → reload the dashboard mail panel on close
@@ -305,15 +306,37 @@ function openMailViewMessage(accountId, messageId, folderHint) {
   _mvOpenByMessageId(accountId, messageId, folderHint);
 }
 
-/** Locate a message by Message-ID (it may have been moved), switch to its folder and open it. */
+/**
+ * Locate a message by Message-ID, switch to its folder and open it. The hint folder is
+ * checked first; if the mail was moved, all folders are searched behind a cancellable dialog.
+ */
 async function _mvOpenByMessageId(accountId, messageId, folderHint) {
-  let found;
+  const locate = (scope, signal) => {
+    const qs = new URLSearchParams({ messageId, ...(folderHint ? { folder: folderHint } : {}), ...(scope ? { scope } : {}) });
+    return _mvJson(_mvApi(accountId, `/locate?${qs}`), signal ? { signal } : undefined);
+  };
+  let found = null;
   try {
-    const qs = new URLSearchParams({ messageId, ...(folderHint ? { folder: folderHint } : {}) });
-    found = await _mvJson(_mvApi(accountId, `/locate?${qs}`));
+    found = await locate('hint');
   } catch (err) {
-    _mvFlash(`Mail not found: ${err.message}`, true);
-    return;
+    if (!/not found/i.test(err.message)) { showMessage(`Could not open the mail: ${err.message}`); return; }
+  }
+  if (!found) {
+    if (!_mvIsOpen()) return;
+    const ctrl = new AbortController();
+    const dlg  = showProgress(`The mail is no longer in "${folderHint || 'INBOX'}" — searching all folders…`);
+    dlg.cancelled.then(() => ctrl.abort());
+    try {
+      found = await locate('', ctrl.signal);
+    } catch (err) {
+      if (ctrl.signal.aborted) return;
+      dlg.close();
+      showMessage(/not found/i.test(err.message)
+        ? 'The mail could not be found in any folder. It may have been deleted.'
+        : `Could not search for the mail: ${err.message}`);
+      return;
+    }
+    dlg.close();
   }
   if (!_mvIsOpen()) return;
   if (found.folder !== _mvFolder || accountId !== _mvAccountId) _mvSelectFolder(accountId, found.folder);
@@ -511,6 +534,7 @@ async function _mvOpenMessage(id) {
   _mvCompose = null;
   _mvSelId = id;
   _mvMsg   = null;
+  _mvPlain = false;
   _mvChecked = new Set([id]);
   _mvAnchor  = id;
   _mvRenderListSelection();
@@ -762,17 +786,20 @@ async function _mvFetchAttachment(att) {
   return r;
 }
 
+function _mvSaveBlob(blob, name) {
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = u;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 5000);
+}
+
 async function _mvDownloadAttachment(att) {
   try {
-    const blob = await (await _mvFetchAttachment(att)).blob();
-    const u = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = u;
-    a.download = att.name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(u), 5000);
+    _mvSaveBlob(await (await _mvFetchAttachment(att)).blob(), att.name);
   } catch (err) {
     _mvFlash(`Download failed: ${err.message}`, true);
   }
@@ -796,6 +823,50 @@ function _mvOpenAttachment(att) {
   if (action === 'view')     openAttachmentViewer(_mvAttachmentUrl(att), att.name, ft);
   else if (action === 'tab') _mvOpenHtmlAttachment(att);
   else                       _mvDownloadAttachment(att);
+}
+
+/** Switch the open message between its HTML and plain-text version. */
+function _mvToggleFormat() {
+  const body = document.querySelector('#mailViewReader .mv-reader-body');
+  if (!_mvMsg || !body) return;
+  _mvPlain = !_mvPlain;
+  body.replaceChildren();
+  _renderMailBody(body, _mvMsg, { plain: _mvPlain, toggle: false });
+  _mvRenderReaderActions();
+}
+
+const _MV_SOURCE_MAX = 2 * 1024 * 1024;   // characters shown; the download always has everything
+
+/** Raw source of the open message in the attachment viewer (plain text, downloadable as .eml). */
+async function _mvOpenSource() {
+  const msg = _mvMsg;
+  const viewer  = document.getElementById('attachViewer');
+  const content = document.getElementById('attachViewerContent');
+  if (!msg || !viewer || !content) return;
+  _wireFallbackViewer();
+  const name = `${(msg.subject || 'message').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 100)}.eml`;
+  document.getElementById('attachViewerName').textContent = `Source: ${msg.subject || '(no subject)'}`;
+  content.innerHTML = '<span class="note-attach-empty">Loading\u2026</span>';
+  viewer.style.display = 'flex';
+  let blob;
+  try {
+    const r = await fetch(_mvApi(_mvAccountId, `/message/${encodeURIComponent(msg.id)}/source?${_mvFolderQs()}`));
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    blob = await r.blob();
+  } catch (err) {
+    content.innerHTML = `<span class="note-attach-empty">Failed to load the source (${escHtml(err.message)})</span>`;
+    return;
+  }
+  const text = await blob.text();
+  const pre = document.createElement('pre');
+  pre.className = 'mv-source';
+  pre.textContent = text.length > _MV_SOURCE_MAX
+    ? `${text.slice(0, _MV_SOURCE_MAX)}\n\n[\u2026 truncated — download to see all ${_mvFmtSize(blob.size)}]`
+    : text;
+  content.innerHTML = '';
+  content.appendChild(pre);
+  document.getElementById('attachViewerDl').onclick = () =>
+    _mvSaveBlob(new Blob([blob], { type: 'message/rfc822' }), name);
 }
 
 function _mvAttachmentUrl(att) {
@@ -1184,6 +1255,8 @@ function _mvRenderReaderActions() {
     unread ? btn('unread', SVGICONS.markRead, 'Mark read', { key: 'u' }) : btn('unread', SVGICONS.markUnread, 'Mark unread', { key: 'u' }),
     btn('move',     SVGICONS.moveTo,   'Move'),
     btn('delete',   SVGICONS.delete,   'Delete',    { key: 'Del', cls: ' btn-danger-soft' }),
+    `<button class="btn btn--icon mv-source-btn" data-mv-act="source" title="Show source" aria-label="Show source">${SVGICONS.cardInfo(12, 12)}</button>`,
+    _mailHasBothParts(_mvMsg) ? (t => `<button class="btn mv-format-btn" data-mv-act="format" title="${t.title}" aria-label="${t.title}" aria-pressed="${_mvPlain}">${escHtml(t.label)}</button>`)(_mailFormatToggle(_mvPlain)) : '',
   ].join('');
 }
 
@@ -1226,7 +1299,7 @@ function _mvRenderReader(mode, error) {
     <div class="mv-reader-body"></div>`;
   _mvRenderReaderActions();
   _resolveLinkedCardLinks(el.querySelector('.mv-headers'));
-  _renderMailBody(el.querySelector('.mv-reader-body'), msg);
+  _renderMailBody(el.querySelector('.mv-reader-body'), msg, { plain: _mvPlain, toggle: false });
 }
 
 // ---- Compose ----
@@ -1612,6 +1685,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (act.dataset.mvAct === 'unread')   _mvSetUnread([id], !_mvMsgs.find(m => m.id === id)?.unread);
       if (act.dataset.mvAct === 'move')     _mvPickAndMoveMessages([id]);
       if (act.dataset.mvAct === 'delete')   _mvDeleteMessages([id]);
+      if (act.dataset.mvAct === 'source')   _mvOpenSource();
+      if (act.dataset.mvAct === 'format')   _mvToggleFormat();
       return;
     }
     const view = e.target.closest('[data-mv-att-view]');

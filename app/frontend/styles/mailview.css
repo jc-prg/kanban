@@ -263,6 +263,27 @@ body.mailview-open header { z-index: 96; }
 .mv-reader-actions .btn { padding: 5px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 5px; }
 .mv-reader-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger-soft:hover { border-color: var(--danger); color: var(--danger); }
+.mv-reader-actions .mv-source-btn { padding: 5px 7px; }
+.mv-reader-actions .mv-format-btn { font-family: 'DM Mono', monospace; min-width: 3.2em; justify-content: center; }
+
+/* Raw message source in the attachment viewer */
+.mv-source {
+  align-self: stretch;
+  width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
 .mv-headers { margin-bottom: 8px; }
 .mv-atts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
 .mv-att {

@@ -340,11 +340,10 @@ function _closeFallbackViewer() {
 }
 
 /** Images and PDFs in #attachViewer; other types are downloaded. */
-async function openAttachmentViewer(url, name, type) {
-  const viewer  = document.getElementById('attachViewer');
-  const content = document.getElementById('attachViewerContent');
-  if (!viewer || !content) return;
-  if (!viewer.dataset.fallbackWired) {
+/** Wire close button, backdrop click and Escape of the fallback viewer once (also used by the mail source view). */
+function _wireFallbackViewer() {
+  const viewer = document.getElementById('attachViewer');
+  if (viewer && !viewer.dataset.fallbackWired) {
     viewer.dataset.fallbackWired = '1';
     document.getElementById('attachViewerClose')?.addEventListener('click', _closeFallbackViewer);
     viewer.addEventListener('click', e => { if (e.target === viewer) _closeFallbackViewer(); });
@@ -356,6 +355,13 @@ async function openAttachmentViewer(url, name, type) {
       _closeFallbackViewer();
     }, true);
   }
+}
+
+async function openAttachmentViewer(url, name, type) {
+  const viewer  = document.getElementById('attachViewer');
+  const content = document.getElementById('attachViewerContent');
+  if (!viewer || !content) return;
+  _wireFallbackViewer();
   const isImage = ['image', 'svg', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(type);
   if (!isImage && type !== 'pdf') { _downloadAttachment(url, name); return; }
   document.getElementById('attachViewerName').textContent = name;

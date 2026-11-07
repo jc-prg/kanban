@@ -501,4 +501,38 @@ body.calview-open header { z-index: 96; }
   .cv-month-ev .cv-ev-time, .cv-month-ev .cv-ev-title { display: none; }
   .cv-month-ev:not(.cv-month-bar) { padding: 1px 2px; }
   .cv-month-bar { height: 6px; padding: 0; }
+  /* Month ends 100px above the bottom edge (room for the floating nav) */
+  .cv-month { padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+  /* Dots of a day side by side, wrapping onto further lines */
+  .cv-month-dots {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    margin: 0 3px;
+    overflow: hidden;
+  }
+  .cv-month-dots .cv-month-ev { margin: 0; }
+  .cv-month-dots .cv-month-more { margin: 0; padding: 0 2px; }
+}
+
+/* Phones in landscape: too little height for a floating nav — Prev / Today / Next sit in the bar after the burger menu */
+@media (max-height: 500px) and (orientation: landscape) {
+  .calview-nav {
+    position: static;
+    order: -1;               /* right after the burger (order -2), before the title */
+    transform: none;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  .calview-menu-btn { order: -2; }
+  .calview-nav .btn { border-radius: 8px; }   /* .btn default */
+  .cv-scroll { padding-bottom: 0; }
+  .cv-month { padding-bottom: 0; }
 }

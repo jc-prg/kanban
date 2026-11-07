@@ -1057,6 +1057,12 @@ function _renderCardsPanel(groups) {
       if (card.hasLinkedNotes) {
         metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
       }
+      if (card.hasMailRef) {
+        metaParts.push(`<span class="card-mail-badge" title="Linked mail">${SVGICONS.email(11, 11)}</span>`);
+      }
+      if (card.hasCalEvent) {
+        metaParts.push(`<span class="card-cal-badge" title="Linked calendar event">${SVGICONS.date(10, 10)}</span>`);
+      }
       if (card.startDate || card.endDate) {
         const cls = 'card-date' + (isOverdue ? ' card-date--overdue' : isWarning ? ' card-date--warning' : '');
         if (card.startDate && card.endDate)
@@ -1279,8 +1285,27 @@ function _openMailDetail(accountId, msgId, webUrl) {
  * (DOMPurify-sanitised, no scripts), plain text in a <pre>.
  * Used by the dashboard detail panel and the mail view.
  */
-function _renderMailBody(container, msg) {
-  if (msg.bodyHtml) {
+function _renderMailBody(container, msg, { plain = false, toggle = true } = {}) {
+  // Both versions present: own TXT ⇄ </> toggle above the body (the mail view puts it in its toolbar)
+  if (toggle && _mailHasBothParts(msg)) {
+    const btn    = document.createElement('button');
+    btn.type      = 'button';
+    btn.className = 'btn mail-format-toggle';
+    const holder = document.createElement('div');
+    const show = () => {
+      holder.replaceChildren();
+      _renderMailBody(holder, msg, { plain, toggle: false });
+      const t = _mailFormatToggle(plain);
+      btn.textContent = t.label;
+      btn.title       = t.title;
+      btn.setAttribute('aria-pressed', String(plain));
+    };
+    btn.addEventListener('click', () => { plain = !plain; show(); });
+    container.append(btn, holder);
+    show();
+    return;
+  }
+  if (msg.bodyHtml && !(plain && msg.body)) {
     const iframe = document.createElement('iframe');
     iframe.className = 'dashboard-mail-iframe';
     // allow-same-origin lets us write content and read scrollHeight;
@@ -1313,6 +1338,18 @@ function _renderMailBody(container, msg) {
     pre.textContent = msg.body;
     container.appendChild(pre);
   }
+}
+
+/** True when a mail has both an HTML and a non-empty plain-text part. */
+function _mailHasBothParts(msg) {
+  return !!(msg?.bodyHtml && msg.body && msg.body.trim());
+}
+
+/** Label / tooltip of the format toggle: shows the version a click switches to. */
+function _mailFormatToggle(plain) {
+  return plain
+    ? { label: '</>', title: 'Show HTML version' }
+    : { label: 'TXT', title: 'Show plain-text version' };
 }
 
 function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
