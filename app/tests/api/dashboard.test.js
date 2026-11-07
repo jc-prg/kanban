@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Dashboard API tests — section DB-1 … DB-46 + DB-13..DB-20 (mail)
+ * Dashboard API tests — section DB-1 … DB-49 + DB-13..DB-20 (mail)
  *
  * global-db is injected into require.cache before createApp loads any routes.
  * The db mock's mockCouch.use() returns a per-name board document so card-source
@@ -907,4 +907,50 @@ test('DB-46 board schema — card.mailRef accepted, malformed mailRef rejected',
   expect(validateBoard(board({ accountId: 'ma-1', messageId: '<a@b>', folder: 'Archive', subject: 'Hi' }))).toBe(true)
   expect(validateBoard(board({ accountId: 'ma-1' }))).toBe(false)
   expect(validateBoard(board({ accountId: 'ma-1', messageId: '<a@b>', uid: 7 }))).toBe(false)
+})
+
+// Series edits: master with TZID (Europe/Berlin) — patchMasterIcs must accept both the dialog's
+// wall-clock times and the calendar view's UTC instants
+function _tzSeriesIcs() {
+  return [
+    'BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:uid-tz@ex',
+    'DTSTART;TZID=Europe/Berlin:20260120T183000', 'DTEND;TZID=Europe/Berlin:20260120T193000',
+    'SUMMARY:Weekly', 'RRULE:FREQ=WEEKLY',
+    'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n')
+}
+
+test('DB-47 patchMasterIcs — dialog wall-clock times + UNTIL on a TZID series (was: invalid date-time value)', () => {
+  const { patchMasterIcs } = require('../../backend/dashboard/calendar')
+  const out = patchMasterIcs(_tzSeriesIcs(), {
+    title: 'Weekly', allDay: false, timezone: 'Europe/Berlin',
+    start: '2026-01-20T18:30:00', end: '2026-01-20T19:30:00',
+    rrule: 'FREQ=WEEKLY;UNTIL=20260830T235959Z',
+  })
+  expect(out).toMatch(/DTSTART;TZID=Europe\/Berlin:20260120T183000/)
+  expect(out).toMatch(/DTEND;TZID=Europe\/Berlin:20260120T193000/)
+  expect(out).toMatch(/RRULE:FREQ=WEEKLY;UNTIL=20260830T235959Z/)
+})
+
+test('DB-48 patchMasterIcs — UTC instants (calendar-view drag) converted into the master timezone', () => {
+  const { patchMasterIcs } = require('../../backend/dashboard/calendar')
+  const out = patchMasterIcs(_tzSeriesIcs(), {
+    title: 'Weekly', allDay: false, timezone: 'Europe/Berlin',
+    start: '2026-01-21T16:30:00.000Z', end: '2026-01-21T17:30:00.000Z',
+  })
+  expect(out).toMatch(/DTSTART;TZID=Europe\/Berlin:20260121T173000/)
+  expect(out).toMatch(/DTEND;TZID=Europe\/Berlin:20260121T183000/)
+})
+
+test('DB-49 patchMasterIcs — UTC series edited with a dialog timezone gets TZID + VTIMEZONE', () => {
+  const { patchMasterIcs } = require('../../backend/dashboard/calendar')
+  const master = makeIcs('uid-utc@ex', '20260120T173000Z', '20260120T183000Z', 'Weekly', 'RRULE:FREQ=WEEKLY;COUNT=3')
+  const out = patchMasterIcs(master, {
+    title: 'Weekly', allDay: false, timezone: 'Europe/Berlin',
+    start: '2026-01-20T19:00:00', end: '2026-01-20T20:00:00',
+  })
+  expect(out).toMatch(/DTSTART;TZID=Europe\/Berlin:20260120T190000/)
+  expect(out).toMatch(/BEGIN:VTIMEZONE[\s\S]*TZID:Europe\/Berlin/)
+  expect(out.match(/BEGIN:VTIMEZONE/g)).toHaveLength(1)
 })

@@ -961,24 +961,32 @@ function patchMasterIcs(masterIcs, event) {
       if (dtStartProp) dtStartProp.setValue(sDate); else master.addPropertyWithValue('dtstart', sDate);
       if (dtEndProp)   dtEndProp.setValue(eDate);   else master.addPropertyWithValue('dtend',   eDate);
     } else {
-      // Keep the master's timezone; fall back to the event timezone, then UTC
-      const tzid = masterTzid || timezone || null;
+      // start/end are either UTC instants ("…Z" — calendar-view drags; converted into the master's
+      // timezone) or wall-clock times in `timezone` (edit dialog; written as entered, in that zone)
+      const zoned = s => /(?:Z|[+-]\d{2}:?\d{2})$/.test(s);
+      const tzid  = (zoned(start) ? masterTzid || timezone : timezone || masterTzid) || null;
       if (tzid && tzid !== 'UTC') {
-        // Express new times as local-time in the master timezone
-        const sLocal = _fmtLocalInTz(start, tzid);
-        const eLocal = _fmtLocalInTz(end,   tzid);
-        // ICAL.Time.fromString on "YYYYMMDDTHHMMSS" → floating time (no Z)
-        const sTime  = ICAL.Time.fromString(sLocal);
-        const eTime  = ICAL.Time.fromString(eLocal);
+        // "YYYY-MM-DDTHH:MM:SS" — ICAL.Time.fromString does not accept the compact ICS form
+        const wall = s => zoned(s)
+          ? _fmtLocalInTz(s, tzid).replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3T$4:$5:$6')
+          : `${s.slice(0, 16)}:${s.slice(17, 19) || '00'}`;
+        const sTime = ICAL.Time.fromString(wall(start));
+        const eTime = ICAL.Time.fromString(wall(end));
         if (dtStartProp) { dtStartProp.setValue(sTime); dtStartProp.setParameter('tzid', tzid); }
         else { master.addPropertyWithValue('dtstart', sTime); master.getFirstProperty('dtstart').setParameter('tzid', tzid); }
         if (dtEndProp)   { dtEndProp.setValue(eTime);   dtEndProp.setParameter('tzid', tzid); }
         else { master.addPropertyWithValue('dtend', eTime);   master.getFirstProperty('dtend').setParameter('tzid', tzid); }
+        // Zone changed in the dialog → the calendar needs a VTIMEZONE for the new TZID
+        if (!vcal.getAllSubcomponents('vtimezone').some(c => c.getFirstPropertyValue('tzid') === tzid)) {
+          const vtz = _buildVTimezone(tzid);
+          if (vtz) vcal.addSubcomponent(new ICAL.Component(ICAL.parse(`BEGIN:VCALENDAR\r\n${vtz}\r\nEND:VCALENDAR`)).getFirstSubcomponent('vtimezone'));
+        }
       } else {
-        const sTime = ICAL.Time.fromJSDate(new Date(start), true);
-        const eTime = ICAL.Time.fromJSDate(new Date(end),   true);
-        if (dtStartProp) dtStartProp.setValue(sTime); else master.addPropertyWithValue('dtstart', sTime);
-        if (dtEndProp)   dtEndProp.setValue(eTime);   else master.addPropertyWithValue('dtend',   eTime);
+        const utc   = s => new Date(zoned(s) ? s : `${s}Z`);
+        const sTime = ICAL.Time.fromJSDate(utc(start), true);
+        const eTime = ICAL.Time.fromJSDate(utc(end),   true);
+        if (dtStartProp) { dtStartProp.setValue(sTime); dtStartProp.removeParameter('tzid'); } else master.addPropertyWithValue('dtstart', sTime);
+        if (dtEndProp)   { dtEndProp.setValue(eTime);   dtEndProp.removeParameter('tzid'); }   else master.addPropertyWithValue('dtend',   eTime);
       }
     }
   }
