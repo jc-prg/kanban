@@ -2076,15 +2076,7 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
 
   async function toggleBoardMenu(e) {
     e.preventDefault();
-    if (APP_PATH === '/focus') {
-      window.location.href = appUrl('/');
-      return;
-    }
-    if (menu.classList.contains('open')) {
-      menu.classList.remove('open');
-      btn.classList.remove('open');
-      return;
-    }
+    if (menu.classList.contains('open')) { closeBoardMenu(); return; }
     try {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
@@ -2101,12 +2093,11 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
     btn.classList.add('open');
   }
 
+  function closeBoardMenu() { menu.classList.remove('open'); btn.classList.remove('open'); }
+
   btn.addEventListener('click', toggleBoardMenu);
 
-  document.addEventListener('click', e => {
-    if (!wrap.contains(e.target)) {
-      menu.classList.remove('open');
-      btn.classList.remove('open');
-    }
-  });
+  // Capture phase: other menu buttons stop propagation, but opening their menu must close this one
+  document.addEventListener('click', e => { if (!wrap.contains(e.target)) closeBoardMenu(); }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBoardMenu(); });
 })();

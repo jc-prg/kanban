@@ -901,6 +901,9 @@ document.addEventListener('keydown', e => {
 
   btn.addEventListener('click', toggleMenu);
   document.addEventListener('click', closeMenu);
+  // Capture phase: other menu buttons (board switcher, panel / calendar menus) stop propagation —
+  // clicking one of them must still close this menu first
+  document.addEventListener('click', e => { if (!btn.contains(e.target) && !dropdown.contains(e.target)) closeMenu(); }, true);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
 
   document.getElementById('menuWebhook').addEventListener('click', async () => {
