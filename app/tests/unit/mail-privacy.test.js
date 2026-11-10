@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail privacy unit tests — MP-1 … MP-12, plus MP-A1 (header address links)
+ * Mail privacy unit tests — MP-1 … MP-13, plus MP-A1 (header address links)
  *
  * The "Privacy" section of frontend/dashboard.js (_mailPrivacyHtml & helpers) is
  * extracted by its comment markers and run with the real DOMPurify bundle in jsdom.
@@ -180,4 +180,51 @@ test('MP-A1 _foldAddresses — "Name, Firstname" (quoted or not) is one link to 
   expect(_foldAddresses('"Name, Firstname" <firstname.name@domain.com>')).toBe(link)
   expect(_foldAddresses('Name, Firstname <firstname.name@domain.com>')).toBe(link)   // unquoted (older server)
   expect(_foldAddresses('"Doe, Jane" <j@x.de>, bob@x.de')).toBe('<a href="mailto:j@x.de" title="j@x.de">Doe, Jane</a>, <a href="mailto:bob@x.de">bob@x.de</a>')
+})
+
+test('MP-13 image attachments — shown below the body only for trusted senders, follow trust changes', async () => {
+  const src = fs.readFileSync(path.join(FRONTEND, 'dashboard.js'), 'utf8')
+  const a = src.indexOf('// ---- Image attachments of trusted senders'), b = src.indexOf('/** True when a mail has both an HTML')
+  const fetched = []
+  const fetchMock = async url => {
+    fetched.push(url)
+    if (url.endsWith('bad')) return { ok: false, status: 404 }
+    return { ok: true, blob: async () => new Blob(['x'], { type: 'image/png' }) }
+  }
+  const URLshim = { createObjectURL: () => `blob:${fetched.length}`, revokeObjectURL: () => {} }
+  const G = new Function('DOMPurify', 'SVGICONS', 'fetch', 'escHtml', '_attachType', 'URL', `${src.slice(a, b)}
+    return { _mailAppendGallery, _mailSyncTrustedBadges, setTrusted: list => { _mailTrusted = new Set(list) } };`)(
+    null, {}, fetchMock, s => s, n => /\.(png|jpe?g|gif)$/i.test(n) ? 'image' : 'other', URLshim)
+  const flush = () => new Promise(r => setTimeout(r, 0))
+
+  const msg = { from: 'Shop <news@shop.com>', attachments: [
+    { name: 'photo.jpg', part: '2' }, { name: 'doc.pdf', part: '3' }, { name: 'scan.png', part: 'bad' },
+  ] }
+  const opened = []
+  const att = { url: x => `/att/${x.part}`, open: x => opened.push(x.name) }
+
+  G.setTrusted([])
+  const box = document.createElement('div'); document.body.appendChild(box)
+  G._mailAppendGallery(box, msg, att)
+  const gal = box.querySelector('.mail-att-gallery')
+  expect(gal.hidden).toBe(true)
+  expect(fetched).toEqual([])                       // untrusted: nothing fetched
+
+  G.setTrusted(['news@shop.com']); G._mailSyncTrustedBadges(); await flush()
+  expect(gal.hidden).toBe(false)
+  expect([...gal.querySelectorAll('figcaption')].map(f => f.textContent)).toEqual(['photo.jpg', 'scan.png — could not be loaded'])
+  expect(fetched).toEqual(['/att/2', '/att/bad'])   // only images, not the PDF
+  expect(gal.querySelector('img').getAttribute('src')).toMatch(/^blob:/)
+  gal.querySelector('.mail-att-img').click()
+  expect(opened).toEqual(['photo.jpg'])
+
+  G.setTrusted([]); G._mailSyncTrustedBadges()
+  expect(gal.hidden).toBe(true)
+  expect(gal.children).toHaveLength(0)
+
+  // No image attachments / no attachment handlers → no gallery at all
+  const box2 = document.createElement('div')
+  G._mailAppendGallery(box2, { from: 'a@b.c', attachments: [{ name: 'x.pdf', part: '2' }] }, att)
+  G._mailAppendGallery(box2, msg, null)
+  expect(box2.children).toHaveLength(0)
 })

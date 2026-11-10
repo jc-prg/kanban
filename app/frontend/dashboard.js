@@ -1344,7 +1344,11 @@ function _openMailDetail(accountId, msgId, webUrl) {
         });
       });
 
-      _renderMailBody(body, msg);
+      const attBase = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
+      _renderMailBody(body, msg, { attachments: {
+        url:  a => attBase + encodeURIComponent(a.part),
+        open: a => openAttachmentViewer(attBase + encodeURIComponent(a.part), a.name, 'image'),
+      } });
 
     })
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load message.</p>'; });
@@ -1355,7 +1359,7 @@ function _openMailDetail(accountId, msgId, webUrl) {
  * (DOMPurify-sanitised, no scripts), plain text in a <pre>.
  * Used by the dashboard detail panel and the mail view.
  */
-function _renderMailBody(container, msg, { plain = false, toggle = true } = {}) {
+function _renderMailBody(container, msg, { plain = false, toggle = true, attachments = null, gallery = true } = {}) {
   // Trusted-sender badge in the From row (rendered hidden; shown once the list is known)
   if (_mailTrusted) _mailSyncTrustedBadges();
   else _mailLoadTrusted().then(_mailSyncTrustedBadges);
@@ -1367,7 +1371,7 @@ function _renderMailBody(container, msg, { plain = false, toggle = true } = {}) 
     const holder = document.createElement('div');
     const show = () => {
       holder.replaceChildren();
-      _renderMailBody(holder, msg, { plain, toggle: false });
+      _renderMailBody(holder, msg, { plain, toggle: false, gallery: false });
       const t = _mailFormatToggle(plain);
       btn.textContent = t.label;
       btn.title       = t.title;
@@ -1376,6 +1380,7 @@ function _renderMailBody(container, msg, { plain = false, toggle = true } = {}) 
     btn.addEventListener('click', () => { plain = !plain; show(); });
     container.append(btn, holder);
     show();
+    if (gallery) _mailAppendGallery(container, msg, attachments);
     return;
   }
   if (msg.bodyHtml && !(plain && msg.body)) {
@@ -1390,6 +1395,76 @@ function _renderMailBody(container, msg, { plain = false, toggle = true } = {}) 
     pre.className = 'dashboard-mail-body';
     pre.textContent = msg.body;
     container.appendChild(pre);
+  }
+  if (gallery) _mailAppendGallery(container, msg, attachments);
+}
+
+// ---- Image attachments of trusted senders, shown below the body ----
+
+const _MAIL_GALLERY_MAX = 30;
+const _mailImgCache = new Map();   // attachment URL → object URL (oldest revoked beyond 60)
+
+function _mailImageAttachments(msg) {
+  return (msg?.attachments || []).filter(a => _attachType(a.name || '') === 'image' || /^image\//i.test(a.contentType || a.type || ''));
+}
+
+/**
+ * Add the (initially empty) gallery after the body. `attachments` = { url(att), open(att) } of the
+ * calling view; it fills itself once the sender is known to be trusted (see _mailRenderGallery).
+ */
+function _mailAppendGallery(container, msg, attachments) {
+  if (!attachments || !_mailImageAttachments(msg).length) return;
+  const el = document.createElement('div');
+  el.className = 'mail-att-gallery';
+  el.hidden = true;
+  el._mailGallery = { msg, attachments };
+  container.appendChild(el);
+  if (_mailTrusted) _mailRenderGallery(el);
+  else _mailLoadTrusted().then(() => _mailRenderGallery(el));
+}
+
+async function _mailImageUrl(url) {
+  if (_mailImgCache.has(url)) return _mailImgCache.get(url);
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const obj = URL.createObjectURL(await r.blob());
+  _mailImgCache.set(url, obj);
+  while (_mailImgCache.size > 60) {
+    const [oldest, oldObj] = _mailImgCache.entries().next().value;
+    URL.revokeObjectURL(oldObj);
+    _mailImgCache.delete(oldest);
+  }
+  return obj;
+}
+
+/** Show the images when the sender is trusted, hide them otherwise (re-run on every trust change). */
+function _mailRenderGallery(el) {
+  if (!el.isConnected || !el._mailGallery) return;
+  const { msg, attachments } = el._mailGallery;
+  const trusted = _mailSenderTrusted(msg);
+  if (el.dataset.trusted === String(trusted)) return;
+  el.dataset.trusted = String(trusted);
+  el.replaceChildren();
+  el.hidden = !trusted;
+  if (!trusted) return;
+  for (const att of _mailImageAttachments(msg).slice(0, _MAIL_GALLERY_MAX)) {
+    const fig = document.createElement('figure');
+    fig.className = 'mail-att-figure';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mail-att-img';
+    btn.title = `Open ${att.name}`;
+    const img = document.createElement('img');
+    img.alt = att.name || '';
+    btn.appendChild(img);
+    btn.addEventListener('click', () => attachments.open(att));
+    const cap = document.createElement('figcaption');
+    cap.textContent = att.name || '';
+    fig.append(btn, cap);
+    el.appendChild(fig);
+    _mailImageUrl(attachments.url(att))
+      .then(obj => { img.src = obj; })
+      .catch(() => { fig.classList.add('mail-att-failed'); cap.textContent = `${att.name} — could not be loaded`; });
   }
 }
 
@@ -1435,6 +1510,7 @@ function _mailSyncTrustedBadges() {
   document.querySelectorAll('.mail-trusted-badge[data-mail-sender]').forEach(el => {
     el.hidden = !_mailTrusted?.has(el.dataset.mailSender);
   });
+  document.querySelectorAll('.mail-att-gallery').forEach(_mailRenderGallery);   // image attachments follow the trust
 }
 
 /** Bare lower-case address of the first sender ("Name <a@b>" or "a@b"), '' if none. */

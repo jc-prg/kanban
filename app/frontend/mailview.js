@@ -893,7 +893,7 @@ function _mvToggleFormat() {
   if (!_mvMsg || !body) return;
   _mvPlain = !_mvPlain;
   body.replaceChildren();
-  _renderMailBody(body, _mvMsg, { plain: _mvPlain, toggle: false });
+  _renderMailBody(body, _mvMsg, { plain: _mvPlain, toggle: false, attachments: _MV_BODY_ATTACHMENTS });
   _mvRenderReaderActions();
 }
 
@@ -930,6 +930,9 @@ async function _mvOpenSource() {
   document.getElementById('attachViewerDl').onclick = () =>
     _mvSaveBlob(new Blob([blob], { type: 'message/rfc822' }), name);
 }
+
+// Image attachments below the body (trusted senders): fetched / opened like the attachment chips
+const _MV_BODY_ATTACHMENTS = { url: att => _mvAttachmentUrl(att), open: att => _mvOpenAttachment(att) };
 
 function _mvAttachmentUrl(att) {
   return _mvApi(_mvAccountId, `/message/${encodeURIComponent(_mvMsg.id)}/attachment/${encodeURIComponent(att.part)}?${_mvFolderQs()}`);
@@ -1494,7 +1497,7 @@ function _mvRenderReader(mode, error) {
     <div class="mv-reader-body"></div>`;
   _mvRenderReaderActions();
   _resolveLinkedCardLinks(el.querySelector('.mv-headers'));
-  _renderMailBody(el.querySelector('.mv-reader-body'), msg, { plain: _mvPlain, toggle: false });
+  _renderMailBody(el.querySelector('.mv-reader-body'), msg, { plain: _mvPlain, toggle: false, attachments: _MV_BODY_ATTACHMENTS });
 }
 
 // ---- Compose ----

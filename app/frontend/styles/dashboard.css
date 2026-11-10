@@ -452,6 +452,31 @@
   cursor: help;
 }
 .mail-trusted-badge[hidden] { display: none; }
+.mail-att-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.mail-att-gallery[hidden] { display: none; }
+.mail-att-figure { margin: 0; max-width: 100%; display: flex; flex-direction: column; gap: 4px; }
+.mail-att-img {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  overflow: hidden;
+  cursor: zoom-in;
+  min-width: 80px;
+  min-height: 60px;
+}
+.mail-att-img img { display: block; max-width: 100%; max-height: 420px; object-fit: contain; }
+.mail-att-img img:not([src]) { width: 160px; height: 100px; }
+.mail-att-figure figcaption { font-size: 0.72rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.mail-att-failed figcaption { color: var(--danger); }
 .mail-privacy-shield {
   display: inline-flex;
   color: #f59e0b;
