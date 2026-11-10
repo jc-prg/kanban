@@ -12,6 +12,7 @@ const DEFAULT_LAYOUTS = {
       { id: 'agenda',    col: 0, order: 0, size: '1/1' },
       { id: 'attention', col: 1, order: 0, size: 'container' },
       { id: 'weather',   col: 1, order: 1, size: 'container' },
+      { id: 'notes',     col: 1, order: 2, size: 'available' },
       { id: 'cvapp',     col: 2, order: 0, size: '1/2' },
       { id: 'progress',  col: 2, order: 1, size: 'container' },
       { id: 'boards',    col: 2, order: 2, size: 'container' },
@@ -26,6 +27,7 @@ const DEFAULT_LAYOUTS = {
       { id: 'cvapp',     col: 1, order: 2, size: '1/3' },
       { id: 'progress',  col: 1, order: 3, size: 'container' },
       { id: 'boards',    col: 1, order: 4, size: 'container' },
+      { id: 'notes',     col: 1, order: 5, size: 'available' },
     ],
   },
   sm: {
@@ -37,6 +39,7 @@ const DEFAULT_LAYOUTS = {
       { id: 'cvapp',     col: 0, order: 3, size: 'container' },
       { id: 'progress',  col: 0, order: 4, size: 'container' },
       { id: 'boards',    col: 0, order: 5, size: 'container' },
+      { id: 'notes',     col: 0, order: 6, size: 'container' },
     ],
   },
 };
@@ -45,6 +48,7 @@ function defaultTodayConfig() {
   return {
     showBar: true,
     refreshMinutes: 1,
+    disabled: [],
     widgets: {},
     layouts: JSON.parse(JSON.stringify(DEFAULT_LAYOUTS)),
   };

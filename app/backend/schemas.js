@@ -330,6 +330,7 @@ const validateTodayConfig = ajv.compile({
   properties: {
     showBar: { type: 'boolean' },
     refreshMinutes: { type: 'integer', minimum: 0, maximum: 60 },   // 0 = no automatic refresh
+    disabled: { type: 'array', maxItems: 50, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9-]{1,32}$' } },   // deactivated widgets
     widgets: {
       type: 'object',
       properties: {

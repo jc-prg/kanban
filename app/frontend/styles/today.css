@@ -327,6 +327,11 @@
   white-space: nowrap;
 }
 .today-cv-badge b { font-weight: 800; }
+.today-cv-filter { border: 1px solid transparent; cursor: pointer; font-family: inherit; line-height: inherit; transition: opacity 0.15s, border-color 0.15s; }
+.today-cv-filter:hover { border-color: currentColor; }
+.today-cv-filter--on { border-color: currentColor; }
+.today-cv-filter--off { opacity: 0.45; }
+.today-cv-filter--off:hover { opacity: 1; }
 /* Status label of each entry: subdued until the entry is hovered (the counters on top stay full) */
 .today-app-row .today-cv-badge { opacity: 0.6; transition: opacity 0.15s; }
 .today-app-row:hover .today-cv-badge { opacity: 1; }
@@ -393,6 +398,23 @@
 /* ---- Settings ---- */
 
 .settings-subtitle { margin: 18px 0 6px; font-weight: 600; font-size: 0.85rem; }
+
+/* Settings → Today → Widgets */
+.today-wlist { display: flex; flex-direction: column; }
+.today-wrow { border-top: 1px solid var(--border); padding: 8px 0; }
+.today-wrow:last-child { border-bottom: 1px solid var(--border); }
+.today-wrow-head { display: flex; align-items: center; gap: 10px; }
+.today-wrow-expand {
+  flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px;
+  background: none; border: none; padding: 2px 0; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.today-wrow-expand--none { cursor: default; padding-left: 18px; }   /* caret width + gap */
+.today-wrow-caret { flex: 0 0 10px; font-size: 0.7rem; transition: transform 0.15s; color: var(--text-muted); }
+.today-wrow--open .today-wrow-caret { transform: rotate(90deg); }
+.today-wrow-title { font-weight: 600; font-size: 0.85rem; }
+.today-wrow-desc { margin: 2px 0 0 18px; }
+.today-wrow--off .today-wrow-title, .today-wrow--off .today-wrow-desc { opacity: 0.5; }
+.today-wrow-body { margin: 10px 0 4px 18px; }
 .today-geo-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .today-geo-results .btn { font-size: 0.78rem; padding: 4px 10px; }
 
@@ -407,3 +429,36 @@
   .today-bar-weather { display: none; }
   .today-wx-hour { flex-basis: 40px; }
 }
+
+/* ---- Notes tile ---- */
+.today-notes-filter {
+  width: 100%; box-sizing: border-box; margin: 2px 0 8px; padding: 5px 10px;
+  font: inherit; font-size: 0.8rem; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+}
+.today-notes-filter:focus { outline: none; border-color: var(--accent); }
+.today-ntree { font-size: 0.82rem; }
+.today-ntree summary {
+  display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 5px;
+  cursor: pointer; list-style: none; min-width: 0;
+}
+.today-ntree summary::-webkit-details-marker { display: none; }
+.today-ntree summary::before {
+  content: '▸'; flex: 0 0 10px; font-size: 0.7rem; color: var(--text-muted); transition: transform 0.15s;
+}
+.today-ntree details[open] > summary::before { transform: rotate(90deg); }
+.today-ntree summary:hover, .today-npage:hover { background: color-mix(in srgb, var(--surface2) 70%, transparent); }
+.today-nboard > summary { font-weight: 600; }
+.today-nboard > summary .today-nlabel { flex: 0 1 auto; }
+.today-nboard > summary .today-ncount { margin-left: auto; }
+.today-ncloud { display: inline-flex; flex-shrink: 0; color: var(--text-muted); }
+.today-nfolder > summary svg { flex-shrink: 0; color: var(--text-muted); }
+.today-nchildren { padding-left: 14px; }
+.today-nlabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-ncount { font-family: var(--today-mono); font-size: 0.7rem; color: var(--text-muted); }
+.today-npage {
+  display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 20px; border-radius: 5px;
+  color: var(--text); text-decoration: none; min-width: 0;
+}
+.today-npage svg { flex-shrink: 0; color: var(--text-muted); }
+.today-nempty { display: block; padding: 2px 4px 2px 20px; color: var(--text-muted); font-size: 0.75rem; font-style: italic; }

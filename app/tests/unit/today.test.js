@@ -222,3 +222,40 @@ test('TU-13 size "available": one per column — stored, folded and edited layou
   const tiles = [{ id: 'a', col: 0, size: 'available' }, { id: 'b', col: 0, size: 'available' }, { id: 'c', col: 1, size: 'available' }]
   expect(plain(ctx._todayOneAvailable(tiles, 'b')).map(t => t.size)).toEqual(['container', 'available', 'available'])
 })
+
+test('TU-14 deactivated widgets: _todayKnownTiles skips them; _todayLayoutsWith re-adds a tile where it is missing', () => {
+  expect(plain(ctx._todayKnownTiles({ disabled: ['weather', 'cvapp'] }))).toEqual(['agenda', 'attention', 'progress', 'boards', 'notes'])
+  const layouts = {
+    lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: '1/1' }, { id: 'boards', col: 1, order: 0, size: 'container' }] },
+    sm: { columns: [{ width: 1 }], tiles: [{ id: 'weather', col: 0, order: 0, size: 'container' }] },
+  }
+  const out = plain(ctx._todayLayoutsWith(layouts, 'weather'))
+  expect(out.lg.tiles.at(-1)).toEqual({ id: 'weather', col: 1, order: 1, size: 'container' })
+  expect(out.sm).toEqual(layouts.sm)
+  expect(layouts.lg.tiles).toHaveLength(2)   // not mutated
+})
+
+test('TU-15 _todayFilterNoteTree — all words, accent-insensitive; folder match keeps its children', () => {
+  const tree = [
+    { type: 'folder', id: 'f1', title: 'Projekte', children: [
+      { type: 'page', id: 'a', title: 'Café Planung' },
+      { type: 'page', id: 'b', title: 'Budget' },
+    ] },
+    { type: 'folder', id: 'f2', title: 'Archiv', children: [{ type: 'page', id: 'c', title: 'Alte Planung 2024' }] },
+    { type: 'page', id: 'd', title: 'Ideen' },
+  ]
+  expect(plain(ctx._todayFilterNoteTree(tree, ''))).toEqual(tree)
+  const cafe = plain(ctx._todayFilterNoteTree(tree, 'cafe plan'))
+  expect(cafe).toEqual([{ type: 'folder', id: 'f1', title: 'Projekte', children: [{ type: 'page', id: 'a', title: 'Café Planung' }] }])
+  expect(plain(ctx._todayFilterNoteTree(tree, 'planung')).map(f => f.children.map(c => c.id))).toEqual([['a'], ['c']])
+  expect(plain(ctx._todayFilterNoteTree(tree, 'projekte'))[0].children).toHaveLength(2)
+  expect(plain(ctx._todayFilterNoteTree(tree, 'xyz'))).toEqual([])
+})
+
+test('TU-16 _todayWidgetShown — deactivated or missing from every stored layout = off', () => {
+  const layouts = { lg: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: '1/1' }] } }
+  expect(ctx._todayWidgetShown({ layouts }, 'agenda')).toBe(true)
+  expect(ctx._todayWidgetShown({ layouts }, 'notes')).toBe(false)
+  expect(ctx._todayWidgetShown({ layouts, disabled: ['agenda'] }, 'agenda')).toBe(false)
+  expect(ctx._todayWidgetShown({ layouts: {} }, 'notes')).toBe(true)
+})

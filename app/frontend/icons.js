@@ -117,6 +117,21 @@ function _svgFilter(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 2h9L7 6.5V10L5 10V6.5Z"/></svg>`;
 }
 
+// Magnifying glass — show / hide a search field
+function _svgSearch(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="5" r="3.5"/><line x1="7.6" y1="7.6" x2="10.8" y2="10.8"/></svg>`;
+}
+
+// Two chevrons pointing apart — expand all
+function _svgExpandAll(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 1.5 9 4.5M3 7.5 6 10.5 9 7.5"/></svg>`;
+}
+
+// Two chevrons pointing together — collapse all
+function _svgCollapseAll(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5 6 4.5 9 1.5M3 10.5 6 7.5 9 10.5"/></svg>`;
+}
+
 // Landscape rounded rectangle with a single headline — kanban card
 function _svgCard(w = 14, h = 10) {
   return `<svg viewBox="0 0 14 10" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="12.6" height="8.6" rx="1.3"/><line x1="2.5" y1="3.5" x2="9" y2="3.5"/></svg>`;
@@ -349,6 +364,9 @@ const SVGICONS = {
   openLink:       _svgOpenLink,
   schedule:       _svgSchedule,
   today:          _svgToday,
+  search:         _svgSearch,
+  expandAll:      _svgExpandAll,
+  collapseAll:    _svgCollapseAll,
   wxSun:          _svgWxSun,
   wxMoon:         _svgWxMoon,
   wxPartly:       _svgWxPartly,
@@ -410,6 +428,9 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgPrint(16, 16),         name: 'Print',            usage: 'Print a card or column' },
   { type: 'svg', svg: _svgDashboard(16, 16),    name: 'Dashboard',        usage: 'Navigate to the dashboard view' },
   { type: 'svg', svg: _svgToday(16, 16),        name: 'Today',            usage: 'Navigate to the Today page' },
+  { type: 'svg', svg: _svgSearch(16, 16),       name: 'Search',           usage: 'Show / hide the filter field of the Today Notes tile' },
+  { type: 'svg', svg: _svgExpandAll(16, 16),    name: 'ExpandAll',        usage: 'Open all folders (Today Notes tile)' },
+  { type: 'svg', svg: _svgCollapseAll(16, 16),  name: 'CollapseAll',      usage: 'Collapse all folders (Today Notes tile)' },
   { type: 'svg', svg: _svgWxSun(16, 16),        name: 'Weather: clear',   usage: 'Today page weather (clear sky, day)' },
   { type: 'svg', svg: _svgWxMoon(16, 16),       name: 'Weather: night',   usage: 'Today page weather (clear sky, night)' },
   { type: 'svg', svg: _svgWxPartly(16, 16),     name: 'Weather: partly cloudy', usage: 'Today page weather' },

@@ -1080,19 +1080,12 @@
           </div>
         </div>
 
-        <div class="settings-section" id="todaySection" data-settings-label="Today" data-settings-keywords="today weather cv-app applications layout bar refresh update interval" style="display:none">
+        <div class="settings-section" id="todaySection" data-settings-label="Today" data-settings-keywords="today widgets agenda weather cv-app applications progress boards layout bar refresh update interval" style="display:none">
           <div class="settings-section-title">
             <span>Today</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
           </div>
           <div class="settings-section-body">
-            <div class="settings-field-row">
-              <span class="settings-field-label">Today bar (date, weather, quick actions)</span>
-              <label class="settings-toggle">
-                <input type="checkbox" id="todayShowBar" checked>
-                <span class="settings-toggle-track"></span>
-              </label>
-            </div>
             <div class="settings-field-row">
               <span class="settings-field-label">Update all tiles</span>
               <select id="todayRefresh" class="new-board-input" style="width:auto;flex:none">
@@ -1115,15 +1108,42 @@
             </div>
             <p class="settings-item-desc">Opens the Today page in edit mode (also: <em>Edit layout</em> in the ☰ menu there). Columns, tile positions and heights are saved per screen size — edit on a narrow window to change the phone layout.</p>
 
-            <p class="settings-subtitle">Weather</p>
+            <p class="settings-subtitle">Widgets</p>
+            <!-- Rows built from TODAY_TILES (_todayRenderWidgetRows); the settings blocks below move into them -->
+            <div id="todayWidgetList" class="today-wlist">
+              <div class="today-wrow" data-widget="bar">
+                <div class="today-wrow-head">
+                  <span class="today-wrow-expand today-wrow-expand--none"><span class="today-wrow-title">Today bar</span></span>
+                  <label class="settings-toggle" title="Show the Today bar above the tiles">
+                    <input type="checkbox" id="todayShowBar" checked aria-label="Today bar">
+                    <span class="settings-toggle-track"></span>
+                  </label>
+                </div>
+                <p class="settings-item-desc today-wrow-desc">Date, weather, quick actions</p>
+              </div>
+            </div>
+
+            <div id="todayWidgetSettings" hidden>
+            <div data-wset="agenda">
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="todayAgendaDays">Range</label>
+              <select id="todayAgendaDays" class="new-board-input" style="width:auto;flex:none">
+                <option value="2">today + tomorrow</option>
+                <option value="7">upcoming week (7 days)</option>
+              </select>
+            </div>
+            </div>
+
+            <div data-wset="weather">
             <p class="settings-item-desc">Location: <span id="todayWeatherLabel">not set</span>. Forecast by Open-Meteo.</p>
             <div class="new-board-row">
               <input id="todayWeatherQuery" class="new-board-input" type="text" placeholder="Search a place, e.g. Berlin" autocomplete="off">
               <button class="btn" id="todayWeatherSearchBtn">Search</button>
             </div>
             <div id="todayWeatherResults" class="today-geo-results"></div>
+            </div>
 
-            <p class="settings-subtitle">CV-App (applications)</p>
+            <div data-wset="cvapp">
             <div class="settings-field-row">
               <label class="settings-field-label" for="todayCvApiUrl">API URL</label>
               <input id="todayCvApiUrl" class="new-board-input" type="url" placeholder="http://localhost:8000" autocomplete="off">
@@ -1138,6 +1158,8 @@
             </div>
             <div class="settings-webdav-actions">
               <button class="btn btn-accent" id="todayCvSaveBtn">Save</button>
+            </div>
+            </div>
             </div>
             <div id="todaySettingsResult" class="settings-webdav-result" style="display:none"></div>
           </div>

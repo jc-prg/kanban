@@ -10,6 +10,7 @@ const { defaultTodayConfig, BREAKPOINTS }  = require('../today/defaults');
 const { fetchTodayCards }                  = require('../today/cards');
 const { fetchWeather, geocode }            = require('../today/weather');
 const { fetchApplications }                = require('../today/cvapp');
+const { fetchNoteTrees }                   = require('../today/notes');
 
 const _ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -28,6 +29,7 @@ const PROVIDERS = {
   },
   weather: { fetch: settings => fetchWeather(settings) },
   cvapp:   { fetch: settings => fetchApplications(settings) },
+  notes:   { fetch: () => fetchNoteTrees() },
 };
 
 async function _loadConfig() {

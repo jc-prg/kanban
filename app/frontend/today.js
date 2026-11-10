@@ -304,12 +304,15 @@ function _todayKanbanCardHtml(item) {
 }
 
 // ---- Tile registry ----
-// { title, load() → data, render(body, data), actions?() → [{ icon, title, run }], wide? }
+// { title, desc, settings? (block [data-wset=<id>] in Settings → Today), load() → data, render(body, data),
+//   actions?() → [{ icon, title, run }] }
 // A new source = an optional backend provider (routes/today.js PROVIDERS) + one entry here.
 
 const TODAY_TILES = {
   agenda: {
     title: 'Agenda',
+    desc: 'Calendar events and due / starting cards of today and tomorrow or the upcoming week',
+    settings: true,
     load: _todayLoadAgenda,
     render: _todayRenderAgenda,
     actions: () => [
@@ -321,17 +324,22 @@ const TODAY_TILES = {
   },
   attention: {
     title: 'Needs attention',
+    desc: 'Unread mail, overdue cards, cards due today or soon, new cards',
     load: _todayLoadAttention,
     render: _todayRenderAttention,
     actions: () => [{ icon: SVGICONS.email(12, 12), title: 'Mail view', run: () => _todayOpenMail() }],
   },
   weather: {
     title: 'Weather',
+    desc: 'Forecast for the rest of the day (Open-Meteo)',
+    settings: true,
     load: () => _todayFetchJson('/api/today/widgets/weather'),
     render: _todayRenderWeather,
   },
   cvapp: {
     title: 'Applications',
+    desc: 'Active and recently updated applications from the CV-App',
+    settings: true,
     load: () => _todayFetchJson('/api/today/widgets/cvapp'),
     render: _todayRenderCvApp,
     actions: () => {
@@ -346,20 +354,53 @@ const TODAY_TILES = {
   },
   progress: {
     title: "Today's progress",
+    desc: 'Cards added to inboxes, created, moved and done today',
     load: () => _todayFetchJson(`/api/achievements/today?date=${_todayToday()}`),
     render: _todayRenderProgress,
   },
   boards: {
     title: 'Boards',
+    desc: 'Boards with open counts and the last edited cards',
     load: () => Promise.all([
       _todayFetchJson('/api/boards'),
       _todayFetchJson('/api/dashboard/recent?limit=8').catch(() => []),
     ]),
     render: _todayRenderBoards,
   },
+  notes: {
+    title: 'Notes',
+    desc: 'Browse the note pages of all active boards and open one directly',
+    load: () => _todayFetchJson('/api/today/widgets/notes'),
+    render: _todayRenderNotes,
+    actions: () => [
+      { icon: SVGICONS.search(12, 12), title: _todayNotesSearch ? 'Hide the filter' : 'Filter pages', active: _todayNotesSearch,
+        run: () => _todayToggleNotesSearch() },
+      { icon: SVGICONS.expandAll(12, 12),   title: 'Open all', run: () => _todayNotesOpenAll(true) },
+      { icon: SVGICONS.collapseAll(12, 12), title: 'Collapse all', run: () => _todayNotesOpenAll(false) },
+    ],
+  },
 };
 
-function _todayKnownTiles() { return Object.keys(TODAY_TILES); }
+/** Tiles that can be shown: all registered ones except those deactivated in Settings → Today. */
+function _todayKnownTiles(cfg = _todayCfg) {
+  const off = cfg?.disabled || [];
+  return Object.keys(TODAY_TILES).filter(id => !off.includes(id));
+}
+
+/**
+ * Stored layouts with tile `id` added where it is missing (end of the last column, fit content) —
+ * a widget activated again in the settings shows up even if it was removed from a layout. Pure.
+ */
+function _todayLayoutsWith(layouts, id) {
+  const out = {};
+  for (const [bp, l] of Object.entries(layouts || {})) {
+    if (!l || l.tiles.some(t => t.id === id)) { out[bp] = l; continue; }
+    const col = l.columns.length - 1;
+    const order = l.tiles.filter(t => t.col === col).reduce((m, t) => Math.max(m, (t.order ?? 0) + 1), 0);
+    out[bp] = { ...l, tiles: [...l.tiles, { id, col, order, size: 'container' }] };
+  }
+  return out;
+}
 
 // ---- Init ----
 
@@ -609,6 +650,9 @@ function _todaySaveState(body) {
     scroll: body.scrollTop,
     details: new Map(_todayDetailsKeys(body).map(([k, d]) => [k, d.open])),
     infos: [...body.querySelectorAll('[data-info]:not([hidden])')].map(i => i.dataset.info),
+    // An input being typed in (Notes filter) keeps focus and caret
+    focus: body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT'
+      ? { cls: document.activeElement.className, caret: document.activeElement.selectionStart } : null,
   };
 }
 
@@ -623,6 +667,8 @@ function _todayRestoreState(body, st) {
     btn.setAttribute('aria-expanded', 'true');
   }
   body.scrollTop = st.scroll;
+  const input = st.focus && [...body.querySelectorAll('input')].find(i => i.className === st.focus.cls);
+  if (input) { input.focus(); if (st.focus.caret != null) input.setSelectionRange(st.focus.caret, st.focus.caret); }
 }
 
 async function _todayLoadTile(id, { keepState = false } = {}) {
@@ -969,6 +1015,25 @@ function _todayCvBadge(status, count) {
   return `<span class="today-cv-badge" style="background:${c.bg};color:${c.color}">${escHtml(status)}${count != null ? ` <b>${count}</b>` : ''}</span>`;
 }
 
+/** Status counter on top of the Applications tile — a toggle that filters the list by that status. */
+function _todayCvFilterChip(status, count, filter) {
+  const c  = _TODAY_CV_STATUS[status] || { bg: 'var(--surface2)', color: 'var(--text)' };
+  const on = filter === status;
+  const cls = `today-cv-badge today-cv-filter${on ? ' today-cv-filter--on' : filter ? ' today-cv-filter--off' : ''}`;
+  return `<button class="${cls}" data-cv-status="${escHtml(status)}" style="background:${c.bg};color:${c.color}" aria-pressed="${on}"
+    title="${on ? 'Show all' : `Show only ${escHtml(status)}`}">${escHtml(status)} <b>${count}</b></button>`;
+}
+
+/** Status filter of the Applications tile ('' = all); per browser. */
+function _todayCvFilter() {
+  try { return localStorage.getItem('today-cvapp-status') || ''; } catch { return ''; }
+}
+
+function _todaySetCvFilter(status) {
+  try { localStorage.setItem('today-cvapp-status', status); } catch { /* ignore */ }
+  _todayLoadTile('cvapp');   // served from the per-load fetch memo
+}
+
 /** List mode of the Applications tile: 'active' (default) or 'recent'; per browser. */
 function _todayCvMode() {
   try { return localStorage.getItem('today-cvapp-list') === 'recent' ? 'recent' : 'active'; } catch { return 'active'; }
@@ -999,8 +1064,10 @@ function _todayRenderCvApp(body, data, el) {
   _todaySetCount(el, data.total);
   _todaySetTileActions('cvapp');
   const mode = _todayCvMode();
-  const list = (mode === 'recent' ? data.recent : data.active) || [];
-  const chips = data.statuses.map(s => _todayCvBadge(s.status, s.count)).join('');
+  // A stored filter whose status has no applications any more shows everything
+  const filter = data.statuses.some(s => s.status === _todayCvFilter()) ? _todayCvFilter() : '';
+  const list = ((mode === 'recent' ? data.recent : data.active) || []).filter(a => !filter || a.status === filter);
+  const chips = data.statuses.map(s => _todayCvFilterChip(s.status, s.count, filter)).join('');
   const fit = f => f == null ? '' : `<span class="today-fit" title="Fit ${f}/4">${'●'.repeat(Math.round(f))}${'○'.repeat(4 - Math.round(f))}</span>`;
   const items = list.map((a, i) => {
     const hasInfo = a.statusNote || a.progress;
@@ -1018,9 +1085,14 @@ function _todayRenderCvApp(body, data, el) {
       ${hasInfo ? `<button class="today-info-btn" data-info-btn="${escHtml(String(a.id ?? i))}" title="${escHtml(a.statusNote || 'Show the application status')}" aria-label="Show the application status" aria-expanded="false">i</button>` : ''}
     </div>`;
   }).join('');
-  const empty = `<p class="dashboard-empty">${mode === 'recent' ? 'No applications yet.' : 'No active applications.'}</p>`;
+  const empty = `<p class="dashboard-empty">${filter ? `No ${mode === 'recent' ? 'recently updated' : 'active'} applications with status ${escHtml(filter)}.`
+    : mode === 'recent' ? 'No applications yet.' : 'No active applications.'}</p>`;
   body.innerHTML = (chips ? `<div class="today-statuses">${chips}</div>` : '')
-    + `<div class="today-subhead">${mode === 'recent' ? 'Recently updated' : 'Active'}</div>${items || empty}`;
+    + `<div class="today-subhead">${mode === 'recent' ? 'Recently updated' : 'Active'}${filter ? ` · ${escHtml(filter)}` : ''}</div>${items || empty}`;
+  body.querySelectorAll('[data-cv-status]').forEach(chip => chip.addEventListener('click', e => {
+    e.stopPropagation();
+    _todaySetCvFilter(chip.dataset.cvStatus === filter ? '' : chip.dataset.cvStatus);
+  }));
   body.querySelectorAll('[data-info-btn]').forEach(btn => btn.addEventListener('click', e => {
     e.stopPropagation();
     const info = [...body.querySelectorAll('[data-info]')].find(x => x.dataset.info === btn.dataset.infoBtn);
@@ -1056,6 +1128,128 @@ function _todayRenderBoards(body, [boards, recent], el) {
   }).join('');
   body.innerHTML = `<div class="today-boards">${chips || '<p class="dashboard-empty">No boards yet.</p>'}</div>
     ${recent?.length ? `<details class="today-recent"><summary>Last edited</summary>${recent.map(_recentItemHtml).join('')}</details>` : ''}`;
+}
+
+// ---- Notes ----
+
+let _todayNotesQuery  = '';
+let _todayNotesData   = null;
+let _todayNotesSearch = false;   // filter field shown
+
+function _todayNotesRerender(focus) {
+  const el = _todayTileEls.get('notes');
+  if (!el || !_todayNotesData) return;
+  _todaySetTileActions('notes');
+  _todayRenderNotes(el.querySelector('.today-tile-body'), _todayNotesData, el);
+  if (focus) el.querySelector('.today-notes-filter')?.focus();
+}
+
+/** Show / hide the filter field; hiding clears the filter. */
+function _todayToggleNotesSearch() {
+  _todayNotesSearch = !_todayNotesSearch;
+  if (!_todayNotesSearch) _todayNotesQuery = '';
+  _todayNotesRerender(_todayNotesSearch);
+}
+
+/** Open or collapse every board and folder of the Notes tile (remembered unless a filter is active). */
+function _todayNotesOpenAll(open) {
+  const body = _todayTileEls.get('notes')?.querySelector('.today-tile-body');
+  if (!body) return;
+  const details = [...body.querySelectorAll('.today-ntree details')];
+  if (!_todayNotesQuery.trim()) {
+    try { localStorage.setItem('today-notes-open', JSON.stringify(open ? details.map(d => d.dataset.key).slice(-300) : [])); } catch { /* ignore */ }
+  }
+  for (const d of details) d.open = open;
+}
+
+function _todayNorm(s) {
+  return String(s || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+}
+
+/**
+ * Note tree filtered by title: every word of `q` must occur (case / accent-insensitive). A folder
+ * whose title matches keeps all its children; otherwise only matching descendants. Pure.
+ */
+function _todayFilterNoteTree(items, q) {
+  const words = _todayNorm(q).split(/\s+/).filter(Boolean);
+  if (!words.length) return items;
+  const hit = t => { const n = _todayNorm(t); return words.every(w => n.includes(w)); };
+  const walk = list => list.flatMap(it => {
+    if (hit(it.title)) return [it];
+    if (it.type !== 'folder') return [];
+    const children = walk(it.children || []);
+    return children.length ? [{ ...it, children }] : [];
+  });
+  return walk(items);
+}
+
+/** Open boards / folders of the Notes tile (`nb:<board>`, `nf:<board>/<id>`); per browser. */
+function _todayNotesOpen() {
+  try { return new Set(JSON.parse(localStorage.getItem('today-notes-open') || '[]')); } catch { return new Set(); }
+}
+
+function _todaySetNotesOpen(key, open) {
+  const set = _todayNotesOpen();
+  if (open) set.add(key); else set.delete(key);
+  try { localStorage.setItem('today-notes-open', JSON.stringify([...set].slice(-300))); } catch { /* ignore */ }
+}
+
+function _todayRenderNotes(body, data, el) {
+  _todayNotesData = data;
+  _todaySetCount(el, data.total);
+  const q    = _todayNotesQuery.trim();
+  const open = _todayNotesOpen();
+  const isOpen = key => (q || open.has(key) ? ' open' : '');
+  const node = (board, it) => {
+    const title = escHtml(it.title || '(untitled)');
+    if (it.type === 'folder') {
+      const key = `nf:${board}/${it.id}`;
+      return `<details class="today-nfolder" data-key="${escHtml(key)}"${isOpen(key)}>
+        <summary title="${title}">${SVGICONS.folder(12, 12)}<span class="today-nlabel">${title}</span></summary>
+        <div class="today-nchildren">${(it.children || []).map(c => node(board, c)).join('') || '<span class="today-nempty">empty</span>'}</div>
+      </details>`;
+    }
+    return `<a class="today-npage" href="${BASE_PATH}/board/${encodeURIComponent(board)}#note:${encodeURIComponent(it.id)}" title="${title} — ${escHtml(board)}">${SVGICONS.notePages(10, 10)}<span class="today-nlabel">${title}</span></a>`;
+  };
+  const boards = (data.boards || []).map(b => ({ ...b, items: _todayFilterNoteTree(b.items, q) })).filter(b => b.items.length);
+  const tree = boards.map(b => {
+    const key = `nb:${b.board}`;
+    return `<details class="today-nboard" data-key="${escHtml(key)}"${isOpen(key)}>
+      <summary><span class="today-nlabel">${escHtml(b.board)}</span>${b.webdav ? `<span class="today-ncloud" title="Notes synced with WebDAV" aria-label="WebDAV">${SVGICONS.wxCloud(14, 14)}</span>` : ''}<span class="today-ncount">${b.pages}</span></summary>
+      <div class="today-nchildren">${b.items.map(it => node(b.board, it)).join('')}</div>
+    </details>`;
+  }).join('');
+  const empty = q ? 'No matching pages.' : 'No note pages on the active boards.';
+  body.innerHTML = `${data.total && _todayNotesSearch ? `<input class="today-notes-filter" type="search" placeholder="Filter pages…" aria-label="Filter note pages" value="${escHtml(_todayNotesQuery)}">` : ''}
+    <div class="today-ntree">${tree || `<p class="dashboard-empty">${empty}</p>`}</div>`;
+
+  if (!body.dataset.notesWired) {
+    body.dataset.notesWired = '1';
+    // Remember folders opened / closed by hand (not the ones a filter opens)
+    body.addEventListener('toggle', e => {
+      const d = e.target;
+      if (d.tagName === 'DETAILS' && d.dataset.key?.startsWith('n') && !_todayNotesQuery.trim()) _todaySetNotesOpen(d.dataset.key, d.open);
+    }, true);
+    let t = null;
+    body.addEventListener('input', e => {
+      if (!e.target.classList.contains('today-notes-filter')) return;
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const input = body.querySelector('.today-notes-filter');
+        const caret = input?.selectionStart ?? null;
+        _todayNotesQuery = input?.value || '';
+        _todayRenderNotes(body, _todayNotesData, el);
+        const again = body.querySelector('.today-notes-filter');
+        if (again) { again.focus(); if (caret != null) again.setSelectionRange(caret, caret); }
+      }, 150);
+    });
+    body.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || !e.target.classList.contains('today-notes-filter')) return;
+      e.preventDefault();
+      if (e.target.value) { e.target.value = ''; e.target.dispatchEvent(new Event('input', { bubbles: true })); }
+      else _todayToggleNotesSearch();   // Escape on an empty field hides it
+    });
+  }
 }
 
 // ---- Event delegation (cards, events, mails in all tiles) ----
@@ -1339,7 +1533,10 @@ async function loadTodaySettings() {
   const w  = cfg.widgets?.weather || {};
   const cv = cfg.widgets?.cvapp   || {};
   document.getElementById('todayShowBar').checked = cfg.showBar !== false;
+  document.querySelector('.today-wrow[data-widget="bar"]')?.classList.toggle('today-wrow--off', cfg.showBar === false);
   document.getElementById('todayRefresh').value = String(_todayRefreshMinutes(cfg));
+  document.getElementById('todayAgendaDays').value = String(_todayAgendaRange(cfg));
+  _todayRenderWidgetRows(cfg);
   document.getElementById('todayWeatherLabel').textContent = w.lat != null ? `${w.label || ''} (${(+w.lat).toFixed(2)}, ${(+w.lon).toFixed(2)})` : 'not set';
   document.getElementById('todayCvApiUrl').value    = cv.apiUrl || '';
   document.getElementById('todayCvPublicUrl').value = cv.publicUrl || '';
@@ -1347,6 +1544,56 @@ async function loadTodaySettings() {
   keyEl.value = '';
   keyEl.placeholder = cv.hasApiKey ? '•••••• (stored — leave empty to keep)' : 'API key';
   sec.dataset.cfg = JSON.stringify(cfg);
+}
+
+/**
+ * A widget counts as shown when it is not deactivated and at least one stored layout places it
+ * (a widget added later, e.g. Notes, is missing from layouts saved before). Pure.
+ */
+function _todayWidgetShown(cfg, id) {
+  if ((cfg?.disabled || []).includes(id)) return false;
+  const layouts = Object.values(cfg?.layouts || {}).filter(Boolean);
+  return !layouts.length || layouts.some(l => (l.tiles || []).some(t => t.id === id));
+}
+
+/** Settings → Today → Widgets: one row per registered tile (toggle + collapsed settings block). */
+function _todayRenderWidgetRows(cfg) {
+  const list = document.getElementById('todayWidgetList');
+  if (!list) return;
+  if (!list.dataset.built) {
+    list.dataset.built = '1';
+    for (const [id, def] of Object.entries(TODAY_TILES)) {
+      const row = document.createElement('div');
+      row.className = 'today-wrow';
+      row.dataset.widget = id;
+      row.innerHTML = `<div class="today-wrow-head">
+          ${def.settings
+            ? `<button class="today-wrow-expand" aria-expanded="false" title="Settings"><span class="today-wrow-caret" aria-hidden="true">▸</span><span class="today-wrow-title">${escHtml(def.title)}</span></button>`
+            : `<span class="today-wrow-expand today-wrow-expand--none"><span class="today-wrow-title">${escHtml(def.title)}</span></span>`}
+          <label class="settings-toggle" title="Show this widget on the Today page">
+            <input type="checkbox" data-widget-toggle="${id}" aria-label="${escHtml(def.title)} widget">
+            <span class="settings-toggle-track"></span>
+          </label>
+        </div>
+        ${def.desc ? `<p class="settings-item-desc today-wrow-desc">${escHtml(def.desc)}</p>` : ''}
+        <div class="today-wrow-body" hidden></div>`;
+      const block = def.settings && document.querySelector(`#todayWidgetSettings [data-wset="${id}"]`);
+      if (block) row.querySelector('.today-wrow-body').appendChild(block);
+      row.querySelector('button.today-wrow-expand')?.addEventListener('click', e => {
+        const btn = e.currentTarget;
+        const body = row.querySelector('.today-wrow-body');
+        body.hidden = !body.hidden;
+        btn.setAttribute('aria-expanded', String(!body.hidden));
+        row.classList.toggle('today-wrow--open', !body.hidden);
+      });
+      list.appendChild(row);
+    }
+  }
+  for (const input of list.querySelectorAll('[data-widget-toggle]')) {
+    const on = _todayWidgetShown(cfg, input.dataset.widgetToggle);
+    input.checked = on;
+    input.closest('.today-wrow').classList.toggle('today-wrow--off', !on);
+  }
 }
 
 function _todaySettingsCfg() {
@@ -1371,10 +1618,29 @@ function initTodaySettings() {
   const report = (msg, ok) => { result.textContent = msg; result.style.display = ''; result.className = `settings-webdav-result settings-webdav-result--${ok ? 'ok' : 'err'}`; };
 
   document.getElementById('todayShowBar').addEventListener('change', async e => {
+    e.target.closest('.today-wrow')?.classList.toggle('today-wrow--off', !e.target.checked);
     try { await _todaySaveSettings({ showBar: e.target.checked }); } catch (err) { report(err.message, false); }
   });
   document.getElementById('todayRefresh').addEventListener('change', async e => {
     try { await _todaySaveSettings({ refreshMinutes: Number(e.target.value) }); } catch (err) { report(err.message, false); }
+  });
+  document.getElementById('todayAgendaDays').addEventListener('change', async e => {
+    const cfg = _todaySettingsCfg();
+    try { await _todaySaveSettings({ widgets: { ...(cfg.widgets || {}), agenda: { days: Number(e.target.value) } } }); } catch (err) { report(err.message, false); }
+  });
+  document.getElementById('todayWidgetList').addEventListener('change', async e => {
+    const input = e.target.closest('[data-widget-toggle]');
+    if (!input) return;
+    const id  = input.dataset.widgetToggle;
+    const cfg = _todaySettingsCfg();
+    const off = (cfg.disabled || []).filter(x => x !== id);
+    if (!input.checked) off.push(id);
+    const body = { disabled: off };
+    if (input.checked) body.layouts = _todayLayoutsWith(cfg.layouts, id);
+    try {
+      const saved = await _todaySaveSettings(body, `${TODAY_TILES[id].title} ${input.checked ? 'shown' : 'hidden'}`);
+      _todayRenderWidgetRows(saved);
+    } catch (err) { input.checked = !input.checked; report(err.message, false); }
   });
 
   const results = document.getElementById('todayWeatherResults');

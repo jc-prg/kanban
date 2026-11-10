@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page API tests — TD-1 … TD-17
+ * Today page API tests — TD-1 … TD-20
  *
  * routes/today.js is mounted on its own with db.js / global-db.js replaced via require.cache;
  * Open-Meteo and the CV-App are mocked with vi.stubGlobal('fetch').
@@ -18,11 +18,13 @@ const GLOBAL_DB_MODULE = path.resolve(__dirname, '../../backend/global-db.js')
 
 // ---- Mock CouchDB: board name → board doc ----
 const boards = {}
+const notes  = {}   // board name → notes doc
 const couch = {
   db:  { list: async () => Object.keys(boards).map(b => `jc-kanban-${b}`).concat(['jc-config-dashboard']) },
   use: name => ({
-    get: async () => {
-      const doc = boards[name.replace(/^jc-kanban-/, '')]
+    get: async id => {
+      const b   = name.replace(/^jc-kanban-/, '')
+      const doc = id === 'notes' ? notes[b] : boards[b]
       if (!doc) throw Object.assign(new Error('not_found'), { statusCode: 404 })
       return JSON.parse(JSON.stringify(doc))
     },
@@ -38,10 +40,16 @@ require.cache[DB_MODULE] = {
 
 // ---- Mock global config DB ----
 const store = { today: null }
+const webdav = {}   // board name → jc-config-webdav doc
 require.cache[GLOBAL_DB_MODULE] = {
   id: GLOBAL_DB_MODULE, filename: GLOBAL_DB_MODULE, loaded: true, children: [], paths: [],
   exports: {
     getTodayConfig:  async () => (store.today ? JSON.parse(JSON.stringify(store.today)) : null),
+    getWebdavDb:       () => ({ get: async board => {
+      if (!webdav[board]) throw Object.assign(new Error('not_found'), { statusCode: 404 })
+      return webdav[board]
+    } }),
+    getWebdavAccounts: async () => [{ id: 'wa-1', url: 'https://dav.example/' }],
     saveTodayConfig: async data => { store.today = JSON.parse(JSON.stringify(data)); return { ok: true } },
   },
 }
@@ -57,6 +65,8 @@ const card = (id, extra = {}) => ({ id, text: `Card ${id}`, ...extra })
 beforeEach(() => {
   store.today = null
   for (const k of Object.keys(boards)) delete boards[k]
+  for (const k of Object.keys(notes)) delete notes[k]
+  for (const k of Object.keys(webdav)) delete webdav[k]
   clearWeather()
   clearCvApp()
   vi.unstubAllGlobals()
@@ -285,4 +295,51 @@ test('TD-17 refreshMinutes: default 1, 0–60 accepted, others rejected', async 
   expect((await request(app).put('/api/today/config').send({ refreshMinutes: 5 })).body.config.refreshMinutes).toBe(5)
   expect((await request(app).put('/api/today/config').send({ refreshMinutes: 61 })).status).toBe(400)
   expect((await request(app).put('/api/today/config').send({ refreshMinutes: 1.5 })).status).toBe(400)
+})
+
+test('TD-18 disabled widgets: default empty, list of ids saved, invalid ids / duplicates rejected', async () => {
+  expect((await request(app).get('/api/today/config')).body.disabled).toEqual([])
+  const ok = await request(app).put('/api/today/config').send({ disabled: ['weather', 'cvapp'] })
+  expect(ok.status).toBe(200)
+  expect(store.today.disabled).toEqual(['weather', 'cvapp'])
+  expect((await request(app).put('/api/today/config').send({ disabled: ['Bad Id'] })).status).toBe(400)
+  expect((await request(app).put('/api/today/config').send({ disabled: ['a', 'a'] })).status).toBe(400)
+})
+
+test('TD-19 notes widget: page trees (titles only) of active boards; archived boards and boards without pages skipped', async () => {
+  boards.work = { columns: [] }
+  notes.work  = { schemaVersion: 2, items: [
+    { type: 'folder', id: 'f1', title: 'Projects', children: [
+      { type: 'page', id: 'n-a', title: 'Alpha', description: 'secret body', lastModified: '2026-11-01T10:00:00Z' },
+    ] },
+    { type: 'page', id: 'n-b', title: 'Beta', linkedCards: ['id-x'] },
+  ] }
+  boards.old  = { columns: [], settings: { archived: true } }
+  notes.old   = { schemaVersion: 2, items: [{ type: 'page', id: 'n-c', title: 'Old' }] }
+  boards.empty = { columns: [] }
+  notes.empty  = { schemaVersion: 2, items: [{ type: 'folder', id: 'f2', title: 'Nothing', children: [] }] }
+  boards.none  = { columns: [] }   // no notes doc
+
+  const res = await request(app).get('/api/today/widgets/notes')
+  expect(res.status).toBe(200)
+  expect(res.body.total).toBe(2)
+  expect(res.body.boards).toEqual([{ board: 'work', pages: 2, webdav: false, items: [
+    { type: 'folder', id: 'f1', title: 'Projects', children: [
+      { type: 'page', id: 'n-a', title: 'Alpha', lastModified: '2026-11-01T10:00:00Z' },
+    ] },
+    { type: 'page', id: 'n-b', title: 'Beta' },
+  ] }])
+})
+
+test('TD-20 notes widget: webdav flag — enabled with an existing account or legacy inline config', async () => {
+  for (const b of ['acc', 'legacy', 'gone', 'off']) {
+    boards[b] = { columns: [] }
+    notes[b]  = { schemaVersion: 2, items: [{ type: 'page', id: `n-${b}`, title: b }] }
+  }
+  webdav.acc    = { enabled: true, accountId: 'wa-1' }
+  webdav.legacy = { enabled: true, url: 'https://dav.example/x/' }
+  webdav.gone   = { enabled: true, accountId: 'wa-deleted' }
+  webdav.off    = { enabled: false, accountId: 'wa-1' }
+  const res = await request(app).get('/api/today/widgets/notes')
+  expect(Object.fromEntries(res.body.boards.map(b => [b.board, b.webdav]))).toEqual({ acc: true, legacy: true, gone: false, off: false })
 })
