@@ -1155,6 +1155,66 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     } catch { flashIndicator(' error'); }
   }
 
+  // ---- Trusted senders (remote images allowed; shared with dashboard.js `_mailTrusted`) ----
+
+  function _renderMailTrusted(senders, error) {
+    const list = document.getElementById('mailTrustedList');
+    document.getElementById('mailTrustedCount').textContent = error ? '' : `(${senders.length})`;
+    if (error) { list.innerHTML = `<p class="settings-item-desc mail-trusted-error">${escHtml(error)}</p>`; return; }
+    if (!senders.length) {
+      list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No trusted senders yet — use "Trust sender and load images" on a mail or add an address below.</p>';
+      return;
+    }
+    list.innerHTML = [...senders].sort().map(addr => `
+      <div class="calendar-account-row mail-trusted-row">
+        <div class="calendar-account-info"><span class="mail-trusted-addr">${escHtml(addr)}</span></div>
+        <div class="calendar-account-actions">
+          <button class="btn btn--icon" data-trusted-del="${escHtml(addr)}" title="Remove ${escHtml(addr)}" aria-label="Remove ${escHtml(addr)}">${_svgDelete()}</button>
+        </div>
+      </div>`).join('');
+  }
+
+  async function loadMailTrusted() {
+    try {
+      const r = await fetch('/api/dashboard/mail-trusted-senders');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const senders = (await r.json()).senders || [];
+      _mailTrusted = new Set(senders);   // refresh the mail views' cache too
+      _mailSyncTrustedBadges();
+      _renderMailTrusted(senders);
+    } catch (err) {
+      _renderMailTrusted([], `Could not load trusted senders: ${err.message}`);
+    }
+  }
+
+  async function _changeMailTrusted(addr, trusted) {
+    try {
+      await _mailSetTrusted(addr, trusted);
+      _renderMailTrusted([..._mailTrusted]);
+      flashIndicator(`${ICONS.done} saved`);
+      return true;
+    } catch {
+      flashIndicator(' error');
+      return false;
+    }
+  }
+
+  document.getElementById('mailTrustedList').addEventListener('click', e => {
+    const del = e.target.closest('[data-trusted-del]');
+    if (del) _changeMailTrusted(del.dataset.trustedDel, false);
+  });
+
+  document.getElementById('mailTrustedForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const input = document.getElementById('mailTrustedInput');
+    // Accepts "a@b" as well as a pasted "Name <a@b>"
+    const addr = _mailSenderAddr({ from: input.value });
+    if (!addr) { input.setCustomValidity('Enter an e-mail address'); input.reportValidity(); return; }
+    input.setCustomValidity('');
+    if (await _changeMailTrusted(addr, true)) input.value = '';
+  });
+  document.getElementById('mailTrustedInput').addEventListener('input', e => e.target.setCustomValidity(''));
+
   async function loadMailSettings() {
     try {
       const cfg = await fetch('/api/dashboard/config').then(r => r.json());
@@ -1164,6 +1224,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     }
     _renderMailList();
     _closeMailForm();
+    loadMailTrusted();
   }
 
   document.getElementById('mailAddBtn').addEventListener('click', () => _openMailForm(-1));

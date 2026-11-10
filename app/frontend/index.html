@@ -1216,7 +1216,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="accountsSection" data-settings-label="Sources" data-settings-keywords="calendar caldav ical imap mail email cards columns board webdav nextcloud accounts add account" style="display:none">
+        <div class="settings-section" id="accountsSection" data-settings-label="Sources" data-settings-keywords="calendar caldav ical imap mail email cards columns board webdav nextcloud accounts add account trusted senders images privacy" style="display:none">
           <div class="settings-section-title">
             <span>Sources</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1379,7 +1379,7 @@
                   </div>
                   <div class="settings-field-row">
                     <label class="settings-field-label" for="mailFromAddress">Sender address</label>
-                    <input id="mailFromAddress" class="new-board-input" type="email" placeholder="same as IMAP username" autocomplete="off" spellcheck="false">
+                    <input id="mailFromAddress" class="new-board-input" type="email" multiple placeholder="same as IMAP username — separate several with commas" title="Several sender addresses, separated by commas; the first is the default" autocomplete="off" spellcheck="false">
                   </div>
                   <div class="settings-webdav-actions">
                     <button class="btn btn-accent" id="mailSaveAccountBtn">Save account</button>
@@ -1388,6 +1388,15 @@
                   </div>
                   <div id="mailTestResult" class="settings-webdav-result" style="display:none"></div>
                 </div>
+                <details id="mail-trusted-senders" class="mail-trusted">
+                  <summary class="settings-item-desc mail-form-subhead">Trusted senders <span class="mail-trusted-count" id="mailTrustedCount"></span></summary>
+                  <p class="settings-item-desc">Remote images in mails from these addresses are loaded. Tracking elements stay blocked.</p>
+                  <div id="mailTrustedList"></div>
+                  <form class="mail-trusted-add" id="mailTrustedForm" autocomplete="off">
+                    <input id="mailTrustedInput" class="new-board-input" type="text" placeholder="name@example.com" spellcheck="false" aria-label="Sender address to trust">
+                    <button class="btn" type="submit">+ Add</button>
+                  </form>
+                </details>
               </div>
 
               <div class="prompts-panel active" data-panel="calendar">

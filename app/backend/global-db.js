@@ -142,4 +142,25 @@ async function addMailCardLink(accountId, messageId, board, cardId) {
   return true;
 }
 
-module.exports = { getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink };
+// Senders whose remote images may load in the mail view: { senders: ['lower@case.addr'] }
+const MAIL_TRUSTED_ID = 'mail-trusted-senders';
+
+async function getTrustedSenders() {
+  try {
+    const doc = await globalDb.get(MAIL_TRUSTED_ID);
+    return Array.isArray(doc.senders) ? doc.senders : [];
+  } catch (err) {
+    if (err.statusCode === 404) return [];
+    throw err;
+  }
+}
+
+/** Add or remove one (lower-cased) sender address; returns the new list. */
+async function setTrustedSender(address, trusted) {
+  const list = (await getTrustedSenders()).filter(a => a !== address);
+  if (trusted) list.push(address);
+  await upsertDoc(globalDb, MAIL_TRUSTED_ID, { senders: list });
+  return list;
+}
+
+module.exports = { getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender };

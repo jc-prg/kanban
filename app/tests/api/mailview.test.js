@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view API tests — MVA-1 … MVA-27
+ * Mail view API tests — MVA-1 … MVA-31
  *
  * Folder management, paged/searchable message lists, ?folder= on message routes,
  * trash handling and sending via SMTP (nodemailer mocked) with a sent copy.
@@ -20,6 +20,7 @@ const request = require('supertest')
 // ---- global-db mock ----
 let _storedConfig = null
 let _mailLinks = {}
+let _trusted = []
 const _cfg = () => _storedConfig ?? { mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }
 const GLOBAL_DB_MODULE = path.resolve(__dirname, '../../backend/global-db.js')
 require.cache[GLOBAL_DB_MODULE] = {
@@ -37,6 +38,8 @@ require.cache[GLOBAL_DB_MODULE] = {
       if (list.some(r => r.board === board && r.cardId === cardId)) return false
       list.push({ board, cardId }); return true
     },
+    getTrustedSenders:   async () => [..._trusted],
+    setTrustedSender:    async (addr, on) => { _trusted = _trusted.filter(a => a !== addr); if (on) _trusted.push(addr); return [..._trusted] },
     initGlobalDb:        async () => {},
     getGlobalDb:         () => ({}),
   },
@@ -272,6 +275,17 @@ test('MVA-9 GET message?folder= — threading headers and reply-to returned', as
   })
 })
 
+test('MVA-31 address lists — display names with specials are quoted, so "Doe, Jane" stays one address', async () => {
+  imap.messages = [_msg(43, { envelope: {
+    from: [{ name: 'Doe, Jane', address: 'jane@ex.com' }],
+    to:   [{ name: 'Say "Hi"', address: 'hi@ex.com' }, { name: 'Bob', address: 'bob@ex.com' }, { address: 'x@ex.com' }],
+  } })]
+  const res = await request(app).get(`${API}/message/43`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.from).toBe('"Doe, Jane" <jane@ex.com>')
+  expect(res.body.to).toBe('"Say \\"Hi\\"" <hi@ex.com>, Bob <bob@ex.com>, x@ex.com')
+})
+
 test('MVA-10 PATCH / move with ?folder= — operate in that folder; default stays account folder', async () => {
   await request(app).patch(`${API}/message/7?folder=Projects`).set(AUTH).send({ seen: true })
   expect(calls('lock').at(-1)[1]).toBe('Projects')
@@ -355,6 +369,48 @@ test('MVA-13 send — SMTP falls back to IMAP credentials; sent copy keeps Bcc; 
   expect(copy.match(/^Message-ID: (.*)$/m)[1]).toBe(sent.raw.match(/^Message-ID: (.*)$/m)[1])
 
   expect(calls('flagsAdd')[0]).toEqual(['flagsAdd', '77', ['\\Answered']])
+})
+
+test('MVA-28 send — several sender addresses: chosen `from` used for header, envelope and Message-ID; default = first', async () => {
+  _storedConfig.mailAccounts[0].smtp = { host: 'smtp.ex.com', fromName: 'Me', fromAddress: 'info@shop.de, Support Team <help@other.de>' }
+
+  expect((await _send({ to: 'bob@ex.com', subject: 'a', text: 'x', from: 'HELP@other.de' })).status).toBe(200)
+  let sent = smtp.sent.at(-1)
+  expect(sent.envelope.from).toBe('help@other.de')
+  expect(sent.raw).toMatch(/^From: Support Team <help@other\.de>/m)
+  expect(sent.raw).toMatch(/^Message-ID: <[^@]+@other\.de>/m)
+
+  expect((await _send({ to: 'bob@ex.com', subject: 'b', text: 'x' })).status).toBe(200)
+  sent = smtp.sent.at(-1)
+  expect(sent.envelope.from).toBe('info@shop.de')
+  expect(sent.raw).toMatch(/^From: Me <info@shop\.de>/m)
+})
+
+test('MVA-29 send — `from` not configured for the account → 400, nothing sent', async () => {
+  _storedConfig.mailAccounts[0].smtp = { host: 'smtp.ex.com', fromAddress: 'info@shop.de, help@other.de' }
+  const res = await _send({ to: 'bob@ex.com', subject: 'a', text: 'x', from: 'ceo@bank.com' })
+  expect(res.status).toBe(400)
+  expect(res.body.error).toMatch(/Sender address not configured/)
+  // Without fromAddress only the IMAP user may send
+  _storedConfig.mailAccounts[0].smtp = { host: 'smtp.ex.com' }
+  expect((await _send({ to: 'bob@ex.com', text: 'x', from: 'info@shop.de' })).status).toBe(400)
+  expect((await _send({ to: 'bob@ex.com', text: 'x', from: 'me@ex.com' })).status).toBe(200)
+  expect(smtp.sent).toHaveLength(1)
+})
+
+test('MVA-30 trusted senders — GET / PUT, lower-cased, idempotent, validated', async () => {
+  _trusted = []
+  const url = '/api/dashboard/mail-trusted-senders'
+  expect((await request(app).get(url).set(AUTH)).body).toEqual({ senders: [] })
+  const put = await request(app).put(url).set(AUTH).send({ address: ' News@Shop.com ', trusted: true })
+  expect(put.status).toBe(200)
+  expect(put.body).toEqual({ ok: true, senders: ['news@shop.com'] })
+  await request(app).put(url).set(AUTH).send({ address: 'news@shop.com', trusted: true })
+  expect((await request(app).get(url).set(AUTH)).body.senders).toEqual(['news@shop.com'])
+  expect((await request(app).put(url).set(AUTH).send({ address: 'news@shop.com', trusted: false })).body.senders).toEqual([])
+  for (const body of [{ address: 'nope', trusted: true }, { address: 'a@b.c', trusted: 'yes' }, { address: 'x'.repeat(320) + '@b.c', trusted: true }, {}]) {
+    expect((await request(app).put(url).set(AUTH).send(body)).status).toBe(400)
+  }
 })
 
 test('MVA-14 config — SMTP password never returned and preserved on PUT', async () => {

@@ -1197,7 +1197,7 @@ function _renderMailPanel(accounts) {
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         return `${dd}.${mm}. ${hh}:${mi}`;
       })() : '';
-      const fromStr = msg.from ? (msg.from.match(/^(.+?)\s*<[^>]+>$/) || [])[1]?.trim() || msg.from : '';
+      const fromStr = _mailDisplayName(msg.from);
       const metaParts = [];
       if (msg.hasAttachments) metaParts.push(`<span class="dashboard-mail-attach" title="Has attachments">${_svgAttachment(11, 11)}</span>`);
       if (msg.cardRefs?.length) {
@@ -1225,7 +1225,8 @@ function _splitAddresses(str) {
   let current = '', inQuote = false, inAngle = false;
   for (let i = 0; i < str.length; i++) {
     const c = str[i];
-    if      (c === '"')                      { inQuote = !inQuote; current += c; }
+    if      (c === '\\' && inQuote)          { current += c + (str[++i] ?? ''); }   // escaped char in "…"
+    else if (c === '"')                      { inQuote = !inQuote; current += c; }
     else if (c === '<')                      { inAngle = true;     current += c; }
     else if (c === '>')                      { inAngle = false;    current += c; }
     else if (c === ',' && !inQuote && !inAngle) {
@@ -1234,12 +1235,32 @@ function _splitAddresses(str) {
     } else { current += c; }
   }
   if (current.trim()) parts.push(current.trim());
-  return parts;
+  // Unquoted "Doe, Jane <jane@x>" (older server responses): a fragment without any address
+  // belongs to the next entry
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!/[@<]/.test(parts[i]) && i + 1 < parts.length && /</.test(parts[i + 1])) parts[i + 1] = `${parts[i]}, ${parts[i + 1]}`;
+    else out.push(parts[i]);
+  }
+  return out;
+}
+
+/** Display name of the first address ("Doe, Jane" <j@x> → Doe, Jane); the address when there is no name. */
+function _mailDisplayName(str) {
+  const first = _splitAddresses(String(str || ''))[0] || '';
+  const m = first.match(/^\s*(?:"((?:[^"\\]|\\.)*)"|([^"<]*?))\s*<([^>]+)>\s*$/);
+  if (!m) return first;
+  return (m[1] != null ? m[1].replace(/\\(.)/g, '$1') : m[2]).trim() || m[3].trim();
 }
 
 function _fmtAddress(addr) {
-  const m = addr.match(/^"?([^"<]+?)"?\s*<([^>]+)>$/);
-  if (m) return `<a href="mailto:${escHtml(m[2].trim())}">${escHtml(m[1].trim())}</a>`;
+  // "Name" <a@b> (quoted, may contain commas and \-escapes) or Name <a@b>
+  const m = addr.match(/^\s*(?:"((?:[^"\\]|\\.)*)"|([^"<]*?))\s*<([^>]+)>\s*$/);
+  if (m) {
+    const name = m[1] != null ? m[1].replace(/\\(.)/g, '$1') : m[2];
+    const email = m[3].trim();
+    return `<a href="mailto:${escHtml(email)}" title="${escHtml(email)}">${escHtml(name.trim() || email)}</a>`;
+  }
   if (addr.includes('@')) return `<a href="mailto:${escHtml(addr)}">${escHtml(addr)}</a>`;
   return escHtml(addr);
 }
@@ -1285,7 +1306,7 @@ function _openMailDetail(accountId, msgId, webUrl) {
       document.getElementById('dashboardDetailTitle').textContent = msg.subject;
 
       const rows = [];
-      if (msg.from)    rows.push(['From',    _foldAddresses(msg.from)]);
+      if (msg.from)    rows.push(['From',    _foldAddresses(msg.from) + _mailTrustedBadgeHtml(msg)]);
       if (msg.to)      rows.push(['To',      _foldAddresses(msg.to)]);
       if (msg.cc)      rows.push(['Cc',      _foldAddresses(msg.cc)]);
       if (msg.date)    rows.push(['Date',    escHtml(new Date(msg.date).toLocaleString())]);
@@ -1335,6 +1356,9 @@ function _openMailDetail(accountId, msgId, webUrl) {
  * Used by the dashboard detail panel and the mail view.
  */
 function _renderMailBody(container, msg, { plain = false, toggle = true } = {}) {
+  // Trusted-sender badge in the From row (rendered hidden; shown once the list is known)
+  if (_mailTrusted) _mailSyncTrustedBadges();
+  else _mailLoadTrusted().then(_mailSyncTrustedBadges);
   // Both versions present: own TXT ⇄ </> toggle above the body (the mail view puts it in its toolbar)
   if (toggle && _mailHasBothParts(msg)) {
     const btn    = document.createElement('button');
@@ -1355,38 +1379,304 @@ function _renderMailBody(container, msg, { plain = false, toggle = true } = {}) 
     return;
   }
   if (msg.bodyHtml && !(plain && msg.body)) {
-    const iframe = document.createElement('iframe');
-    iframe.className = 'dashboard-mail-iframe';
-    // allow-same-origin lets us write content and read scrollHeight;
-    // scripts are still blocked (no allow-scripts), so this is safe.
-    iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
-    iframe.setAttribute('referrerpolicy', 'no-referrer');
-    container.appendChild(iframe);
-    const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#222;background:white;padding:8px;margin:0;word-break:break-word}'
-      + ' a{color:#4f46e5} img{max-width:100%;height:auto}'
-      + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
-      + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
-    const { emailStyles, bodyClass } = (() => {
-      try {
-        const parsed = new DOMParser().parseFromString(msg.bodyHtml, 'text/html');
-        return {
-          emailStyles: [...parsed.querySelectorAll('style')].map(s => s.textContent).join('\n'),
-          bodyClass:   parsed.body.className || '',
-        };
-      } catch { return { emailStyles: '', bodyClass: '' }; }
-    })();
-    const safeHtml    = DOMPurify.sanitize(msg.bodyHtml, { FORCE_BODY: true });
-    const emailStyleTag = emailStyles ? `<style>${emailStyles}</style>` : '';
-    const bodyAttr    = bodyClass ? ` class="${bodyClass.replace(/"/g, '&quot;')}"` : '';
-    iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${safeHtml}</body></html>`;
-    const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
-    iframe.addEventListener('load', resize);
+    // Own wrapper: toggling trust re-renders only the body (the detail panel container also holds the headers)
+    const wrap = document.createElement('div');
+    wrap.className = 'mail-body-wrap';
+    container.appendChild(wrap);
+    if (_mailTrusted) _renderMailHtml(wrap, msg);
+    else _mailLoadTrusted().then(() => _renderMailHtml(wrap, msg));
   } else if (msg.body) {
     const pre = document.createElement('pre');
     pre.className = 'dashboard-mail-body';
     pre.textContent = msg.body;
     container.appendChild(pre);
   }
+}
+
+// ---- Privacy: remote images and tracking elements ----
+
+let _mailTrusted = null;            // Set of trusted (lower-case) sender addresses; null until loaded
+let _mailTrustedLoading = null;
+
+/** Load the trusted senders once (a failure leaves the cache empty for this session's next try). */
+function _mailLoadTrusted() {
+  if (_mailTrusted) return Promise.resolve(_mailTrusted);
+  if (!_mailTrustedLoading) {
+    _mailTrustedLoading = fetch('/api/dashboard/mail-trusted-senders')
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => (_mailTrusted = new Set(d.senders || [])))
+      .catch(() => new Set())
+      .finally(() => { _mailTrustedLoading = null; });
+  }
+  return _mailTrustedLoading.then(set => _mailTrusted || set);
+}
+
+async function _mailSetTrusted(address, trusted) {
+  const r = await fetch('/api/dashboard/mail-trusted-senders', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, trusted }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  _mailTrusted = new Set((await r.json()).senders || []);
+  _mailSyncTrustedBadges();
+}
+
+/** Small icon after the sender in a From row; hidden until _mailSyncTrustedBadges finds the sender trusted. */
+function _mailTrustedBadgeHtml(msg) {
+  const addr = _mailSenderAddr(msg);
+  if (!addr) return '';
+  return `<span class="mail-trusted-badge" data-mail-sender="${escHtml(addr)}" title="Trusted sender — remote images are loaded" aria-label="Trusted sender"`
+    + `${_mailTrusted?.has(addr) ? '' : ' hidden'}>${SVGICONS.shieldCheck(12, 12)}</span>`;
+}
+
+/** Show / hide every trusted-sender badge on the page according to the cached list. */
+function _mailSyncTrustedBadges() {
+  document.querySelectorAll('.mail-trusted-badge[data-mail-sender]').forEach(el => {
+    el.hidden = !_mailTrusted?.has(el.dataset.mailSender);
+  });
+}
+
+/** Bare lower-case address of the first sender ("Name <a@b>" or "a@b"), '' if none. */
+function _mailSenderAddr(msg) {
+  const from = String(msg?.from || '');
+  const m = from.match(/<([^<>\s]+@[^<>\s]+)>/) || from.match(/[^\s<>",;]+@[^\s<>",;]+/);
+  return m ? (m[1] || m[0]).toLowerCase() : '';
+}
+
+/** True when the sender of `msg` is trusted (remote images may load). */
+function _mailSenderTrusted(msg) {
+  const addr = _mailSenderAddr(msg);
+  return !!addr && !!_mailTrusted?.has(addr);
+}
+
+const _MAIL_REMOTE_RE       = /^\s*(https?:)?\/\//i;
+// Hosts that only serve open/click tracking (image CDNs of the same providers are not listed)
+const _MAIL_TRACKER_HOST_RE = /(^|\.)(list-manage\.com|sendgrid\.net|mandrillapp\.com|mailgun\.org|mailjet\.com|mjt\.lu|sparkpostmail\.com|hubspotemail\.net|hs-analytics\.net|exct\.net|exacttarget\.com|doubleclick\.net|google-analytics\.com|mailtrack\.io|mixmax\.com|yesware\.com|getnotify\.com|bananatag\.com|returnpath\.net|emltrk\.com|litmus\.com|cmail\d+\.com|createsend\d*\.com|mlsend\.com|klclick\d*\.com|rs6\.net|ct\.sendgrid\.net)$|^(track|tracking|trk|pixel|beacon|open|opens|email-open|click|clicks|links?)\./i;
+const _MAIL_TRACKER_PATH_RE = /\/(open|opens|track|tracking|trk|pixel|beacon|wf\/open)(\/|\.gif|\.png|\?|$)|\/(open|pixel|track|beacon|spacer|blank|t)\.(gif|png)(\?|$)/i;
+
+function _mailUrlHost(url) {
+  try { return new URL(url.trim().replace(/^\/\//, 'https://')).hostname; } catch { return ''; }
+}
+
+/** Reason when a remote URL / element looks like a tracker, else ''. */
+function _mailTrackerReason(url, el) {
+  const host = _mailUrlHost(url);
+  if (host && _MAIL_TRACKER_HOST_RE.test(host)) return 'tracker host';
+  if (el && el.tagName === 'IMG') {
+    const dim = name => {
+      const attr = el.getAttribute(name);
+      const css  = (el.getAttribute('style') || '').match(new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*(\\d+(?:\\.\\d+)?)px`, 'i'));
+      const v = css ? css[1] : attr;
+      return v != null && /^\s*\d+(\.\d+)?\s*(px)?\s*$/i.test(v) ? parseFloat(v) : null;
+    };
+    const w = dim('width'), h = dim('height');
+    if ((w !== null || h !== null) && (w === null || w <= 2) && (h === null || h <= 2)) return w === 0 || h === 0 ? 'invisible image' : '1×1 pixel';
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      if (/(display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(\.0*)?\s*(;|$)|max-(height|width)\s*:\s*0(px)?\s*(;|$))/i.test(n.getAttribute('style') || '')) return 'hidden image';
+    }
+  }
+  if (_MAIL_TRACKER_PATH_RE.test(url.replace(/^[^/]*\/\/[^/]+/, ''))) return 'tracking URL';
+  return '';
+}
+
+/**
+ * Remove remote / tracking resources from CSS text. Trackers are always
+ * removed, other remote url() only when !loadImages; @import is always dropped.
+ */
+function _mailScrubCss(css, loadImages, out) {
+  return String(css || '')
+    .replace(/@import\s+(url\([^)]*\)|"[^"]*"|'[^']*')[^;]*;?/gi, (m, target) => {
+      // Imported stylesheets are always dropped; listed with the blocked URLs but not counted as images
+      out.urls.add(target.replace(/^url\(\s*|\s*\)$/g, '').replace(/^(['"])(.*)\1$/, '$2'));
+      return '';
+    })
+    .replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (m, q, url) => {
+      if (!_MAIL_REMOTE_RE.test(url)) return m;
+      const reason = _mailTrackerReason(url, null);
+      if (reason) { out.trackers.push({ host: _mailUrlHost(url), reason: 'CSS ' + reason }); return 'none'; }
+      out.remote++;
+      if (!loadImages) { out.blocked++; out.urls.add(url.trim()); return 'none'; }
+      return m;
+    });
+}
+
+/**
+ * Sanitise mail HTML for display: DOMPurify, then remove every tracking element
+ * (always) and remote images / backgrounds / CSS urls (unless `loadImages`).
+ * Returns { html, styles, bodyClass, remote, blocked, blockedUrls, trackers: [{ host, reason }] }:
+ * `remote` = remote images / backgrounds in the mail (loaded or not), `blocked` = those removed.
+ */
+function _mailPrivacyHtml(html, { loadImages = false } = {}) {
+  const out = { remote: 0, blocked: 0, urls: new Set(), trackers: [] };
+  let styles = '', bodyClass = '';
+  try {
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    styles    = [...parsed.querySelectorAll('style')].map(st => st.textContent).join('\n');
+    bodyClass = parsed.body.className || '';
+  } catch { /* keep defaults */ }
+  styles = _mailScrubCss(styles, loadImages, out);
+
+  const body = DOMPurify.sanitize(html, { FORCE_BODY: true, RETURN_DOM: true });
+  body.querySelectorAll('style').forEach(st => st.remove());   // already collected (and scrubbed) above
+  const record = (url, reason) => out.trackers.push({ host: _mailUrlHost(url) || url.slice(0, 60), reason });
+
+  for (const el of [...body.querySelectorAll('*')]) {
+    if (!el.isConnected) continue;
+    if (el.tagName === 'A') el.setAttribute('rel', 'noopener noreferrer');   // DOMPurify already drops `ping`
+    let counted = false;   // one remote image per element (src + srcset of the same <img> count once)
+    for (const attr of ['src', 'srcset', 'poster', 'background', 'data', 'dynsrc', 'lowsrc']) {
+      const val = el.getAttribute(attr);
+      if (val == null) continue;
+      const urls = attr === 'srcset' ? val.split(',').map(p => p.trim().split(/\s+/)[0]) : [val];
+      const remote = urls.filter(u => _MAIL_REMOTE_RE.test(u));
+      if (!remote.length) continue;
+      const reason = remote.map(u => _mailTrackerReason(u, el)).find(Boolean);
+      if (reason) {
+        record(remote[0], reason);
+        if (el.tagName === 'IMG' || el.tagName === 'SOURCE') { el.remove(); break; }
+        el.removeAttribute(attr);
+        continue;
+      }
+      const counts = !counted && attr !== 'data' && attr !== 'dynsrc' && attr !== 'lowsrc';
+      if (counts) { counted = true; out.remote++; }
+      if (!loadImages) {
+        el.removeAttribute(attr);
+        remote.forEach(u => out.urls.add(u.trim()));
+        if (counts) out.blocked++;
+        if (el.tagName === 'IMG') {
+          el.setAttribute('data-jc-blocked', '');
+          // Placeholder tooltip: which image was blocked
+          if (attr === 'src') el.setAttribute('title', `Blocked: ${remote[0].trim()}${el.getAttribute('title') ? `\n${el.getAttribute('title')}` : ''}`);
+        }
+      }
+    }
+    if (!el.isConnected) continue;
+    const style = el.getAttribute('style');
+    if (style && /url\(/i.test(style)) el.setAttribute('style', _mailScrubCss(style, loadImages, out));
+  }
+  return { html: body.innerHTML, styles, bodyClass, remote: out.remote, blocked: out.blocked, blockedUrls: [...out.urls], trackers: out.trackers };
+}
+
+/** Content-Security-Policy of the mail iframe — the safety net behind _mailPrivacyHtml. */
+function _mailCsp(loadImages) {
+  return `default-src 'none'; style-src 'unsafe-inline'; img-src data: blob: cid:${loadImages ? ' https: http:' : ''}; font-src data:${loadImages ? ' https:' : ''}`;
+}
+
+/** Tooltip text of the tracker shield: "3 tracking elements blocked:\n• 1×1 pixel — host". */
+function _mailTrackerTitle(trackers) {
+  const counts = new Map();
+  for (const t of trackers) {
+    const key = `${t.reason} — ${t.host}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const lines = [...counts].map(([k, n]) => `• ${k}${n > 1 ? ` (×${n})` : ''}`);
+  return `${trackers.length} tracking element${trackers.length > 1 ? 's' : ''} blocked:\n${lines.join('\n')}`;
+}
+
+/** HTML body in a sandboxed iframe, with the privacy bar (trust toggle, tracker shield) above it. */
+function _renderMailHtml(wrap, msg) {
+  wrap.replaceChildren();
+  const sender  = _mailSenderAddr(msg);
+  const trusted = _mailSenderTrusted(msg);
+  const res     = _mailPrivacyHtml(msg.bodyHtml, { loadImages: trusted });
+
+  // Only mails with remote images get the images part (count / "Images loaded" + trust toggle), trusted or not
+  const hasImages = res.remote > 0;
+  if (hasImages || res.trackers.length || res.blockedUrls.length) {
+    const bar = document.createElement('div');
+    bar.className = 'mail-privacy-bar';
+    if (res.trackers.length) {
+      const shield = document.createElement('span');
+      shield.className = 'mail-privacy-shield';
+      shield.innerHTML = SVGICONS.shield(14, 14);
+      shield.title = _mailTrackerTitle(res.trackers);
+      shield.setAttribute('aria-label', shield.title);
+      shield.tabIndex = 0;
+      bar.appendChild(shield);
+    }
+    // With blocked content the text is a toggle that lists the blocked URLs (plain text — never fetched)
+    const text = document.createElement(res.blockedUrls.length ? 'button' : 'span');
+    text.className = 'mail-privacy-text';
+    if (res.blocked) {
+      // "N remote images blocked"; phones hide the middle part → "N blocked"
+      const long = document.createElement('span');
+      long.className = 'mail-privacy-long';
+      long.textContent = ` remote image${res.blocked > 1 ? 's' : ''}`;
+      text.append(String(res.blocked), long, ' blocked');
+      text.setAttribute('aria-label', `${res.blocked}${long.textContent} blocked`);
+    } else if (trusted && hasImages) {
+      // "Images loaded (trusted sender)"; phones → "Images loaded"
+      const long = document.createElement('span');
+      long.className = 'mail-privacy-long';
+      long.textContent = ' (trusted sender)';
+      text.append('Images loaded', long);
+    } else {
+      text.textContent = res.trackers.length ? 'Tracking blocked' : 'Remote styles blocked';
+    }
+    bar.appendChild(text);
+    let urlList = null;
+    if (res.blockedUrls.length) {
+      text.type = 'button';
+      text.classList.add('mail-privacy-toggle');
+      text.title = 'Show the blocked URLs';
+      text.setAttribute('aria-expanded', 'false');
+      urlList = document.createElement('ul');
+      urlList.className = 'mail-privacy-urls';
+      urlList.hidden = true;
+      for (const u of res.blockedUrls) {
+        const li = document.createElement('li');
+        li.textContent = u;
+        urlList.appendChild(li);
+      }
+      text.addEventListener('click', () => {
+        urlList.hidden = !urlList.hidden;
+        text.setAttribute('aria-expanded', String(!urlList.hidden));
+      });
+    }
+    if (hasImages) {
+      const label = document.createElement('label');
+      label.className = 'mail-privacy-trust';
+      label.title = sender ? `Always load remote images from ${sender}` : 'No sender address';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked  = trusted;
+      cb.disabled = !sender;
+      cb.addEventListener('change', async () => {
+        cb.disabled = true;
+        try {
+          await _mailSetTrusted(sender, cb.checked);
+          _renderMailHtml(wrap, msg);
+        } catch {
+          cb.checked  = !cb.checked;
+          cb.disabled = false;
+          text.textContent = 'Could not save the trusted sender';
+        }
+      });
+      label.append(cb, document.createTextNode(' Trust sender and load images'));
+      bar.appendChild(label);
+    }
+    if (urlList) bar.appendChild(urlList);
+    wrap.appendChild(bar);
+  }
+
+  const iframe = document.createElement('iframe');
+  iframe.className = 'dashboard-mail-iframe';
+  // allow-same-origin lets us write content and read scrollHeight;
+  // scripts are still blocked (no allow-scripts), so this is safe.
+  iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
+  iframe.setAttribute('referrerpolicy', 'no-referrer');
+  wrap.appendChild(iframe);
+  const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#222;background:white;padding:8px;margin:0;word-break:break-word}'
+    + ' a{color:#4f46e5} img{max-width:100%;height:auto}'
+    + ' img[data-jc-blocked]{display:inline-block;min-width:16px;min-height:16px;background:#f0f0f0;outline:1px dashed #ccc;outline-offset:-1px}'
+    + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
+    + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
+  const emailStyleTag = res.styles ? `<style>${res.styles.replace(/<\/style/gi, '<\\/style')}</style>` : '';
+  const bodyAttr = res.bodyClass ? ` class="${res.bodyClass.replace(/"/g, '&quot;')}"` : '';
+  iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${_mailCsp(trusted)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${res.html}</body></html>`;
+  const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
+  iframe.addEventListener('load', resize);
 }
 
 /** True when a mail has both an HTML and a non-empty plain-text part. */

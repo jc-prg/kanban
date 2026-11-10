@@ -252,8 +252,20 @@ function _svgSchedule(w = 14, h = 14) {
   return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke-width="1.5"/><line x1="8" y1="2" x2="8" y2="3.2" stroke-width="1.5"/><polyline points="8,5 8,8.5 11.5,8.5" stroke-width="1.6"/><circle cx="8" cy="8" r="0.8" fill="currentColor" stroke="none"/></svg>`;
 }
 
+// Shield with exclamation mark — blocked mail tracking elements
+function _svgShield(w = 14, h = 14) {
+  return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z" stroke-width="1.4"/><line x1="8" y1="5" x2="8" y2="8.6" stroke-width="1.6"/><circle cx="8" cy="10.9" r="0.85" fill="currentColor" stroke="none"/></svg>`;
+}
+
+// Shield with check mark — trusted mail sender (remote images allowed)
+function _svgShieldCheck(w = 14, h = 14) {
+  return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z" stroke-width="1.4"/><polyline points="5.4,8.1 7.3,10 10.7,6.3" stroke-width="1.6"/></svg>`;
+}
+
 const SVGICONS = {
   close:          _svgClose,
+  shield:         _svgShield,
+  shieldCheck:    _svgShieldCheck,
   delete:         _svgDelete,
   color:          _svgColor,
   fileImage:      _svgFileImage,

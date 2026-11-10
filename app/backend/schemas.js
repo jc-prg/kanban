@@ -279,6 +279,7 @@ const validateMailSend = ajv.compile({
   required: ['to'],
   additionalProperties: false,
   properties: {
+    from:        { type: 'string', maxLength: 320 },
     to:          { ..._mailAddrList, minLength: 3 },
     cc:          _mailAddrList,
     bcc:         _mailAddrList,

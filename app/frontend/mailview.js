@@ -92,7 +92,10 @@ function _mvForwardSubject(subject) {
 function _mvSplitAddrs(str) {
   const out = [];
   let cur = '', quoted = false, angle = false;
+  let esc = false;
   for (const ch of str || '') {
+    if (esc) { esc = false; cur += ch; continue; }
+    if (ch === '\\' && quoted) { esc = true; cur += ch; continue; }   // \" inside a quoted name
     if (ch === '"') quoted = !quoted;
     else if (ch === '<') angle = true;
     else if (ch === '>') angle = false;
@@ -102,6 +105,12 @@ function _mvSplitAddrs(str) {
     } else cur += ch;
   }
   if (cur.trim()) out.push(cur.trim());
+  // Unquoted "Doe, Jane <jane@x>" (older server responses): a fragment without any address belongs
+  // to the next entry — rebuilt as a quoted name so replies stay valid
+  for (let i = out.length - 2; i >= 0; i--) {
+    const m = !/[@<]/.test(out[i]) && out[i + 1].match(/^([^"<]*?)\s*(<[^<>]+>)$/);
+    if (m) out.splice(i, 2, `"${`${out[i]}, ${m[1]}`.trim().replace(/(["\\])/g, '\\$1')}" ${m[2]}`);
+  }
   return out;
 }
 
@@ -114,8 +123,25 @@ function _mvAddrOf(entry) {
 /** Display name of "Name <a@b>" (falls back to the address). */
 function _mvDisplayName(entry) {
   const first = _mvSplitAddrs(entry)[0] || '';
-  const name  = first.replace(/<[^<>]*>\s*$/, '').trim().replace(/^"(.*)"$/, '$1');
+  const name  = first.replace(/<[^<>]*>\s*$/, '').trim().replace(/^"(.*)"$/, (m, q) => q.replace(/\\(.)/g, '$1'));
   return name || _mvAddrOf(first);
+}
+
+/** Sender addresses of an SMTP `fromAddress` ("a@x, Name <b@x>"), bare and de-duplicated; falls back to `fallback`. */
+function _mvParseSenders(str, fallback) {
+  const out = [];
+  for (const e of _mvSplitAddrs(str)) {
+    const a = _mvAddrOf(e);
+    if (a.includes('@') && !out.includes(a)) out.push(a);
+  }
+  if (!out.length && fallback && fallback.includes('@')) out.push(fallback.trim().toLowerCase());
+  return out;
+}
+
+/** Sender for a reply: the configured address the original was sent to (To, then Cc), else the first one. */
+function _mvReplySender(msg, senders) {
+  const rcpt = [..._mvSplitAddrs(msg?.to), ..._mvSplitAddrs(msg?.cc)].map(_mvAddrOf);
+  return rcpt.find(a => senders.includes(a)) || senders[0] || '';
 }
 
 /**
@@ -147,10 +173,15 @@ function _mvReplyFields(msg, all, own) {
   };
 }
 
-/** Body of the original as editor-safe HTML (no styles / classes leaking into the app). */
+/**
+ * Body of the original as editor-safe HTML (no styles / classes leaking into the app).
+ * The editor lives in the app document, so trackers and (unless the sender is trusted)
+ * remote images are removed first — quoting must not load them.
+ */
 function _mvOriginalHtml(msg) {
   return msg.bodyHtml
-    ? DOMPurify.sanitize(msg.bodyHtml, { FORBID_TAGS: ['style', 'link', 'meta', 'title'], FORBID_ATTR: ['class', 'id'] })
+    ? DOMPurify.sanitize(_mailPrivacyHtml(msg.bodyHtml, { loadImages: _mailSenderTrusted(msg) }).html,
+        { FORBID_TAGS: ['style', 'link', 'meta', 'title'], FORBID_ATTR: ['class', 'id', 'data-jc-blocked'] })
     : escHtml(msg.body || '').replace(/\r?\n/g, '<br>');
 }
 
@@ -411,7 +442,8 @@ async function _mvReload() {
       label:           a.label || a.user || a.id,
       color:           a.color || null,
       webInterfaceUrl: a.webInterfaceUrl || null,
-      own:             [a.user, a.smtp?.fromAddress].filter(x => x && x.includes('@')),
+      senders:         _mvParseSenders(a.smtp?.fromAddress, a.user),
+      own:             [a.user, ..._mvParseSenders(a.smtp?.fromAddress)].filter(x => x && x.includes('@')),
       canSend:         !!a.smtp?.host,
       trashFolder:     a.trashFolder || null,
     }));
@@ -624,8 +656,11 @@ async function _mvSetUnread(ids, unread) {
   }
 }
 
-/** Remove messages from the list; if the open one goes, open its neighbour. */
-function _mvDropFromList(ids) {
+/**
+ * Remove messages from the list; if the open one goes, open its neighbour
+ * (`stay`: just close it and keep showing the list — swipe actions on phones).
+ */
+function _mvDropFromList(ids, { stay = false } = {}) {
   const drop = new Set(ids);
   const first = _mvMsgs.findIndex(m => drop.has(m.id));
   if (first < 0) return;
@@ -639,20 +674,20 @@ function _mvDropFromList(ids) {
     const next = _mvMsgs[first] || _mvMsgs[first - 1];
     _mvSelId = null;
     _mvMsg   = null;
-    if (next) _mvOpenMessage(next.id);
+    if (next && !stay) _mvOpenMessage(next.id);
     else { _mvRenderReader(); _mvSetPane('list'); }
   }
   _mvRenderList();
 }
 
-async function _mvDeleteMessages(ids) {
+async function _mvDeleteMessages(ids, opts = {}) {
   if (!ids.length) return;
   const accountId = _mvAccountId, folder = _mvFolder;
   const f = _mvFolderInfo();
   // Several messages out of trash / spam: deletion may be permanent → ask first
   if (ids.length > 1 && f && _mvIsEmptyable(f, _mvAccounts.find(a => a.accountId === accountId)?.trashFolder)
       && !(await showConfirm(`Delete ${ids.length} messages from "${_mvFolderLabel(f)}"? This cannot be undone.`, { okLabel: 'Delete', danger: true }))) return;
-  _mvDropFromList(ids);
+  _mvDropFromList(ids, opts);
   _mvDashStale = true;
   const n = ids.length === 1 ? 'Message' : `${ids.length} messages`;
   try {
@@ -665,9 +700,9 @@ async function _mvDeleteMessages(ids) {
   _mvRefreshFoldersSoon(accountId);
 }
 
-async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _mvFolder) {
+async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _mvFolder, opts = {}) {
   if (!ids.length || target === folder) return;
-  if (accountId === _mvAccountId && folder === _mvFolder) _mvDropFromList(ids);
+  if (accountId === _mvAccountId && folder === _mvFolder) _mvDropFromList(ids, opts);
   _mvDashStale = true;
   try {
     await _mvJson(_mvApi(accountId, `/message/${ids.join(',')}/move?${_mvFolderQs(folder)}`), {
@@ -683,10 +718,10 @@ async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _
   _mvRefreshFoldersSoon(accountId);
 }
 
-async function _mvPickAndMoveMessages(ids) {
+async function _mvPickAndMoveMessages(ids, opts = {}) {
   const title = ids.length === 1 ? 'Move message to…' : `Move ${ids.length} messages to…`;
   const target = await _mvPickFolder(_mvAccountId, title, { exclude: [_mvFolder], withRecents: true });
-  if (target) _mvMoveMessages(ids, target);
+  if (target) _mvMoveMessages(ids, target, _mvAccountId, _mvFolder, opts);
 }
 
 let _mvBoardsCache = null;
@@ -715,6 +750,31 @@ function _mvCreateCard(id, board = null) {
       if (_mvMsg?.id === id) _mvRenderReader();
     },
   });
+}
+
+/** Bare lower-case address of a header link (mailto:…), '' if none. */
+function _mvMailtoAddr(href) {
+  const m = String(href || '').match(/^mailto:([^?]+)/i);
+  if (!m) return '';
+  try { return decodeURIComponent(m[1]).trim().toLowerCase(); } catch { return m[1].trim().toLowerCase(); }
+}
+
+/** Right-click on an address in the reader header: trust / untrust it (remote images). */
+async function _mvAddressMenu(e, addr) {
+  await _mailLoadTrusted();
+  const trusted = !!_mailTrusted?.has(addr);
+  const set = async on => {
+    try {
+      await _mailSetTrusted(addr, on);
+      _mvFlash(on ? `${addr} is now a trusted sender` : `${addr} removed from trusted senders`);
+      _mvRenderReader();   // the open mail reloads / blocks its images and updates the badge
+    } catch (err) {
+      _mvFlash(`Could not update trusted senders: ${err.message}`, true);
+    }
+  };
+  openContextMenu(e, [trusted
+    ? { labelHtml: `<span class="ctx-icon">${SVGICONS.shield()}</span>Remove from trusted senders`, action: () => set(false) }
+    : { labelHtml: `<span class="ctx-icon">${SVGICONS.shieldCheck()}</span>Trust sender and load images`, action: () => set(true) }]);
 }
 
 /** Context menu: acts on the whole selection when the row is part of a multi-selection. */
@@ -1199,10 +1259,142 @@ function _mvListItemHtml(m) {
   const date = _mvFmtListDate(m.date);
   if (date)             meta.push(`<span class="card-date">${escHtml(date)}</span>`);
   const selected = _mvChecked.size > 1 && _mvChecked.has(m.id);
-  return `<div class="mv-msg${m.unread ? ' mv-unread' : ''}${m.id === _mvSelId ? ' active' : ''}${selected ? ' selected' : ''}" data-mv-msg="${escHtml(m.id)}" draggable="true">
+  // Wrapper: on phones the row slides inside it to reveal the swipe actions
+  return `<div class="mv-msg-wrap"><div class="mv-msg${m.unread ? ' mv-unread' : ''}${m.id === _mvSelId ? ' active' : ''}${selected ? ' selected' : ''}" data-mv-msg="${escHtml(m.id)}" draggable="true">
       <div class="card-text">${m.unread ? `<strong>${escHtml(m.subject)}</strong>` : escHtml(m.subject)}</div>
       ${meta.length ? `<div class="card-meta">${meta.join('')}</div>` : ''}
-    </div>`;
+    </div></div>`;
+}
+
+// ---- Swipe actions on phones: left → Move + Delete, right → Mark read / unread ----
+
+const _MV_SWIPE_BTN = 64;   // px per action button
+let _mvSwipe = null;        // { row, offset } of the row that is currently swiped open
+
+/**
+ * Where a released row snaps to: open to the left (-endW), open to the right
+ * (+startW) or closed (0). Past half of an action area it opens.
+ */
+function _mvSwipeSnap(offset, startW, endW) {
+  if (endW && offset <= -endW / 2) return -endW;
+  if (startW && offset >= startW / 2) return startW;
+  return 0;
+}
+
+/** Action layers next to a row: `end` (revealed by a left swipe) and `start` (right swipe). */
+function _mvSwipeLayers(row) {
+  const wrap = row.parentElement;
+  let end   = wrap.querySelector('.mv-swipe-actions--end');
+  let start = wrap.querySelector('.mv-swipe-actions--start');
+  if (!end) {
+    const m = _mvMsgs.find(x => x.id === row.dataset.mvMsg);
+    const btn = (act, icon, label, cls) =>
+      `<button type="button" class="mv-swipe-btn mv-swipe-btn--${cls}" data-mv-swipe="${act}" title="${label}" aria-label="${label}">${icon}</button>`;
+    wrap.insertAdjacentHTML('afterbegin',
+      `<div class="mv-swipe-actions mv-swipe-actions--start">${m?.unread
+        ? btn('read', SVGICONS.markRead(20, 20), 'Mark as read', 'read')
+        : btn('unread', SVGICONS.markUnread(20, 20), 'Mark as unread', 'read')}</div>`
+      + `<div class="mv-swipe-actions mv-swipe-actions--end">${btn('move', SVGICONS.moveTo(20, 20), 'Move', 'move')}`
+      + `${btn('delete', SVGICONS.delete(20, 20), 'Delete', 'delete')}</div>`);
+    end   = wrap.querySelector('.mv-swipe-actions--end');
+    start = wrap.querySelector('.mv-swipe-actions--start');
+  }
+  return { start, end, startW: _MV_SWIPE_BTN, endW: end.children.length * _MV_SWIPE_BTN };
+}
+
+/** Move a row to `offset` px; each action layer fills exactly the space the row frees. */
+function _mvSwipeSet(row, offset, animate) {
+  const { start, end } = _mvSwipeLayers(row);
+  row.classList.toggle('mv-swipe-anim', !!animate);
+  for (const el of [start, end]) el.classList.toggle('mv-swipe-anim', !!animate);
+  row.style.transform = offset ? `translateX(${offset}px)` : '';
+  start.style.width = `${Math.max(0, offset)}px`;
+  end.style.width   = `${Math.max(0, -offset)}px`;
+}
+
+function _mvSwipeClose(animate = true) {
+  if (!_mvSwipe) return;
+  const { row } = _mvSwipe;
+  _mvSwipe = null;
+  if (!row.isConnected) return;
+  _mvSwipeSet(row, 0, animate);
+  // Drop the layers once closed so the row needs no opaque background
+  setTimeout(() => { if (_mvSwipe?.row !== row) row.parentElement?.querySelectorAll('.mv-swipe-actions').forEach(el => el.remove()); }, animate ? 220 : 0);
+}
+
+function _mvSwipeAction(act, id) {
+  _mvSwipeClose(false);
+  const m = _mvMsgs.find(x => x.id === id);
+  if (!m) return;
+  if (act === 'read' || act === 'unread') _mvSetUnread([id], act === 'unread');
+  // Swipe actions keep the list in view (no jump to the next message)
+  else if (act === 'delete') _mvDeleteMessages([id], { stay: true });
+  else if (act === 'move') _mvPickAndMoveMessages([id], { stay: true });
+}
+
+/** Touch swipe on the message list (phone layout only). */
+function _mvWireSwipe(list) {
+  let g = null;   // gesture: { row, id, x0, y0, base, mode: 'pending' | 'swipe', startW, endW, offset }
+  let suppressClick = 0;
+  list.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch' || !_cvIsPhone() || e.target.closest('.mv-swipe-actions')) return;
+    const row = e.target.closest('.mv-msg');
+    if (!row) return;
+    // Touching another row while one is open only closes the open one (unless it turns into a swipe)
+    const closedOther = !!_mvSwipe && _mvSwipe.row !== row;
+    if (closedOther) _mvSwipeClose();
+    g = { row, x0: e.clientX, y0: e.clientY, base: _mvSwipe?.row === row ? _mvSwipe.offset : 0, mode: 'pending', offset: 0, closedOther };
+  });
+  list.addEventListener('pointermove', e => {
+    if (!g || e.pointerType !== 'touch') return;
+    const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+    if (g.mode === 'pending') {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }   // vertical: let the list scroll
+      if (Math.abs(dx) < 10) return;
+      g.mode = 'swipe';
+      Object.assign(g, _mvSwipeLayers(g.row));
+    }
+    // Resist beyond the action area (rubber band)
+    const raw = g.base + dx;
+    const max = raw > 0 ? g.startW : g.endW;
+    const over = Math.abs(raw) - max;
+    g.offset = over > 0 ? Math.sign(raw) * (max + over / 4) : raw;
+    _mvSwipeSet(g.row, g.offset, false);
+  });
+  const end = e => {
+    if (!g || e.pointerType !== 'touch') return;
+    const done = g;
+    g = null;
+    if (done.mode !== 'swipe') {
+      // Tap on an open row closes it instead of opening the message
+      if (_mvSwipe?.row === done.row) { suppressClick = Date.now(); _mvSwipeClose(); }
+      else if (done.closedOther) suppressClick = Date.now();
+      return;
+    }
+    suppressClick = Date.now();
+    const target = e.type === 'pointercancel' ? 0 : _mvSwipeSnap(done.offset, done.startW, done.endW);
+    if (target) {
+      _mvSwipe = { row: done.row, offset: target };
+      _mvSwipeSet(done.row, target, true);
+    } else {
+      _mvSwipe = { row: done.row, offset: 0 };
+      _mvSwipeClose();
+    }
+  };
+  list.addEventListener('pointerup', end);
+  list.addEventListener('pointercancel', end);
+  // Capture: a swipe or the closing tap must not also open the message
+  list.addEventListener('click', e => {
+    const btn = e.target.closest('[data-mv-swipe]');
+    if (btn) {
+      e.stopPropagation();
+      _mvSwipeAction(btn.dataset.mvSwipe, btn.closest('.mv-msg-wrap').querySelector('[data-mv-msg]').dataset.mvMsg);
+      return;
+    }
+    if (Date.now() - suppressClick < 400) { e.stopPropagation(); e.preventDefault(); return; }
+    if (_mvSwipe) { e.stopPropagation(); _mvSwipeClose(); }
+  }, true);
+  list.addEventListener('scroll', () => { if (_mvSwipe && !g) _mvSwipeClose(); }, { passive: true });
 }
 
 function _mvRenderList(error) {
@@ -1217,6 +1409,7 @@ function _mvRenderList(error) {
       : `<p class="dashboard-empty">${_mvQuery ? 'No messages match the search.' : 'No messages.'}</p>`;
     return;
   }
+  _mvSwipe = null;
   el.innerHTML = _mvMsgs.map(_mvListItemHtml).join('')
     + (_mvMsgs.length < _mvTotal ? `<button class="btn mv-load-more" data-mv-more="1">Load more (${_mvTotal - _mvMsgs.length})</button>` : '');
 }
@@ -1242,7 +1435,7 @@ function _mvRenderReaderActions() {
   if (!bar || !_mvMsg) return;
   const acc = _mvAccounts.find(a => a.accountId === _mvAccountId);
   const unread = _mvMsgs.find(m => m.id === _mvMsg.id)?.unread;
-  // Icon + label; phones show the icon only (label stays as tooltip / aria-label)
+  // Icon + label; below 670 px toolbar width only the icon (CSS container query; label stays as tooltip / aria-label)
   const btn = (act, icon, label, { key = '', disabled = '', cls = '' } = {}) => {
     const tip = disabled || (key ? `${label} (${key})` : label);
     return `<button class="btn${cls}" data-mv-act="${act}" title="${escHtml(tip)}" aria-label="${escHtml(label)}"${disabled ? ' disabled' : ''}>`
@@ -1273,7 +1466,7 @@ function _mvRenderReader(mode, error) {
   }
   const msg = _mvMsg;
   const rows = [];
-  rows.push(['From', _foldAddresses(msg.from)]);
+  rows.push(['From', _foldAddresses(msg.from) + _mailTrustedBadgeHtml(msg)]);
   if (msg.to) rows.push(['To', _foldAddresses(msg.to)]);
   if (msg.cc) rows.push(['Cc', _foldAddresses(msg.cc)]);
   if (msg.date) rows.push(['Date', escHtml(new Date(msg.date).toLocaleString())]);
@@ -1313,7 +1506,11 @@ function _mvOpenCompose(mode) {
   const forward = mode === 'forward' && _mvMsg ? _mvMsg : null;
   const fields  = reply ? _mvReplyFields(reply, mode === 'replyall', _mvAccounts.find(a => a.accountId === _mvAccountId)?.own)
     : forward ? { to: '', cc: '', subject: _mvForwardSubject(forward.subject) } : null;
-  const fromId = sendable.some(a => a.accountId === _mvAccountId) ? _mvAccountId : sendable[0].accountId;
+  const fromAcc  = sendable.find(a => a.accountId === _mvAccountId) || sendable[0];
+  const fromAddr = reply && fromAcc.accountId === _mvAccountId ? _mvReplySender(reply, fromAcc.senders) : fromAcc.senders[0];
+  // One option per (account, sender address): the address with the account's colour swatch
+  const fromOpts = sendable.flatMap(a => (a.senders.length ? a.senders : ['']).map(addr => ({ acc: a, addr })));
+  const fromSel  = fromOpts.find(o => o.acc === fromAcc && o.addr === (fromAddr || '')) || fromOpts[0];
   _mvCompose = {
     files:  [],
     dirty:  false,
@@ -1333,8 +1530,7 @@ function _mvOpenCompose(mode) {
       </div>
       <div class="mv-compose-fields">
         <label>From</label>
-        <select class="modal-input" name="from" ${sendable.length < 2 ? 'disabled' : ''}>${sendable.map(a =>
-          `<option value="${escHtml(a.accountId)}"${a.accountId === fromId ? ' selected' : ''}>${escHtml(a.label)}</option>`).join('')}</select>
+        ${_mvFromPickerHtml(fromOpts, fromSel)}
         <label>To</label>
         <input class="modal-input" name="to" type="text" spellcheck="false" value="${escHtml(fields?.to || '')}">
         <label>Cc</label>
@@ -1355,6 +1551,11 @@ function _mvOpenCompose(mode) {
         <button type="button" data-mv-cmd="formatBlock:blockquote" title="Quote">❝</button>
         <button type="button" data-mv-cmd="link" title="Link">${SVGICONS.link(12, 12)}</button>
         <button type="button" data-mv-cmd="removeFormat" title="Clear formatting">T̸</button>
+        <span class="mv-toolbar-sep"></span>
+        <span class="mv-emoji-wrap">
+          <button type="button" class="mv-emoji-toggle" data-mv-emoji-toggle="1" title="Insert emoji" aria-label="Insert emoji" aria-haspopup="true" aria-expanded="false">😊</button>
+          <div class="mv-emoji-pop" role="dialog" aria-label="Emoji" hidden></div>
+        </span>
       </div>
       <div class="mv-editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true">${reply ? _mvQuoteHtml(reply) : forward ? _mvForwardHtml(forward) : '<p><br></p>'}</div>
       <div class="mv-compose-files"></div>
@@ -1369,7 +1570,10 @@ function _mvOpenCompose(mode) {
   const form = el.querySelector('.mv-compose');
   form.addEventListener('input', () => { if (_mvCompose) _mvCompose.dirty = true; });
   form.addEventListener('submit', e => { e.preventDefault(); _mvSend(form); });
+  _mvWireFromPicker(form.querySelector('.mv-from'));
   const editor = form.querySelector('.mv-editor');
+  // Remember the caret so the emoji picker inserts at the last position in the text
+  for (const ev of ['keyup', 'mouseup', 'input', 'blur']) editor.addEventListener(ev, _mvSaveEditorRange);
   editor.addEventListener('paste', e => {
     const files = [...(e.clipboardData?.files || [])];
     if (files.length) { e.preventDefault(); _mvAddFiles(files); }
@@ -1386,6 +1590,74 @@ function _mvOpenCompose(mode) {
   _mvRenderComposeFiles();
   if (reply) { editor.focus(); const r = document.createRange(); r.setStart(editor, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }
   else form.querySelector('[name="to"]').focus();
+}
+
+/** Inner HTML of a sender entry: account colour swatch + address (account label as fallback). */
+function _mvFromOptHtml({ acc, addr }) {
+  return `<span class="mv-account-swatch" style="${acc.color ? `--card-color:${escHtml(acc.color)}` : ''}"></span>`
+    + `<span class="mv-from-addr">${escHtml(addr || acc.label)}</span>`;
+}
+
+/**
+ * Sender picker of the compose form. A native <select> cannot show the account
+ * colour, so this is a button + listbox; the choice lives in the hidden
+ * `from` (account ID) and `fromAddr` inputs read by _mvSend.
+ */
+function _mvFromPickerHtml(opts, sel) {
+  return `<div class="mv-from">
+      <input type="hidden" name="from" value="${escHtml(sel.acc.accountId)}">
+      <input type="hidden" name="fromAddr" value="${escHtml(sel.addr)}">
+      <button type="button" class="modal-input mv-from-btn" aria-haspopup="listbox" aria-expanded="false"
+        title="${escHtml(sel.acc.label)}" ${opts.length < 2 ? 'disabled' : ''}>${_mvFromOptHtml(sel)}<span class="mv-from-caret" aria-hidden="true">▾</span></button>
+      <ul class="mv-from-list" role="listbox" hidden>${opts.map(o =>
+        `<li role="option" tabindex="-1" title="${escHtml(o.acc.label)}" data-acc="${escHtml(o.acc.accountId)}" data-addr="${escHtml(o.addr)}"
+          aria-selected="${o === sel}">${_mvFromOptHtml(o)}</li>`).join('')}</ul>
+    </div>`;
+}
+
+function _mvWireFromPicker(root) {
+  const btn  = root.querySelector('.mv-from-btn');
+  const list = root.querySelector('.mv-from-list');
+  const items = () => [...list.querySelectorAll('[role="option"]')];
+  const open = show => {
+    list.hidden = !show;
+    btn.setAttribute('aria-expanded', String(show));
+    if (show) (items().find(li => li.getAttribute('aria-selected') === 'true') || items()[0])?.focus();
+  };
+  const choose = li => {
+    root.querySelector('[name="from"]').value     = li.dataset.acc;
+    root.querySelector('[name="fromAddr"]').value = li.dataset.addr;
+    items().forEach(x => x.setAttribute('aria-selected', String(x === li)));
+    btn.innerHTML = li.innerHTML + '<span class="mv-from-caret" aria-hidden="true">▾</span>';
+    btn.title = li.title;
+    if (_mvCompose) _mvCompose.dirty = true;
+    open(false);
+    btn.focus();
+  };
+  btn.addEventListener('click', () => open(list.hidden));
+  btn.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(true); }
+  });
+  list.addEventListener('click', e => { const li = e.target.closest('[role="option"]'); if (li) choose(li); });
+  list.addEventListener('keydown', e => {
+    const all = items(), i = all.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      all[(i + (e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length].focus();
+    } else if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      all[e.key === 'Home' ? 0 : all.length - 1].focus();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (i >= 0) choose(all[i]);
+    } else if (e.key === 'Escape' || e.key === 'Tab') {
+      if (e.key === 'Escape') e.preventDefault();
+      open(false);
+      if (e.key === 'Escape') btn.focus();
+    }
+  });
+  // Close when focus leaves the picker (click elsewhere, Tab)
+  root.addEventListener('focusout', e => { if (!root.contains(e.relatedTarget)) open(false); });
 }
 
 function _mvAddFiles(files) {
@@ -1406,6 +1678,92 @@ function _mvRenderComposeFiles() {
       <button type="button" class="mv-att-dl" ${attr} title="Remove">${SVGICONS.close(10, 10)}</button></span>`;
   el.innerHTML = (_mvCompose.forward?.atts || []).map((a, i) => chip(a.name, a.size, `data-mv-unforward="${i}"`)).join('')
     + _mvCompose.files.map((f, i) => chip(f.name, f.size, `data-mv-unattach="${i}"`)).join('');
+}
+
+// ---- Emoji picker (compose toolbar) ----
+
+const _MV_EMOJI = [
+  ['Smileys', '😀 😃 😄 😁 😆 😅 😂 🤣 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 🤪 😝 🤑 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 😌 😔 😪 😴 😷 🤒 🤕 🤢 🤧 🥵 🥶 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 💀 💩 🤡 👻 👽 🤖'],
+  ['Gestures', '👋 🤚 🖐️ ✋ 🖖 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🤝 🙏 ✍️ 💪 👀 🧠 🙋 🙆 🙅 🤷 🤦 🙇 💁'],
+  ['Hearts', '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 💋 😻 🌹 🌷 🌸 💐'],
+  ['Nature', '☀️ 🌤️ ⛅ 🌧️ ⛈️ 🌩️ ❄️ ☃️ 🌈 🌙 ⭐ 🌟 ✨ ⚡ 🔥 💧 🌊 🌍 🌲 🌳 🌴 🌵 🍀 🍁 🍂 🐶 🐱 🐭 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦆 🦉 🐝 🦋 🐌 🐞 🐢 🐍 🐙 🐬 🐳'],
+  ['Food', '☕ 🍵 🍺 🍻 🥂 🍷 🍸 🍹 🥤 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🥑 🥦 🥕 🌽 🥐 🍞 🥨 🧀 🥚 🍳 🥓 🍔 🍟 🍕 🌭 🥪 🌮 🍝 🍜 🍣 🍱 🍰 🎂 🧁 🍪 🍫 🍬 🍦'],
+  ['Activities', '🎉 🎊 🎈 🎁 🎀 🏆 🥇 🥈 🥉 🏅 ⚽ 🏀 🏈 ⚾ 🎾 🏐 🏓 🏸 ⛳ 🎯 🎳 🎮 🎲 🧩 🎨 🎭 🎬 🎤 🎧 🎵 🎶 🎸 🎹 🥁 🚴 🏃 🧘 🏊 ⛷️ 🏄'],
+  ['Travel', '🚗 🚕 🚌 🚎 🚑 🚒 🚚 🚲 🛴 🏍️ ✈️ 🚀 🚁 ⛵ 🚢 🚆 🚇 🚉 🗺️ 🧭 🏔️ 🏖️ 🏝️ 🏠 🏡 🏢 🏥 🏦 🏨 🏫 ⛪ 🏰 🗼 🗽 ⛺ 🌆 🌉 🎡'],
+  ['Objects', '📧 📨 📩 📤 📥 📦 📫 📮 📝 📄 📃 📑 📊 📈 📉 📅 📆 🗓️ 📌 📍 📎 🖇️ ✂️ 🗂️ 📁 📂 🗃️ 🗑️ 🔒 🔓 🔑 🔨 🛠️ ⚙️ 🔧 💡 🔦 🔋 🔌 💻 🖥️ 🖨️ ⌨️ 🖱️ 📱 ☎️ 📞 📷 🎥 📺 ⏰ ⌛ ⏳ 💰 💶 💳 🧾 ✉️ 🎓 📚 📖 ✏️ 🖊️ 🖍️'],
+  ['Symbols', '✅ ☑️ ✔️ ❌ ❎ ➕ ➖ ➗ ✖️ ❓ ❔ ❗ ❕ ‼️ ⁉️ ⚠️ 🚫 ⛔ 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ 🔺 🔻 🔸 🔹 ▶️ ⏸️ ⏹️ ⏩ ⏪ 🔁 🔄 ➡️ ⬅️ ⬆️ ⬇️ ↗️ ↘️ ↩️ ↪️ 💯 🆗 🆕 🆓 🔝 ℹ️ ©️ ®️ ™️ #️⃣ 🔢 💤 💬 💭 🗨️ 🔔 🔕 📣 ♻️ ⭕ 🏁 🚩'],
+].map(([name, list]) => [name, list.split(' ')]);
+const _MV_EMOJI_RECENT_KEY = 'mail-emoji-recent';
+let _mvEmojiTab = null;   // category shown last (null = Recent if any, else the first)
+
+function _mvEmojiRecent() {
+  try {
+    const list = JSON.parse(localStorage.getItem(_MV_EMOJI_RECENT_KEY) || '[]');
+    return Array.isArray(list) ? list.filter(x => typeof x === 'string').slice(0, 24) : [];
+  } catch { return []; }
+}
+
+function _mvEmojiRemember(ch) {
+  try { localStorage.setItem(_MV_EMOJI_RECENT_KEY, JSON.stringify([ch, ..._mvEmojiRecent().filter(x => x !== ch)].slice(0, 24))); }
+  catch { /* storage unavailable — recent list is a convenience only */ }
+}
+
+/** Remember the editor selection (only while it lies inside the editor). */
+function _mvSaveEditorRange() {
+  const editor = document.querySelector('#mailViewReader .mv-editor');
+  const sel = getSelection();
+  if (!_mvCompose || !editor || !sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  if (editor.contains(r.commonAncestorContainer)) _mvCompose.range = r.cloneRange();
+}
+
+function _mvRenderEmojiPop(pop) {
+  const recent = _mvEmojiRecent();
+  const tabs = [...(recent.length ? [['Recent', recent]] : []), ..._MV_EMOJI];
+  const cur  = tabs.find(([n]) => n === _mvEmojiTab) || tabs[0];
+  pop.innerHTML = `
+    <div class="mv-emoji-tabs" role="tablist">${tabs.map(([n, list]) =>
+      `<button type="button" role="tab" data-mv-emoji-tab="${n}" title="${n}" aria-selected="${n === cur[0]}">${n === 'Recent' ? '🕘' : list[0]}</button>`).join('')}</div>
+    <div class="mv-emoji-name">${cur[0]}</div>
+    <div class="mv-emoji-grid">${cur[1].map(ch => `<button type="button" data-mv-emoji="${escHtml(ch)}" title="${escHtml(ch)}">${escHtml(ch)}</button>`).join('')}</div>`;
+}
+
+function _mvToggleEmojiPop(show) {
+  const pop = document.querySelector('#mailViewReader .mv-emoji-pop');
+  if (!pop) return;
+  show ??= pop.hidden;
+  if (show) { _mvSaveEditorRange(); _mvRenderEmojiPop(pop); }
+  pop.hidden = !show;
+  document.querySelector('#mailViewReader [data-mv-emoji-toggle]')?.setAttribute('aria-expanded', String(show));
+}
+
+/** Insert `ch` at the last caret position in the editor (end of the text if there is none). */
+function _mvInsertEmoji(ch) {
+  const editor = document.querySelector('#mailViewReader .mv-editor');
+  if (!editor || !_mvCompose) return;
+  editor.focus();
+  const sel = getSelection();
+  let range = _mvCompose.range;
+  if (!range || !editor.contains(range.commonAncestorContainer)) {
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  }
+  sel.removeAllRanges();
+  sel.addRange(range);
+  // insertText keeps the browser's undo history; fall back to a manual insert
+  if (!document.execCommand('insertText', false, ch)) {
+    range.deleteContents();
+    const node = document.createTextNode(ch);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  _mvSaveEditorRange();
+  _mvCompose.dirty = true;
+  _mvEmojiRemember(ch);
 }
 
 function _mvExecCmd(cmd) {
@@ -1442,6 +1800,8 @@ async function _mvSend(form) {
   const c = _mvCompose;
   const accountId = form.querySelector('[name="from"]').value;
   const payload = { to, subject: v('subject'), html: DOMPurify.sanitize(editor.innerHTML), text: editor.innerText };
+  const fromAddr = form.querySelector('[name="fromAddr"]').value;
+  if (fromAddr) payload.from = fromAddr;
   if (v('cc'))  payload.cc  = v('cc');
   if (v('bcc')) payload.bcc = v('bcc');
   if (c.inReplyTo) payload.inReplyTo = c.inReplyTo;
@@ -1664,6 +2024,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const row = e.target.closest('[data-mv-msg]');
     if (row) _mvClickMessage(e, row.dataset.mvMsg);
   });
+  _mvWireSwipe(list);
   // Shift+click must not select text
   list.addEventListener('mousedown', e => { if (e.shiftKey && e.target.closest('[data-mv-msg]')) e.preventDefault(); });
   list.addEventListener('contextmenu', e => {
@@ -1704,6 +2065,13 @@ document.addEventListener('DOMContentLoaded', () => {
       toggle.textContent = rest.hidden ? 'more' : 'less';
       return;
     }
+    // Emoji picker: closes on any click outside it
+    if (!e.target.closest('.mv-emoji-pop, [data-mv-emoji-toggle]')) _mvToggleEmojiPop(false);
+    if (e.target.closest('[data-mv-emoji-toggle]')) { _mvToggleEmojiPop(); return; }
+    const emTab = e.target.closest('[data-mv-emoji-tab]');
+    if (emTab) { _mvEmojiTab = emTab.dataset.mvEmojiTab; _mvRenderEmojiPop(emTab.closest('.mv-emoji-pop')); return; }
+    const em = e.target.closest('[data-mv-emoji]');
+    if (em) { _mvInsertEmoji(em.dataset.mvEmoji); _mvToggleEmojiPop(e.shiftKey); return; }   // Shift+click keeps the picker open
     const cmd = e.target.closest('[data-mv-cmd]');
     if (cmd) { _mvExecCmd(cmd.dataset.mvCmd); return; }
     if (e.target.closest('[data-mv-bcc]')) {
@@ -1719,8 +2087,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (un && _mvCompose) { _mvCompose.files.splice(+un.dataset.mvUnattach, 1); _mvRenderComposeFiles(); return; }
     if (e.target.closest('[data-mv-discard]')) _mvDiscardCompose();
   });
+  // Right-click on an address in the header: trust / untrust
+  reader.addEventListener('contextmenu', e => {
+    const a = e.target.closest('.mv-headers a[href^="mailto:"]');
+    const addr = a && _mvMailtoAddr(a.getAttribute('href'));
+    if (!addr) return;
+    e.preventDefault();
+    e.stopPropagation();
+    _mvAddressMenu(e, addr);
+  });
   // Toolbar buttons must not steal the editor selection
-  reader.addEventListener('mousedown', e => { if (e.target.closest('[data-mv-cmd]')) e.preventDefault(); });
+  reader.addEventListener('mousedown', e => { if (e.target.closest('[data-mv-cmd], [data-mv-emoji-toggle], .mv-emoji-pop')) e.preventDefault(); });
 
   // Folder picker
   const picker = document.getElementById('mailViewPicker');
@@ -1753,6 +2130,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Any modal above the view (card / inbox modal, confirm dialog, mail detail, attachment viewer)
     if ([...document.querySelectorAll('.modal-backdrop')].some(m => getComputedStyle(m).display !== 'none')) return;
     if (!picker.hidden) return;
+    if (document.querySelector('#mailViewReader .mv-from-list:not([hidden])')) return;   // sender list handles its keys
+    if (document.querySelector('#mailViewReader .mv-emoji-pop:not([hidden])')) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _mvToggleEmojiPop(false); }
+      return;
+    }
     if ([...document.querySelectorAll('.context-menu')].some(m => getComputedStyle(m).display !== 'none')) return;
     if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) {
       if (e.key === 'Escape' && _mvCompose && e.target.closest('.mv-compose')) { e.preventDefault(); _mvDiscardCompose(); }

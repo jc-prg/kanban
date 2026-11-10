@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view unit tests — MV-1 … MV-13
+ * Mail view unit tests — MV-1 … MV-18
  *
  * mailview.js is loaded via vm.runInContext with minimal browser-global stubs.
  * Only the pure helpers are exercised (folder tree, addresses, reply fields, URL state).
@@ -23,6 +23,9 @@ beforeAll(() => {
     localStorage: { getItem: () => null, setItem: noop },
     DOMPurify: { sanitize: html => html.replace(/<script[\s\S]*?<\/script>/gi, '') },
     escHtml:   s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    // dashboard.js globals (privacy filter): record the calls, strip remote images when not trusted
+    _mailSenderTrusted: msg => msg.from === 'trusted@ex.com',
+    _mailPrivacyHtml:   (html, { loadImages }) => ({ html: loadImages ? html : html.replace(/<img[^>]*>/gi, '') }),
     Intl, Date, Math, JSON, Object, Array, String, Number, Set, Map, URL, URLSearchParams,
     setTimeout: noop, clearTimeout: noop,
   })
@@ -108,6 +111,58 @@ test('MV-7 _mvQuoteHtml — plain text escaped, HTML sanitised, inside a blockqu
   const h = ctx._mvQuoteHtml({ from: 'x', bodyHtml: '<p>ok</p><script>alert(1)</script>' })
   expect(h).toContain('<p>ok</p>')
   expect(h).not.toContain('<script')
+})
+
+test('MV-14 _mvOriginalHtml — quoting goes through the privacy filter (remote images only for trusted senders)', () => {
+  const html = '<p>hi</p><img src="https://ex.com/a.png">'
+  expect(ctx._mvQuoteHtml({ from: 'x@ex.com', bodyHtml: html })).not.toContain('<img')
+  expect(ctx._mvQuoteHtml({ from: 'trusted@ex.com', bodyHtml: html })).toContain('<img src="https://ex.com/a.png">')
+})
+
+test('MV-15 _mvParseSenders / _mvReplySender — comma list, first is default, reply uses the address written to', () => {
+  expect(plain(ctx._mvParseSenders('a@x.de, Bob <B@x.de>, a@x.de', 'user@x.de'))).toEqual(['a@x.de', 'b@x.de'])
+  expect(plain(ctx._mvParseSenders('', 'User@x.de'))).toEqual(['user@x.de'])
+  expect(plain(ctx._mvParseSenders('', ''))).toEqual([])
+  const senders = ['a@x.de', 'b@x.de']
+  expect(ctx._mvReplySender({ to: 'Me <B@x.de>', cc: '' }, senders)).toBe('b@x.de')
+  expect(ctx._mvReplySender({ to: 'other@y.de', cc: 'b@x.de' }, senders)).toBe('b@x.de')
+  expect(ctx._mvReplySender({ to: 'list@y.de' }, senders)).toBe('a@x.de')
+  expect(ctx._mvReplySender({}, [])).toBe('')
+  // Reply all drops every own sender address
+  const all = ctx._mvReplyFields({ from: 'bob@y.de', to: 'a@x.de, b@x.de, carol@y.de', subject: 's' }, true, ['user@x.de', ...senders])
+  expect(all.to).toBe('bob@y.de, carol@y.de')
+})
+
+test('MV-16 _mvSwipeSnap — opens past half of an action area, otherwise closes', () => {
+  // Left swipe reveals Move + Delete (128 px), right swipe Mark read (64 px)
+  expect(ctx._mvSwipeSnap(-70, 64, 128)).toBe(-128)
+  expect(ctx._mvSwipeSnap(-60, 64, 128)).toBe(0)
+  expect(ctx._mvSwipeSnap(-300, 64, 128)).toBe(-128)
+  expect(ctx._mvSwipeSnap(40, 64, 128)).toBe(64)
+  expect(ctx._mvSwipeSnap(20, 64, 128)).toBe(0)
+  expect(ctx._mvSwipeSnap(0, 64, 128)).toBe(0)
+  // No action area on a side → that side never opens
+  expect(ctx._mvSwipeSnap(-90, 64, 0)).toBe(0)
+})
+
+test('MV-17 quoted display names — commas and \\" escapes stay inside one entry', () => {
+  const list = ctx._mvSplitAddrs('"Name, Firstname" <firstname.name@domain.com>, "Say \\"Hi\\", Bob" <b@x.de>')
+  expect(list).toHaveLength(2)
+  expect(ctx._mvDisplayName(list[0])).toBe('Name, Firstname')
+  expect(ctx._mvAddrOf(list[0])).toBe('firstname.name@domain.com')
+  expect(ctx._mvDisplayName(list[1])).toBe('Say "Hi", Bob')
+  // Unquoted (older server): merged back into one quoted entry
+  expect(plain(ctx._mvSplitAddrs('Name, Firstname <f.n@d.com>, bob@x.de'))).toEqual(['"Name, Firstname" <f.n@d.com>', 'bob@x.de'])
+  expect(ctx._mvDisplayName('Name, Firstname <f.n@d.com>')).toBe('Name, Firstname')
+  // Plain address lists are untouched
+  expect(plain(ctx._mvSplitAddrs('a@x.de, Bob <b@x.de>'))).toEqual(['a@x.de', 'Bob <b@x.de>'])
+})
+
+test('MV-18 _mvMailtoAddr — header link → bare lower-case address', () => {
+  expect(ctx._mvMailtoAddr('mailto:Firstname.Name@Domain.com')).toBe('firstname.name@domain.com')
+  expect(ctx._mvMailtoAddr('mailto:a%2Bb@x.de?subject=Hi')).toBe('a+b@x.de')
+  expect(ctx._mvMailtoAddr('https://x.de')).toBe('')
+  expect(ctx._mvMailtoAddr(null)).toBe('')
 })
 
 test('MV-8 _mvParseUrl / _mvFmtSize / _mvFolderLabel', () => {

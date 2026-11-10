@@ -242,6 +242,35 @@ body.mailview-open header { z-index: 96; }
 .mv-msg-answered { font-size: 0.7rem; }
 .mv-load-more { display: block; margin: 10px auto; }
 
+/* Swipe actions (phones): the row slides, each action layer fills the freed space */
+.mv-msg-wrap { position: relative; overflow: hidden; }
+.mv-msg-wrap > .mv-msg { position: relative; }
+.mv-swipe-actions {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  width: 0;
+  overflow: hidden;
+}
+.mv-swipe-actions--start { left: 0; }
+.mv-swipe-actions--end   { right: 0; }
+.mv-swipe-anim { transition: transform 0.2s ease, width 0.2s ease; }
+.mv-swipe-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  color: #fff;
+  cursor: pointer;
+}
+.mv-swipe-btn--read    { background: var(--accent); }
+.mv-swipe-btn--move    { background: #3b82f6; }
+.mv-swipe-btn--delete  { background: var(--danger); }
+
 /* ---- Reader ---- */
 
 .mailview-reader { overflow-y: auto; min-width: 0; padding: 14px 18px 24px; }
@@ -259,7 +288,11 @@ body.mailview-open header { z-index: 96; }
 .mv-reader-head { display: flex; align-items: flex-start; gap: 8px; }
 .mv-back { display: none; padding: 4px 10px; font-size: 1rem; line-height: 1; }
 .mv-subject { margin: 0 0 10px; font-size: 1.05rem; font-weight: 600; line-height: 1.35; word-break: break-word; }
-.mv-reader-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.mv-reader-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; container: mv-actions / inline-size; }
+/* Toolbar narrower than 670 px (narrow reader pane or phone): icons only — label stays as tooltip / aria-label */
+@container mv-actions (max-width: 669px) {
+  .mv-act-label { display: none; }
+}
 .mv-reader-actions .btn { padding: 5px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 5px; }
 .mv-reader-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger-soft:hover { border-color: var(--danger); color: var(--danger); }
@@ -285,6 +318,7 @@ body.mailview-open header { z-index: 96; }
   user-select: text;
 }
 .mv-headers { margin-bottom: 8px; }
+.dashboard-detail-table.mv-headers { font-family: system-ui, sans-serif; }
 .mv-atts { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
 .mv-att {
   display: inline-flex;
@@ -336,6 +370,48 @@ button.mv-att-name:hover { color: var(--accent); }
 .mv-compose-fields > label { font-size: 0.75rem; color: var(--text-muted); }
 .mv-compose-fields > label[hidden], .mv-compose-fields > input[hidden] { display: none; }
 .mv-compose-fields .modal-input { padding: 6px 10px; }
+.mv-from { position: relative; min-width: 0; }
+.mv-from-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+.mv-from-btn:disabled { cursor: default; opacity: 1; }
+.mv-from-btn:disabled .mv-from-caret { display: none; }
+.mv-from-addr { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-from-caret { color: var(--text-muted); font-size: 0.7rem; }
+.mv-from-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.mv-from-list[hidden] { display: none; }
+.mv-from-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+/* Same font as the native inputs next to it (form controls don't inherit the app font) */
+.mv-from-btn, .mv-from-list li { font-family: system-ui, sans-serif; font-size: 0.88rem; }
+.mv-from-list li:hover, .mv-from-list li:focus { background: var(--surface2); outline: none; }
+.mv-from-list li[aria-selected="true"] { font-weight: 600; }
 .mv-cc-row { display: flex; gap: 6px; }
 .mv-bcc-toggle { padding: 4px 10px; font-size: 0.72rem; }
 .mv-toolbar {
@@ -361,6 +437,35 @@ button.mv-att-name:hover { color: var(--accent); }
 }
 .mv-toolbar button:hover { border-color: var(--border); background: var(--surface); }
 .mv-toolbar-sep { width: 1px; background: var(--border); margin: 2px 4px; }
+.mv-emoji-wrap { position: relative; display: inline-flex; }
+.mv-toolbar .mv-emoji-toggle { font-size: 0.95rem; padding: 1px 6px; }
+.mv-emoji-toggle[aria-expanded="true"] { border-color: var(--border); background: var(--surface); }
+.mv-emoji-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 304px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.mv-emoji-pop[hidden] { display: none; }
+.mv-emoji-pop, .mv-emoji-pop button { font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', system-ui, sans-serif; }
+.mv-emoji-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.mv-toolbar .mv-emoji-tabs button { justify-content: center; padding: 2px 0; font-size: 1rem; opacity: 0.6; }
+.mv-toolbar .mv-emoji-tabs button[aria-selected="true"] { opacity: 1; background: var(--surface2); border-color: var(--border); }
+.mv-emoji-name { font-family: system-ui, sans-serif; font-size: 0.7rem; color: var(--text-muted); padding: 4px 2px 2px; }
+.mv-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  max-height: 210px;
+  overflow-y: auto;
+}
+.mv-toolbar .mv-emoji-grid button { justify-content: center; padding: 3px 0; font-size: 1.25rem; line-height: 1.2; }
 .mv-editor {
   flex: 1;
   min-height: 220px;
@@ -457,12 +562,35 @@ button.mv-att-name:hover { color: var(--accent); }
 
 /* Settings: mail account form subheading */
 .mail-form-subhead { margin: 18px 0 6px; font-weight: 600; color: var(--text); }
+/* Settings → Sources → Mail: trusted senders */
+.mail-trusted { margin-top: 30px; }
+/* Collapsed by default (<details>); the summary shows the count */
+.mail-trusted > summary.mail-form-subhead {
+  margin-top: 0;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mail-trusted > summary::-webkit-details-marker { display: none; }
+.mail-trusted > summary::before { content: '▸'; color: var(--text-muted); font-size: 0.75em; width: 0.8em; }
+.mail-trusted[open] > summary::before { content: '▾'; }
+.mail-trusted > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.mail-trusted-count { color: var(--text-muted); font-weight: 400; }
+.mail-trusted-addr { font-size: 0.85rem; overflow-wrap: anywhere; }
+.mail-trusted-error { color: var(--danger); }
+.mail-trusted-add { display: flex; gap: 8px; margin-top: 8px; }
+.mail-trusted-add .new-board-input { flex: 1; min-width: 0; }
 
 /* ---- Medium screens: folders above the list ---- */
 
 /* ---- Phones: one column at a time (folders → list → reader) ---- */
 
 @media (max-width: 639px), (max-height: 500px) {
+  /* Horizontal moves are swipes; vertical scrolling stays native */
+  .mv-msg-wrap > .mv-msg { touch-action: pan-y; }
   .mailview-body { grid-template-columns: 1fr; }
   .mailview-foldercol, .mailview-listcol, .mailview-reader { display: none; border-right: none; }
   .mv-resizer { display: none; }
@@ -478,8 +606,7 @@ button.mv-att-name:hover { color: var(--accent); }
   .mv-title-acc { display: none; }   /* account shown as the folders button's border colour instead */
   .mv-folders-btn { border-color: var(--mv-acc-color, var(--border)); }
   .mv-compose-long { display: none; }
-  /* Opened mail: action buttons show their icon only */
-  .mv-act-label { display: none; }
+  /* Opened mail: icon-only buttons (container query above) get a larger touch target */
   .mv-reader-actions .btn { padding: 7px 11px; }
   #mailViewCompose { padding: 6px 10px; flex-shrink: 0; }
   .mailview-reader { padding: 10px 12px 20px; }

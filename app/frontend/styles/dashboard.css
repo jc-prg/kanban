@@ -430,6 +430,79 @@
   font-family: inherit;
 }
 
+/* Privacy bar above an HTML mail: blocked remote images, trust toggle, tracker shield */
+.mail-privacy-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 12px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--surface2);
+  border-radius: 8px;
+}
+.mail-privacy-bar + .dashboard-mail-iframe { margin-top: 8px; }
+.mail-trusted-badge {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-left: 6px;
+  color: var(--unread);
+  cursor: help;
+}
+.mail-trusted-badge[hidden] { display: none; }
+.mail-privacy-shield {
+  display: inline-flex;
+  color: #f59e0b;
+  cursor: help;
+}
+.mail-privacy-shield:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.mail-privacy-trust {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.mail-privacy-trust input { accent-color: var(--accent); margin: 0; }
+.mail-privacy-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.mail-privacy-toggle::after { content: ' ▸'; }
+.mail-privacy-toggle[aria-expanded="true"]::after { content: ' ▾'; }
+.mail-privacy-toggle:hover { color: var(--text); }
+.mail-privacy-urls {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--surface);
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--text);
+  user-select: text;
+}
+.mail-privacy-urls[hidden] { display: none; }
+/* Phones (same breakpoint as the mail view): "N blocked", "Images loaded" */
+@media (max-width: 639px), (max-height: 500px) {
+  .mail-privacy-long { display: none; }
+}
+.mail-privacy-urls li { overflow-wrap: anywhere; padding: 1px 0; }
+.mail-privacy-urls li + li { border-top: 1px solid var(--border); padding-top: 3px; margin-top: 2px; }
+
 .dashboard-mail-iframe {
   width: 100%;
   border: none;

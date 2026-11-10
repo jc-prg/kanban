@@ -11,7 +11,10 @@ const TIMEOUT_MS = 10_000;
 
 function _fmtAddr(addr) {
   if (!addr) return '';
-  return addr.name ? `${addr.name} <${addr.address || ''}>` : (addr.address || '');
+  if (!addr.name) return addr.address || '';
+  // RFC 5322: a display name with specials ("Doe, Jane") must be quoted, or the comma splits the address list
+  const name = /[",;<>@()[\]:\\]/.test(addr.name) ? `"${addr.name.replace(/(["\\])/g, '\\$1')}"` : addr.name;
+  return `${name} <${addr.address || ''}>`;
 }
 
 function _fmtAddrList(list) {
@@ -594,6 +597,23 @@ function _addresses(str) {
 }
 
 /**
+ * Sender addresses of an account: `smtp.fromAddress` may list several,
+ * comma-separated (`a@x.de, Name <b@x.de>`); the first is the default.
+ * Falls back to the IMAP user. Entries without a name get `smtp.fromName`.
+ */
+function senderAddresses(account) {
+  const fromName = account.smtp?.fromName || '';
+  const out = [];
+  for (const a of addressparser(account.smtp?.fromAddress || '')) {
+    if (a.address && a.address.includes('@') && !out.some(o => o.address.toLowerCase() === a.address.toLowerCase())) {
+      out.push({ name: a.name || fromName, address: a.address });
+    }
+  }
+  if (!out.length && account.user) out.push({ name: fromName, address: account.user });
+  return out;
+}
+
+/**
  * Send a message via the account's SMTP server and store a copy in the sent
  * folder (account.sentFolder, else the server's \Sent folder). When the mail
  * answers `replyUid` in `replyFolder`, that message gets the \Answered flag;
@@ -603,8 +623,11 @@ function _addresses(str) {
 async function sendMail(account, mail) {
   if (!account.smtp?.host) throw Object.assign(new Error('No SMTP server configured for this account'), { status: 400 });
   const smtp = _smtpSettings(account);
-  const fromAddress = account.smtp.fromAddress || account.user;
-  const from = account.smtp.fromName ? { name: account.smtp.fromName, address: fromAddress } : fromAddress;
+  const senders = senderAddresses(account);
+  const sender  = mail.from ? senders.find(s => s.address.toLowerCase() === String(mail.from).trim().toLowerCase()) : senders[0];
+  if (!sender) throw Object.assign(new Error('Sender address not configured for this account'), { status: 400 });
+  const fromAddress = sender.address;
+  const from = sender.name ? { name: sender.name, address: fromAddress } : fromAddress;
   const domain = (fromAddress.split('@')[1] || 'localhost').replace(/[^\w.-]/g, '');
   const messageId = `<${crypto.randomUUID()}@${domain}>`;
   const date = new Date();
@@ -656,6 +679,7 @@ async function sendMail(account, mail) {
 }
 
 module.exports = {
+  senderAddresses,
   fetchMailAccount,
   fetchMailMessage,
   fetchMessageId,

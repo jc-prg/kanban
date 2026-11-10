@@ -4,7 +4,7 @@ const multer  = require('multer');
 const router  = express.Router();
 const { writeRateLimit, uploadRateLimit }         = require('../auth');
 const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder,
-        getMailCardLinks, addMailCardLink } = require('../global-db');
+        getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender } = require('../global-db');
 const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
@@ -603,6 +603,21 @@ router.get('/dashboard/mail/:accountId/folder-size', withHandler(async (req, res
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+}));
+
+// GET /api/dashboard/mail-trusted-senders — senders whose remote images the mail views load
+router.get('/dashboard/mail-trusted-senders', withHandler(async (req, res) => {
+  res.json({ senders: await getTrustedSenders() });
+}));
+
+// PUT /api/dashboard/mail-trusted-senders — body { address, trusted }
+router.put('/dashboard/mail-trusted-senders', writeRateLimit, withHandler(async (req, res) => {
+  const { address, trusted } = req.body || {};
+  if (typeof address !== 'string' || address.length > 320 || !/^[^\s@<>]+@[^\s@<>]+$/.test(address.trim())) {
+    return res.status(400).json({ error: 'address must be an e-mail address' });
+  }
+  if (typeof trusted !== 'boolean') return res.status(400).json({ error: 'trusted must be a boolean' });
+  res.json({ ok: true, senders: await setTrustedSender(address.trim().toLowerCase(), trusted) });
 }));
 
 // POST /api/dashboard/mail/:accountId/send — multipart: `payload` (JSON) + `files`
