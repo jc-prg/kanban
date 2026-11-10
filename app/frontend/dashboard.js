@@ -2,91 +2,23 @@
 
 // ---- Dashboard ----
 
-let _refreshTimer   = null;
-let _fetchedAtTimer = null;
-let _dragCardId     = null;
-let _dragCardGroup  = null;
-let _dragCardBoard  = null;
+let _fetchedAtTimer = null;   // Today's "Refreshed at" indicator
 let _mailCtxAccountId = null;
 let _mailCtxMsgId     = null;
 let _mailCtxUnread    = false;
-let _dashAchOffset  = 0;
 
 // Map: accountId → folders array (cached per session)
 const _folderCache = new Map();
 // Recent folders per account, loaded from server on init and updated on move
 let _serverRecentFolders = {};
 
-// Map: cardId → { card, board } — populated on each render for context menu
-const _dashCardMap      = new Map();
-const _collapsedGroups  = new Set(); // keyed by "board\0column"
-const _seededGroups     = new Set(); // groups already seeded from config
-let _dashRecentLimit    = 10;
-
-const _PANEL_FAILED  = '<p class="dashboard-empty">Failed to load.</p>';
-
-const _DASH_STATE_KEY = 'dash-group-state';
-function _loadGroupState() {
-  try {
-    const navType = performance.getEntriesByType?.('navigation')[0]?.type;
-    if (navType === 'reload') { localStorage.removeItem(_DASH_STATE_KEY); return; }
-    const stored = JSON.parse(localStorage.getItem(_DASH_STATE_KEY));
-    if (stored && typeof stored === 'object') {
-      for (const [key, collapsed] of Object.entries(stored)) {
-        _seededGroups.add(key);          // skip config seeding for stored groups
-        if (collapsed) _collapsedGroups.add(key);
-      }
-    }
-  } catch { /* ignore */ }
-}
-function _persistGroupState(key, collapsed) {
-  try {
-    const stored = JSON.parse(localStorage.getItem(_DASH_STATE_KEY)) || {};
-    stored[key] = collapsed;
-    localStorage.setItem(_DASH_STATE_KEY, JSON.stringify(stored));
-  } catch { /* ignore */ }
-}
-_loadGroupState();
-// Map: "accountId\0uid" → event object — populated on each calendar render for instant detail view
+// Map: "accountId\0uid" → event object — filled by the Today agenda / calendar view for instant detail view
 const _calEventMap      = new Map();
-// Map: accountId → current lookahead days (persisted in localStorage across reloads)
-const _calLookahead     = new Map();
-const _CAL_LOOKAHEAD_KEY = 'cal-lookahead';
-(function _loadCalLookahead() {
-  try {
-    const navType = performance.getEntriesByType?.('navigation')[0]?.type;
-    if (navType === 'reload') { localStorage.removeItem(_CAL_LOOKAHEAD_KEY); return; }
-    const stored = JSON.parse(localStorage.getItem(_CAL_LOOKAHEAD_KEY));
-    if (stored && typeof stored === 'object') {
-      for (const [k, v] of Object.entries(stored)) {
-        if (typeof v === 'number' && v > 0) _calLookahead.set(k, v);
-      }
-    }
-  } catch { /* ignore */ }
-})();
-function _setCalLookahead(accountId, days) {
-  _calLookahead.set(accountId, days);
-  try {
-    const obj = Object.fromEntries(_calLookahead);
-    localStorage.setItem(_CAL_LOOKAHEAD_KEY, JSON.stringify(obj));
-  } catch { /* ignore */ }
-}
-
-const _CAL_GROUPED_KEY = 'cal-grouped';
-function _setCalGrouped(val) {
-  _calGrouped = val;
-  try { localStorage.setItem(_CAL_GROUPED_KEY, String(val)); } catch { /* ignore */ }
-}
 // Dashboard config: default timezone for new calendar events
 let _defaultTimezone    = '';
-// Raw calendar account configs from /api/dashboard/config — used to build per-account fetch URLs
+// Raw calendar account configs from /api/dashboard/config
 let _calAccountsConfig  = [];
-/// Calendar display mode: true = grouped per account, false = unified chronological
-let _calGrouped         = true;
-// Cards display mode: true = grouped by board, false = flat list
-let _cardGrouped        = true;
-// Last-rendered accounts lists; used by panel header context menus
-let _cardSourcesMeta    = [];   // unique boards from last-rendered card sources
+// Last-loaded account lists (Today, calendar / mail views)
 let _mailAccountsMeta   = [];
 let _calAccountsMeta    = [];
 // Calendar event modal state
@@ -129,37 +61,6 @@ async function _dashDeleteCard(board, cardId) {
   });
 }
 
-async function _dashMoveCardCrossGroup(board, cardId, fromColTitle, toColTitle, newToColOrder) {
-  try {
-    const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
-    const fromCol = data.columns.find(c => c.title === fromColTitle);
-    const toCol   = data.columns.find(c => c.title === toColTitle);
-    if (!fromCol || !toCol) return;
-    const cardIdx = fromCol.cards.findIndex(c => c.id === cardId);
-    if (cardIdx < 0) return;
-    const [movedCard] = fromCol.cards.splice(cardIdx, 1);
-    if (movedCard.unread) movedCard.unread = false;
-    movedCard.moves = [...(movedCard.moves || []), { at: new Date().toISOString(), from: fromCol.title, to: toCol.title }];
-    const actions = toCol.actions || [];
-    const today = new Date().toISOString().slice(0, 10);
-    if (actions.includes('markDone'))     { movedCard.done = true;  movedCard.doneAt = new Date().toISOString(); }
-    if (actions.includes('markUndone'))   { movedCard.done = false; delete movedCard.doneAt; }
-    if (actions.includes('setStartDate')) movedCard.startDate = today;
-    if (actions.includes('setEndDate'))   movedCard.endDate   = today;
-    const byId = new Map(toCol.cards.map(c => [c.id, c]));
-    byId.set(cardId, movedCard);
-    toCol.cards = [
-      ...newToColOrder.map(id => byId.get(id)).filter(Boolean),
-      ...toCol.cards.filter(c => !newToColOrder.includes(c.id)),
-    ];
-    await fetch(`/api/${encodeURIComponent(board)}/board`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updatedColumns: [fromCol, toCol] }),
-    });
-  } catch { /* ignore */ }
-}
-
 async function _dashMoveCard(board, cardId, fromColId, toColId) {
   const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
   let fromCol = null, toCol = null;
@@ -187,129 +88,11 @@ async function _dashMoveCard(board, cardId, fromColId, toColId) {
   });
 }
 
-function applyDashboardPanelVisibility(cfg) {
-  const panels = [
-    { id: 'dashboardBoardsPanel',   visible: cfg.panelBoards   !== false },
-    { id: 'dashboardCardsPanel',    visible: cfg.panelCards    !== false },
-    { id: 'dashboardMailPanel',     visible: cfg.panelMail     !== false },
-    { id: 'dashboardCalendarPanel', visible: cfg.panelCalendar !== false },
-  ];
-  let visible = 0;
-  for (const { id, visible: show } of panels) {
-    document.getElementById(id).closest('.dashboard-panel').style.display = show ? '' : 'none';
-    if (show) visible++;
-  }
-  document.querySelector('.dashboard-grid').style.setProperty('--dash-panel-count', visible || 1);
-}
+/** Card / mail changed from a context menu or the detail panel: refresh the Today tiles. */
+function _reloadCardsPanel() { if (typeof _todayRefresh === 'function') _todayRefresh('cards'); return Promise.resolve(); }
+function _reloadMailPanel()  { if (typeof _todayRefresh === 'function') _todayRefresh('mail');  return Promise.resolve(); }
 
-async function _dashReorderColumn(board, columnTitle, newCardIdOrder, movedCardId) {
-  try {
-    const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
-    const col = data.columns.find(c => c.title === columnTitle);
-    if (!col) return;
-    const moved = col.cards.find(c => c.id === movedCardId);
-    if (moved?.unread) moved.unread = false;
-    const byId = new Map(col.cards.map(c => [c.id, c]));
-    col.cards = [
-      ...newCardIdOrder.map(id => byId.get(id)).filter(Boolean),
-      ...col.cards.filter(c => !newCardIdOrder.includes(c.id)),
-    ];
-    await fetch(`/api/${encodeURIComponent(board)}/board`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updatedColumns: [col] }),
-    });
-  } catch { /* ignore */ }
-}
-
-function _initCardsDragDrop() {
-  const panel = document.getElementById('dashboardCardsPanel');
-
-  panel.addEventListener('dragstart', e => {
-    const card = e.target.closest('.dashboard-card-item[data-card-id]');
-    if (!card) return;
-    _dragCardId    = card.dataset.cardId;
-    _dragCardGroup = card.closest('.dashboard-card-group');
-    _dragCardBoard = _dragCardGroup.dataset.board;
-    e.dataTransfer.effectAllowed = 'move';
-    setTimeout(() => card.classList.add('dragging'), 0);
-  });
-
-  panel.addEventListener('dragend', () => {
-    panel.querySelectorAll('.dashboard-card-item.dragging').forEach(el => el.classList.remove('dragging'));
-    panel.querySelectorAll('.dash-drop-indicator').forEach(el => el.remove());
-    panel.querySelectorAll('.dashboard-group-header--drag-over').forEach(el => el.classList.remove('dashboard-group-header--drag-over'));
-    _dragCardId    = null;
-    _dragCardGroup = null;
-    _dragCardBoard = null;
-  });
-
-  panel.addEventListener('dragover', e => {
-    if (!_dragCardId) return;
-    const header = e.target.closest('.dashboard-group-header');
-    const card   = !header && e.target.closest('.dashboard-card-item[data-card-id]');
-    const group  = header
-      ? header.closest('.dashboard-card-group')
-      : card
-        ? card.closest('.dashboard-card-group')
-        : e.target.closest('.dashboard-card-group');
-    if (!group || group.dataset.board !== _dragCardBoard) return;
-    if (card && card.dataset.cardId === _dragCardId) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    panel.querySelectorAll('.dash-drop-indicator').forEach(el => el.remove());
-    panel.querySelectorAll('.dashboard-group-header--drag-over').forEach(el => el.classList.remove('dashboard-group-header--drag-over'));
-    const ind = document.createElement('div');
-    ind.className = 'dash-drop-indicator';
-    if (header) {
-      header.classList.add('dashboard-group-header--drag-over');
-      header.after(ind);
-    } else if (card) {
-      const rect   = card.getBoundingClientRect();
-      const before = e.clientY < rect.top + rect.height / 2;
-      if (before) card.before(ind); else card.after(ind);
-    } else {
-      group.appendChild(ind);
-    }
-  });
-
-  panel.addEventListener('drop', e => {
-    e.preventDefault();
-    panel.querySelectorAll('.dashboard-group-header--drag-over').forEach(el => el.classList.remove('dashboard-group-header--drag-over'));
-    const ind = panel.querySelector('.dash-drop-indicator');
-    if (!ind || !_dragCardId || !_dragCardGroup) { ind?.remove(); return; }
-    const targetGroup = ind.closest('.dashboard-card-group');
-    if (!targetGroup) { ind.remove(); return; }
-    const src = _dragCardGroup.querySelector(`.dashboard-card-item[data-card-id="${_dragCardId}"]`);
-    if (!src) { ind.remove(); return; }
-    ind.replaceWith(src);
-    src.classList.remove('card--unread');
-    // Expand target group if it was collapsed
-    if (targetGroup.classList.contains('dashboard-card-group--collapsed')) {
-      const key = `${targetGroup.dataset.board}\0${targetGroup.dataset.column}`;
-      _collapsedGroups.delete(key);
-      targetGroup.classList.remove('dashboard-card-group--collapsed');
-      _persistGroupState(key, false);
-    }
-    if (targetGroup === _dragCardGroup) {
-      const newOrder = [..._dragCardGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
-        .map(el => el.dataset.cardId);
-      _dashReorderColumn(_dragCardGroup.dataset.board, _dragCardGroup.dataset.column, newOrder, _dragCardId);
-    } else {
-      const newToColOrder = [...targetGroup.querySelectorAll('.dashboard-card-item[data-card-id]')]
-        .map(el => el.dataset.cardId);
-      _dashMoveCardCrossGroup(
-        _dragCardBoard,
-        _dragCardId,
-        _dragCardGroup.dataset.column,
-        targetGroup.dataset.column,
-        newToColOrder,
-      );
-    }
-  });
-}
-
-/** Close / full-screen buttons of the detail panel (Focus panels, calendar view, mail view). */
+/** Close / full-screen buttons of the detail panel (Today, calendar view, mail view). */
 function _wireDetailPanel() {
   const close = document.getElementById('dashboardDetailClose');
   if (close.dataset.wired) return;
@@ -320,17 +103,17 @@ function _wireDetailPanel() {
   });
 }
 
-// ---- Overlay host on the overview (/) ----
-// The calendar and mail views open directly over the overview: #dashboard (which contains them and
-// the detail panel) is shown with its panel grid hidden while one of them is open.
+// ---- Overlay host on Today ----
+// The calendar and mail views open directly over Today: #dashboard (which contains them and
+// the detail panel) is shown while one of them is open.
 
 /** Paths whose page hosts the calendar / mail overlays (URL state + back button). */
 function _isOverlayHostPage() {
-  return APP_PATH === '/focus' || APP_PATH === '/' || APP_PATH === '/today';
+  return ROUTE === 'today';
 }
 
 let _overlayHostReady = null;
-/** Overview / Today: prepare the overlays once — detail panel, config the views read from dashboard.js globals. */
+/** Today: prepare the overlays once — detail panel, config the views read from dashboard.js globals. */
 function _initOverlayHost() {
   if (_overlayHostReady) return _overlayHostReady;
   document.getElementById('dashboard').classList.add('dashboard--overlay-host');
@@ -353,554 +136,16 @@ function _initOverlayHost() {
   return _overlayHostReady;
 }
 
-/** Overview / Today: show the overlay host while the calendar or mail view is open, the page otherwise. */
+/** Today: show the overlay host while the calendar or mail view is open, the page otherwise. */
 function _syncOverlayHost() {
-  const page = APP_PATH === '/' ? 'overview' : APP_PATH === '/today' ? 'today' : null;
-  if (!page) return;
+  if (ROUTE !== 'today') return;
   const open = _cvIsOpen() || _mvIsOpen();
   document.getElementById('dashboard').style.display = open ? 'flex' : 'none';
-  document.getElementById(page).style.display        = open ? 'none' : 'flex';
+  document.getElementById('today').style.display     = open ? 'none' : 'flex';
   // Back on Today after working in a view: refresh what may have changed there
-  if (!open && page === 'today' && typeof loadToday === 'function' && _todayCfg) {
+  if (!open && typeof loadToday === 'function' && _todayCfg) {
     setTimeout(() => { if (!_cvIsOpen() && !_mvIsOpen()) loadToday(); }, 0);   // not when switching views
   }
-}
-
-async function initDashboard() {
-  document.querySelector('.board-area').style.display = 'none';
-  document.getElementById('saveIndicator').style.display = 'none';
-  document.getElementById('dashboardFetchedAt').style.display = '';
-  document.querySelector('.header-menu').style.marginLeft = 'auto';
-  document.getElementById('dashboard').style.display = 'flex';
-
-  // Show board-switch wrap (headerHomeBtn) and refresh button for navigation
-  document.getElementById('boardSwitchWrap').style.display = '';
-  document.getElementById('dashboardRefreshBtn').style.display = '';
-  document.getElementById('dashboardCalBtn').style.display = '';
-  document.getElementById('dashboardMailBtn').style.display = '';
-  document.getElementById('todayBtn').style.display = '';
-
-  // Match overview menu: hide board-specific items; Inbox/Analyze/Settings stay visible
-  ['menuWebhook', 'menuDashboardSettings'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
-  });
-  // Refresh also reloads the calendar view while it is open
-  document.getElementById('dashboardRefreshBtn').addEventListener('click', () => {
-    loadDashboard();
-    if (_cvIsOpen()) _cvLoad();
-    if (_mvIsOpen()) _mvReload();
-  });
-  document.getElementById('dashboardCalBtn').addEventListener('click', () => {
-    if (_cvIsOpen()) closeCalView(); else openCalView();
-  });
-  document.getElementById('dashboardMailBtn').addEventListener('click', () => {
-    if (_mvIsOpen()) closeMailView(); else openMailView();
-  });
-  document.getElementById('dashCardsMenuBtn').addEventListener('click', e => {
-    e.stopPropagation();
-    const boards = _cardSourcesMeta;
-    const items  = [];
-    if (boards.length === 1) {
-      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`, action: () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer') });
-    } else if (boards.length > 1) {
-      items.push({
-        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`,
-        action:    () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boards[0])}`, '_blank', 'noopener,noreferrer'),
-        children:  boards.map(b => ({ label: b, action: () => window.open(`${BASE_PATH}/board/${encodeURIComponent(b)}`, '_blank', 'noopener,noreferrer') })),
-      });
-    }
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _reloadCardsPanel() });
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit sources`, action: () => openSettingsDialog('card-sources') });
-    openContextMenu(e, items);
-  });
-  document.getElementById('dashMailMenuBtn').addEventListener('click', e => {
-    e.stopPropagation();
-    const accounts = _mailAccountsMeta;
-    const urlAccs  = accounts.filter(a => a.webInterfaceUrl);
-    const items    = [];
-    if (urlAccs.length === 1) {
-      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open webmail`, action: () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer') });
-    } else if (urlAccs.length > 1) {
-      items.push({
-        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open webmail`,
-        action:    () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer'),
-        children:  urlAccs.map(a => ({ label: a.label || a.accountId, action: () => window.open(a.webInterfaceUrl, '_blank', 'noopener,noreferrer') })),
-      });
-    }
-    if (accounts.length > 1) {
-      items.push({
-        labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Mail view`,
-        action:    () => openMailView(),
-        children:  accounts.map(a => ({ label: a.label || a.accountId, action: () => openMailView(a.accountId) })),
-      });
-    } else {
-      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Mail view`, action: () => openMailView(accounts[0]?.accountId) });
-    }
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _reloadMailPanel() });
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('mail-accounts') });
-    openContextMenu(e, items);
-  });
-  document.getElementById('dashCalendarMenuBtn').addEventListener('click', e => {
-    e.stopPropagation();
-    const accounts = _calAccountsMeta;
-    const caldavAccs = accounts.filter(a => (a.type || 'caldav') !== 'ical-url');
-    const urlAccs    = accounts.filter(a => a.webInterfaceUrl);
-    const items = [];
-    if (caldavAccs.length === 1) {
-      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`, action: () => openCalEventModal(caldavAccs[0].accountId, null, caldavAccs[0]) });
-    } else if (caldavAccs.length > 1) {
-      items.push({
-        labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`,
-        action:    () => openCalEventModal(caldavAccs[0].accountId, null, caldavAccs[0]),
-        children: caldavAccs.map(a => ({ label: a.label || a.accountId, action: () => openCalEventModal(a.accountId, null, a) })),
-      });
-    }
-    if (urlAccs.length === 1) {
-      items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open calendar`, action: () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer') });
-    } else if (urlAccs.length > 1) {
-      items.push({
-        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open calendar`,
-        action:    () => window.open(urlAccs[0].webInterfaceUrl, '_blank', 'noopener,noreferrer'),
-        children:  urlAccs.map(a => ({ label: a.label || a.accountId, action: () => window.open(a.webInterfaceUrl, '_blank', 'noopener,noreferrer') })),
-      });
-    }
-    const lookaheads = accounts.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7));
-    const minDays = lookaheads.length ? Math.min(...lookaheads) : 7;
-    items.push({
-      labelHtml: `<span class="ctx-icon">${SVGICONS.date()}</span>Calendar view`,
-      action:    () => openCalView(),
-      children:  [
-        { label: 'Week',      action: () => openCalView('week') },
-        { label: 'Work week', action: () => openCalView('workweek') },
-        { label: 'Month',     action: () => openCalView('month') },
-      ],
-    });
-    items.push(
-      { labelHtml: `<span class="ctx-icon">${_calGrouped ? ICONS.done : '\u00a0\u00a0'}</span>Group by account`, action: () => { _setCalGrouped(!_calGrouped); _renderCalendarPanel(_calAccountsMeta); } },
-      { separator: true },
-      { labelHtml: `<span class="ctx-icon">${SVGICONS.date()}</span>Today`,          action: () => _resetCalToToday() },
-      { labelHtml: `<span class="ctx-icon">+1</span>week (now: ${minDays} days)`,   action: () => _loadMoreCalEventsAll(7) },
-      { labelHtml: `<span class="ctx-icon">+1</span>month (now: ${minDays} days)`,  action: () => _loadMoreCalEventsAll(30) },
-      { labelHtml: `<span class="ctx-icon">${SVGICONS.sync()}</span>Reload`, action: () => _fetchCalendarData().then(_renderCalendarPanel).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = _PANEL_FAILED; }) },
-      { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Edit accounts`, action: () => openSettingsDialog('calendar-accounts') },
-    );
-    openContextMenu(e, items);
-  });
-  _wireDetailPanel();
-
-  // Calendar event click → detail panel (skipped on touch; handled by touchend below)
-  document.getElementById('dashboardCalendarPanel').addEventListener('click', e => {
-    const item = e.target.closest('[data-uid]');
-    if (!item) return;
-    if (lastInputWasTouch) return;
-    _openEventDetail(item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
-  });
-
-  // Calendar event right-click → context menu
-  document.getElementById('dashboardCalendarPanel').addEventListener('contextmenu', e => {
-    const item = e.target.closest('[data-uid]');
-    if (!item) return;
-    e.preventDefault();
-    e.stopPropagation();
-    _showCalEventContextMenu(e, item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
-  });
-
-  // Calendar event touch: single tap → open detail, double tap → context menu
-  { let _calTap = null; let _calTouchMoved = false;
-    const _calPanel = document.getElementById('dashboardCalendarPanel');
-    _calPanel.addEventListener('touchstart', () => { _calTouchMoved = false; }, { passive: true });
-    _calPanel.addEventListener('touchmove',  () => { _calTouchMoved = true;  }, { passive: true });
-    _calPanel.addEventListener('touchend', e => {
-      if (_calTouchMoved) return;
-      const item = e.target.closest('[data-uid]');
-      if (!item) return;
-      e.preventDefault();
-      const t = e.changedTouches[0];
-      if (_calTap && _calTap.el === item) {
-        clearTimeout(_calTap.timer);
-        _calTap = null;
-        _showCalEventContextMenu({ clientX: t.clientX, clientY: t.clientY },
-          item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
-      } else {
-        clearTimeout(_calTap?.timer);
-        _calTap = { el: item, timer: setTimeout(() => {
-          _calTap = null;
-          _openEventDetail(item.dataset.accountId, item.dataset.uid, item.dataset.webUrl || '');
-        }, 280) };
-      }
-    }, { passive: false }); }
-
-  // Mail message click → detail panel (skipped on touch; handled by touchend below)
-  document.getElementById('dashboardMailPanel').addEventListener('click', e => {
-    const item = e.target.closest('[data-msg-id]');
-    if (!item) return;
-    if (lastInputWasTouch) return;
-    _openMailDetail(item.dataset.accountId, item.dataset.msgId, item.dataset.webUrl || '');
-  });
-
-  // Mail message right-click → mail context menu
-  document.getElementById('dashboardMailPanel').addEventListener('contextmenu', e => {
-    const item = e.target.closest('[data-msg-id]');
-    if (!item) return;
-    e.preventDefault();
-    e.stopPropagation();
-    _showMailContextMenu(e.clientX, e.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
-  });
-
-  // Mail message touch: single tap → open detail, double tap → context menu
-  { let _mailTap = null; let _mailTouchMoved = false;
-    const _mailPanel = document.getElementById('dashboardMailPanel');
-    _mailPanel.addEventListener('touchstart', () => { _mailTouchMoved = false; }, { passive: true });
-    _mailPanel.addEventListener('touchmove',  () => { _mailTouchMoved = true;  }, { passive: true });
-    _mailPanel.addEventListener('touchend', e => {
-      if (_mailTouchMoved) return;
-      const item = e.target.closest('[data-msg-id]');
-      if (!item) return;
-      e.preventDefault();
-      const t = e.changedTouches[0];
-      if (_mailTap && _mailTap.el === item) {
-        clearTimeout(_mailTap.timer);
-        _mailTap = null;
-        _showMailContextMenu(t.clientX, t.clientY, item.dataset.accountId, item.dataset.msgId, item.dataset.unread === '1', item.dataset.webUrl || '');
-      } else {
-        clearTimeout(_mailTap?.timer);
-        _mailTap = { el: item, timer: setTimeout(() => {
-          _mailTap = null;
-          _openMailDetail(item.dataset.accountId, item.dataset.msgId, item.dataset.webUrl || '');
-        }, 280) };
-      }
-    }, { passive: false }); }
-
-  // Card click → open detail panel (skipped on touch; handled by touchend below)
-  document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
-    if (e.target.closest('.card-link-badge')) return;
-    const item = e.target.closest('[data-card-id]');
-    if (!item) return;
-    if (lastInputWasTouch) return;
-    const entry = _dashCardMap.get(item.dataset.cardId);
-    if (!entry) return;
-    _openCardDetail(entry.board, entry.card);
-  });
-
-  // Opening a card's link (left or middle click) marks the card as read
-  const _onCardLinkOpen = e => {
-    if (e.type === 'auxclick' && e.button !== 1) return;
-    if (!e.target.closest('.card-link-badge')) return;
-    const item = e.target.closest('[data-card-id]');
-    const entry = item && _dashCardMap.get(item.dataset.cardId);
-    if (entry) _dashMarkRead(entry.board, entry.card);
-  };
-  document.getElementById('dashboardCardsPanel').addEventListener('click', _onCardLinkOpen);
-  document.getElementById('dashboardCardsPanel').addEventListener('auxclick', _onCardLinkOpen);
-
-  // Card right-click → card context menu (same as on the board)
-  document.getElementById('dashboardCardsPanel').addEventListener('contextmenu', e => {
-    const item = e.target.closest('[data-card-id]');
-    if (!item) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const entry = _dashCardMap.get(item.dataset.cardId);
-    if (!entry) return;
-    showDashboardContextMenu(e.clientX, e.clientY, entry.board, entry.card);
-  });
-
-  // Card touch: single tap → open detail panel, double tap → context menu
-  { let _cardTap = null; let _cardTouchMoved = false;
-    const _cardsPanel = document.getElementById('dashboardCardsPanel');
-    _cardsPanel.addEventListener('touchstart', () => { _cardTouchMoved = false; }, { passive: true });
-    _cardsPanel.addEventListener('touchmove',  () => { _cardTouchMoved = true;  }, { passive: true });
-    _cardsPanel.addEventListener('touchend', e => {
-      if (_cardTouchMoved) return;
-      if (e.target.closest('.card-link-badge')) return;
-      const item = e.target.closest('[data-card-id]');
-      if (!item) return;
-      e.preventDefault();
-      const t = e.changedTouches[0];
-      const entry = _dashCardMap.get(item.dataset.cardId);
-      if (!entry) return;
-      if (_cardTap && _cardTap.el === item) {
-        clearTimeout(_cardTap.timer);
-        _cardTap = null;
-        showDashboardContextMenu(t.clientX, t.clientY, entry.board, entry.card);
-      } else {
-        clearTimeout(_cardTap?.timer);
-        _cardTap = { el: item, timer: setTimeout(() => {
-          _cardTap = null;
-          _openCardDetail(entry.board, entry.card);
-        }, 280) };
-      }
-    }, { passive: false }); }
-
-  // Card group collapse toggle
-  document.getElementById('dashboardCardsPanel').addEventListener('click', e => {
-    const hdr = e.target.closest('.dashboard-group-header--collapsible');
-    if (!hdr || e.target.closest('a')) return;
-    const key   = `${hdr.dataset.board}\0${hdr.dataset.column}`;
-    const group = hdr.closest('.dashboard-card-group');
-    if (_collapsedGroups.has(key)) {
-      _collapsedGroups.delete(key);
-      group.classList.remove('dashboard-card-group--collapsed');
-      _persistGroupState(key, false);
-    } else {
-      _collapsedGroups.add(key);
-      group.classList.add('dashboard-card-group--collapsed');
-      _persistGroupState(key, true);
-    }
-  });
-
-  // Card group header right-click context menu
-  document.getElementById('dashboardCardsPanel').addEventListener('contextmenu', e => {
-    const hdr = e.target.closest('.dashboard-group-header--collapsible');
-    if (!hdr) return;
-    e.preventDefault();
-    const board  = hdr.dataset.board;
-    const column = hdr.dataset.column;
-    const key    = `${board}\0${column}`;
-    const isCollapsed = _collapsedGroups.has(key);
-    openContextMenu(e, [
-      {
-        labelHtml: `<span class="ctx-icon">${ICONS[isCollapsed ? 'expand' : 'collapse']}</span>${isCollapsed ? 'Open' : 'Close'}`,
-        action: () => {
-          const group = document.querySelector(`.dashboard-card-group[data-board="${CSS.escape(board)}"][data-column="${CSS.escape(column)}"]`);
-          if (!group) return;
-          if (_collapsedGroups.has(key)) {
-            _collapsedGroups.delete(key);
-            group.classList.remove('dashboard-card-group--collapsed');
-            _persistGroupState(key, false);
-          } else {
-            _collapsedGroups.add(key);
-            group.classList.add('dashboard-card-group--collapsed');
-            _persistGroupState(key, true);
-          }
-        },
-      },
-      {
-        labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>Add card`,
-        action: () => openInboxModal(board, null, null, column),
-      },
-    ]);
-  });
-
-  // Board item right-click context menu
-  document.getElementById('dashboardBoardsPanel').addEventListener('contextmenu', e => {
-    const item = e.target.closest('.dashboard-board-item');
-    if (!item) return;
-    e.preventDefault();
-    const name = decodeURIComponent(item.href.split('/board/')[1] || '');
-    if (!name) return;
-    openContextMenu(e, [
-      {
-        labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open board`,
-        action: () => { window.location.href = `${BASE_PATH}/board/${encodeURIComponent(name)}`; },
-      },
-      {
-        labelHtml: `<span class="ctx-icon">${_svgMoreOptions()}</span>Board settings`,
-        action: () => { window.location.href = `${BASE_PATH}/board/${encodeURIComponent(name)}#settings`; },
-      },
-    ]);
-  });
-
-  // Mobile accordion: clicking a panel header opens it and closes others
-  const _dashPanels = document.querySelectorAll('.dashboard-grid .dashboard-panel');
-  _dashPanels.forEach(panel => {
-    panel.querySelector('.dashboard-panel-header').addEventListener('click', () => {
-      const isOpen = panel.classList.contains('dashboard-panel--open');
-      _dashPanels.forEach(p => p.classList.remove('dashboard-panel--open'));
-      if (!isOpen) panel.classList.add('dashboard-panel--open');
-    });
-  });
-  // Default: Boards panel open (only has visual effect on mobile)
-  document.getElementById('dashboardBoardsPanel').closest('.dashboard-panel').classList.add('dashboard-panel--open');
-
-  // Fetch config + recent folders in parallel before loading any data
-  try {
-    const [cfg, recentFolders] = await Promise.all([
-      fetch('/api/dashboard/config').then(r => r.json()),
-      fetch('/api/dashboard/mail-recent-folders').then(r => r.ok ? r.json() : {}).catch(() => {}),
-    ]);
-    applyDashboardPanelVisibility(cfg);
-    _dashRecentLimit       = cfg.recentLimit || 10;
-    _defaultTimezone       = cfg.defaultTimezone || '';
-    _calGrouped            = cfg.calendarGrouped !== false;
-    try { const s = localStorage.getItem(_CAL_GROUPED_KEY); if (s !== null) _calGrouped = s === 'true'; } catch { /* ignore */ }
-    _cardGrouped           = cfg.cardGrouped !== false;
-    _calAccountsConfig     = cfg.calendarAccounts || [];
-    _serverRecentFolders   = recentFolders || {};
-    if (cfg.autoRefreshMs > 0) {
-      _refreshTimer = setInterval(loadDashboard, cfg.autoRefreshMs);
-    }
-    window.addEventListener('pagehide', () => { clearInterval(_refreshTimer); }, { once: true });
-  } catch { /* ignore */ }
-
-  _initCardsDragDrop();
-  await loadDashboard();
-  _cvInitFromUrl();
-  _mvInitFromUrl();
-}
-
-async function _reloadPanel(url, renderFn, panelId) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed');
-    renderFn(await res.json());
-  } catch {
-    document.getElementById(panelId).innerHTML = _PANEL_FAILED;
-  }
-}
-
-async function _reloadBoardsPanel() {
-  if (!_panelShown('dashboardBoardsPanel')) return;
-  try {
-    const d = new Date();
-    d.setDate(d.getDate() + _dashAchOffset);
-    const [boards, ach] = await Promise.all([
-      fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-      fetch(`/api/achievements/today?date=${d.toISOString().slice(0, 10)}`).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]);
-    await _renderBoardsPanel(boards, ach);
-  } catch {
-    document.getElementById('dashboardBoardsPanel').innerHTML = _PANEL_FAILED;
-  }
-}
-
-function _reloadCardsPanel() {
-  if (APP_PATH === '/today') { _todayRefresh('cards'); return Promise.resolve(); }
-  _reloadBoardsPanel();
-  return _reloadPanel('/api/dashboard/cards', _renderCardsPanel, 'dashboardCardsPanel');
-}
-function _reloadMailPanel()  {
-  if (APP_PATH === '/today') { _todayRefresh('mail'); return Promise.resolve(); }
-  return _reloadPanel('/api/dashboard/mail',  _renderMailPanel,  'dashboardMailPanel');
-}
-
-function _panelShown(id) {
-  return document.getElementById(id).closest('.dashboard-panel').style.display !== 'none';
-}
-
-async function _fetchCalendarData() {
-  if (!_calLookahead.size || !_calAccountsConfig.length) {
-    const r = await fetch('/api/dashboard/calendar');
-    if (!r.ok) throw new Error();
-    return r.json();
-  }
-  const settled = await Promise.allSettled(
-    _calAccountsConfig.map(acc => {
-      const days = _calLookahead.get(acc.id) ?? (acc.lookaheadDays || 7);
-      return fetch(`/api/dashboard/calendar/${encodeURIComponent(acc.id)}?days=${days}`)
-        .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed')))
-        .then(data => ({
-          accountId: acc.id, label: acc.label, type: acc.type || 'caldav',
-          color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null,
-          lookaheadDays: acc.lookaheadDays || 7,
-          ...data,
-        }));
-    })
-  );
-  return settled.map((r, i) => {
-    const acc = _calAccountsConfig[i];
-    const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
-    return r.status === 'fulfilled' ? r.value : { ...base, events: [], error: r.reason?.message || 'Failed to load' };
-  });
-}
-
-async function loadDashboard() {
-  const fetchedAt = document.getElementById('dashboardFetchedAt');
-  clearTimeout(_fetchedAtTimer);
-  fetchedAt.classList.add('show');
-  fetchedAt.textContent = 'Loading\u2026';
-  const loadingHtml = '<p class="dashboard-loading">Loading\u2026</p>';
-
-  const showBoards   = _panelShown('dashboardBoardsPanel');
-  const showCards    = _panelShown('dashboardCardsPanel');
-  const showMail     = _panelShown('dashboardMailPanel');
-  const showCalendar = _panelShown('dashboardCalendarPanel');
-
-  if (showBoards)   { document.getElementById('dashboardBoardsPanel').innerHTML = loadingHtml;   document.getElementById('dashBoardsCount').textContent   = 0; }
-  if (showCards)    { document.getElementById('dashboardCardsPanel').innerHTML = loadingHtml;     document.getElementById('dashCardsCount').textContent     = 0; }
-  if (showMail)     { document.getElementById('dashboardMailPanel').innerHTML = loadingHtml;      document.getElementById('dashMailCount').textContent      = 0; }
-  if (showCalendar) { document.getElementById('dashboardCalendarPanel').innerHTML = loadingHtml;  document.getElementById('dashCalendarCount').textContent  = 0; }
-
-  const resolved = await Promise.all([
-    showBoards   ? Promise.all([
-      fetch('/api/boards').then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-      (() => { const d = new Date(); d.setDate(d.getDate() + _dashAchOffset); return fetch(`/api/achievements/today?date=${d.toISOString().slice(0,10)}`).then(r => r.ok ? r.json() : null).catch(() => null); })(),
-    ]).then(([d, a]) => _renderBoardsPanel(d, a).then(() => true)).catch(() => { document.getElementById('dashboardBoardsPanel').innerHTML = _PANEL_FAILED; return false; }) : true,
-    showCards    ? fetch('/api/dashboard/cards').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderCardsPanel(d);    return true; }).catch(() => { document.getElementById('dashboardCardsPanel').innerHTML    = _PANEL_FAILED; return false; }) : true,
-    showMail     ? fetch('/api/dashboard/mail').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(d => { _renderMailPanel(d);     return true; }).catch(() => { document.getElementById('dashboardMailPanel').innerHTML     = _PANEL_FAILED; return false; }) : true,
-    showCalendar ? _fetchCalendarData().then(d => { _renderCalendarPanel(d); return true; }).catch(() => { document.getElementById('dashboardCalendarPanel').innerHTML = _PANEL_FAILED; return false; }) : true,
-  ]);
-
-  const anyError = resolved.some((ok, i) => !ok && [showBoards, showCards, showMail, showCalendar][i]);
-  fetchedAt.textContent = (anyError ? 'Partial load \u2014 ' : 'Refreshed at ') +
-    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  _fetchedAtTimer = setTimeout(() => fetchedAt.classList.remove('show'), 10000);
-}
-
-function _boardItemHtml(b) {
-  const { name, description, columnBadges = [] } = b;
-  const badges = boardBadgesHtml(columnBadges);
-  return `<a class="dashboard-board-item" href="${BASE_PATH}/board/${encodeURIComponent(name)}">
-    <div class="board-card-info">
-      <span class="board-card-name">${escHtml(name)}</span>
-      ${description ? `<span class="board-card-desc">${escHtml(description)}</span>` : ''}
-      ${badges ? `<div class="board-card-counts">${badges}</div>` : ''}
-    </div>
-    <span class="board-card-arrow">\u2192</span>
-  </a>`;
-}
-
-function _dashAchDateLabel(offset) {
-  if (offset === 0)  return 'Today';
-  if (offset === -1) return 'Yesterday';
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
-}
-
-function _renderDashAchTiles(data, offset) {
-  const section = document.getElementById('dashAchSection');
-  if (!section) return;
-  const { done = 0, moved = 0, created = 0, inboxCreated = 0,
-          doneCards = [], movedCards = [], createdCards = [], inboxCreatedCards = [],
-          hasPast = false } = data || {};
-
-  document.getElementById('dashAchLabel').textContent = _dashAchDateLabel(offset);
-  document.getElementById('dashAchPrev').disabled   = !hasPast;
-  document.getElementById('dashAchNext').disabled   = offset >= 0;
-  document.getElementById('dashAchToday').style.display = offset < 0 ? '' : 'none';
-
-  if (done + moved + created === 0 && offset === 0) { section.style.display = 'none'; return; }
-  section.style.display = '';
-
-  const _tip = cards => {
-    const lines = cards.slice(0, 8).map(({ board, text }) => {
-      const short = text.length > 35 ? text.slice(0, 35) + '\u2026' : text;
-      return `${board}: ${short}`;
-    });
-    if (cards.length > 8) lines.push(`${cards.length - 8} further cards \u2026`);
-    return lines.join('\n');
-  };
-  const _tile = (value, label, cls, cards) => {
-    const tip = cards.length ? ` data-tooltip="${escHtml(_tip(cards))}"` : '';
-    return `<div class="achievement-item ${cls}"${tip}><span class="achievement-value">${value}</span><span class="achievement-label">${label}</span></div>`;
-  };
-  document.getElementById('dashAchTiles').innerHTML = `<div class="dashboard-achievement-tiles">
-    ${_tile(inboxCreated,           'cards<br>inbox',   'dash-ach--inbox',   inboxCreatedCards)}
-    ${_tile(created - inboxCreated, 'cards<br>created', 'dash-ach--created', createdCards)}
-    ${_tile(moved,                  'cards<br>moved',   'dash-ach--moved',   movedCards)}
-    ${_tile(done,                   'cards<br>done',    'dash-ach--done',    doneCards)}
-  </div>`;
-}
-
-async function _loadDashAchievements(offset) {
-  _dashAchOffset = offset;
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  try {
-    const res = await fetch(`/api/achievements/today?date=${d.toISOString().slice(0, 10)}`);
-    _renderDashAchTiles(res.ok ? await res.json() : {}, offset);
-  } catch { /* ignore */ }
 }
 
 function _fmtRecentDate(at) {
@@ -936,293 +181,7 @@ function _recentItemHtml(item) {
   </a>`;
 }
 
-async function _renderBoardsPanel(boards, achievements) {
-  const panel = document.getElementById('dashboardBoardsPanel');
-  const active   = boards.filter(b => !b.archived);
-  const archived = boards.filter(b =>  b.archived);
-  document.getElementById('dashBoardsCount').textContent = active.length;
-
-  let html = '<div class="dashboard-group-header">Active boards</div>';
-  html += active.length
-    ? active.map(_boardItemHtml).join('')
-    : '<p class="dashboard-empty">No boards yet.</p>';
-
-  html += `<div id="dashAchSection" style="display:none;margin-top:10px">
-    <div class="dashboard-group-header dash-ach-header">
-      <span id="dashAchLabel">Today</span>
-      <span class="dash-ach-nav">
-        <button id="dashAchToday" class="ach-nav-btn" style="display:none" title="Jump to today"></button>
-        <button id="dashAchPrev" class="ach-nav-btn" title="Previous day">&#8249;</button>
-        <button id="dashAchNext" class="ach-nav-btn" disabled title="Next day">&#8250;</button>
-      </span>
-    </div>
-    <div id="dashAchTiles"></div>
-  </div>`;
-
-  html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
-    Create board<span class="dashboard-boards-chevron">\u203A</span>
-  </button>
-  <div class="dashboard-boards-archived-list" style="display:none">
-    <div class="dash-new-board-inner">
-      <div class="new-board-row">
-        <input id="dashNewBoardInput" class="new-board-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off">
-        <button id="dashNewBoardBtn" class="btn btn-accent">+&nbsp;new</button>
-      </div>
-      <p id="dashNewBoardError" class="new-board-error" style="display:none"></p>
-    </div>
-  </div>`;
-
-  if (archived.length) {
-    html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
-      Archived boards<span class="dash-group-right"><span class="column-count">${archived.length}</span><span class="dashboard-boards-chevron">\u203A</span></span>
-    </button>`;
-    html += `<div class="dashboard-boards-archived-list" style="display:none">${archived.map(_boardItemHtml).join('')}</div>`;
-  }
-
-  const recent = await fetch(`/api/dashboard/recent?limit=${_dashRecentLimit}`).then(r => r.ok ? r.json() : []).catch(() => []);
-  html += `<button class="dashboard-boards-archived-btn" aria-expanded="false">
-    Last edited<span class="dash-group-right"><span class="column-count">${recent.length}</span><span class="dashboard-boards-chevron">\u203A</span></span>
-  </button>`;
-  html += `<div class="dashboard-boards-archived-list" style="display:none">${recent.length ? recent.map(_recentItemHtml).join('') : '<p class="dashboard-empty">No items yet.</p>'}</div>`;
-
-  panel.innerHTML = html;
-
-  document.getElementById('dashAchToday').innerHTML = SVGICONS.sync(10, 10);
-
-  document.getElementById('dashNewBoardBtn').addEventListener('click', async () => {
-    const input = document.getElementById('dashNewBoardInput');
-    const errEl = document.getElementById('dashNewBoardError');
-    const name  = input.value.trim().toLowerCase();
-    errEl.style.display = 'none';
-    if (!name) return;
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
-      errEl.textContent = 'Use only lowercase letters, digits and hyphens.';
-      errEl.style.display = '';
-      return;
-    }
-    if (name === 'inbox') {
-      errEl.textContent = '"inbox" is a reserved name.';
-      errEl.style.display = '';
-      return;
-    }
-    try {
-      const r    = await fetch(`/api/boards/${encodeURIComponent(name)}`, { method: 'POST' });
-      const data = await r.json();
-      if (!r.ok) { errEl.textContent = data.error || 'Failed to create board.'; errEl.style.display = ''; return; }
-      window.location.href = `${BASE_PATH}/board/${name}`;
-    } catch {
-      errEl.textContent = 'Failed to create board.'; errEl.style.display = '';
-    }
-  });
-  document.getElementById('dashNewBoardInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('dashNewBoardBtn').click();
-  });
-
-  _renderDashAchTiles(achievements, _dashAchOffset);
-
-  document.getElementById('dashAchPrev').addEventListener('click',  () => _loadDashAchievements(_dashAchOffset - 1));
-  document.getElementById('dashAchNext').addEventListener('click',  () => _loadDashAchievements(_dashAchOffset + 1));
-  document.getElementById('dashAchToday').addEventListener('click', () => _loadDashAchievements(0));
-
-  panel.querySelectorAll('.dashboard-boards-archived-btn').forEach(btn => {
-    btn.addEventListener('click', function () {
-      const list    = this.nextElementSibling;
-      const chevron = this.querySelector('.dashboard-boards-chevron');
-      const isOpen  = list.style.display !== 'none';
-      list.style.display      = isOpen ? 'none' : '';
-      chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
-      this.setAttribute('aria-expanded', String(!isOpen));
-    });
-  });
-}
-
-function _renderCardsPanel(groups) {
-  const panel   = document.getElementById('dashboardCardsPanel');
-  const menuBtn = document.getElementById('dashCardsMenuBtn');
-  _dashCardMap.clear();
-  const total = groups.reduce((s, g) => s + (g.cards?.filter(c => !c.text?.startsWith('#')).length || 0), 0);
-  document.getElementById('dashCardsCount').textContent = total;
-  _cardSourcesMeta = [...new Set(groups.filter(g => !g.error).map(g => g.board))];
-  menuBtn.style.display = groups.length ? '' : 'none';
-  if (!groups.length) {
-    panel.innerHTML = '<p class="dashboard-empty">No card sources configured.</p>';
-    return;
-  }
-  const today = new Date().toISOString().slice(0, 10);
-  const warnD = new Date(); warnD.setDate(warnD.getDate() + 2);
-  const warnDate = warnD.toISOString().slice(0, 10);
-
-  function renderOneGroup(group) {
-    if (group.error) {
-      return `<div class="dashboard-source-error">\u26a0 ${escHtml(group.board)}: ${escHtml(group.error)}</div>`;
-    }
-    const groupKey   = `${group.board}\0${group.column}`;
-    const visibleCards  = group.cards.filter(c => !c.text?.startsWith('#'));
-    if (!_seededGroups.has(groupKey)) {
-      _seededGroups.add(groupKey);
-      if (group.initiallyCollapsed || !visibleCards.length) {
-        _collapsedGroups.add(groupKey);
-        _persistGroupState(groupKey, true);
-      }
-    }
-    const collapsed     = _collapsedGroups.has(groupKey);
-    const cardCount     = visibleCards.length;
-    const hasOverdue    = visibleCards.some(c => !c.done && c.endDate && c.endDate < today);
-    const hasWarning    = !hasOverdue && visibleCards.some(c => !c.done && c.endDate && c.endDate >= today && c.endDate <= warnDate);
-    const countClass    = hasOverdue ? ' dash-group-count--overdue' : hasWarning ? ' dash-group-count--warning' : '';
-    const headerLabel   = _cardGrouped
-      ? `\xb7 ${escHtml(group.column)}`
-      : `<a class="dashboard-group-board-link" href="${BASE_PATH}/board/${encodeURIComponent(group.board)}">${escHtml(group.board)}</a> \xb7 ${escHtml(group.column)}`;
-    const groupHeader =
-      `<div class="dashboard-group-header dashboard-group-header--collapsible" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}">` +
-      headerLabel +
-      `<span class="dash-group-right"><span class="column-count dash-group-count${countClass}">${cardCount}</span><span class="dashboard-boards-chevron">\u203a</span></span></div>`;
-    const collapsedClass = collapsed ? ' dashboard-card-group--collapsed' : '';
-    const groupAttrs = `class="dashboard-card-group${collapsedClass}" data-board="${escHtml(group.board)}" data-column="${escHtml(group.column)}"`;
-    if (!group.cards.length) {
-      return `<div ${groupAttrs}>${groupHeader}<p class="dashboard-empty">No cards.</p></div>`;
-    }
-    const items = group.cards.map(card => {
-      _dashCardMap.set(card.id, { card, board: group.board });
-      const isLabel   = (card.text || '').startsWith('#');
-      const isOverdue = !isLabel && card.endDate && card.endDate < today && !card.done;
-      const isWarning = !isLabel && !isOverdue && card.endDate && card.endDate >= today && card.endDate <= warnDate && !card.done;
-      const colorStyle = card.color ? ` style="--card-color:${escHtml(card.color)}"` : '';
-
-      if (isLabel) {
-        const displayText = card.text.slice(1).trimStart();
-        return `<div class="dashboard-card-item card card--label" draggable="true"
-            data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
-          <div class="card-body">
-            <div class="card-label-text">${escHtml(displayText)}</div>
-          </div>
-        </div>`;
-      }
-
-      const metaParts = [];
-      if (card.priority) {
-        const pc = PRIORITY_COLORS[card.priority];
-        metaParts.push(`<span class="priority-badge" style="background:${pc}22;color:${pc}">${PRIORITY_LABELS[card.priority]}</span>`);
-      }
-      if (card.description) {
-        metaParts.push(`<span class="card-desc" title="Has description">${SVGICONS.description()}</span>`);
-      }
-      if (card.hasLinkedNotes) {
-        metaParts.push(`<span class="card-note-badge" title="Linked in notes">${SVGICONS.noteDoc(9, 11)}</span>`);
-      }
-      if (card.hasMailRef) {
-        metaParts.push(`<span class="card-mail-badge" title="Linked mail">${SVGICONS.email(11, 11)}</span>`);
-      }
-      if (card.hasCalEvent) {
-        metaParts.push(`<span class="card-cal-badge" title="Linked calendar event">${SVGICONS.date(10, 10)}</span>`);
-      }
-      if (card.startDate || card.endDate) {
-        const cls = 'card-date' + (isOverdue ? ' card-date--overdue' : isWarning ? ' card-date--warning' : '');
-        if (card.startDate && card.endDate)
-          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} \u2192 ${fmtDate(card.endDate)}</span>`);
-        else if (card.startDate)
-          metaParts.push(`<span class="${cls}">${fmtDate(card.startDate)} \u2192</span>`);
-        else
-          metaParts.push(`<span class="${cls}">\u2192 ${fmtDate(card.endDate)}</span>`);
-      }
-      if (card.done) {
-        metaParts.push(`<span class="card-done-mark">${ICONS.done} done</span>`);
-      }
-      if (card.link) {
-        const safeLinkHref = safeLink(card.link);
-        if (safeLinkHref) metaParts.push(getLinkBadgeHtml(card.link, safeLinkHref));
-      }
-      const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
-
-      return `<div class="dashboard-card-item card${card.done ? ' card--done' : ''}${isOverdue ? ' card--overdue' : ''}${card.unread === true ? ' card--unread' : ''}" draggable="true"
-          data-card-id="${escHtml(card.id || '')}" data-board="${escHtml(group.board)}"${colorStyle}>
-        <div class="card-body">
-          <div class="card-text">${escHtml(card.text || '')}</div>
-          ${metaHtml}
-        </div>
-      </div>`;
-    }).join('');
-    return `<div ${groupAttrs}>${groupHeader}${items}</div>`;
-  }
-
-  if (_cardGrouped) {
-    const boardMap = new Map();
-    groups.forEach(g => {
-      if (!boardMap.has(g.board)) boardMap.set(g.board, []);
-      boardMap.get(g.board).push(g);
-    });
-    panel.innerHTML = [...boardMap.entries()].map(([board, bGroups]) => {
-      const boardHeader = `<div class="dashboard-group-header dashboard-group-header--board">` +
-        `<a class="dashboard-group-board-link" href="${BASE_PATH}/board/${encodeURIComponent(board)}">${escHtml(board)}</a></div>`;
-      return `<div class="dashboard-board-group">${boardHeader}${bGroups.map(renderOneGroup).join('')}</div>`;
-    }).join('');
-  } else {
-    panel.innerHTML = groups.map(renderOneGroup).join('');
-  }
-}
-
-const _mailCardRefs = new Map();   // `${accountId}\0${msgId}` → [{ board, cardId }] (dashboard mail panel)
-
-function _renderMailPanel(accounts) {
-  const panel   = document.getElementById('dashboardMailPanel');
-  const menuBtn = document.getElementById('dashMailMenuBtn');
-  const total   = accounts.reduce((s, a) => s + (a.messages?.length || 0), 0);
-  document.getElementById('dashMailCount').textContent = total;
-
-  _mailAccountsMeta = accounts;
-  menuBtn.style.display = accounts.length ? '' : 'none';
-
-  if (!accounts.length) {
-    panel.innerHTML = '<p class="dashboard-empty">No mail accounts configured.</p>';
-    return;
-  }
-
-  _mailCardRefs.clear();
-  panel.innerHTML = accounts.map(acc => {
-    const header = `<div class="dashboard-group-header"><strong>${escHtml(acc.label)}</strong></div>`;
-
-    if (acc.error) {
-      return header + `<div class="dashboard-source-error">\u26a0 ${escHtml(acc.error)}</div>`;
-    }
-    if (!acc.messages?.length) {
-      return header + '<p class="dashboard-empty">No messages.</p>';
-    }
-
-    const colorStyle = acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : '';
-    const items = acc.messages.map(msg => {
-      const dateStr = msg.date ? (() => {
-        const d   = new Date(msg.date);
-        const now = new Date();
-        const hh  = String(d.getHours()).padStart(2, '0');
-        const mi  = String(d.getMinutes()).padStart(2, '0');
-        const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        if (isToday) return `${hh}:${mi}`;
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        return `${dd}.${mm}. ${hh}:${mi}`;
-      })() : '';
-      const fromStr = _mailDisplayName(msg.from);
-      const metaParts = [];
-      if (msg.hasAttachments) metaParts.push(`<span class="dashboard-mail-attach" title="Has attachments">${_svgAttachment(11, 11)}</span>`);
-      if (msg.cardRefs?.length) {
-        _mailCardRefs.set(`${acc.accountId}\0${msg.id}`, msg.cardRefs);
-        metaParts.push(`<span class="dashboard-mail-attach" title="Linked to a card">${SVGICONS.card(13, 9)}</span>`);
-      }
-      if (fromStr) metaParts.push(`<span class="dashboard-mail-from">${escHtml(fromStr)}</span>`);
-      if (dateStr) metaParts.push(`<span class="card-date">${escHtml(dateStr)}</span>`);
-      const metaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('')}</div>` : '';
-      return `<div class="dashboard-mail-item card"${colorStyle}
-          data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-unread="${msg.unread ? '1' : '0'}" data-web-url="${escHtml(acc.webInterfaceUrl || '')}">
-        <div class="card-body">
-          <div class="card-text">${msg.unread ? `<strong>${escHtml(msg.subject)}</strong>` : escHtml(msg.subject)}</div>
-          ${metaHtml}
-        </div>
-      </div>`;
-    }).join('');
-
-    return header + items;
-  }).join('');
-}
+const _mailCardRefs = new Map();   // `${accountId}\0${msgId}` → [{ board, cardId }] (Today mail rows)
 
 function _splitAddresses(str) {
   const parts = [];
@@ -1798,228 +757,6 @@ function _mailFormatToggle(plain) {
     : { label: 'TXT', title: 'Show plain-text version' };
 }
 
-function _calDayGroupsHtml(events, accColor, accAccountId, accWebUrl, maxDay) {
-  const todayStr    = new Date().toISOString().slice(0, 10);
-  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-
-  function _dayLabel(dateStr) {
-    if (dateStr === todayStr)    return 'Today';
-    if (dateStr === tomorrowStr) return 'Tomorrow';
-    return new Date(dateStr).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-  }
-
-  function _fmtTime(ev, dayStr) {
-    if (ev.allDay) return '';
-    if (dayStr !== (ev.start || '').slice(0, 10)) return 'continues';
-    try {
-      const startStr = new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      if (!ev.end) return startStr;
-      const endStr = new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      return `${startStr} \u2013 ${endStr}`;
-    } catch { return ''; }
-  }
-
-  const groups = new Map();
-  // All-day events first within each day, then by start time
-  const sorted = [...events].sort((a, b) => {
-    if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
-    return (a.start || '').localeCompare(b.start || '');
-  });
-  for (const ev of sorted) {
-    const startDay = (ev.start || '').slice(0, 10);
-    if (!startDay) continue;
-    let endDay = startDay;
-    if (ev.end) {
-      const endDateStr = ev.end.slice(0, 10);
-      if (ev.allDay) {
-        const d = new Date(endDateStr + 'T00:00:00Z');
-        d.setUTCDate(d.getUTCDate() - 1);
-        endDay = d.toISOString().slice(0, 10);
-      } else {
-        endDay = endDateStr;
-      }
-    }
-    const effectiveStart = startDay < todayStr ? todayStr : startDay;
-    const effectiveEnd = maxDay && endDay > maxDay ? maxDay : endDay;
-    let cur = new Date(effectiveStart + 'T00:00:00Z');
-    const last = new Date(effectiveEnd + 'T00:00:00Z');
-    while (cur <= last) {
-      const dayStr = cur.toISOString().slice(0, 10);
-      if (!groups.has(dayStr)) groups.set(dayStr, []);
-      groups.get(dayStr).push(ev);
-      cur.setUTCDate(cur.getUTCDate() + 1);
-    }
-  }
-
-  const now = new Date();
-  return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([dayStr, evs]) => {
-      const header = `<div class="dashboard-group-header">${escHtml(_dayLabel(dayStr))}</div>`;
-      const items = evs.map(ev => {
-        const isPast      = ev.end && new Date(ev.end) < now;
-        const evColor     = ev._color     || accColor;
-        const evAccountId = ev._accountId || accAccountId;
-        const evWebUrl    = ev._webUrl    || accWebUrl;
-        const colorStyle  = evColor ? ` style="--card-color:${escHtml(evColor)}"` : '';
-        const evStartDay  = (ev.start || '').slice(0, 10);
-        let evEndDay = evStartDay;
-        if (ev.end) {
-          const endDateStr = ev.end.slice(0, 10);
-          if (ev.allDay) {
-            const d = new Date(endDateStr + 'T00:00:00Z');
-            d.setUTCDate(d.getUTCDate() - 1);
-            evEndDay = d.toISOString().slice(0, 10);
-          } else {
-            evEndDay = endDateStr;
-          }
-        }
-        const isMultiday = evStartDay && evEndDay && evStartDay !== evEndDay;
-        const metaText   = isMultiday
-          ? `${fmtDate(evStartDay)} \u2192 ${fmtDate(evEndDay)}`
-          : _fmtTime(ev, dayStr);
-        // All-day events: show full title + date range as tooltip, keep the element single-line
-        const allDayTooltip = ev.allDay ? (metaText ? `${ev.title}\n${metaText}` : ev.title) : '';
-        const tooltipAttr = allDayTooltip ? ` data-tooltip="${escHtml(allDayTooltip)}"` : '';
-        const timeHtml    = (!ev.allDay && metaText) ? `<div class="card-meta"><span class="card-date">${escHtml(metaText)}</span></div>` : '';
-        return `<div class="dashboard-event-item card${isPast ? ' card--done' : ''}${ev.allDay ? ' cal-event--allday' : ''}${ev._provisional ? ' cal-event--provisional' : ''}" data-account-id="${escHtml(evAccountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(evWebUrl || '')}"${colorStyle}${tooltipAttr}>
-          <div class="card-body"><div class="card-text">${escHtml(ev.title)}</div>${timeHtml}</div>
-        </div>`;
-      }).join('');
-      return header + items;
-    }).join('');
-}
-
-function _renderCalendarPanel(accounts) {
-  const panel   = document.getElementById('dashboardCalendarPanel');
-  const menuBtn = document.getElementById('dashCalendarMenuBtn');
-  const total   = accounts.reduce((s, a) => s + (a.events?.length || 0), 0);
-  document.getElementById('dashCalendarCount').textContent = total;
-
-  _calAccountsMeta = accounts;
-
-  if (!accounts.length) {
-    panel.innerHTML = '<p class="dashboard-empty">No calendar accounts configured.</p>';
-    menuBtn.style.display = 'none';
-    return;
-  }
-
-  // Tag all events in _calEventMap (needed in both modes for the detail panel)
-  _calEventMap.clear();
-  for (const acc of accounts) {
-    for (const ev of (acc.events || [])) {
-      _calEventMap.set(`${acc.accountId}\0${ev.uid}`, {
-        ...ev,
-        _label: acc.label, _accountId: acc.accountId,
-        _webUrl: acc.webInterfaceUrl, _color: acc.color,
-        _accountType: acc.type || 'caldav',
-      });
-    }
-  }
-
-  panel.innerHTML = '';
-
-  menuBtn.style.display = '';
-
-  if (!_calGrouped) {
-    // ---- Unified chronological view ----
-
-    const allEvents = [];
-    for (const acc of accounts) {
-      if (acc.error) continue;
-      for (const ev of (acc.events || [])) {
-        allEvents.push({ ...ev, _color: acc.color, _accountId: acc.accountId, _webUrl: acc.webInterfaceUrl || '' });
-      }
-    }
-
-    const errAccounts = accounts.filter(a => a.error);
-    if (errAccounts.length) {
-      for (const acc of errAccounts) {
-        panel.innerHTML += `<div class="dashboard-source-error">\u26a0 ${escHtml(acc.label || acc.accountId)}: ${escHtml(acc.error)}</div>`;
-      }
-    }
-
-    // Unified lookahead note (show max of all accounts)
-    const lookaheads = accounts.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7));
-    const maxLookahead = lookaheads.length ? Math.max(...lookaheads) : 7;
-    const maxDayUnified = new Date(); maxDayUnified.setDate(maxDayUnified.getDate() + maxLookahead - 1);
-    const groupsHtml = _calDayGroupsHtml(allEvents, '', '', '', maxDayUnified.toISOString().slice(0, 10));
-    if (!groupsHtml) {
-      const labels = accounts.filter(a => !a.error).map(a => `<strong>${escHtml(a.label || a.accountId)}</strong>`).join(', ');
-      if (labels) panel.innerHTML += `<div class="dashboard-group-header">${labels}</div>`;
-    }
-    panel.innerHTML += groupsHtml || _calEmptyMsg(maxLookahead);
-
-    if (maxLookahead > 7) {
-      const noteEl = document.createElement('p');
-      noteEl.className = 'dash-cal-lookahead-note';
-      noteEl.textContent = `Showing next ${maxLookahead} days`;
-      panel.appendChild(noteEl);
-    }
-    return;
-  }
-
-  // ---- Grouped per-account view (default) ----
-
-  for (const acc of accounts) {
-    const sectionEl = document.createElement('div');
-    sectionEl.className = 'dash-cal-account';
-    sectionEl.dataset.accountId = acc.accountId;
-
-    // Header with col-btn
-    const headerEl = document.createElement('div');
-    headerEl.className = 'dash-cal-account-header';
-    const labelEl = document.createElement('span');
-    labelEl.className = 'dash-cal-account-label';
-    labelEl.textContent = acc.label || acc.accountId;
-    if (acc.color) labelEl.style.setProperty('--card-color', acc.color);
-    const accMenuBtn = document.createElement('button');
-    accMenuBtn.className = 'col-btn';
-    accMenuBtn.title = 'Calendar options';
-    accMenuBtn.dataset.accountId = acc.accountId;
-    accMenuBtn.textContent = '\u22ee';
-    headerEl.append(labelEl, accMenuBtn);
-    sectionEl.appendChild(headerEl);
-
-    const bodyEl = document.createElement('div');
-    bodyEl.className = 'dash-cal-account-body';
-
-    if (acc.error) {
-      bodyEl.innerHTML = `<div class="dashboard-source-error">\u26a0 ${escHtml(acc.error)}</div>`;
-    } else {
-      const lookahead = _calLookahead.get(acc.accountId) ?? (acc.lookaheadDays || 7);
-      const maxDayAcc = new Date(); maxDayAcc.setDate(maxDayAcc.getDate() + lookahead - 1);
-      const groupsHtml = _calDayGroupsHtml(acc.events || [], acc.color, acc.accountId, acc.webInterfaceUrl, maxDayAcc.toISOString().slice(0, 10));
-      bodyEl.innerHTML = groupsHtml || _calEmptyMsg(lookahead);
-
-      // Lookahead note — only when there are events to show
-      if (groupsHtml && _calLookahead.get(acc.accountId)) {
-        const noteEl = document.createElement('p');
-        noteEl.className = 'dash-cal-lookahead-note';
-        noteEl.textContent = `Showing next ${lookahead} days`;
-        bodyEl.appendChild(noteEl);
-      }
-    }
-
-    sectionEl.appendChild(bodyEl);
-
-    // Col-btn click → per-account context menu (grouped mode only)
-    accMenuBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      const items = [];
-      if ((acc.type || 'caldav') !== 'ical-url') {
-        items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.create()}</span>New event`, action: () => openCalEventModal(acc.accountId, null, acc) });
-      }
-      if (acc.webInterfaceUrl) {
-        items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.openLink()}</span>Open calendar`, action: () => window.open(acc.webInterfaceUrl, '_blank', 'noopener,noreferrer') });
-      }
-      if (items.length) openContextMenu(e, items);
-    });
-
-    panel.appendChild(sectionEl);
-  }
-}
-
 // ---- Detail panel ----
 
 async function _resolveDashCardAttachments(container, board, cardId) {
@@ -2072,7 +809,14 @@ async function _openCardDetail(board, card) {
   else _cardTitlebar.style.removeProperty('--detail-accent');
 
   document.getElementById('dashboardDetailTitle').textContent = card.text || '';
+  // href kept for middle-click / new tab; a plain click edits in place (Today)
   editBtn.href = `${BASE_PATH}/board/${encodeURIComponent(board)}#card:${encodeURIComponent(card.id)}`;
+  editBtn.onclick = e => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    _closeDetail();
+    _todayEditCard(board, card.id);
+  };
   editBtn.style.display = '';
   webUrlBtn.style.display = 'none';
   body.innerHTML = '';
@@ -2205,8 +949,15 @@ async function _openCardDetail(board, card) {
     section.innerHTML = '<div class="dash-card-detail-section-hdr">Linked notes</div>' +
       linkedPages.map(p => {
         const href = `${BASE_PATH}/board/${encodeURIComponent(board)}#note:${encodeURIComponent(p.id)}`;
-        return `<a class="dash-card-note-link" href="${escHtml(href)}">${SVGICONS.noteDoc(9, 11)} ${escHtml(p.title || 'Untitled')}</a>`;
+        return `<a class="dash-card-note-link" href="${escHtml(href)}" data-page-id="${escHtml(p.id)}">${SVGICONS.noteDoc(9, 11)} ${escHtml(p.title || 'Untitled')}</a>`;
       }).join('');
+    section.addEventListener('click', e => {
+      const a = e.target.closest('.dash-card-note-link');
+      if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      _closeDetail();
+      _todayEditNote(board, a.dataset.pageId);
+    });
     body.appendChild(section);
   }
 }
@@ -2741,9 +1492,6 @@ function _populateFolderList(folders, listEl) {
 
 async function _mailToggleRead(accountId, msgId, unread) {
   const seen = unread; // unread=true → mark as seen; unread=false → mark as unseen
-  const item = document.querySelector(
-    `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
-  );
   try {
     const res = await fetch(
       `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`,
@@ -2751,43 +1499,15 @@ async function _mailToggleRead(accountId, msgId, unread) {
     );
     if (!res.ok) throw new Error('Failed');
     // Today lists unread mails only: a read one leaves the list, an unread one may join it
-    if (APP_PATH === '/today') { if (seen) _todayDropMail(accountId, msgId); _todayRefresh('mail'); return; }
-    if (item) {
-      const textEl = item.querySelector('.card-text');
-      if (textEl) {
-        if (seen) {
-          // Was unread → now read: remove bold
-          const strong = textEl.querySelector('strong');
-          textEl.textContent = strong ? strong.textContent : textEl.textContent;
-        } else {
-          // Was read → now unread: add bold
-          textEl.innerHTML = `<strong>${escHtml(textEl.textContent)}</strong>`;
-        }
-      }
-      item.dataset.unread = seen ? '0' : '1';
-    }
+    if (seen) _todayDropMail(accountId, msgId);
+    _todayRefresh('mail');
   } catch {
     _reloadMailPanel();
   }
 }
 
 function _mailRemoveItem(accountId, msgId) {
-  if (APP_PATH === '/today') _todayDropMail(accountId, msgId);
-  const panel = document.getElementById('dashboardMailPanel');
-  const item  = panel?.querySelector(
-    `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
-  );
-  if (!item) return;
-  const afterItem = item.nextElementSibling;
-  item.remove();
-  if (!panel.querySelector(`.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"]`)) {
-    const empty = document.createElement('p');
-    empty.className = 'dashboard-empty';
-    empty.textContent = 'No messages.';
-    afterItem ? panel.insertBefore(empty, afterItem) : panel.appendChild(empty);
-  }
-  const total = panel.querySelectorAll('.dashboard-mail-item').length;
-  document.getElementById('dashMailCount').textContent = total;
+  _todayDropMail(accountId, msgId);
 }
 
 async function _mailDelete(accountId, msgId) {
@@ -2798,7 +1518,7 @@ async function _mailDelete(accountId, msgId) {
       { method: 'DELETE' }
     );
     if (!res.ok) throw new Error('Failed');
-    if (APP_PATH === '/today') _todayRefresh('mail');
+    _todayRefresh('mail');
   } catch {
     _reloadMailPanel();
   }
@@ -2813,7 +1533,7 @@ async function _mailMove(accountId, msgId, folder) {
     );
     if (!res.ok) throw new Error('Failed');
     _addRecentFolder(accountId, folder);
-    if (APP_PATH === '/today') _todayRefresh('mail');
+    _todayRefresh('mail');
   } catch {
     _reloadMailPanel();
   }
@@ -2909,12 +1629,6 @@ async function _linkMailToCard(accountId, msgId, folder, board, cardId, onLinked
   if (!folder) {
     const key = `${accountId}\0${msgId}`;
     _mailCardRefs.set(key, [...(_mailCardRefs.get(key) || []), ref]);
-    const meta = document.querySelector(`.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"] .card-meta`);
-    if (meta && !meta.querySelector('[title="Linked to a card"]')) {
-      meta.insertAdjacentHTML('afterbegin', `<span class="dashboard-mail-attach" title="Linked to a card">${SVGICONS.card(13, 9)}</span>`);
-    }
-  } else if (typeof _mvDashStale !== 'undefined') {
-    _mvDashStale = true;   // the dashboard panel reloads when the mail view closes
   }
   if (onLinked) onLinked(ref);
 }
@@ -3398,191 +2112,9 @@ async function _deleteCalEvent(accountId, uid, etag, href, scope, occurrenceDate
   }
 }
 
-async function _loadMoreCalEvents(accountId, extraDays, acc) {
-  const configured = acc?.lookaheadDays || 7;
-  const current    = _calLookahead.get(accountId) ?? configured;
-  const newDays    = Math.min(365, current + extraDays);
-
-  // Disable this account's col-btn during load
-  const btn = document.querySelector(`.dash-cal-account[data-account-id="${CSS.escape(accountId)}"] .col-btn`);
-  if (btn) btn.disabled = true;
-
-  try {
-    const res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(accountId)}?days=${newDays}`);
-    if (!res.ok) return;
-    const data = await res.json();
-
-    _setCalLookahead(accountId, newDays);
-
-    // Merge new events for this account into _calEventMap
-    for (const key of [..._calEventMap.keys()]) {
-      if (key.startsWith(`${accountId}\0`)) _calEventMap.delete(key);
-    }
-    const freshAcc = { ...acc, ...data, accountId, events: data.events || [] };
-    for (const ev of freshAcc.events) {
-      _calEventMap.set(`${accountId}\0${ev.uid}`, {
-        ...ev,
-        _label: acc?.label, _accountId: accountId,
-        _webUrl: acc?.webInterfaceUrl, _color: acc?.color,
-        _accountType: acc?.type || 'caldav',
-      });
-    }
-
-    // Re-render just this account section
-    const sectionEl = document.querySelector(`.dash-cal-account[data-account-id="${CSS.escape(accountId)}"]`);
-    if (sectionEl) {
-      const bodyEl = sectionEl.querySelector('.dash-cal-account-body');
-      if (bodyEl) {
-        const groupsHtml = _calDayGroupsHtml(freshAcc.events, acc?.color, accountId, acc?.webInterfaceUrl);
-        bodyEl.innerHTML = groupsHtml || _calEmptyMsg(newDays);
-        const noteEl = document.createElement('p');
-        noteEl.className = 'dash-cal-lookahead-note';
-        noteEl.textContent = `Showing next ${newDays} days`;
-        bodyEl.appendChild(noteEl);
-      }
-    }
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-function _calEmptyMsg(days) {
-  return days === 1
-    ? '<p class="dashboard-empty">No events today.</p>'
-    : `<p class="dashboard-empty">No upcoming events in the next ${days} day${days !== 1 ? 's' : ''}.</p>`;
-}
-
-async function _resetCalToToday() {
-  const headerBtn = document.getElementById('dashCalendarMenuBtn');
-  if (headerBtn) headerBtn.disabled = true;
-
-  const accounts = _calAccountsMeta;
-  const fetches  = accounts.map(async acc => {
-    _setCalLookahead(acc.accountId, 1);
-    try {
-      const res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(acc.accountId)}?days=1`);
-      if (!res.ok) return acc;
-      const data = await res.json();
-      for (const key of [..._calEventMap.keys()]) {
-        if (key.startsWith(`${acc.accountId}\0`)) _calEventMap.delete(key);
-      }
-      const freshAcc = { ...acc, ...data, accountId: acc.accountId, events: data.events || [] };
-      for (const ev of freshAcc.events) {
-        _calEventMap.set(`${acc.accountId}\0${ev.uid}`, {
-          ...ev, _label: acc.label, _accountId: acc.accountId,
-          _webUrl: acc.webInterfaceUrl, _color: acc.color, _accountType: acc.type || 'caldav',
-        });
-      }
-      return freshAcc;
-    } catch { return acc; }
-  });
-
-  const freshAccounts = await Promise.all(fetches);
-  _renderCalendarPanel(freshAccounts);
-  if (headerBtn) headerBtn.disabled = false;
-}
-
-async function _loadMoreCalEventsAll(extraDays) {
-  const headerBtn = document.getElementById('dashCalendarMenuBtn');
-  if (headerBtn) headerBtn.disabled = true;
-
-  const accounts = _calAccountsMeta;
-  const fetches  = accounts.map(async acc => {
-    const configured = acc.lookaheadDays || 7;
-    const current    = _calLookahead.get(acc.accountId) ?? configured;
-    const newDays    = Math.min(365, current + extraDays);
-    _setCalLookahead(acc.accountId, newDays);
-    try {
-      const res = await fetch(`/api/dashboard/calendar/${encodeURIComponent(acc.accountId)}?days=${newDays}`);
-      if (!res.ok) return acc;
-      const data = await res.json();
-      for (const key of [..._calEventMap.keys()]) {
-        if (key.startsWith(`${acc.accountId}\0`)) _calEventMap.delete(key);
-      }
-      const freshAcc = { ...acc, ...data, accountId: acc.accountId, events: data.events || [] };
-      for (const ev of freshAcc.events) {
-        _calEventMap.set(`${acc.accountId}\0${ev.uid}`, {
-          ...ev, _label: acc.label, _accountId: acc.accountId,
-          _webUrl: acc.webInterfaceUrl, _color: acc.color, _accountType: acc.type || 'caldav',
-        });
-      }
-      return freshAcc;
-    } catch { return acc; }
-  });
-
-  const freshAccounts = await Promise.all(fetches);
-  _renderCalendarPanel(freshAccounts);
-  if (headerBtn) headerBtn.disabled = false;
-}
-
-async function _refreshCalendarAccount(accountId) {
-  const days = _calLookahead.get(accountId);
-  const url  = days
-    ? `/api/dashboard/calendar/${encodeURIComponent(accountId)}?days=${days}`
-    : `/api/dashboard/calendar/${encodeURIComponent(accountId)}`;
-
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return;
-    const data = await res.json();
-
-    // Update _calEventMap for this account
-    for (const key of [..._calEventMap.keys()]) {
-      if (key.startsWith(`${accountId}\0`)) _calEventMap.delete(key);
-    }
-
-    // Look up account meta from the last-rendered accounts list (reliable in both grouped and ungrouped mode)
-    const accMeta   = _calAccountsMeta.find(a => a.accountId === accountId) || {};
-    const accLabel  = accMeta.label || '';
-    const accColor  = accMeta.color || '';
-    const accWebUrl = accMeta.webInterfaceUrl || '';
-    const accType   = data.type || accMeta.type || 'caldav';
-    const sectionEl = document.querySelector(`.dash-cal-account[data-account-id="${CSS.escape(accountId)}"]`);
-
-    for (const ev of (data.events || [])) {
-      _calEventMap.set(`${accountId}\0${ev.uid}`, {
-        ...ev,
-        _label: accLabel, _accountId: accountId,
-        _webUrl: accWebUrl, _color: accColor,
-        _accountType: accType,
-      });
-    }
-
-    const lookahead = _calLookahead.get(accountId) ?? (data.lookaheadDays || 7);
-    const maxDayD = new Date(); maxDayD.setDate(maxDayD.getDate() + lookahead - 1);
-    const maxDay  = maxDayD.toISOString().slice(0, 10);
-
-    if (!_calGrouped) {
-      // Unified view — rebuild the whole panel from the updated _calEventMap
-      const allEvents = [..._calEventMap.values()];
-      const panel = document.getElementById('dashboardCalendarPanel');
-      const maxLookahead = Math.max(..._calAccountsMeta.map(a => _calLookahead.get(a.accountId) ?? (a.lookaheadDays || 7)));
-      const maxDayAllD = new Date(); maxDayAllD.setDate(maxDayAllD.getDate() + maxLookahead - 1);
-      const groupsHtml = _calDayGroupsHtml(allEvents, '', '', '', maxDayAllD.toISOString().slice(0, 10));
-      // Replace only the day-group content (keep any error banners at the top)
-      const errBanners = [...panel.querySelectorAll('.dashboard-source-error')].map(el => el.outerHTML).join('');
-      panel.innerHTML = errBanners + (groupsHtml || _calEmptyMsg(maxLookahead));
-      if (maxLookahead > 7) {
-        const noteEl = document.createElement('p');
-        noteEl.className = 'dash-cal-lookahead-note';
-        noteEl.textContent = `Showing next ${maxLookahead} days`;
-        panel.appendChild(noteEl);
-      }
-    } else if (sectionEl) {
-      // Grouped view — update just this account's section
-      const bodyEl = sectionEl.querySelector('.dash-cal-account-body');
-      if (bodyEl) {
-        const groupsHtml = _calDayGroupsHtml(data.events || [], accColor || null, accountId, accWebUrl || null, maxDay);
-        bodyEl.innerHTML = groupsHtml || _calEmptyMsg(lookahead);
-        if (_calLookahead.get(accountId)) {
-          const noteEl = document.createElement('p');
-          noteEl.className = 'dash-cal-lookahead-note';
-          noteEl.textContent = `Showing next ${lookahead} days`;
-          bodyEl.appendChild(noteEl);
-        }
-      }
-    }
-  } catch { /* ignore — stale UI is better than a crash */ }
+/** After an event was created / changed / deleted: reload the Today agenda (calendar view reloads itself). */
+async function _refreshCalendarAccount() {
+  if (typeof _todayRefresh === 'function') _todayRefresh('calendar');
 }
 
 // ---- Recurrence helpers ----

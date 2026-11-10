@@ -88,29 +88,6 @@ function _validateTz(tz) {
 
 // ---- Helpers ----
 
-function _collectLinkedCardIds(items) {
-  const ids = new Set();
-  for (const item of (items || [])) {
-    if (item.type === 'page') {
-      for (const id of (item.linkedCards || [])) ids.add(id);
-    } else if (item.type === 'folder') {
-      for (const id of _collectLinkedCardIds(item.children)) ids.add(id);
-    }
-  }
-  return ids;
-}
-
-async function _fetchNotesMap(couch, boards) {
-  const map = new Map();
-  await Promise.allSettled(boards.map(async board => {
-    try {
-      const raw = await couch.use(DB_PREFIX + board).get('notes');
-      map.set(board, _collectLinkedCardIds(raw.items || []));
-    } catch { map.set(board, new Set()); }
-  }));
-  return map;
-}
-
 function _flattenPages(items) {
   const pages = [];
   for (const item of (items || [])) {
@@ -130,9 +107,18 @@ function _cardLastEdited(card) {
 
 // ---- Routes ----
 
+// Settings of the removed Focus view — dropped from stored configs on read and write
+const FOCUS_ONLY_KEYS = ['cardSources', 'cardGrouped', 'calendarGrouped', 'autoRefreshMs', 'recentLimit',
+  'panelBoards', 'panelCards', 'panelMail', 'panelCalendar'];
+function _withoutFocusKeys(config) {
+  const out = { ...config };
+  for (const k of FOCUS_ONLY_KEYS) delete out[k];
+  return out;
+}
+
 router.get('/dashboard/config', withHandler(async (req, res) => {
   const config = await getDashboardConfig();
-  res.json(stripPasswords(config));
+  res.json(stripPasswords(_withoutFocusKeys(config)));
 }));
 
 router.get('/dashboard/recent', withHandler(async (req, res) => {
@@ -175,7 +161,7 @@ router.put('/dashboard/config', writeRateLimit, withHandler(async (req, res) => 
   }
 
   const stored = await getDashboardConfig();
-  const merged = mergePasswords(stored, req.body);
+  const merged = _withoutFocusKeys(mergePasswords(stored, req.body));
 
   // Clear defaultTimezone if explicitly set to empty string
   if (tz === '') delete merged.defaultTimezone;
@@ -183,113 +169,6 @@ router.put('/dashboard/config', writeRateLimit, withHandler(async (req, res) => 
   await saveDashboardConfig(merged);
   clearCalendarUrlCache();
   res.json({ ok: true });
-}));
-
-router.get('/dashboard/cards', withHandler(async (req, res) => {
-  const config  = await getDashboardConfig();
-  const couch   = getCouch();
-  const sources = config.cardSources || [];
-
-  const notesMap = await _fetchNotesMap(couch, [...new Set(sources.map(s => s.board))]);
-
-  const settled = await Promise.allSettled(
-    sources.map(async source => {
-      const db  = couch.use(DB_PREFIX + source.board);
-      const doc = await db.get(DOC_ID);
-      const cols = (doc.columns || []).filter(col =>
-        !source.columns?.length || source.columns.includes(col.title)
-      );
-      const linkedCards = notesMap.get(source.board) || new Set();
-      return cols.map(col => ({
-        sourceId:           source.id,
-        board:              source.board,
-        column:             col.title,
-        initiallyCollapsed: source.collapsed || false,
-        cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link, mailRef, calEvent }) => ({
-          id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
-          hasLinkedNotes: linkedCards.has(id),
-          hasMailRef:     !!mailRef,
-          hasCalEvent:    !!calEvent,
-        })),
-        error: null,
-      }));
-    })
-  );
-
-  const result = sources.flatMap((source, i) => {
-    const r = settled[i];
-    if (r.status === 'fulfilled') return r.value;
-    return [{ sourceId: source.id, board: source.board, column: null, cards: [], error: r.reason?.message || 'Unknown error' }];
-  });
-
-  res.json(result);
-}));
-
-// ---- Combined data endpoint ----
-
-// GET /api/dashboard/data — fetch all sources in parallel, return combined result
-router.get('/dashboard/data', withHandler(async (req, res) => {
-  const config = await getDashboardConfig();
-
-  const cardsPromise = (async () => {
-    const couch   = getCouch();
-    const sources = config.cardSources || [];
-    const notesMap = await _fetchNotesMap(couch, [...new Set(sources.map(s => s.board))]);
-    const settled = await Promise.allSettled(
-      sources.map(async source => {
-        const db  = couch.use(DB_PREFIX + source.board);
-        const doc = await db.get(DOC_ID);
-        const cols = (doc.columns || []).filter(col =>
-          !source.columns?.length || source.columns.includes(col.title)
-        );
-        const linkedCards = notesMap.get(source.board) || new Set();
-        return cols.map(col => ({
-          sourceId:          source.id,
-          board:             source.board,
-          column:            col.title,
-          initiallyCollapsed: source.collapsed || false,
-          cards: (col.cards || []).map(({ id, text, priority, color, startDate, endDate, done, description, link, mailRef, calEvent }) => ({
-            id, text, priority, color, startDate, endDate, done, description: !!description, link: link || '',
-            hasLinkedNotes: linkedCards.has(id),
-            hasMailRef:     !!mailRef,
-            hasCalEvent:    !!calEvent,
-          })),
-          error: null,
-        }));
-      })
-    );
-    return sources.flatMap((source, i) => {
-      const r = settled[i];
-      if (r.status === 'fulfilled') return r.value;
-      return [{ sourceId: source.id, board: source.board, column: null, cards: [], error: r.reason?.message || 'Unknown error' }];
-    });
-  })();
-
-  const mailPromise = (async () => {
-    const accounts = config.mailAccounts || [];
-    const settled  = await Promise.allSettled(accounts.map(acc => fetchMailAccount(acc)));
-    return accounts.map((acc, i) => {
-      const r = settled[i];
-      if (r.status === 'fulfilled') {
-        return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: r.value, error: null };
-      }
-      return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: [], error: r.reason?.message || 'Unknown error' };
-    });
-  })();
-
-  const calendarPromise = (async () => {
-    const accounts = config.calendarAccounts || [];
-    const settled  = await Promise.allSettled(accounts.map(acc => fetchCalendarAccount(acc)));
-    return accounts.map((acc, i) => {
-      const r    = settled[i];
-      const base = { accountId: acc.id, label: acc.label, type: acc.type || 'caldav', color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null };
-      if (r.status === 'fulfilled') return { ...base, ...r.value };
-      return { ...base, events: [], error: r.reason?.message || 'Unknown error' };
-    });
-  })();
-
-  const [cards, mail, calendar] = await Promise.all([cardsPromise, mailPromise, calendarPromise]);
-  res.json({ cards, mail, calendar, fetchedAt: new Date().toISOString() });
 }));
 
 // ---- Mail recent folders ----

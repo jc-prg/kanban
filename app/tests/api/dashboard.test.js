@@ -62,7 +62,7 @@ require.cache[IMAPFLOW_MODULE] = {
   children: [], paths: [],
 }
 
-// ---- db mock (for /dashboard/cards) ----
+// ---- db mock (board documents) ----
 const boardDocs = new Map()   // dbName → board document
 
 const mockCouch = {
@@ -109,10 +109,9 @@ test('DB-1 GET /api/dashboard/config — no config saved → default empty confi
   expect(res.status).toBe(200)
   expect(res.body).toMatchObject({
     mailAccounts:     [],
-    cardSources:      [],
     calendarAccounts: [],
-    autoRefreshMs:    0,
   })
+  expect(res.body.cardSources).toBeUndefined()
 })
 
 test('DB-2 PUT then GET /api/dashboard/config — values persisted', async () => {
@@ -128,8 +127,11 @@ test('DB-2 PUT then GET /api/dashboard/config — values persisted', async () =>
 
   const get = await request(app).get('/api/dashboard/config').set(AUTH)
   expect(get.status).toBe(200)
-  expect(get.body.cardSources).toEqual(cfg.cardSources)
-  expect(get.body.autoRefreshMs).toBe(300000)
+  expect(get.body.mailAccounts[0].label).toBe('work')
+  // Settings of the removed Focus view are not stored
+  expect(get.body.cardSources).toBeUndefined()
+  expect(get.body.autoRefreshMs).toBeUndefined()
+  expect(_storedConfig.cardSources).toBeUndefined()
 })
 
 test('DB-3 GET /api/dashboard/config — passwords stripped; hasPassword added', async () => {
@@ -210,79 +212,23 @@ test('DB-8 webInterfaceUrl on calendar account — saved and returned in GET', a
 })
 
 // ---------------------------------------------------------------------------
-// Card sources
+// Removed Focus view
 // ---------------------------------------------------------------------------
 
-test('DB-9 GET /api/dashboard/cards — cards from configured board/column returned', async () => {
+test('DB-9 GET /api/dashboard/config — Focus-only keys of an old stored config are dropped', async () => {
   _storedConfig = {
-    mailAccounts: [], calendarAccounts: [], autoRefreshMs: 0,
-    cardSources: [{ id: 'cs-1', board: 'jobs', columns: ['Inbox'] }],
+    mailAccounts: [], calendarAccounts: [], autoRefreshMs: 60000, recentLimit: 10, panelCards: false,
+    cardSources: [{ id: 'cs-1', board: 'jobs', columns: ['Inbox'] }], defaultTimezone: 'Europe/Berlin',
   }
-  boardDocs.set('jc-kanban-jobs', {
-    _id: 'board', _rev: '1-abc',
-    columns: [
-      { id: 'c1', title: 'Inbox', cards: [{ id: 'id-aaa', text: 'Card A', priority: 1 }] },
-      { id: 'c2', title: 'Done',  cards: [{ id: 'id-bbb', text: 'Card B' }] },
-    ],
-  })
-
-  const res = await request(app).get('/api/dashboard/cards').set(AUTH)
+  const res = await request(app).get('/api/dashboard/config').set(AUTH)
   expect(res.status).toBe(200)
-  expect(res.body).toHaveLength(1)
-  expect(res.body[0].column).toBe('Inbox')
-  expect(res.body[0].cards).toHaveLength(1)
-  expect(res.body[0].cards[0].text).toBe('Card A')
+  expect(res.body.defaultTimezone).toBe('Europe/Berlin')
+  for (const k of ['cardSources', 'autoRefreshMs', 'recentLimit', 'panelCards']) expect(res.body[k]).toBeUndefined()
 })
 
-test('DB-10 GET /api/dashboard/cards — column filter applied; unlisted column excluded', async () => {
-  _storedConfig = {
-    mailAccounts: [], calendarAccounts: [], autoRefreshMs: 0,
-    cardSources: [{ id: 'cs-1', board: 'jobs', columns: ['Inbox'] }],
-  }
-  boardDocs.set('jc-kanban-jobs', {
-    _id: 'board', _rev: '1-abc',
-    columns: [
-      { id: 'c1', title: 'Inbox', cards: [{ id: 'id-aaa', text: 'Wanted' }] },
-      { id: 'c2', title: 'Done',  cards: [{ id: 'id-bbb', text: 'Not wanted' }] },
-    ],
-  })
-
-  const res = await request(app).get('/api/dashboard/cards').set(AUTH)
-  expect(res.body.every(g => g.column === 'Inbox')).toBe(true)
-  expect(res.body.flatMap(g => g.cards).map(c => c.text)).not.toContain('Not wanted')
-})
-
-test('DB-11 GET /api/dashboard/cards — columns: [] means all columns included', async () => {
-  _storedConfig = {
-    mailAccounts: [], calendarAccounts: [], autoRefreshMs: 0,
-    cardSources: [{ id: 'cs-1', board: 'jobs', columns: [] }],
-  }
-  boardDocs.set('jc-kanban-jobs', {
-    _id: 'board', _rev: '1-abc',
-    columns: [
-      { id: 'c1', title: 'Inbox', cards: [{ id: 'id-aaa', text: 'A' }] },
-      { id: 'c2', title: 'Done',  cards: [{ id: 'id-bbb', text: 'B' }] },
-    ],
-  })
-
-  const res = await request(app).get('/api/dashboard/cards').set(AUTH)
-  const columnTitles = res.body.map(g => g.column)
-  expect(columnTitles).toContain('Inbox')
-  expect(columnTitles).toContain('Done')
-})
-
-test('DB-12 GET /api/dashboard/cards — missing board returns error field, no 500', async () => {
-  _storedConfig = {
-    mailAccounts: [], calendarAccounts: [], autoRefreshMs: 0,
-    cardSources: [{ id: 'cs-1', board: 'missing', columns: [] }],
-  }
-  // boardDocs has nothing for jc-kanban-missing
-
-  const res = await request(app).get('/api/dashboard/cards').set(AUTH)
-  expect(res.status).toBe(200)
-  expect(res.body).toHaveLength(1)
-  expect(res.body[0].error).toBeTruthy()
-  expect(res.body[0].cards).toEqual([])
+test('DB-10 GET /api/dashboard/cards and /api/dashboard/data — removed (404)', async () => {
+  expect((await request(app).get('/api/dashboard/cards').set(AUTH)).status).toBe(404)
+  expect((await request(app).get('/api/dashboard/data').set(AUTH)).status).toBe(404)
 })
 
 // ---------------------------------------------------------------------------
@@ -618,85 +564,6 @@ test('DB-20 POST /api/dashboard/mail/:id/test — timeout → { ok: false, error
   expect(res.status).toBe(200)
   expect(res.body.ok).toBe(false)
   expect(res.body.error).toBe('Connection timed out (10 s)')
-})
-
-// ---------------------------------------------------------------------------
-// Combined data endpoint
-// ---------------------------------------------------------------------------
-
-test('DB-30 GET /api/dashboard/data — all sources configured and mocked successfully', async () => {
-  _storedConfig = {
-    autoRefreshMs:    0,
-    mailAccounts:     [_mailAccount()],
-    cardSources:      [{ id: 'cs-1', board: 'jobs', columns: ['Inbox'] }],
-    calendarAccounts: [_calAccount()],
-  }
-  _imapMessages = [_mockMsg(1, 'Newsletter')]
-  boardDocs.set('jc-kanban-jobs', {
-    columns: [{ id: 'c1', title: 'Inbox', cards: [{ id: 'id-abc', text: 'Apply at Acme' }] }],
-  })
-  const ics = makeIcs('uid-d30@ex', icalTs(TOMORROW), icalTs(TOMORROW), 'Standup')
-  vi.stubGlobal('fetch', async () => ({ ok: true, status: 207, text: async () => calDavXml(ics) }))
-
-  const res = await request(app).get('/api/dashboard/data').set(AUTH)
-  expect(res.status).toBe(200)
-  expect(res.body.fetchedAt).toBeTruthy()
-  expect(res.body.mail).toHaveLength(1)
-  expect(res.body.mail[0].messages).toHaveLength(1)
-  expect(res.body.mail[0].error).toBeNull()
-  expect(res.body.cards).toHaveLength(1)
-  expect(res.body.cards[0].cards).toHaveLength(1)
-  expect(res.body.cards[0].error).toBeNull()
-  expect(res.body.calendar).toHaveLength(1)
-  expect(res.body.calendar[0].events).toHaveLength(1)
-  expect(res.body.calendar[0].error).toBeNull()
-})
-
-test('DB-31 GET /api/dashboard/data — one IMAP account unreachable → error field, other sources normal', async () => {
-  _storedConfig = {
-    autoRefreshMs:    0,
-    mailAccounts:     [_mailAccount()],
-    cardSources:      [{ id: 'cs-1', board: 'jobs', columns: ['Inbox'] }],
-    calendarAccounts: [_calAccount()],
-  }
-  _imapConnectErr = new Error('Connection refused')
-  boardDocs.set('jc-kanban-jobs', {
-    columns: [{ id: 'c1', title: 'Inbox', cards: [{ id: 'id-abc', text: 'Apply' }] }],
-  })
-  const ics = makeIcs('uid-d31@ex', icalTs(TOMORROW), icalTs(TOMORROW), 'Meeting')
-  vi.stubGlobal('fetch', async () => ({ ok: true, status: 207, text: async () => calDavXml(ics) }))
-
-  const res = await request(app).get('/api/dashboard/data').set(AUTH)
-  expect(res.status).toBe(200)
-  expect(res.body.mail[0].error).toBeTruthy()
-  expect(res.body.mail[0].messages).toHaveLength(0)
-  expect(res.body.cards[0].cards).toHaveLength(1)
-  expect(res.body.cards[0].error).toBeNull()
-  expect(res.body.calendar[0].events).toHaveLength(1)
-  expect(res.body.calendar[0].error).toBeNull()
-})
-
-test('DB-32 GET /api/dashboard/data — all sources fail → 200 with all error fields set', async () => {
-  _storedConfig = {
-    autoRefreshMs:    0,
-    mailAccounts:     [_mailAccount()],
-    cardSources:      [{ id: 'cs-1', board: 'missing', columns: [] }],
-    calendarAccounts: [_calAccount()],
-  }
-  _imapConnectErr = new Error('Connection refused')
-  // boardDocs has no entry for 'missing'
-  vi.stubGlobal('fetch', async () => ({ ok: false, status: 401, text: async () => 'Unauthorized' }))
-
-  const res = await request(app).get('/api/dashboard/data').set(AUTH)
-  expect(res.status).toBe(200)
-  expect(res.body.mail[0].error).toBeTruthy()
-  expect(res.body.cards[0].error).toBeTruthy()
-  expect(res.body.calendar[0].error).toBeTruthy()
-})
-
-test('DB-33 GET /api/dashboard/data — unauthenticated → 401', async () => {
-  const res = await request(app).get('/api/dashboard/data')
-  expect(res.status).toBe(401)
 })
 
 // ---- Calendar range (?from&to) — used by the calendar view ----

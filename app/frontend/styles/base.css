@@ -55,6 +55,9 @@
   --radius: 12px;
   --col-width: 300px;
   --mark-bg: rgba(161, 118, 0, 0.7);
+  /* Scrollbar thumb: idle (barely visible in dark mode) / hovered */
+  --scrollbar: #15151b;
+  --scrollbar-active: #34344a;
 }
 
 @media (prefers-color-scheme: light) {
@@ -72,6 +75,8 @@
     --mark-bg: rgba(250, 204, 21, 0.45);
     --link: #2563eb;
     --link-visited: #7c3aed;
+    --scrollbar: var(--border);
+    --scrollbar-active: var(--text-muted);
   }
 }
 
@@ -105,5 +110,5 @@ a:visited { color: var(--link-visited); }
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-active); }

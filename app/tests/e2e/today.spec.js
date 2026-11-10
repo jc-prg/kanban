@@ -5,7 +5,7 @@
  * All data endpoints are mocked with page.route (no CalDAV / IMAP / Open-Meteo / CV-App, and no
  * writes to the shared CouchDB — PUT /api/today/config is captured in the test).
  *
- * Scenarios: E-T-1 … E-T-7
+ * Scenarios: E-T-1 … E-T-12
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -65,6 +65,27 @@ async function mockApis(page, state) {
   ] } }));
   await page.route('**/api/achievements/today?**', r => r.fulfill({ json: { done: 2, moved: 3, created: 1, inboxCreated: 0 } }));
 }
+
+// Board (and its notes) edited in place from Today: GETs served from `data`, writes captured in `state`
+async function mockBoard(page, name, data, state) {
+  state.patches ||= {}; state.notesWrites ||= {};
+  await page.route(`**/api/${name}/board`, r => {
+    if (r.request().method() === 'GET') return r.fulfill({ json: data.board, headers: { ETag: '"1-a"' } });
+    (state.patches[name] ||= []).push(JSON.parse(r.request().postData()));
+    return r.fulfill({ json: { ok: true }, headers: { ETag: '"2-b"' } });
+  });
+  await page.route(`**/api/${name}/notes`, r => {
+    if (r.request().method() === 'GET') return r.fulfill({ json: data.notes || { schemaVersion: 2, items: [] }, headers: { ETag: '"1-n"' } });
+    (state.notesWrites[name] ||= []).push({ method: r.request().method(), body: r.request().postData() });
+    return r.fulfill({ json: { ok: true }, headers: { ETag: '"2-n"' } });
+  });
+  for (const sub of ['webdav-config', 'webhook-config']) await page.route(`**/api/${name}/${sub}`, r => r.fulfill({ json: { enabled: false } }));
+  await page.route(`**/api/${name}/recurring-tasks`, r => r.fulfill({ json: [] }));
+  await page.route(`**/api/${name}/cards/attachments**`, r => r.fulfill({ json: [] }));
+  await page.route(`**/api/${name}/notes/attachments/**`, r => r.fulfill({ json: [] }));
+}
+
+const BOARD_TODAY = { board: { columns: [{ id: 'c-todo', title: 'TODO', cards: [{ id: 'id-due1', text: 'Send offer', endDate: TODAY, priority: 1 }] }] } };
 
 const columnsOf = page => page.evaluate(() =>
   [...document.querySelectorAll('#todayGrid .today-col')].map(c => [...c.querySelectorAll('.today-tile')].map(t => `${t.dataset.tile}:${t.dataset.size}`)));
@@ -270,5 +291,133 @@ test.describe('Today page', () => {
     await page.goBack();
     await expect(page.locator('#today')).toBeVisible();
     await expect(page.locator('#calView')).toBeHidden();
+  });
+
+  test('E-T-8 card "Edit" from the context menu opens the dialog on Today; Save patches that board', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="agenda"] .today-kcard', { hasText: 'Send offer' }).click({ button: 'right' });
+    await page.click('#ctxEdit');
+
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#cardText')).toHaveValue('Send offer');
+    expect(new URL(page.url()).pathname).toBe('/today');
+    expect(new URL(page.url()).hash).toBe('');
+    await expect(page.locator('#board .column')).toHaveCount(0);   // the board is not rendered
+    await expect(page.locator('#modalGoBoardBtn')).toBeVisible();
+    await expect(page.locator('#modalGoBoardBtn')).toHaveAttribute('href', '/board/e2e-today#card:id-due1');
+
+    await page.fill('#cardText', 'Send offer (v2)');
+    await page.click('#modalSubmitBtn');
+    await expect(page.locator('#modal')).toBeHidden();
+    await expect.poll(() => state.patches['e2e-today']?.at(-1)?.updatedColumns?.[0]?.cards?.[0]?.text).toBe('Send offer (v2)');
+    expect(new URL(page.url()).pathname).toBe('/today');
+  });
+
+  test('E-T-9 detail panel "Edit" opens the dialog in place; "Go to board" asks about changes, then opens the board', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="agenda"] .today-kcard', { hasText: 'Send offer' }).click();
+    await expect(page.locator('#dashboardDetail')).toBeVisible();
+    await page.click('#dashboardDetailEditBtn');
+    await expect(page.locator('#dashboardDetail')).toBeHidden();
+    await expect(page.locator('#modal')).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/today');
+
+    // Unsaved change: Go to board asks first; cancelling keeps the dialog on Today
+    await page.fill('#cardText', 'Changed');
+    await page.click('#modalGoBoardBtn');
+    await expect(page.locator('#dialogBackdrop')).toBeVisible();
+    await page.click('#dialogCancelBtn');
+    await expect(page.locator('#modal')).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/today');
+
+    // Discard → the board opens with the same card dialog
+    await page.click('#modalGoBoardBtn');
+    await page.click('#dialogOkBtn');
+    await expect(page).toHaveURL(/\/board\/e2e-today#card:id-due1$/);
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#cardText')).toHaveValue('Send offer');
+    expect(state.patches['e2e-today'] || []).toEqual([]);   // nothing was saved
+  });
+
+  test('E-T-10 cards of two boards edited one after the other are saved to their own board', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await page.route('**/api/today/widgets/cards?**', r => r.fulfill({ json: {
+      date: TODAY, overdue: [], startsToday: [], dueTomorrow: [], unread: [], dueWeek: [], startsWeek: [],
+      dueToday: [item('id-due1', 'Send offer', { endDate: TODAY }), { ...item('id-oth1', 'Call Bob', { endDate: TODAY }), board: 'e2e-other' }],
+      counts: { overdue: 0, dueToday: 2, startsToday: 0, dueTomorrow: 0, unread: 0 },
+    } }));
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await mockBoard(page, 'e2e-other', { board: { columns: [{ id: 'c-x', title: 'DOING', cards: [{ id: 'id-oth1', text: 'Call Bob', endDate: TODAY }] }] } }, state);
+    await page.goto('/today');
+    const agenda = page.locator('.today-tile[data-tile="agenda"]');
+
+    await agenda.locator('.today-kcard', { hasText: 'Send offer' }).click({ button: 'right' });
+    await page.click('#ctxEdit');
+    await page.fill('#cardText', 'Send offer A');
+    await page.click('#modalSubmitBtn');
+    await expect(page.locator('#modal')).toBeHidden();
+
+    await agenda.locator('.today-kcard', { hasText: 'Call Bob' }).click({ button: 'right' });
+    await page.click('#ctxEdit');
+    await expect(page.locator('#cardText')).toHaveValue('Call Bob');
+    await expect(page.locator('#modalGoBoardBtn')).toHaveAttribute('href', '/board/e2e-other#card:id-oth1');
+    await page.fill('#cardText', 'Call Bob B');
+    await page.click('#modalSubmitBtn');
+
+    await expect.poll(() => state.patches['e2e-other']?.at(-1)?.updatedColumns?.[0]?.cards?.[0]?.text).toBe('Call Bob B');
+    expect(state.patches['e2e-today'].at(-1).updatedColumns[0].cards[0].text).toBe('Send offer A');
+    expect(JSON.stringify(state.patches['e2e-today'])).not.toContain('Call Bob');
+  });
+
+  test('E-T-11 a note page in the Notes tile opens the note dialog on Today; Save writes that board\'s notes', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 1 }], tiles: [{ id: 'notes', col: 0, order: 0, size: '1/1' }] } } };
+    await mockApis(page, state);
+    await page.route('**/api/today/widgets/notes', r => r.fulfill({ json: {
+      total: 1, boards: [{ board: 'e2e-today', pages: 1, webdav: false, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes' }] }],
+    } }));
+    await mockBoard(page, 'e2e-today', { ...BOARD_TODAY, notes: { schemaVersion: 2, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes', description: 'hello' }] } }, state);
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="notes"]');
+    await tile.locator('.today-nboard > summary').click();
+    await tile.locator('.today-npage', { hasText: 'Meeting notes' }).click();
+
+    await expect(page.locator('#noteModal')).toBeVisible();
+    await expect(page.locator('#notePageTitle')).toHaveValue('Meeting notes');
+    expect(new URL(page.url()).pathname).toBe('/today');
+    expect(new URL(page.url()).hash).toBe('');
+    await expect(page.locator('#noteModalGoBoardBtn')).toBeVisible();
+    await expect(page.locator('#notesSidebar')).not.toHaveClass(/notes-sidebar--open/);
+
+    await page.fill('#notePageTitle', 'Meeting notes (edited)');
+    await page.click('#noteModalSaveBtn');
+    await expect(page.locator('#noteModal')).toBeHidden();
+    await expect.poll(() => (state.notesWrites['e2e-today'] || []).map(w => w.body).join('')).toContain('Meeting notes (edited)');
+  });
+
+  test('E-T-12 Find on Today searches all boards; a result opens the card dialog in place', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.route('**/api/boards', r => r.fulfill({ json: [{ name: 'e2e-today', columnBadges: [] }] }));
+    await page.route('**/api/e2e-today/all-columns', r => r.fulfill({ json: { TODO: [{ id: 'id-due1', text: 'Send offer' }] } }));
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
+    await page.click('#headerMenuBtn');
+    await page.click('#menuFindCard');
+    await page.fill('#searchText', 'send off');
+    const hit = page.locator('#searchResults .search-result-item', { hasText: 'Send offer' });
+    await expect(hit).toContainText('e2e-today › TODO');
+    await hit.click();
+    await expect(page.locator('#searchBackdrop')).toBeHidden();
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#cardText')).toHaveValue('Send offer');
+    expect(new URL(page.url()).pathname).toBe('/today');
   });
 });

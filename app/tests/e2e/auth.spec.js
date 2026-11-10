@@ -25,8 +25,8 @@ test.describe('3.1 Authentication', () => {
     await page.fill('#loginPassword', PASSWORD);
     await page.click('#loginSubmitBtn');
 
-    // Overview appears, login modal is gone
-    await expect(page.locator('#overview')).toBeVisible();
+    // Today (the entry point) appears, login modal is gone
+    await expect(page.locator('#today')).toBeVisible();
     await expect(page.locator('#loginBackdrop')).toBeHidden();
   });
 
@@ -42,8 +42,8 @@ test.describe('3.1 Authentication', () => {
     await expect(page.locator('#loginError')).toBeVisible();
     await expect(page.locator('#loginPassword')).toBeVisible();
 
-    // Overview must NOT be visible
-    await expect(page.locator('#overview')).toBeHidden();
+    // Today must NOT be visible
+    await expect(page.locator('#today')).toBeHidden();
   });
 
   // E-A-3 ---------------------------------------------------------------
@@ -52,13 +52,13 @@ test.describe('3.1 Authentication', () => {
     await page.goto('/');
     await page.fill('#loginPassword', PASSWORD);
     await page.click('#loginSubmitBtn');
-    await expect(page.locator('#overview')).toBeVisible();
+    await expect(page.locator('#today')).toBeVisible();
 
     // Reload — the kanban-session cookie is still in the browser context
     await page.reload();
 
     await expect(page.locator('#loginBackdrop')).toBeHidden();
-    await expect(page.locator('#overview')).toBeVisible();
+    await expect(page.locator('#today')).toBeVisible();
   });
 
   // E-A-4 ---------------------------------------------------------------
@@ -67,14 +67,14 @@ test.describe('3.1 Authentication', () => {
     await page.goto('/');
     await page.fill('#loginPassword', PASSWORD);
     await page.click('#loginSubmitBtn');
-    await expect(page.locator('#overview')).toBeVisible();
+    await expect(page.locator('#today')).toBeVisible();
 
     // Drop all cookies — simulates "sign out" or cookie expiry
     await context.clearCookies();
     await page.reload();
 
     await expect(page.locator('#loginBackdrop')).toBeVisible();
-    await expect(page.locator('#overview')).toBeHidden();
+    await expect(page.locator('#today')).toBeHidden();
   });
 
 });

@@ -86,6 +86,7 @@ function _buildNoteLinkedSet() {
 }
 
 function render() {
+  if (ROUTE !== 'board') return;   // Today edits a board in place without showing it
   const board = document.getElementById('board');
   // Preserve per-column (and board) scroll positions across the full rebuild
   const _scrolls = typeof saveColScrolls === 'function' ? saveColScrolls() : {};
@@ -523,7 +524,7 @@ function render() {
 }
 
 /**
- * Column count badges of a board (overview, Focus boards panel, Today Boards tile): inbox / todo /
+ * Column count badges of a board (Today Boards tile): inbox / todo /
  * doing aggregates and tracked columns; the tooltip names the column(s) behind each count.
  * `numbersOnly` (Today) drops the labels — the tooltip names the column.
  */

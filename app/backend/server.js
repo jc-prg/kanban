@@ -75,7 +75,17 @@ async function sendSpa(req, res, next) {
   } catch (err) { next(err); }
 }
 
-site.get(['/', '/index.html'], sendSpa);
+// Today is the entry point; the old overview (/), Focus (/focus, /dashboard) and quick-add (/inbox)
+// URLs redirect there and keep their query (?cal= / ?mail= deep links, ?board= for the inbox modal).
+function toToday(extra = '') {
+  return (req, res) => {
+    const i  = req.originalUrl.indexOf('?');
+    const qs = i >= 0 ? req.originalUrl.slice(i + 1) : '';
+    const q  = [extra, qs].filter(Boolean).join('&');
+    res.redirect(302, `${BASE_PATH}/today${q ? '?' + q : ''}`);
+  };
+}
+site.get(['/', '/index.html'], toToday());
 site.use(express.static(path.join(__dirname, '..', 'frontend'), { index: false }));
 site.use('/notes-webdav', express.static(path.join(__dirname, '..', 'notes-webdav', 'frontend')));
 
@@ -125,10 +135,9 @@ site.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit })
 site.use('/api', require('./routes/recurring'));
 site.use('/api', require('./routes/templates'));
 
-site.get('/focus',              sendSpa);
 site.get('/today',              sendSpa);
-site.get('/dashboard',          (req, res) => res.redirect(301, `${BASE_PATH}/focus`));
-site.get('/inbox',              sendSpa);
+site.get(['/focus', '/dashboard'], toToday());
+site.get('/inbox',              toToday('inbox'));
 site.get('/board/:board',       sendSpa);
 site.get('/board/:board/*path', sendSpa);
 

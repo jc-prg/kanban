@@ -16,9 +16,8 @@
   }
 
   window.openSearch = function () {
-    const onDashboard = document.getElementById('dashboard').style.display !== 'none';
-    if (!API && !onDashboard) return;
-    dashMode = onDashboard && !API;
+    // Board page: this board's cards / notes; Today: all boards (results open in place)
+    dashMode = ROUTE !== 'board';
 
     const colGroup = document.querySelector('#searchCardFilters .search-col-group');
     if (colGroup) colGroup.style.display = dashMode ? 'none' : '';
@@ -293,7 +292,7 @@
       el.innerHTML = `<div class="search-result-col-label">${escHtml(colLabel)}</div>
         <div class="search-result-text">${escHtml(card.text)}</div>${metaHtml}`;
       if (dashMode) {
-        el.addEventListener('click', () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boardName)}#card:${card.id}`, '_blank', 'noopener,noreferrer'));
+        el.addEventListener('click', () => { closeSearch(); _todayEditCard(boardName, card.id); });
       } else {
         el.addEventListener('click', () => { closeSearch(); openEditModal(col.id, card); });
         el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showContextMenu(e.clientX, e.clientY, col.id, card); });
@@ -326,7 +325,7 @@
         `<div class="search-result-text">${escHtml(page.title)}</div>` +
         (preview ? `<div class="search-result-preview">${escHtml(preview)}${(page.description?.length ?? 0) > 80 ? '…' : ''}</div>` : '');
       if (dashMode) {
-        el.addEventListener('click', () => window.open(`${BASE_PATH}/board/${encodeURIComponent(boardName)}#note:${page.id}`, '_blank', 'noopener,noreferrer'));
+        el.addEventListener('click', () => { closeSearch(); _todayEditNote(boardName, page.id); });
       } else {
         el.addEventListener('click', () => { closeSearch(); window._notesModule?.openNoteModal(page.id); });
       }
@@ -350,8 +349,7 @@
   });
 
   document.addEventListener('keydown', e => {
-    const onDashboard = document.getElementById('dashboard').style.display !== 'none';
-    if ((e.ctrlKey || e.metaKey) && e.key === 'f' && (API || onDashboard)) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
       if (document.getElementById('searchBackdrop').style.display !== 'none') return;
       e.preventDefault();
       openSearch();

@@ -276,3 +276,32 @@ test('TU-18 _todayBoardCols — as many equal cards as fit, at least 2, at most 
   expect(ctx._todayBoardCols(1000, 120, 8, 1)).toBe(2)
   expect(ctx._todayBoardCols(400, 0, 8, 5)).toBe(2)
 })
+
+test('TU-19 _todayColumnNeed — fixed sizes as set, collapsed = header, fit content / available = header + content', () => {
+  const H = 600, g = 26
+  // 1/3 + collapsed + "available" with 200 px content: fits
+  const fits = [
+    { size: '1/3', headerH: 30, contentH: 999, collapsed: false },
+    { size: '1/2', headerH: 30, contentH: 999, collapsed: true },
+    { size: 'available', headerH: 30, contentH: 200, collapsed: false },
+  ]
+  const need = ctx._todayColumnNeed(fits, H, g)
+  expect(need).toBeCloseTo((H / 3 - g * 2 / 3) + 30 + (30 + 200) + 2 * g)
+  expect(need).toBeLessThan(H)
+  // The same column with a long "available" tile overflows → the column scrolls anyway
+  expect(ctx._todayColumnNeed([fits[0], fits[1], { ...fits[2], contentH: 900 }], H, g)).toBeGreaterThan(H)
+  // A single 1/1 tile is exactly the column height
+  expect(ctx._todayColumnNeed([{ size: '1/1', headerH: 30, contentH: 5000, collapsed: false }], H, g)).toBeCloseTo(H)
+})
+
+test('TU-20 _todayMeetingLink — Teams / Webex / Google Meet / Zoom from location, else description; other URLs ignored', () => {
+  const m = ev => plain(ctx._todayMeetingLink(ev))
+  expect(m({ location: 'https://acme.zoom.us/j/123456?pwd=abc' })).toEqual({ name: 'Zoom', url: 'https://acme.zoom.us/j/123456?pwd=abc' })
+  expect(m({ location: 'Room 4', description: 'Join: <https://teams.microsoft.com/l/meetup-join/19%3ameeting_x/0?context=%7b%7d>' }))
+    .toEqual({ name: 'Teams', url: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_x/0?context=%7b%7d' })
+  expect(m({ description: 'Agenda https://example.com/doc then https://meet.google.com/abc-defg-hij.' }))
+    .toEqual({ name: 'Google Meet', url: 'https://meet.google.com/abc-defg-hij' })
+  expect(m({ location: 'https://acme.webex.com/acme/j.php?MTID=m1' }).name).toBe('Webex')
+  expect(m({ location: 'https://zoom.us/', description: 'https://example.com/zoom.us/j/1' })).toBeNull()
+  expect(m({ location: '', description: '' })).toBeNull()
+})

@@ -4,7 +4,7 @@
 // One page for "what matters today": a configurable grid of tiles (agenda, needs attention,
 // widgets). Layouts are stored per breakpoint (≤ 4 columns, tile height relative to the column);
 // a breakpoint without its own layout is derived from the next larger one (_todayResolveLayout).
-// Details open in the Focus detail panel / calendar view / mail view (dashboard.js, calview.js,
+// Details open in the shared detail panel / calendar view / mail view (dashboard.js, calview.js,
 // mailview.js), so this file only renders summaries.
 
 const TODAY_BPS = [
@@ -357,7 +357,7 @@ const TODAY_TILES = {
     desc: 'Cards added to inboxes, created, moved and done today — or on an earlier day',
     load: () => _todayFetchJson(`/api/achievements/today?date=${_todayAddDays(_todayToday(), _todayAchOffset)}`),
     render: _todayRenderProgress,
-    // Day navigation as in the overview's achievements: ‹ earlier, › later (up to today), back to today
+    // Day navigation: ‹ earlier, › later (up to today), back to today
     actions: () => [
       ...(_todayAchOffset < 0 ? [{ icon: SVGICONS.sync(12, 12), title: 'Jump to today', run: () => _todaySetAchOffset(0) }] : []),
       { label: '‹', title: 'Previous day', disabled: !_todayAchHasPast, run: () => _todaySetAchOffset(_todayAchOffset - 1) },
@@ -373,8 +373,12 @@ const TODAY_TILES = {
       _todayFetchJson('/api/dashboard/recent?limit=8').catch(() => []),
     ]),
     render: _todayRenderBoards,
-    actions: () => [{ icon: SVGICONS.create(12, 12), title: _todayNewBoardOpen ? 'Cancel new board' : 'New board', active: _todayNewBoardOpen,
-      run: () => _todayToggleNewBoard() }],
+    actions: () => [
+      { icon: SVGICONS.folder(12, 12), title: _todayShowArchived() ? 'Hide archived boards' : 'Show archived boards', active: _todayShowArchived(),
+        run: () => _todayToggleArchived() },
+      { icon: SVGICONS.create(12, 12), title: _todayNewBoardOpen ? 'Cancel new board' : 'New board', active: _todayNewBoardOpen,
+        run: () => _todayToggleNewBoard() },
+    ],
   },
   notes: {
     title: 'Notes',
@@ -419,13 +423,10 @@ async function initToday() {
   document.getElementById('saveIndicator').style.display = 'none';
   document.getElementById('dashboardFetchedAt').style.display = '';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
-  document.getElementById('menuFindCard').style.display = 'none';
   ['menuWebhook', 'menuDashboardSettings'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   document.getElementById('today').style.display = 'flex';
   document.getElementById('boardSwitchWrap').style.display = '';
-  document.getElementById('dashboardBtn').style.display = '';
   document.getElementById('dashboardRefreshBtn').style.display = '';
-  document.getElementById('dashboardBtn').classList.add('header-menu-btn--hide-mobile');   // in the board menu on phones
   document.getElementById('dashboardRefreshBtn').title = 'Refresh';
 
   // The detail panel lives in #dashboard, which is only shown while a view is open here
@@ -472,6 +473,13 @@ async function initToday() {
   });
   // The grid's height changes with the Today bar / edit bar (wrapping, weather loaded later)
   if (typeof ResizeObserver === 'function') new ResizeObserver(() => _todayMeasure()).observe(document.getElementById('todayGrid'));
+  // Content height changes decide whether a column overflows (_todayFitColumns)
+  if (typeof MutationObserver === 'function') {
+    const mo = new MutationObserver(_todayScheduleFit);
+    mo.observe(document.getElementById('todayGrid'), { childList: true, subtree: true });
+    mo.observe(document.getElementById('today'), { attributes: true, attributeFilter: ['class'] });
+  }
+  document.getElementById('todayGrid').addEventListener('toggle', _todayScheduleFit, true);   // <details>
 
   _todayRenderBar();
   _todayRelayout();
@@ -481,6 +489,14 @@ async function initToday() {
     url.searchParams.delete('edit');
     history.replaceState(history.state, '', url);
     _todayStartEdit();
+  }
+  // /today?inbox[&board=<b>] (old /inbox URL, quick-add bookmark): open the add-to-inbox modal
+  if (url.searchParams.has('inbox')) {
+    const preselect = url.searchParams.get('board');
+    url.searchParams.delete('inbox');
+    url.searchParams.delete('board');
+    history.replaceState(history.state, '', url);
+    openInboxModal(preselect, null, () => _todayRefresh('cards'));
   }
   await loadToday();
   _cvInitFromUrl();
@@ -591,6 +607,7 @@ function _todaySetCollapsed(id, collapsed) {
   if (collapsed) set.add(id); else set.delete(id);
   try { localStorage.setItem('today-collapsed', JSON.stringify([...set])); } catch { /* ignore */ }
   _todayTileEls.get(id)?.classList.toggle('today-tile--collapsed', collapsed);
+  _todayScheduleFit();
   window.getSelection?.()?.removeAllRanges();   // a double-click selects the title text
 }
 
@@ -645,6 +662,65 @@ function _todayMeasure() {
     ? Math.max(320, window.innerHeight - header - 32)
     : grid.clientHeight;
   root.style.setProperty('--today-col-h', `${Math.max(200, h)}px`);
+  _todayFitColumns();
+}
+
+const _TODAY_FRAC = { f1: 1, f23: 2 / 3, f12: 1 / 2, f13: 1 / 3 };
+
+/**
+ * Height a column's tiles need: fixed sizes as set (n × column height minus their share of the
+ * gaps), collapsed tiles their header, "fit content" / "available" tiles header + full content.
+ * Pure apart from reading the given measurements.
+ */
+function _todayColumnNeed(tiles, colH, gap) {
+  let total = 0;
+  for (const t of tiles) {
+    const f = _TODAY_FRAC[_TODAY_SIZE_CLS[t.size]];
+    if (t.collapsed)  total += t.headerH;
+    else if (f)       total += colH * f - gap * (1 - f);
+    else              total += t.headerH + t.contentH;
+  }
+  return total + gap * Math.max(0, tiles.length - 1);
+}
+
+/**
+ * A column whose tiles need more than its height scrolls anyway: there its "available" tile shows
+ * all content (`today-col--over`), and on multi-column layouts the headers become a sticky stack
+ * (`today-col--stack`, see today.css). Off while editing — the editor measures the tile boxes.
+ */
+function _todayFitColumns() {
+  const root = document.getElementById('today');
+  if (!root) return;
+  const colH    = parseFloat(root.style.getPropertyValue('--today-col-h')) || 0;
+  const gap     = parseFloat(getComputedStyle(root).getPropertyValue('--today-gap')) || 0;
+  const single  = root.classList.contains('today--scroll');
+  let headerMax = 0;
+  for (const col of document.querySelectorAll('#todayGrid .today-col')) {
+    const els = [...col.querySelectorAll(':scope > .today-tile')];
+    const tiles = els.map(el => {
+      const headerH = el.querySelector('.today-tile-header')?.offsetHeight || 0;
+      headerMax = Math.max(headerMax, headerH);
+      return {
+        size: el.dataset.size, headerH,
+        collapsed: el.classList.contains('today-tile--collapsed'),
+        contentH: el.querySelector('.today-tile-body')?.scrollHeight || 0,
+      };
+    });
+    const over = !_todayEdit && els.length > 0 && colH > 0 && _todayColumnNeed(tiles, colH, gap) > colH + 1;
+    col.classList.toggle('today-col--over', over);
+    col.classList.toggle('today-col--stack', over && !single);
+    col.style.setProperty('--today-stack-n', String(els.length));
+    els.forEach((el, i) => el.style.setProperty('--today-stack-i', String(i)));
+  }
+  // Stacked headers share one fixed height (headers never wrap, so stacked and free ones match)
+  if (headerMax) root.style.setProperty('--today-hdr-h', `${headerMax}px`);
+}
+
+/** Re-fit after content changes (tile renders, opened <details>, edit mode on / off); once per frame. */
+let _todayFitRaf = 0;
+function _todayScheduleFit() {
+  if (_todayFitRaf) return;
+  _todayFitRaf = requestAnimationFrame(() => { _todayFitRaf = 0; _todayFitColumns(); });
 }
 
 // ---- Loading ----
@@ -845,22 +921,51 @@ function _todayDecodeEntities(str) {
   return t.value;
 }
 
+/** Online-meeting providers recognised in an event's location / description (host + path). */
+const _TODAY_MEETING_PROVIDERS = [
+  { name: 'Teams',       re: /^https:\/\/(teams\.microsoft\.com|teams\.live\.com)\/(l\/meetup-join|meet)\//i },
+  { name: 'Webex',       re: /^https:\/\/([\w-]+\.)*webex\.com\//i },
+  { name: 'Google Meet', re: /^https:\/\/meet\.google\.com\/[a-z0-9-]+/i },
+  { name: 'Zoom',        re: /^https:\/\/([\w-]+\.)*zoom(gov)?\.(us|com)\/(j|w|my|s)\//i },
+];
+
+/** First Teams / Webex / Google Meet / Zoom link in the location, else in the description → { name, url } | null. */
+function _todayMeetingLink(ev) {
+  for (const text of [ev.location, ev.description]) {
+    const urls = _todayDecodeEntities(text || '').match(/https:\/\/[^\s<>"'`\])}|]+/gi) || [];
+    for (const raw of urls) {
+      const url = raw.replace(/[.,;:!?]+$/, '');
+      const p = _TODAY_MEETING_PROVIDERS.find(p => p.re.test(url));
+      if (p) return { name: p.name, url };
+    }
+  }
+  return null;
+}
+
+function _todayMeetingHtml(meet) {
+  return meet ? `<a class="today-ev-meet" href="${escHtml(meet.url)}" target="_blank" rel="noopener noreferrer" title="Join the ${escHtml(meet.name)} meeting in a new tab">${SVGICONS.openLink(11, 11)} ${escHtml(meet.name)}</a>` : '';
+}
+
 function _todayEventHtml(item, day) {
   const ev = item.ev;
+  const meet = _todayMeetingLink(ev);
   const color = ev._color ? ` style="--card-color:${escHtml(ev._color)}"` : '';
   const refs  = ev.cardRefs?.length ? `<span class="today-ev-link" title="Linked to a card">${SVGICONS.card(12, 8)}</span>` : '';
   const attrs = `data-account-id="${escHtml(ev._accountId)}" data-uid="${escHtml(ev.uid)}" data-web-url="${escHtml(ev._webUrl || '')}"`;
   if (item.kind === 'event' && (ev.allDay || item.continues)) {
-    return `<div class="today-chip today-ev" ${attrs}${color} title="${escHtml(`${_todayDecodeEntities(ev.title)}\n${_calEventWhen(ev)}`)}">${item.continues ? '<span class="today-muted">cont.</span> ' : ''}${escHtml(_todayDecodeEntities(ev.title))}${refs}</div>`;
+    return `<div class="today-chip today-ev" ${attrs}${color} title="${escHtml(`${_todayDecodeEntities(ev.title)}\n${_calEventWhen(ev)}`)}">${item.continues ? '<span class="today-muted">cont.</span> ' : ''}${escHtml(_todayDecodeEntities(ev.title))}${refs}${_todayMeetingHtml(meet)}</div>`;
   }
   const end = ev.end && ev.end !== ev.start ? `–${_todayFmtTime(ev.end)}` : '';
   const endsLater = ev.end && _todayLocalDay(new Date(new Date(ev.end) - 1)) > day ? ' →' : '';
   return `<div class="today-ev today-ev-row${item.past ? ' today-ev--past' : ''}" ${attrs}${color}>
     <span class="today-ev-time">${escHtml(_todayFmtTime(ev.start))}${escHtml(end)}${endsLater}</span>
     <span class="today-ev-title">${(() => {
-      const title = _todayDecodeEntities(ev.title), loc = _todayDecodeEntities(ev.location);
+      const title = _todayDecodeEntities(ev.title);
+      let loc = _todayDecodeEntities(ev.location).trim();
+      if (meet && loc === meet.url) loc = '';   // the link replaces a bare meeting URL
       return `<span class="today-ev-line" title="${escHtml(title)}">${escHtml(title)}</span>`
-        + (loc ? `<span class="today-ev-line today-ev-loc" title="${escHtml(loc)}">${escHtml(loc)}</span>` : '');
+        + (loc ? `<span class="today-ev-line today-ev-loc" title="${escHtml(loc)}">${escHtml(loc)}</span>` : '')
+        + (meet ? `<span class="today-ev-line">${_todayMeetingHtml(meet)}</span>` : '');
     })()}</span>${refs}
   </div>`;
 }
@@ -954,7 +1059,11 @@ function _todayRenderAttention(body, data, el) {
   _mailAccountsMeta = Array.isArray(mail) ? mail : [];
   const unreadMail = [];
   for (const acc of _mailAccountsMeta) {
-    for (const msg of acc.messages || []) if (msg.unread) unreadMail.push({ acc, msg });
+    for (const msg of acc.messages || []) {
+      if (msg.unread) unreadMail.push({ acc, msg });
+      // Linked cards for the mail context menu ("Open card")
+      if (msg.cardRefs?.length) _mailCardRefs.set(`${acc.accountId}\0${msg.id}`, msg.cardRefs);
+    }
   }
   unreadMail.sort((a, b) => String(b.msg.date || '').localeCompare(String(a.msg.date || '')));
   const accCount = new Set(unreadMail.map(m => m.acc.accountId)).size;
@@ -981,7 +1090,7 @@ function _todayRenderAttention(body, data, el) {
     cards.overdue.slice(0, 15).map(it => _todayKanbanCardHtml(it)).join('') + moreNote(Math.min(15, cards.overdue.length), cards.counts.overdue));
   row('due', 'today-att--warn', '●', cards.counts.dueToday, 'due today',
     cards.dueToday.slice(0, 15).map(it => _todayKanbanCardHtml(it)).join('') + moreNote(Math.min(15, cards.dueToday.length), cards.counts.dueToday));
-  // Due soon: the next _TODAY_SOON_DAYS days after today (like the Focus cards' due-date warning)
+  // Due soon: the next _TODAY_SOON_DAYS days after today
   const soonEnd = _todayAddDays(_todayToday(), _TODAY_SOON_DAYS);
   const dueSoon = (cards.dueWeek || []).filter(it => it.card.endDate <= soonEnd);
   row('soon', 'today-att--soon', '\u25d4', dueSoon.length, `due in the next ${_TODAY_SOON_DAYS === 1 ? 'day' : `${_TODAY_SOON_DAYS} days`}`,
@@ -1177,7 +1286,7 @@ function _todayRenderProgress(body, data, el) {
   const dayEl = el.querySelector('.today-tile-count');
   dayEl.textContent = _todayAchLabel(_todayAchOffset);
   dayEl.title = _todayAddDays(_todayToday(), _todayAchOffset);
-  // Tooltip: the cards behind a number (same list as the overview's achievements)
+  // Tooltip: the cards behind a number
   const tip = cards => (cards.length ? ` title="${escHtml(cardsTooltip(cards))}"` : '');
   const stat = (v, label, color, cards) => `<div class="today-stat" style="--stat-color:${color}"${tip(cards)}><span class="today-stat-value">${v}</span><span class="today-stat-label">${label}</span></div>`;
   body.innerHTML = `<div class="today-stats">
@@ -1192,6 +1301,16 @@ function _todayRenderProgress(body, data, el) {
 
 let _todayNewBoardOpen  = false;
 let _todayNewBoardDraft = '';   // typed name, kept across tile refreshes
+
+/** Archived boards listed with the active ones (folder action of the Boards tile); per browser. */
+function _todayShowArchived() {
+  try { return localStorage.getItem('today-boards-archived') === '1'; } catch { return false; }
+}
+
+function _todayToggleArchived() {
+  try { localStorage.setItem('today-boards-archived', _todayShowArchived() ? '0' : '1'); } catch { /* ignore */ }
+  _todayLoadTile('boards', { keepState: true });
+}
 
 function _todayToggleNewBoard() {
   _todayNewBoardOpen = !_todayNewBoardOpen;
@@ -1234,25 +1353,25 @@ function _todayRenderBoards(body, [boards, recent], el) {
   _todaySetCount(el, active.length);
   const chip = b => {
     const badges = boardBadgesHtml(b.columnBadges, { numbersOnly: true });
-    return `<a class="today-board" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">
+    return `<a class="today-board${b.archived ? ' today-board--archived' : ''}"${b.archived ? ' data-archived="1"' : ''} href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">
       <span class="today-board-name board-card-name" title="${escHtml(b.description || b.name)}">${escHtml(b.name)}</span>
       ${badges ? `<span class="today-board-counts">${badges}</span>` : ''}</a>`;
   };
-  const chips = active.map(chip).join('');
+  // Archived boards (folder action) follow the active ones in the same grid, dimmed
+  const shown = _todayShowArchived() ? [...active, ...archived] : active;
+  const chips = shown.map(chip).join('');
   body.innerHTML = `<div class="today-boards">${chips || '<p class="dashboard-empty">No boards yet.</p>'}</div>
-    ${archived.length ? `<details class="today-recent today-archived"><summary>Archived boards <span class="today-ncount">${archived.length}</span></summary>
-      <div class="today-boards">${archived.map(chip).join('')}</div></details>` : ''}
     ${recent?.length ? `<details class="today-recent"><summary>Last edited</summary>${recent.map(_recentItemHtml).join('')}</details>` : ''}`;
   _todayRenderNewBoard(body);
 
   // Equal-width board cards: as many per row as fit with name and all counts on one line (≥ 2).
-  // Widest card measured off-screen (archived ones live in a closed <details>, not rendered).
+  // Widest card measured off-screen (archived ones too, so toggling them keeps the card width).
   const measure = document.createElement('div');
   measure.className = 'today-boards today-boards--measure';
   measure.innerHTML = [...active, ...archived].map(chip).join('');
   body.appendChild(measure);
   body._todayBoardNeed = Math.max(0, ...[...measure.children].map(c => Math.ceil(c.getBoundingClientRect().width)));
-  body._todayBoardCount = active.length;
+  body._todayBoardCount = shown.length;
   measure.remove();
   _todayFitBoards(body);
   if (!body._todayBoardRO && typeof ResizeObserver === 'function') {
@@ -1357,7 +1476,7 @@ function _todayRenderNotes(body, data, el) {
         <div class="today-nchildren">${(it.children || []).map(c => node(board, c)).join('') || '<span class="today-nempty">empty</span>'}</div>
       </details>`;
     }
-    return `<a class="today-npage" href="${BASE_PATH}/board/${encodeURIComponent(board)}#note:${encodeURIComponent(it.id)}" title="${title} — ${escHtml(board)}">${SVGICONS.notePages(10, 10)}<span class="today-nlabel">${title}</span></a>`;
+    return `<a class="today-npage" data-board="${escHtml(board)}" data-page-id="${escHtml(it.id)}" href="${BASE_PATH}/board/${encodeURIComponent(board)}#note:${encodeURIComponent(it.id)}" title="${title} — ${escHtml(board)}">${SVGICONS.notePages(10, 10)}<span class="today-nlabel">${title}</span></a>`;
   };
   const boards = (data.boards || []).map(b => ({ ...b, items: _todayFilterNoteTree(b.items, q) })).filter(b => b.items.length);
   const tree = boards.map(b => {
@@ -1413,11 +1532,20 @@ function _todayWireDelegation() {
   grid.addEventListener('click', e => {
     if (_todayEdit) return;
     if (e.target.closest('.today-setup-link')) { e.preventDefault(); openSettingsDialog('todaySection'); return; }
+    // Note page: plain click edits in place; modifier / middle click keeps the board link
+    const npage = e.target.closest('.today-npage[data-page-id]');
+    if (npage) {
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      _todayEditNote(npage.dataset.board, npage.dataset.pageId);
+      return;
+    }
     const check = e.target.closest('[data-act="done"]');
     if (check) { e.stopPropagation(); const c = cardAt(check); if (c?.entry) _todayMarkDone(c.el, c.entry); return; }
     const c = cardAt(e.target);
     if (c?.entry && e.target.closest('.card-link-badge')) { _dashMarkRead(c.entry.board, c.entry.card); c.el.classList.remove('card--unread'); return; }
     if (c?.entry) { _openCardDetail(c.entry.board, c.entry.card); c.el.classList.remove('today-card-row--unread', 'card--unread'); return; }
+    if (e.target.closest('.today-ev-meet')) return;   // meeting link opens itself in a new tab
     const ev = e.target.closest('.today-ev[data-uid]');
     if (ev) { _openEventDetail(ev.dataset.accountId, ev.dataset.uid, ev.dataset.webUrl || ''); return; }
     const mail = e.target.closest('.today-mail-row[data-msg-id]');
@@ -1469,14 +1597,138 @@ async function _todayMarkDone(rowEl, { board, card }) {
 
 /**
  * Reload the tiles that show cards or mail after an action elsewhere (card / mail context menu,
- * detail panel — dashboard.js / menus.js call this on /today instead of their Focus panels).
+ * detail panel — dashboard.js / menus.js call this after changes).
  * Only the changed data is fetched again; the calendar stays cached for this load cycle.
  */
 function _todayRefresh(kind) {
-  const urls  = kind === 'mail' ? [/^\/api\/dashboard\/mail$/] : [/^\/api\/today\/widgets\/cards/, /^\/api\/achievements\//];
-  const tiles = kind === 'mail' ? ['attention'] : ['agenda', 'attention', 'progress'];
+  const urls  = kind === 'mail'     ? [/^\/api\/dashboard\/mail$/]
+              : kind === 'calendar' ? [/^\/api\/dashboard\/calendar/]
+              : [/^\/api\/today\/widgets\/cards/, /^\/api\/achievements\//];
+  const tiles = kind === 'mail' ? ['attention'] : kind === 'calendar' ? ['agenda'] : ['agenda', 'attention', 'progress'];
   for (const url of [..._todayFetchMemo.keys()]) if (urls.some(re => re.test(url))) _todayFetchMemo.delete(url);
   for (const id of tiles) if ((_todayEdit?.draft || _todayLayout)?.tiles.some(t => t.id === id)) _todayLoadTile(id);
+}
+
+// ---- In-place editing (card / note dialogs without loading the board page) ----
+// The board context of state.js / cards.js (setBoardContext) and one lazily created
+// notes module are pointed at the edited item's board; the board is never rendered.
+
+/** Promise chain: one context switch at a time (fast double clicks). */
+let _todayEditQueue = Promise.resolve();
+function _todayEditSerial(fn) {
+  const run = _todayEditQueue.then(fn, fn);
+  _todayEditQueue = run.catch(() => {});
+  return run;
+}
+
+/** Wait for pending card / note saves, then switch the board context (loads the board JSON). */
+async function _todaySwitchBoard(board) {
+  await flushBoardSave();
+  await window._notesModule?.flushNotesSave();
+  if (BOARD_NAME === board && state.columns.length) {
+    // Same board: refresh to pick up changes made elsewhere since the last edit
+    await load();
+    return;
+  }
+  setBoardContext(board);
+  await load();
+}
+
+function _todayBoardUrl(board, hash) {
+  return appUrl(`/board/${encodeURIComponent(board)}#${hash}`);
+}
+
+/** Open the card edit dialog on Today. */
+function _todayEditCard(board, cardId) {
+  return _todayEditSerial(async () => {
+    try { await _todaySwitchBoard(board); }
+    catch (e) { showMessage(e.message || 'Failed to load the board.'); return; }
+    const col  = state.columns.find(c => c.cards.some(k => k.id === cardId));
+    const card = col?.cards.find(k => k.id === cardId);
+    if (!card) { showMessage('This card no longer exists.'); _todayRefresh('cards'); return; }
+    openEditModal(col.id, card);
+    const goBtn = document.getElementById('modalGoBoardBtn');
+    goBtn.href = _todayBoardUrl(board, `card:${cardId}`);
+    goBtn.style.display = '';
+    goBtn.onclick = async e => {
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;   // new tab: leave the dialog open
+      e.preventDefault();
+      const href = goBtn.href;
+      await tryCloseModal();
+      if (document.getElementById('modal').style.display !== 'none') return;   // close cancelled
+      await flushBoardSave();
+      window.location.href = href;
+    };
+    // Linked note pages of the card: load that board's notes in the background
+    _todayNotesFor(board).then(() => {
+      if (modalMode === 'edit' && editCardId === cardId) renderCardLinkedPages(cardId);
+    }).catch(() => {});
+  });
+}
+
+/** Called by closeModal() after an in-place card edit: save, then refresh the card tiles. */
+async function _todayAfterCardEdit() {
+  await flushBoardSave();
+  _todayRefresh('cards');
+}
+
+/** Notes module pointed at `board`, its notes loaded (created on first use). */
+async function _todayNotesFor(board) {
+  const nm = window._notesModule;
+  if (nm && nm.getBoardName() === board && nm.getNotesState().items.length) return nm;
+  let webdavEnabled = false;
+  try {
+    const r = await fetch(`/api/${encodeURIComponent(board)}/webdav-config`);
+    if (r.ok) webdavEnabled = !!(await r.json()).enabled;
+  } catch { /* notes still load from CouchDB */ }
+  if (!nm) {
+    window._notesModule = _createNotesModule({
+      apiBase:   `/api/${encodeURIComponent(board)}`,
+      boardName: board,
+      webdavEnabled,
+      headless:  true,
+      onClose:   () => _todayAfterNoteEdit(),
+      goToBoard: pageId => { window.location.href = _todayBoardUrl(window._notesModule.getBoardName(), `note:${pageId}`); },
+      // Linked card in the note dialog: in place as well (with Go to board)
+      hooks:     { openEditModal: (colId, card) => _todayEditCard(window._notesModule.getBoardName(), card.id) },
+    });
+  } else {
+    await nm.flushNotesSave();
+    nm.setBoard({ apiBase: `/api/${encodeURIComponent(board)}`, boardName: board, webdavEnabled });
+  }
+  await window._notesModule.loadNotes();
+  return window._notesModule;
+}
+
+/** Open the note page dialog on Today. */
+function _todayEditNote(board, pageId) {
+  return _todayEditSerial(async () => {
+    let nm;
+    try {
+      // Board state too: linked-card titles, "Create card" and auto-save settings come from it
+      await _todaySwitchBoard(board);
+      nm = await _todayNotesFor(board);
+    } catch (e) { showMessage(e.message || 'Failed to load the notes.'); return; }
+    if (!nm.findNotePage(pageId, nm.getNotesState().items)) { showMessage('This note page no longer exists.'); _todayReloadNotes(); return; }
+    await nm.openNoteModal(pageId);
+  });
+}
+
+let _todayNoteCloseT = null;
+function _todayAfterNoteEdit() {
+  // The save button awaits the save before closing; debounced saves (tree ops) get a moment
+  clearTimeout(_todayNoteCloseT);
+  _todayNoteCloseT = setTimeout(async () => {
+    await window._notesModule?.flushNotesSave();
+    await flushBoardSave();
+    _todayReloadNotes();
+    _todayRefresh('cards');
+  }, 100);
+}
+
+function _todayReloadNotes() {
+  for (const url of [..._todayFetchMemo.keys()]) if (/^\/api\/today\/widgets\/notes/.test(url)) _todayFetchMemo.delete(url);
+  if ((_todayEdit?.draft || _todayLayout)?.tiles.some(t => t.id === 'notes')) _todayLoadTile('notes');
 }
 
 /** Remove a mail from the "unread mails" list right away (read, moved or deleted); count follows. */

@@ -23,8 +23,8 @@
 
 /* Elements with scrollbar-width ignore the ::-webkit-scrollbar colours (base.css) in Chrome and
    fall back to the light default — colour them from the theme tokens instead */
-#today, #today * { scrollbar-color: var(--border) transparent; }
-#today *:hover { scrollbar-color: var(--text-muted) transparent; }
+#today, #today * { scrollbar-color: var(--scrollbar) transparent; }
+#today:hover, #today *:hover { scrollbar-color: var(--scrollbar-active) transparent; }
 
 .today-muted { color: var(--text-muted); font-weight: normal; }
 
@@ -248,6 +248,13 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-ev-line { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .today-ev-loc { font-size: 0.75rem; color: var(--text-muted); }
 .today-ev-link { display: inline-flex; color: var(--text-muted); margin-left: 4px; }
+/* Online-meeting link (Teams / Webex / Google Meet / Zoom) */
+.today-ev-meet {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.75rem; color: var(--accent); text-decoration: none;
+}
+.today-chip .today-ev-meet { margin-left: 6px; }
+.today-ev-meet:hover { text-decoration: underline; }
 .today-now { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: var(--danger); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
 .today-now::after { content: ''; flex: 1; height: 2px; border-radius: 1px; background: var(--danger); }
 .today-tomorrow { margin-top: 26px; }
@@ -353,7 +360,8 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-app-row .today-cv-badge { opacity: 0.6; transition: opacity 0.15s; }
 .today-app-row:hover .today-cv-badge { opacity: 1; }
 .today-app-row { align-items: flex-start; cursor: default; padding-top: 10px; padding-bottom: 10px; }
-.today-app-row + .today-app-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
+.today-app-row + .today-app-row,
+.today-mail-row + .today-mail-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
 /* Entry: position / company / status line — one line each, cut with … when too long */
 .today-app-line { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .today-app-title { line-height: 1.35; }
@@ -407,6 +415,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 .today-board:hover { border-color: var(--accent); }
+/* Archived board (shown via the tile's folder action): dimmed, dashed border */
+.today-board--archived { border-style: dashed; opacity: 0.6; }
+.today-board--archived:hover { opacity: 1; }
 /* base.css colours visited links (a:visited) — board and note page links keep the text colour */
 .today-board:visited, .today-npage:visited { color: var(--text); }
 .today-board-name { max-width: 100%; }   /* .board-card-name: Syne 0.9rem bold, ellipsis */
@@ -414,10 +425,8 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-boards-compact .today-boards:not(.today-boards--measure) .today-board { padding: 7px 8px; }
 .today-boards-compact .today-boards:not(.today-boards--measure) .today-board-counts { gap: 3px; }
 .today-boards-compact .today-boards:not(.today-boards--measure) .board-card-count { padding: 2px 5px; }
-.today-board .board-card-count { font-family: var(--today-mono); }   /* as on the overview (body font) */
+.today-board .board-card-count { font-family: var(--today-mono); }   /* body font */
 .today-recent { margin-top: 12px; }
-.today-archived .today-board { opacity: 0.75; }
-.today-archived .today-board:hover { opacity: 1; }
 .today-recent > summary { color: var(--text-muted); transition: color 0.15s; }
 .today-recent > summary:hover { color: var(--text); }
 .today-newboard { margin: 0 0 10px; }
@@ -522,3 +531,39 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 @media (prefers-color-scheme: light) {
   #today .today-tile-header { background: color-mix(in srgb, var(--accent) 9%, var(--surface2)); }
 }
+
+/* Dark mode: widget headers tinted with the accent of the app title as well */
+@media not (prefers-color-scheme: light) {
+  #today .today-tile-header {
+    background: color-mix(in srgb, var(--accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
+    border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  }
+  #today .today-tile-title { color: color-mix(in srgb, var(--accent) 35%, var(--text-muted)); }
+}
+
+/* Column whose tiles need more than its height (it scrolls anyway — _todayFitColumns): an
+   "available" tile shows all its content, like "fit content" */
+#today .today-col--over > .today-tile--fill { flex: 0 0 auto; min-height: 0; max-height: none; }
+#today .today-col--over > .today-tile--fill > .today-tile-body { flex: 0 0 auto; overflow: visible; }
+
+/* ...and on multi-column layouts the headers stay as a stack: tiles scrolled past keep their
+   header at the top, tiles further down at the bottom; only the content scrolls out of sight.
+   The tile boxes dissolve (display: contents) so every header sticks within the whole column. */
+.today-col--stack { gap: 0; --today-stack-gap: 5px; }
+.today-col--stack > .today-tile { display: contents; }
+.today-col--stack > .today-tile > .today-tile-header {
+  position: sticky;
+  z-index: 3;
+  height: var(--today-hdr-h);
+  top: calc(var(--today-stack-i) * (var(--today-hdr-h) + var(--today-stack-gap)));
+  bottom: calc((var(--today-stack-n) - 1 - var(--today-stack-i)) * (var(--today-hdr-h) + var(--today-stack-gap)));
+  /* Page-coloured strips above and below keep the 5 px between stacked headers clear of scrolling content */
+  box-shadow: 0 calc(-1 * var(--today-stack-gap)) 0 var(--bg), 0 var(--today-stack-gap) 0 var(--bg);
+}
+.today-col--stack > .today-tile + .today-tile > .today-tile-header { margin-top: var(--today-gap); }
+/* Fixed sizes: the tile height minus its header goes to the body */
+.today-col--stack > .today-tile--f1  > .today-tile-body { flex: 0 0 calc(var(--today-col-h) - var(--today-hdr-h)); }
+.today-col--stack > .today-tile--f23 > .today-tile-body { flex: 0 0 calc(var(--today-col-h) * 2 / 3 - var(--today-gap) / 3 - var(--today-hdr-h)); }
+.today-col--stack > .today-tile--f12 > .today-tile-body { flex: 0 0 calc(var(--today-col-h) / 2 - var(--today-gap) / 2 - var(--today-hdr-h)); }
+.today-col--stack > .today-tile--f13 > .today-tile-body { flex: 0 0 calc(var(--today-col-h) / 3 - var(--today-gap) * 2 / 3 - var(--today-hdr-h)); }
+.today-col--stack > .today-tile--auto > .today-tile-body { flex: 0 0 auto; }

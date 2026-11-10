@@ -24,7 +24,7 @@
         }
 
         let rows;
-        if (!BOARD_NAME) {
+        if (ROUTE !== 'board') {
           let boards = [];
           try {
             const r = await fetch('/api/boards');
@@ -1058,7 +1058,7 @@
   }
 
   window.openAnalytics = function () {
-    if (!API) return;
+    if (ROUTE !== 'board') return;
     selColumns.clear();
 
     const sel = document.getElementById('analyticsType');

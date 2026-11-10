@@ -53,9 +53,7 @@ async function getDashboardConfig() {
   } catch (err) {
     if (err.statusCode === 404) return {
       mailAccounts:     [],
-      cardSources:      [],
       calendarAccounts: [],
-      autoRefreshMs:    0,
     };
     throw err;
   }

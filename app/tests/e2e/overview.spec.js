@@ -1,11 +1,12 @@
 'use strict';
 /**
- * E2E — 3.2 Board overview
+ * E2E — 3.2 Boards on Today (the entry point; the old overview at / redirects there)
  *
  * All tests run with a pre-authenticated session (storageState from globalSetup).
- * beforeAll creates the boards needed; afterAll removes them.
+ * beforeAll creates the boards needed; afterAll removes them. Only the Today config is
+ * mocked (a layout with the Boards tile, no external widgets) — boards come from the real API.
  *
- * Scenarios: E-O-1 … E-O-3
+ * Scenarios: E-O-1 … E-O-4
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -57,7 +58,7 @@ async function apiDelete(urlPath) {
 // Unique board names for this test file
 // ---------------------------------------------------------------------------
 
-const BOARD_LIST     = 'e2e-ov-list';    // E-O-1: verify board appears in overview
+const BOARD_LIST     = 'e2e-ov-list';    // E-O-1: verify board appears on Today
 const BOARD_CREATE   = 'e2e-ov-create';  // E-O-2: create via UI
 const BOARD_ARCHIVED = 'e2e-ov-arch';    // E-O-3: archived board visibility
 
@@ -81,60 +82,68 @@ test.describe('3.2 Board Overview', () => {
   });
 
   // E-O-1 ---------------------------------------------------------------
-  test('E-O-1: overview lists boards as clickable links', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.locator('#overview')).toBeVisible();
+  // Today config: only the Boards tile; Today PUTs are never sent to the shared CouchDB
+  async function mockTodayConfig(page) {
+    await page.route('**/api/today/config', r => r.request().method() === 'GET'
+      ? r.fulfill({ json: { showBar: false, refreshMinutes: 0, widgets: {}, disabled: [],
+          layouts: { lg: { columns: [{ width: 1 }], tiles: [{ id: 'boards', col: 0, order: 0, size: 'container' }] } } } })
+      : r.fulfill({ json: { ok: true } }));
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [] } }));
+    await page.route('**/api/dashboard/mail-recent-folders', r => r.fulfill({ json: {} }));
+  }
 
-    // The board we seeded should appear in the active grid
-    const boardLink = page.locator(`#boardGrid .board-card[href="/board/${BOARD_LIST}"]`);
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1300, height: 900 });
+    await mockTodayConfig(page);
+  });
+
+  test('E-O-1: / redirects to Today, which lists boards as clickable links', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/today$/);
+    await expect(page.locator('#today')).toBeVisible();
+
+    const boardLink = page.locator(`.today-tile[data-tile="boards"] .today-board[href="/board/${BOARD_LIST}"]`).first();
     await expect(boardLink).toBeVisible();
-
-    // It should contain the board name
-    await expect(boardLink.locator('.board-card-name')).toHaveText(BOARD_LIST);
+    await boardLink.click();
+    await expect(page).toHaveURL(new RegExp(`/board/${BOARD_LIST}$`));
   });
 
-  // E-O-2 ---------------------------------------------------------------
-  test('E-O-2: creating a board from the overview navigates to it', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.locator('#overview')).toBeVisible();
-
-    await page.click('#newBoardSectionBtn');
-    await expect(page.locator('#newBoardContent')).toBeVisible();
-    await page.fill('#newBoardInput', BOARD_CREATE);
-    await page.click('#newBoardBtn');
-
-    // App navigates to /<boardname>
-    await page.waitForURL(`**/${BOARD_CREATE}`);
-    await expect(page).toHaveURL(new RegExp(`/${BOARD_CREATE}$`));
-
-    // Board area is shown; overview is hidden
-    await expect(page.locator('#overview')).toBeHidden();
+  test('E-O-2: creating a board from the Boards tile navigates to it', async ({ page }) => {
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="boards"]');
+    await tile.locator('button[title="New board"]').click();
+    await tile.locator('.today-newboard-input').fill(BOARD_CREATE);
+    await tile.locator('.today-newboard button[type="submit"]').click();
+    await expect(page).toHaveURL(new RegExp(`/board/${BOARD_CREATE}$`));
   });
 
-  // E-O-3 ---------------------------------------------------------------
-  test('E-O-3: archived board is hidden from active grid and shown when toggled', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.locator('#overview')).toBeVisible();
+  test('E-O-3: archived boards are hidden; the folder action lists them with the active ones', async ({ page }) => {
+    await page.goto('/today');
+    await page.evaluate(() => localStorage.removeItem('today-boards-archived'));
+    await page.reload();
+    const tile = page.locator('.today-tile[data-tile="boards"]');
+    await expect(tile.locator(`.today-board[href="/board/${BOARD_LIST}"]`)).toBeVisible();
+    await expect(tile.locator(`.today-board[href="/board/${BOARD_ARCHIVED}"]`)).toHaveCount(0);
 
-    // Archived board must NOT appear in the active grid
-    await expect(
-      page.locator(`#boardGrid .board-card[href="/board/${BOARD_ARCHIVED}"]`)
-    ).toBeHidden();
+    const toggle = tile.locator('button[title="Show archived boards"]');
+    await toggle.click();
+    const arch = tile.locator(`.today-boards .today-board--archived[href="/board/${BOARD_ARCHIVED}"]`);
+    await expect(arch).toBeVisible();
+    await expect(tile.locator('button[title="Hide archived boards"]')).toHaveAttribute('aria-pressed', 'true');
 
-    // The archived section header should be visible (there is at least one archived board)
-    await expect(page.locator('#archivedSection')).toBeVisible();
+    // Kept per browser across reloads; the folder action hides them again
+    await page.reload();
+    await expect(arch).toBeVisible();
+    await tile.locator('button[title="Hide archived boards"]').click();
+    await expect(arch).toHaveCount(0);
+  });
 
-    // Archived grid starts collapsed
-    await expect(page.locator('#archivedGrid')).toBeHidden();
-
-    // Click the toggle
-    await page.click('#archivedSectionBtn');
-
-    // Archived grid expands and the board is visible
-    await expect(page.locator('#archivedGrid')).toBeVisible();
-    await expect(
-      page.locator(`#archivedGrid .board-card[href="/board/${BOARD_ARCHIVED}"]`)
-    ).toBeVisible();
+  test('E-O-4: old entry URLs redirect to Today and keep their query', async ({ request }) => {
+    const loc = async p => (await request.get(p, { maxRedirects: 0 })).headers().location;
+    expect(await loc('/')).toBe('/today');
+    expect(await loc('/focus?mail=ma-1&folder=INBOX')).toBe('/today?mail=ma-1&folder=INBOX');
+    expect(await loc('/dashboard')).toBe('/today');
+    expect(await loc('/inbox?board=jobs')).toBe('/today?inbox&board=jobs');
   });
 
 });

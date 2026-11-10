@@ -22,7 +22,7 @@ module.exports = async function globalSetup() {
   await page.locator('#loginBackdrop').waitFor({ state: 'visible' });
   await page.fill('#loginPassword', PASSWORD);
   await page.click('#loginSubmitBtn');
-  await page.locator('#overview').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.locator('#today').waitFor({ state: 'visible', timeout: 10_000 });
 
   // Persist cookies so test files can skip the login flow
   await context.storageState({ path: AUTH_STATE });

@@ -8,6 +8,10 @@
  * @param {string}   cfg.apiBase        - e.g. "/api/myboard"
  * @param {string}   [cfg.boardName]    - for document.title updates
  * @param {boolean}  [cfg.webdavEnabled] - initial WebDAV enabled state
+ * @param {boolean}  [cfg.headless]     - no board page around the module (host app's Today page):
+ *                                        no sidebar restore, no #note: hash / document.title updates
+ * @param {function} [cfg.onClose]      - called after the note modal closed
+ * @param {function} [cfg.goToBoard]    - (pageId) => void; shows #noteModalGoBoardBtn in the note modal
  *
  * @param {object} cfg.hooks
  *   scheduleSave()                     - debounce-save the board state
@@ -81,12 +85,19 @@ function initNotes(cfg) {
   }
 
   // ---- API URLs ----
-  const _base         = cfg.apiBase || null;
-  const NOTES_API        = _base ? `${_base}/notes`             : null;
-  const NOTES_ATTACH_API = _base ? `${_base}/notes/attachments` : null;
-  const NOTES_PAGES_API  = _base ? `${_base}/notes/pages`       : null;
-  const NOTES_FOLD_API   = _base ? `${_base}/notes/folders`     : null;
-  const NOTES_CHECK_API  = _base ? `${_base}/notes/check-consistency` : null;
+  // `let`: setBoard() switches them when the host edits notes of another board
+  let _base, NOTES_API, NOTES_ATTACH_API, NOTES_PAGES_API, NOTES_FOLD_API, NOTES_CHECK_API;
+  function _setApiBase(base) {
+    _base            = base || null;
+    NOTES_API        = _base ? `${_base}/notes`             : null;
+    NOTES_ATTACH_API = _base ? `${_base}/notes/attachments` : null;
+    NOTES_PAGES_API  = _base ? `${_base}/notes/pages`       : null;
+    NOTES_FOLD_API   = _base ? `${_base}/notes/folders`     : null;
+    NOTES_CHECK_API  = _base ? `${_base}/notes/check-consistency` : null;
+  }
+  _setApiBase(cfg.apiBase);
+  let _boardName = cfg.boardName || null;
+  const _headless = !!cfg.headless;
 
   function _webdavActive() { return !!(_webdavEnabled && NOTES_PAGES_API); }
 
@@ -188,7 +199,7 @@ function initNotes(cfg) {
     baseNotesState = JSON.parse(JSON.stringify(notesState));
     _updateWebdavUi();
     renderNotesTree();
-    restoreNotesSidebar();
+    if (!_headless) restoreNotesSidebar();
     _render();
   }
 
@@ -289,40 +300,61 @@ function initNotes(cfg) {
   function scheduleSaveNotes() {
     if (_notesSaving) { _notesSavePending = true; return; }
     clearTimeout(notesSaveTimer);
-    notesSaveTimer = setTimeout(async () => {
-      notesSaveTimer = null;
-      if (!NOTES_API) return;
-      _notesSaving = true;
-      try {
-        let r;
-        const headers = { 'Content-Type': 'application/json' };
-        if (notesEtag) headers['If-Match'] = notesEtag;
-        if (baseNotesState) {
-          const patch = buildNotesPatch(baseNotesState, notesState);
-          if (patch !== null) {
-            if (!Object.keys(patch).length) return;
-            r = await fetch(NOTES_API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
-          } else {
-            r = await fetch(NOTES_API, { method: 'PUT', headers, body: JSON.stringify(notesState) });
-          }
+    notesSaveTimer = setTimeout(_runNotesSave, 600);
+  }
+
+  async function _runNotesSave() {
+    notesSaveTimer = null;
+    if (!NOTES_API) return;
+    _notesSaving = true;
+    try {
+      let r;
+      const headers = { 'Content-Type': 'application/json' };
+      if (notesEtag) headers['If-Match'] = notesEtag;
+      if (baseNotesState) {
+        const patch = buildNotesPatch(baseNotesState, notesState);
+        if (patch !== null) {
+          if (!Object.keys(patch).length) return;
+          r = await fetch(NOTES_API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
         } else {
           r = await fetch(NOTES_API, { method: 'PUT', headers, body: JSON.stringify(notesState) });
         }
-        if (r.status === 409) {
-          await loadNotes();
-          scheduleSaveNotes();
-          return;
-        }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const newEtag = r.headers.get('ETag');
-        if (newEtag) notesEtag = newEtag;
-        baseNotesState = JSON.parse(JSON.stringify(notesState));
-      } catch (e) { console.error('Notes save failed:', e.message); }
-      finally {
-        _notesSaving = false;
-        if (_notesSavePending) { _notesSavePending = false; scheduleSaveNotes(); }
+      } else {
+        r = await fetch(NOTES_API, { method: 'PUT', headers, body: JSON.stringify(notesState) });
       }
-    }, 600);
+      if (r.status === 409) {
+        await loadNotes();
+        scheduleSaveNotes();
+        return;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const newEtag = r.headers.get('ETag');
+      if (newEtag) notesEtag = newEtag;
+      baseNotesState = JSON.parse(JSON.stringify(notesState));
+    } catch (e) { console.error('Notes save failed:', e.message); }
+    finally {
+      _notesSaving = false;
+      if (_notesSavePending) { _notesSavePending = false; scheduleSaveNotes(); }
+    }
+  }
+
+  /** Run a pending notes save now and wait until no save is in flight. */
+  async function flushNotesSave() {
+    while (notesSaveTimer || _notesSaving) {
+      if (notesSaveTimer && !_notesSaving) { clearTimeout(notesSaveTimer); await _runNotesSave(); continue; }
+      await new Promise(r => setTimeout(r, 50));
+    }
+  }
+
+  /** Point the module at another board (host's Today page); call flushNotesSave() first. */
+  function setBoard({ apiBase, boardName, webdavEnabled } = {}) {
+    _setApiBase(apiBase);
+    _boardName     = boardName || null;
+    notesState     = { items: [], schemaVersion: 2 };
+    baseNotesState = null;
+    notesEtag      = null;
+    _pageLoadedAt.clear();
+    updateWebdavEnabled(webdavEnabled);
   }
 
   function _removeItem(id, items) {
@@ -1271,9 +1303,11 @@ function initNotes(cfg) {
       }
     }
 
-    if (cfg.boardName) document.title = `${cfg.boardName} - ${page.title} (note)`;
+    const goBtn = document.getElementById('noteModalGoBoardBtn');
+    if (goBtn) goBtn.style.display = cfg.goToBoard && !_pendingNewPage ? '' : 'none';
+    if (!_headless && _boardName) document.title = `${_boardName} - ${page.title} (note)`;
     document.getElementById('noteModal').style.display = 'flex';
-    if (!_pendingNewPage) history[push ? 'pushState' : 'replaceState'](null, '', '#note:' + pageId);
+    if (!_headless && !_pendingNewPage) history[push ? 'pushState' : 'replaceState'](null, '', '#note:' + pageId);
     const nt = document.getElementById('notePageTitle');
     autoResizeTitle(nt);
     if (focusTitle) requestAnimationFrame(() => { nt.focus(); nt.select(); });
@@ -1302,14 +1336,15 @@ function initNotes(cfg) {
   function closeNoteModal(skipHistory = false) {
     _exitNoteFullscreen();
     _stopNoteAutoSave();
-    if (cfg.boardName) document.title = `jc://${cfg.boardName}/`;
+    if (!_headless && _boardName) document.title = `jc://${_boardName}/`;
     const _wdInfoPop = document.getElementById('noteWdInfoPopover');
     if (_wdInfoPop) _wdInfoPop.style.display = 'none';
-    if (!skipHistory && location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
+    if (!_headless && !skipHistory && location.hash.startsWith('#note:')) history.replaceState(null, '', location.pathname + location.search);
     document.getElementById('noteModal').style.display = 'none';
     document.getElementById('noteCreateCardForm').style.display = 'none';
     noteModalPageId = null;
     _pendingNewPage = null;
+    if (cfg.onClose) cfg.onClose();
   }
 
   let _noteSubmitSaving = false;
@@ -1439,13 +1474,13 @@ function initNotes(cfg) {
            document.getElementById('notePageLink').value.trim()  !== noteModalOrig.link;
   }
 
+  /** Returns true when the modal was closed. */
   async function tryCloseNoteModal() {
     if (noteModalHasChanges()) {
-      if (await _showConfirm('Close without saving changes?', { okLabel: 'Close', danger: true }))
-        closeNoteModal();
-    } else {
-      closeNoteModal();
+      if (!await _showConfirm('Close without saving changes?', { okLabel: 'Close', danger: true })) return false;
     }
+    closeNoteModal();
+    return true;
   }
 
   // ---- Table of Contents ----
@@ -2183,7 +2218,7 @@ function initNotes(cfg) {
     const page = findNotePage(pageId, notesState.items);
     if (!page) return;
 
-    const board   = cfg.boardName || 'kanban';
+    const board   = _boardName || 'kanban';
     const path    = getNotePath(pageId, notesState.items);
     const context = path && path.length > 1
       ? path.slice(0, -1).map(p => p.title).join(' \u203a ')
@@ -2322,6 +2357,13 @@ function initNotes(cfg) {
     });
 
     document.getElementById('noteFullscreenBtn')?.addEventListener('click', () => toggleNoteFullscreen());
+    document.getElementById('noteModalGoBoardBtn')?.addEventListener('click', async e => {
+      e.preventDefault();
+      const id = noteModalPageId;
+      if (!cfg.goToBoard || !id || !await tryCloseNoteModal()) return;
+      await flushNotesSave();
+      cfg.goToBoard(id);
+    });
     document.getElementById('noteModalPrintBtn')?.addEventListener('click', () => printNote(noteModalPageId));
     document.getElementById('noteModalCancelBtn')?.addEventListener('click', () => tryCloseNoteModal());
     document.getElementById('noteModalSaveBtn')?.addEventListener('click', async () => { await submitNote(); closeNoteModal(); });
@@ -2498,5 +2540,8 @@ function initNotes(cfg) {
     findNotePage,
     findNoteItem,
     getNotesState: () => notesState,
+    setBoard,
+    flushNotesSave,
+    getBoardName:  () => _boardName,
   };
 }

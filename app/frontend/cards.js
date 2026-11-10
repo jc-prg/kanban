@@ -243,7 +243,8 @@ document.addEventListener('DOMContentLoaded', () => {
 })();
 
 // ---- Card attachment constants & helpers ----
-const CARD_ATTACH_API = API_BASE ? `${API_BASE}/cards/attachments` : null;
+// Reassigned by setBoardContext (state.js) when Today edits a card in place
+let CARD_ATTACH_API = API_BASE ? `${API_BASE}/cards/attachments` : null;
 
 // Temp card used in inbox mode for pre-upload before the card is saved
 let _inboxTempCardId = null;
@@ -315,7 +316,7 @@ async function _openInNewTab(url) {
 
 // ---- Fallback attachment viewer / download ----
 // initNotes() (notes-webdav/frontend/notes.js) replaces both via window.* on board pages;
-// pages without the notes module (e.g. /focus: dashboard mail detail, mail view) use these.
+// pages without the notes module (Today: detail panel, mail view) use these.
 
 async function _downloadAttachment(url, name) {
   try {
@@ -651,7 +652,7 @@ function renderCardCalEvent(ref) {
   field.style.display = ref ? '' : 'none';
   if (!ref) return;
   text.textContent = 'Loading\u2026';
-  link.href = appUrl('/focus?cal=week');
+  link.href = appUrl('/today?cal=week');
   link.classList.remove('card-cal-event--missing');
   fetch(`/api/dashboard/calendar/${encodeURIComponent(ref.accountId)}/event/${encodeURIComponent(ref.uid)}`)
     .then(r => r.ok ? r.json() : null)
@@ -665,14 +666,14 @@ function renderCardCalEvent(ref) {
       }
       const day = (ev.allDay ? (ev.start || '').slice(0, 10) : _ymdLocal(new Date(ev.start))) || '';
       text.textContent = `${ev.title || '(no title)'}${day ? ' \u2014 ' + fmtDate(day) : ''}`;
-      if (day) link.href = appUrl(`/focus?cal=week&date=${day}`);
+      if (day) link.href = appUrl(`/today?cal=week&date=${day}`);
     });
 }
 
-/** Focus URL that opens the mail view on a message identified by its Message-ID. */
+/** Today URL that opens the mail view on a message identified by its Message-ID. */
 function mailRefUrl(ref) {
   const qs = new URLSearchParams({ mail: ref.accountId, folder: ref.folder || 'INBOX', mid: ref.messageId });
-  return appUrl(`/focus?${qs}`);
+  return appUrl(`/today?${qs}`);
 }
 
 /** Show the mail a card was created from (card.mailRef) below the link field. */
@@ -785,7 +786,7 @@ function openModal(colId) {
   const autoSaveLbl = document.getElementById('cardAutoSaveLabel');
   if (autoSaveLbl) autoSaveLbl.style.display = 'none';
   _stopCardAutoSave();
-  if (BOARD_NAME) document.title = `${BOARD_NAME} - New Card (card)`;
+  if (ROUTE === 'board') document.title = `${BOARD_NAME} - New Card (card)`;
   document.getElementById('modal').style.display = 'flex';
   const ct = document.getElementById('cardText');
   autoResizeTitle(ct);
@@ -832,9 +833,11 @@ function openEditModal(colId, card) {
     autoSaveEl.checked = state.settings?.autoSaveDialogs ?? false;
     if (autoSaveEl.checked) _startCardAutoSave(); else _stopCardAutoSave();
   }
-  if (BOARD_NAME) document.title = `${BOARD_NAME} - ${card.text} (card)`;
+  if (ROUTE === 'board') {
+    document.title = `${BOARD_NAME} - ${card.text} (card)`;
+    history.replaceState(null, '', '#card:' + card.id);
+  }
   document.getElementById('modal').style.display = 'flex';
-  history.replaceState(null, '', '#card:' + card.id);
   const ct = document.getElementById('cardText');
   autoResizeTitle(ct);
 }
@@ -853,12 +856,16 @@ function closeModal() {
   _inboxTempBoard  = null;
   _exitCardFullscreen();
   _stopCardAutoSave();
-  if (BOARD_NAME) document.title = `jc://${BOARD_NAME}/`;
-  if (location.hash.startsWith('#card:')) history.replaceState(null, '', location.pathname + location.search);
+  if (ROUTE === 'board') {
+    document.title = `jc://${BOARD_NAME}/`;
+    if (location.hash.startsWith('#card:')) history.replaceState(null, '', location.pathname + location.search);
+  }
+  const wasInPlaceEdit = ROUTE === 'today' && modalMode === 'edit';
   document.getElementById('modal').style.display = 'none';
   document.getElementById('modalBoardField').style.display    = 'none';
   document.getElementById('modalStatusMsg').style.display     = 'none';
   document.getElementById('modalGoBoardBtn').style.display    = 'none';
+  document.getElementById('modalGoBoardBtn').onclick          = null;
   document.getElementById('modalDeleteBtn').style.display     = 'none';
   document.getElementById('modalAddCloseBtn').style.display   = 'none';
   document.getElementById('modalSubmitBtn').classList.add('btn-accent');
@@ -866,6 +873,7 @@ function closeModal() {
   const noteToggle = document.getElementById('cardToggleNotePages');
   if (noteToggle) noteToggle.style.display = 'none';
   resetCardSections();
+  if (wasInPlaceEdit && typeof _todayAfterCardEdit === 'function') _todayAfterCardEdit();
 }
 
 function submitCard() {

@@ -9,12 +9,16 @@ const APP_PATH   = (() => {
   return BASE_PATH && (p === BASE_PATH || p.startsWith(BASE_PATH + '/')) ? (p.slice(BASE_PATH.length) || '/') : p;
 })();
 
-// Board URLs are /board/<name>; special views (/focus, /inbox) are top-level.
+// Board URLs are /board/<name>; special views (/today, /inbox) are top-level.
 const _pathSegs  = APP_PATH.split('/').filter(Boolean);
 const _isBoard   = _pathSegs[0] === 'board' && _pathSegs.length > 1;
-const BOARD_NAME = _isBoard ? _pathSegs[1] : (_pathSegs[0] || null);
-const API_BASE   = _isBoard ? `/api/${BOARD_NAME}` : null;
-const API        = _isBoard ? `${API_BASE}/board`  : null;
+// Page type: 'board' | 'today' (the server redirects /, /focus and /inbox to /today).
+const ROUTE      = _isBoard ? 'board' : 'today';
+// Board context. Fixed on board pages; on Today it is switched to the board of the
+// card / note being edited in place (setBoardContext) — nothing is rendered then.
+let BOARD_NAME   = _isBoard ? _pathSegs[1] : null;
+let API_BASE     = _isBoard ? `/api/${BOARD_NAME}` : null;
+let API          = _isBoard ? `${API_BASE}/board`  : null;
 
 // Intercept fetch: handle 401 session expiry and detect connection loss.
 (function () {
@@ -189,9 +193,9 @@ async function load() {
   if (!API) return;
   const r = await fetch(API);
   if (r.status === 404) {
-    document.getElementById('overviewHint').textContent = `Board "${BOARD_NAME}" does not exist.`;
-    document.getElementById('overviewHint').style.display = '';
-    initOverview();
+    if (ROUTE !== 'board') throw new Error(`Board "${BOARD_NAME}" does not exist.`);
+    await showMessage(`Board "${BOARD_NAME}" does not exist.`);
+    window.location.href = appUrl('/today');
     return;
   }
   if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
@@ -264,44 +268,67 @@ function schedulesSave() {
   if (_boardSaving) { _boardSavePending = true; return; }
   clearTimeout(saveTimer);
   showSaving();
-  saveTimer = setTimeout(async () => {
-    saveTimer = null;
-    _boardSaving = true;
-    try {
-      let r;
-      const headers = { 'Content-Type': 'application/json' };
-      if (boardEtag) headers['If-Match'] = boardEtag;
-      let sentState;
-      if (baseState) {
-        const patch = buildPatch(baseState, state);
-        if (!Object.keys(patch).length) { showSaved(); return; }
-        sentState = JSON.parse(JSON.stringify(state));
-        r = await fetch(API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
-      } else {
-        sentState = JSON.parse(JSON.stringify(state));
-        r = await fetch(API, { method: 'PUT', headers, body: JSON.stringify(state) });
-      }
-      if (r.status === 409) {
-        const localSnapshot = JSON.parse(JSON.stringify(state));
-        const baseSnapshot  = JSON.parse(JSON.stringify(baseState));
-        await load();
-        state = mergeStates(baseSnapshot, state, localSnapshot);
-        render();
-        schedulesSave();
-        return;
-      }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const newEtag = r.headers.get('ETag');
-      if (newEtag) boardEtag = newEtag;
-      baseState = sentState;
-      showSaved();
-    } catch (e) {
-      showSaveError();
-    } finally {
-      _boardSaving = false;
-      if (_boardSavePending) { _boardSavePending = false; schedulesSave(); }
+  saveTimer = setTimeout(_runBoardSave, 600);
+}
+
+async function _runBoardSave() {
+  saveTimer = null;
+  _boardSaving = true;
+  try {
+    let r;
+    const headers = { 'Content-Type': 'application/json' };
+    if (boardEtag) headers['If-Match'] = boardEtag;
+    let sentState;
+    if (baseState) {
+      const patch = buildPatch(baseState, state);
+      if (!Object.keys(patch).length) { showSaved(); return; }
+      sentState = JSON.parse(JSON.stringify(state));
+      r = await fetch(API, { method: 'PATCH', headers, body: JSON.stringify(patch) });
+    } else {
+      sentState = JSON.parse(JSON.stringify(state));
+      r = await fetch(API, { method: 'PUT', headers, body: JSON.stringify(state) });
     }
-  }, 600);
+    if (r.status === 409) {
+      const localSnapshot = JSON.parse(JSON.stringify(state));
+      const baseSnapshot  = JSON.parse(JSON.stringify(baseState));
+      await load();
+      state = mergeStates(baseSnapshot, state, localSnapshot);
+      render();
+      schedulesSave();
+      return;
+    }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const newEtag = r.headers.get('ETag');
+    if (newEtag) boardEtag = newEtag;
+    baseState = sentState;
+    showSaved();
+  } catch (e) {
+    showSaveError();
+  } finally {
+    _boardSaving = false;
+    if (_boardSavePending) { _boardSavePending = false; schedulesSave(); }
+  }
+}
+
+/** Run a pending board save now and wait until no save is in flight (Today: before switching boards / leaving). */
+async function flushBoardSave() {
+  if (saveTimer) { clearTimeout(saveTimer); await _runBoardSave(); }
+  while (_boardSaving || saveTimer) {
+    if (saveTimer && !_boardSaving) { clearTimeout(saveTimer); await _runBoardSave(); continue; }
+    await new Promise(r => setTimeout(r, 50));
+  }
+}
+
+/** Switch the board context (Today in-place editing): API globals, attachment API, empty state. */
+function setBoardContext(name) {
+  BOARD_NAME = name || null;
+  API_BASE   = name ? `/api/${encodeURIComponent(name)}` : null;
+  API        = name ? `${API_BASE}/board` : null;
+  if (typeof CARD_ATTACH_API !== 'undefined') CARD_ATTACH_API = API_BASE ? `${API_BASE}/cards/attachments` : null;
+  state      = { columns: [] };
+  baseState  = null;
+  boardEtag  = null;
+  colCollapsed.clear();
 }
 
 function showSaving() {

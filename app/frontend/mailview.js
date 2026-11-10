@@ -1,4 +1,4 @@
-// ---- Mail view (folders / message list / reader / compose) — opened from the Focus mail panel ----
+// ---- Mail view (folders / message list / reader / compose) — opened from Today ----
 // Shares the overlay slot with the calendar view (calview.js): opening one replaces the other.
 
 const _MV_COLLAPSED_KEY = 'mail-view-collapsed';
@@ -32,7 +32,6 @@ let _mvListSeq     = 0;           // discards responses of superseded list loads
 let _mvPlain       = false;       // open message shown as plain text (HTML is the default)
 let _mvMsgSeq      = 0;
 let _mvCompose     = null;        // { files: [File], reply: { uid, folder } | null, dirty }
-let _mvDashStale   = false;       // something changed → reload the dashboard mail panel on close
 let _mvWidths      = _mvLoadWidths(); // requested column widths (px); applied clamped to the body width
 
 // ---- Pure helpers (unit-tested) ----
@@ -395,7 +394,6 @@ function _mvHide() {
   document.getElementById('dashboardMailBtn')?.classList.remove('open');
   _mvCompose = null;
   _mvClosePicker(null);
-  if (_mvDashStale) { _mvDashStale = false; if (APP_PATH === '/focus') _reloadMailPanel(); }
 }
 
 /** Open the view if the URL asks for it (called once the dashboard is initialised). */
@@ -645,7 +643,6 @@ async function _mvSetUnread(ids, unread) {
   _mvAdjustUnseen(unread ? changed.length : -changed.length);
   _mvRenderList();
   if (_mvMsg && ids.includes(_mvMsg.id)) _mvRenderReaderActions();
-  _mvDashStale = true;
   try {
     await _mvJson(_mvMessagesUrl(changed.map(m => m.id), ''), {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seen: !unread }),
@@ -688,7 +685,6 @@ async function _mvDeleteMessages(ids, opts = {}) {
   if (ids.length > 1 && f && _mvIsEmptyable(f, _mvAccounts.find(a => a.accountId === accountId)?.trashFolder)
       && !(await showConfirm(`Delete ${ids.length} messages from "${_mvFolderLabel(f)}"? This cannot be undone.`, { okLabel: 'Delete', danger: true }))) return;
   _mvDropFromList(ids, opts);
-  _mvDashStale = true;
   const n = ids.length === 1 ? 'Message' : `${ids.length} messages`;
   try {
     const res = await _mvJson(_mvMessagesUrl(ids, '', folder), { method: 'DELETE' });
@@ -703,7 +699,6 @@ async function _mvDeleteMessages(ids, opts = {}) {
 async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _mvFolder, opts = {}) {
   if (!ids.length || target === folder) return;
   if (accountId === _mvAccountId && folder === _mvFolder) _mvDropFromList(ids, opts);
-  _mvDashStale = true;
   try {
     await _mvJson(_mvApi(accountId, `/message/${ids.join(',')}/move?${_mvFolderQs(folder)}`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: target }),
@@ -1014,7 +1009,6 @@ async function _mvMarkFolderRead(accountId, path) {
     if (_mvMsg) _mvRenderReaderActions();
   }
   _mvRenderTree();
-  _mvDashStale = true;
   try {
     await _mvJson(_mvApi(accountId, '/folders/mark-read'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
@@ -1042,7 +1036,6 @@ async function _mvEmptyFolder(accountId, path) {
     return;
   }
   _mvFlash(`Deleted ${res.deleted} message${res.deleted === 1 ? '' : 's'}`);
-  _mvDashStale = true;
   if (accountId === _mvAccountId && path === _mvFolder) {
     _mvSelId = null;
     _mvMsg   = null;

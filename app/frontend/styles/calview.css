@@ -253,6 +253,20 @@ body.calview-open header { z-index: 96; }
 .cv-timed.cv-short { flex-direction: row; gap: 4px; align-items: baseline; white-space: nowrap; }
 .cv-timed.cv-past { opacity: 0.6; }
 .cv-timed .cv-ev-title { font-weight: 500; }
+/* Title and location / meeting link: sans-serif, one line each */
+.cv-timed :is(.cv-ev-title, .cv-ev-loc) {
+  font-family: system-ui, sans-serif;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; flex-shrink: 0;
+}
+.cv-ev-loc { color: var(--text-muted); font-size: 0.66rem; }
+/* Meeting link: account colour pulled towards the text colour → readable on the tinted event
+   background in light and dark mode, still recognisably the calendar's colour */
+.cv-ev-loc .today-ev-meet {
+  font-size: inherit; font-weight: 600;
+  color: color-mix(in srgb, var(--cv-c) 45%, var(--text));
+}
+.cv-timed.cv-short .cv-ev-loc { display: none; }   /* one line only — the title wins */
 .cv-resize {
   position: absolute;
   left: 0;

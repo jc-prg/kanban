@@ -1,4 +1,4 @@
-// ---- Calendar view (week / work week / month) — opened from the Focus calendar panel ----
+// ---- Calendar view (week / work week / month) — opened from Today ----
 // Depends on dashboard.js globals: _calAccountsMeta, _defaultTimezone, openCalEventModal,
 // _openEventDetail, _showCalEventContextMenu, _refreshCalendarAccount.
 
@@ -693,6 +693,7 @@ function _cvWeekHtml(range) {
         style="top:${top}px;height:${height}px;left:calc(${sg.col} * 100% / ${sg.cols});width:calc(100% / ${sg.cols});${_cvColorCss(ev)}">
         <span class="cv-ev-time">${escHtml(sg.contTop ? '↑ ' + _cvTimeLabel(ev._s) : _cvTimeLabel(ev._s))}</span>
         <span class="cv-ev-title">${escHtml(ev.title)}</span>
+        ${_cvEvLocHtml(ev)}
         ${editable && !sg.contBottom ? '<span class="cv-resize" data-cv-resize="1"></span>' : ''}
       </div>`;
     }).join('');
@@ -881,8 +882,17 @@ function _cvDateAt(clientX, clientY) {
   return el ? _cvParseYmd(el.dataset.date) : null;
 }
 
+/** Second line of a timed event: the online-meeting link (today.js helpers), else the location. */
+function _cvEvLocHtml(ev) {
+  const meet = _todayMeetingLink(ev);
+  if (meet) return `<span class="cv-ev-loc">${_todayMeetingHtml(meet)}</span>`;
+  const loc = _todayDecodeEntities(ev.location).trim();
+  return loc ? `<span class="cv-ev-loc" title="${escHtml(loc)}">${escHtml(loc)}</span>` : '';
+}
+
 function _cvPointerDown(e) {
   if (e.button !== 0 || _cvDrag) return;
+  if (e.target.closest('.today-ev-meet')) return;   // meeting link opens itself in a new tab
   // Phones, month: taps open the day overview instead of single entries (see _cvMonthTap)
   if (_cvMode === 'month' && _cvIsPhone() && e.target.closest('.cv-month-grid')) return;
   const evEl = e.target.closest('.cv-ev');

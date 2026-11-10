@@ -420,7 +420,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgLink(16, 16),         name: 'Link (chain)',     usage: 'URL link on a note page' },
   { type: 'svg', svg: _svgNoteDoc(12, 15),      name: 'Note / Document',  usage: 'Toggle notes sidebar; card linked to note' },
   { type: 'svg', svg: _svgLinkedCards(16, 16),  name: 'Linked cards',     usage: 'Cards linked from a note page' },
-  { type: 'svg', svg: _svgAllBoards(16, 16),    name: 'All boards',       usage: 'Navigate to board overview' },
+  { type: 'svg', svg: _svgAllBoards(16, 16),    name: 'All boards',       usage: 'Board switcher' },
   { type: 'svg', svg: _svgDate(16, 16),         name: 'Date',             usage: 'Card start / end dates' },
   { type: 'svg', svg: _svgPriority(14, 16),     name: 'Priority',         usage: 'Card priority level (1–5)' },
   { type: 'svg', svg: _svgColorPalette(16, 16), name: 'Color palette',    usage: 'Color selection in card modal' },

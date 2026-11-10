@@ -260,7 +260,7 @@ document.getElementById('ctxEdit').addEventListener('click', () => {
   const board = _dashCtxBoard, colId = ctxColId, card = ctxCard;
   hideContextMenu();
   if (board && card) {
-    window.location.href = `${BASE_PATH}/board/${encodeURIComponent(board)}#card:${card.id}`;
+    _todayEditCard(board, card.id);   // Today: dialog in place, no board page
   } else if (colId && card) {
     openEditModal(colId, card);
   }
@@ -929,7 +929,7 @@ document.addEventListener('keydown', e => {
   });
 
   document.getElementById('menuFindCard').addEventListener('click', () => { closeMenu(); openSearch(); });
-  document.getElementById('menuAnalytics').addEventListener('click', () => { closeMenu(); if (API) openAnalytics(); else openAchievementHistory(); });
+  document.getElementById('menuAnalytics').addEventListener('click', () => { closeMenu(); if (ROUTE === 'board') openAnalytics(); else openAchievementHistory(); });
   document.getElementById('menuLogout').addEventListener('click', async () => {
     closeMenu();
     await fetch('/api/auth/logout', { method: 'POST' });
