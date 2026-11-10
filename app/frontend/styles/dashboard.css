@@ -483,16 +483,23 @@
   cursor: help;
 }
 .mail-privacy-shield:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.mail-privacy-opts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-left: auto;
+}
 .mail-privacy-trust {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
   color: var(--text);
   cursor: pointer;
   user-select: none;
 }
 .mail-privacy-trust input { accent-color: var(--accent); margin: 0; }
+.mail-privacy-trust:has(input:disabled) { cursor: default; color: var(--text-muted); }
 .mail-privacy-toggle {
   background: none;
   border: none;

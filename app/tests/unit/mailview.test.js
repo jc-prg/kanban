@@ -25,6 +25,7 @@ beforeAll(() => {
     escHtml:   s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     // dashboard.js globals (privacy filter): record the calls, strip remote images when not trusted
     _mailSenderTrusted: msg => msg.from === 'trusted@ex.com',
+    _mailImagesAllowed: msg => msg.from === 'trusted@ex.com' || !!msg._jcLoadImages,
     _mailPrivacyHtml:   (html, { loadImages }) => ({ html: loadImages ? html : html.replace(/<img[^>]*>/gi, '') }),
     Intl, Date, Math, JSON, Object, Array, String, Number, Set, Map, URL, URLSearchParams,
     setTimeout: noop, clearTimeout: noop,
@@ -117,6 +118,8 @@ test('MV-14 _mvOriginalHtml — quoting goes through the privacy filter (remote 
   const html = '<p>hi</p><img src="https://ex.com/a.png">'
   expect(ctx._mvQuoteHtml({ from: 'x@ex.com', bodyHtml: html })).not.toContain('<img')
   expect(ctx._mvQuoteHtml({ from: 'trusted@ex.com', bodyHtml: html })).toContain('<img src="https://ex.com/a.png">')
+  // "Load images" ticked for this mail only → its quote keeps the images too
+  expect(ctx._mvQuoteHtml({ from: 'x@ex.com', bodyHtml: html, _jcLoadImages: true })).toContain('<img src="https://ex.com/a.png">')
 })
 
 test('MV-15 _mvParseSenders / _mvReplySender — comma list, first is default, reply uses the address written to', () => {

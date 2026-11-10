@@ -1526,6 +1526,14 @@ function _mailSenderTrusted(msg) {
   return !!addr && !!_mailTrusted?.has(addr);
 }
 
+/**
+ * Remote images of `msg` may load: trusted sender, or "Load images" ticked for this mail only
+ * (`_jcLoadImages` lives on the message object — reopening the mail blocks them again).
+ */
+function _mailImagesAllowed(msg) {
+  return !!msg?._jcLoadImages || _mailSenderTrusted(msg);
+}
+
 const _MAIL_REMOTE_RE       = /^\s*(https?:)?\/\//i;
 // Hosts that only serve open/click tracking (image CDNs of the same providers are not listed)
 const _MAIL_TRACKER_HOST_RE = /(^|\.)(list-manage\.com|sendgrid\.net|mandrillapp\.com|mailgun\.org|mailjet\.com|mjt\.lu|sparkpostmail\.com|hubspotemail\.net|hs-analytics\.net|exct\.net|exacttarget\.com|doubleclick\.net|google-analytics\.com|mailtrack\.io|mixmax\.com|yesware\.com|getnotify\.com|bananatag\.com|returnpath\.net|emltrk\.com|litmus\.com|cmail\d+\.com|createsend\d*\.com|mlsend\.com|klclick\d*\.com|rs6\.net|ct\.sendgrid\.net)$|^(track|tracking|trk|pixel|beacon|open|opens|email-open|click|clicks|links?)\./i;
@@ -1655,9 +1663,10 @@ function _renderMailHtml(wrap, msg) {
   wrap.replaceChildren();
   const sender  = _mailSenderAddr(msg);
   const trusted = _mailSenderTrusted(msg);
-  const res     = _mailPrivacyHtml(msg.bodyHtml, { loadImages: trusted });
+  const load    = trusted || !!msg._jcLoadImages;
+  const res     = _mailPrivacyHtml(msg.bodyHtml, { loadImages: load });
 
-  // Only mails with remote images get the images part (count / "Images loaded" + trust toggle), trusted or not
+  // Only mails with remote images get the images part (count / "Images loaded" + checkboxes), trusted or not
   const hasImages = res.remote > 0;
   if (hasImages || res.trackers.length || res.blockedUrls.length) {
     const bar = document.createElement('div');
@@ -1681,11 +1690,11 @@ function _renderMailHtml(wrap, msg) {
       long.textContent = ` remote image${res.blocked > 1 ? 's' : ''}`;
       text.append(String(res.blocked), long, ' blocked');
       text.setAttribute('aria-label', `${res.blocked}${long.textContent} blocked`);
-    } else if (trusted && hasImages) {
-      // "Images loaded (trusted sender)"; phones → "Images loaded"
+    } else if (load && hasImages) {
+      // "Images loaded (trusted sender)" / "(this time)"; phones → "Images loaded"
       const long = document.createElement('span');
       long.className = 'mail-privacy-long';
-      long.textContent = ' (trusted sender)';
+      long.textContent = trusted ? ' (trusted sender)' : ' (this time)';
       text.append('Images loaded', long);
     } else {
       text.textContent = res.trackers.length ? 'Tracking blocked' : 'Remote styles blocked';
@@ -1711,26 +1720,44 @@ function _renderMailHtml(wrap, msg) {
       });
     }
     if (hasImages) {
-      const label = document.createElement('label');
-      label.className = 'mail-privacy-trust';
-      label.title = sender ? `Always load remote images from ${sender}` : 'No sender address';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked  = trusted;
-      cb.disabled = !sender;
-      cb.addEventListener('change', async () => {
-        cb.disabled = true;
-        try {
-          await _mailSetTrusted(sender, cb.checked);
+      // "Load images" (this mail only); once ticked, "Trust sender" (always, saved) appears next to it
+      const opts = document.createElement('span');
+      opts.className = 'mail-privacy-opts';
+      const checkbox = (cls, label, title, checked, onChange) => {
+        const el = document.createElement('label');
+        el.className = `mail-privacy-trust ${cls}`;
+        el.title = title;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = checked;
+        cb.addEventListener('change', () => onChange(cb));
+        el.append(cb, document.createTextNode(` ${label}`));
+        opts.appendChild(el);
+        return cb;
+      };
+      const loadCb = checkbox('mail-privacy-load', 'Load images',
+        trusted ? 'Always loaded for trusted senders' : 'Load the remote images of this mail once', load, cb => {
+          msg._jcLoadImages = cb.checked;
           _renderMailHtml(wrap, msg);
-        } catch {
-          cb.checked  = !cb.checked;
-          cb.disabled = false;
-          text.textContent = 'Could not save the trusted sender';
-        }
-      });
-      label.append(cb, document.createTextNode(' Trust sender and load images'));
-      bar.appendChild(label);
+        });
+      loadCb.disabled = trusted;   // a trusted sender's images always load — untrust first
+      if (load) {
+        const trustCb = checkbox('mail-privacy-trust-sender', 'Trust sender',
+          sender ? `Always load remote images from ${sender}` : 'No sender address', trusted, async cb => {
+            cb.disabled = true;
+            try {
+              await _mailSetTrusted(sender, cb.checked);
+              msg._jcLoadImages = true;   // untrusting keeps this mail's images loaded
+              _renderMailHtml(wrap, msg);
+            } catch {
+              cb.checked  = !cb.checked;
+              cb.disabled = false;
+              text.textContent = 'Could not save the trusted sender';
+            }
+          });
+        trustCb.disabled = !sender;
+      }
+      bar.appendChild(opts);
     }
     if (urlList) bar.appendChild(urlList);
     wrap.appendChild(bar);
@@ -1750,7 +1777,7 @@ function _renderMailHtml(wrap, msg) {
     + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
   const emailStyleTag = res.styles ? `<style>${res.styles.replace(/<\/style/gi, '<\\/style')}</style>` : '';
   const bodyAttr = res.bodyClass ? ` class="${res.bodyClass.replace(/"/g, '&quot;')}"` : '';
-  iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${_mailCsp(trusted)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${res.html}</body></html>`;
+  iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${_mailCsp(load)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${res.html}</body></html>`;
   const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
   iframe.addEventListener('load', resize);
 }

@@ -25,7 +25,7 @@ beforeAll(() => {
   expect(start).toBeGreaterThan(-1)
   expect(end).toBeGreaterThan(start)
   P = new Function('DOMPurify', 'SVGICONS', 'fetch', 'escHtml', `${src.slice(start, end)}
-    return { _mailPrivacyHtml, _mailSenderAddr, _mailCsp, _mailTrackerTitle, _mailSenderTrusted, _mailTrustedBadgeHtml,
+    return { _mailPrivacyHtml, _mailSenderAddr, _mailCsp, _mailTrackerTitle, _mailSenderTrusted, _mailTrustedBadgeHtml, _mailImagesAllowed,
              setTrusted: list => { _mailTrusted = new Set(list) } };`)(DOMPurify, { shield: () => '', shieldCheck: () => '<svg/>' }, () => Promise.reject(new Error('no fetch')),
     s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'))
 })
@@ -127,6 +127,10 @@ test('MP-9 _mailSenderAddr / _mailSenderTrusted — bare lower-case address of F
   P.setTrusted(['news@shop.com'])
   expect(P._mailSenderTrusted({ from: 'Shop <NEWS@shop.com>' })).toBe(true)
   expect(P._mailSenderTrusted({ from: 'other@shop.com' })).toBe(false)
+  // Images: trusted sender, or "Load images" ticked for this one mail
+  expect(P._mailImagesAllowed({ from: 'news@shop.com' })).toBe(true)
+  expect(P._mailImagesAllowed({ from: 'other@shop.com' })).toBe(false)
+  expect(P._mailImagesAllowed({ from: 'other@shop.com', _jcLoadImages: true })).toBe(true)
 })
 
 test('MP-10 _mailTrackerTitle — grouped list with counts', () => {

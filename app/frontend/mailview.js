@@ -180,7 +180,7 @@ function _mvReplyFields(msg, all, own) {
  */
 function _mvOriginalHtml(msg) {
   return msg.bodyHtml
-    ? DOMPurify.sanitize(_mailPrivacyHtml(msg.bodyHtml, { loadImages: _mailSenderTrusted(msg) }).html,
+    ? DOMPurify.sanitize(_mailPrivacyHtml(msg.bodyHtml, { loadImages: _mailImagesAllowed(msg) }).html,
         { FORBID_TAGS: ['style', 'link', 'meta', 'title'], FORBID_ATTR: ['class', 'id', 'data-jc-blocked'] })
     : escHtml(msg.body || '').replace(/\r?\n/g, '<br>');
 }

@@ -1162,7 +1162,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('mailTrustedCount').textContent = error ? '' : `(${senders.length})`;
     if (error) { list.innerHTML = `<p class="settings-item-desc mail-trusted-error">${escHtml(error)}</p>`; return; }
     if (!senders.length) {
-      list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No trusted senders yet — use "Trust sender and load images" on a mail or add an address below.</p>';
+      list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No trusted senders yet — tick "Load images" and then "Trust sender" on a mail, or add an address below.</p>';
       return;
     }
     list.innerHTML = [...senders].sort().map(addr => `
