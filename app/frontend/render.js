@@ -521,3 +521,23 @@ function render() {
   board.scrollLeft = _boardScrollLeft;
   if (typeof restoreColScrolls === 'function') restoreColScrolls(_scrolls);
 }
+
+/**
+ * Column count badges of a board (overview, Focus boards panel, Today Boards tile): inbox / todo /
+ * doing aggregates and tracked columns; the tooltip names the column(s) behind each count.
+ * `numbersOnly` (Today) drops the labels — the tooltip names the column.
+ */
+function boardBadgesHtml(columnBadges = [], { numbersOnly = false } = {}) {
+  const label = text => (numbersOnly ? '' : `${text} `);
+  const tip = b => {
+    const cols = b.type === 'tracked' ? [b.title] : (b.columns || []);
+    return cols.length ? ` title="${escHtml(cols.join(', '))}"` : '';
+  };
+  return columnBadges.filter(b => b.count > 0).map(b => {
+    if (b.type === 'inbox')      return `<span class="board-card-count board-card-count-inbox"${tip(b)}>${label('inbox')}${b.count}</span>`;
+    if (b.type === 'todo')       return `<span class="board-card-count board-card-count-todo"${tip(b)}>${label('todo')}${b.count}</span>`;
+    if (b.type === 'inprogress') return `<span class="board-card-count board-card-count-inprogress"${tip(b)}>${label('doing')}${b.count}</span>`;
+    const style = b.color ? `background:${b.color}22;color:${b.color}` : '';
+    return `<span class="board-card-count board-card-count-tracked" style="${style}"${tip(b)}>${label(escHtml(b.title))}${b.count}</span>`;
+  }).join('');
+}

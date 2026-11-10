@@ -40,23 +40,24 @@ router.get('/boards', async (req, res) => {
         const inboxRe = /^inbox/i, todoRe = /^todo/i, inProgressRe = /^in.?progress/i, doingRe = /^doing$/i;
         let inboxCount = 0, todoCount = 0, inProgressCount = 0;
         let inboxPos = Infinity, todoPos = Infinity, inProgressPos = Infinity;
+        const inboxCols = [], todoCols = [], inProgressCols = [];   // titles of the columns behind each aggregate (tooltips)
         const trackedEntries = [];
         data.columns.forEach((col, i) => {
           const cnt = trackedCards(col).length;
           if (trackedSet.has(col.title)) {
             trackedEntries.push({ pos: i, type: 'tracked', title: col.title, count: cnt, color: col.color || null });
           } else if (inboxRe.test(col.title)) {
-            inboxCount += cnt; if (i < inboxPos) inboxPos = i;
+            inboxCount += cnt; if (i < inboxPos) inboxPos = i; if (cnt) inboxCols.push(col.title);
           } else if (todoRe.test(col.title)) {
-            todoCount += cnt; if (i < todoPos) todoPos = i;
+            todoCount += cnt; if (i < todoPos) todoPos = i; if (cnt) todoCols.push(col.title);
           } else if (inProgressRe.test(col.title) || doingRe.test(col.title)) {
-            inProgressCount += cnt; if (i < inProgressPos) inProgressPos = i;
+            inProgressCount += cnt; if (i < inProgressPos) inProgressPos = i; if (cnt) inProgressCols.push(col.title);
           }
         });
         const columnBadges = [
-          ...(inboxCount      > 0 ? [{ pos: inboxPos,      type: 'inbox',      count: inboxCount }]      : []),
-          ...(todoCount       > 0 ? [{ pos: todoPos,       type: 'todo',       count: todoCount }]       : []),
-          ...(inProgressCount > 0 ? [{ pos: inProgressPos, type: 'inprogress', count: inProgressCount }] : []),
+          ...(inboxCount      > 0 ? [{ pos: inboxPos,      type: 'inbox',      count: inboxCount,      columns: inboxCols }]      : []),
+          ...(todoCount       > 0 ? [{ pos: todoPos,       type: 'todo',       count: todoCount,       columns: todoCols }]       : []),
+          ...(inProgressCount > 0 ? [{ pos: inProgressPos, type: 'inprogress', count: inProgressCount, columns: inProgressCols }] : []),
           ...trackedEntries,
         ].sort((a, b) => a.pos - b.pos).map(({ pos, ...rest }) => rest);
         const { count: attachCount, size: attachSize } = getBoardAttachStats(name);

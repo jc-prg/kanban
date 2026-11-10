@@ -839,13 +839,7 @@ async function loadDashboard() {
 
 function _boardItemHtml(b) {
   const { name, description, columnBadges = [] } = b;
-  const badges = columnBadges.filter(b => b.count > 0).map(b => {
-    if (b.type === 'inbox')      return `<span class="board-card-count board-card-count-inbox">inbox ${b.count}</span>`;
-    if (b.type === 'todo')       return `<span class="board-card-count board-card-count-todo">todo ${b.count}</span>`;
-    if (b.type === 'inprogress') return `<span class="board-card-count board-card-count-inprogress">doing ${b.count}</span>`;
-    const style = b.color ? `background:${b.color}22;color:${b.color}` : '';
-    return `<span class="board-card-count board-card-count-tracked" style="${style}">${escHtml(b.title)} ${b.count}</span>`;
-  }).join('');
+  const badges = boardBadgesHtml(columnBadges);
   return `<a class="dashboard-board-item" href="${BASE_PATH}/board/${encodeURIComponent(name)}">
     <div class="board-card-info">
       <span class="board-card-name">${escHtml(name)}</span>

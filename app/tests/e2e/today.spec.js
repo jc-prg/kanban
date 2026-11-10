@@ -5,7 +5,7 @@
  * All data endpoints are mocked with page.route (no CalDAV / IMAP / Open-Meteo / CV-App, and no
  * writes to the shared CouchDB — PUT /api/today/config is captured in the test).
  *
- * Scenarios: E-T-1 … E-T-4
+ * Scenarios: E-T-1 … E-T-7
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -154,6 +154,65 @@ test.describe('Today page', () => {
       ['agenda:2/3', 'cvapp:1/3'],
       ['attention:container', 'progress:container'],
     ]);
+  });
+
+  test('E-T-6 edit mode follows the screen size: each size keeps its draft, Save writes all changed ones', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(LAYOUTS)) };
+    await mockApis(page, state);
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
+
+    await page.click('#todayEditBtn');
+    await expect(page.locator('.today-edit-badge')).toContainText('Large');
+    await page.selectOption('.today-tile[data-tile="cvapp"] .today-tile-size', '1/2');
+
+    // Wider window → the extra-large layout (derived from lg) is edited now
+    await page.setViewportSize({ width: 1700, height: 900 });
+    await expect(page.locator('select.today-edit-bp')).toHaveValue('xl');
+    await expect(page.locator('.today-edit-status')).toHaveText('derived from lg');
+    await expect(page.locator('.today-edit-pending')).toHaveText('also changed: lg');
+    await page.selectOption('.today-tile[data-tile="attention"] .today-tile-size', '1/3');
+
+    // Back → the lg draft is still there
+    await page.setViewportSize({ width: 1300, height: 900 });
+    await expect(page.locator('.today-edit-badge')).toContainText('Large');
+    await expect(page.locator('.today-edit-pending')).toHaveText('also changed: xl');
+    expect((await columnsOf(page))[1]).toContain('cvapp:1/2');
+
+    await page.click('[data-edit="save"]');
+    await expect(page.locator('#todayEditBar')).toBeHidden();
+    expect(Object.keys(state.put.layouts).sort()).toEqual(['lg', 'xl']);
+    expect(state.put.layouts.lg.tiles.find(t => t.id === 'cvapp').size).toBe('1/2');
+    expect(state.put.layouts.xl.tiles.find(t => t.id === 'attention').size).toBe('1/3');
+  });
+
+  test('E-T-7 extra-large screen: the size drop-down previews and edits smaller sizes', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(LAYOUTS)) };
+    await mockApis(page, state);
+    await page.setViewportSize({ width: 1700, height: 900 });
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
+
+    await page.click('#todayEditBtn');
+    await expect(page.locator('select.today-edit-bp')).toHaveValue('xl');
+
+    // Small (phone): grid narrowed to the phone width, one column
+    await page.selectOption('select.today-edit-bp', 'sm');
+    await expect(page.locator('#today')).toHaveClass(/today--preview/);
+    await expect.poll(async () => (await columnsOf(page)).length).toBe(1);
+    expect((await page.locator('#todayGrid').boundingBox()).width).toBeLessThanOrEqual(400);
+    await page.selectOption('.today-tile[data-tile="progress"] .today-tile-size', '1/3');
+
+    // Large: two columns at 1400 px; the phone change is listed
+    await page.selectOption('select.today-edit-bp', 'lg');
+    await expect.poll(async () => (await columnsOf(page)).length).toBe(2);
+    await expect(page.locator('select.today-edit-bp option[value="sm"]')).toContainText('changed');
+
+    await page.click('[data-edit="save"]');
+    await expect(page.locator('#todayEditBar')).toBeHidden();
+    await expect(page.locator('#today')).not.toHaveClass(/today--preview/);
+    expect(state.put.layouts.sm.tiles.find(t => t.id === 'progress').size).toBe('1/3');
+    expect(state.put.layouts.sm.columns).toHaveLength(1);
   });
 
   test('E-T-3 smaller viewport: the layout is derived and reflows to one column', async ({ page }) => {

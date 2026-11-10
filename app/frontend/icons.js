@@ -117,6 +117,11 @@ function _svgFilter(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 2h9L7 6.5V10L5 10V6.5Z"/></svg>`;
 }
 
+// Bar chart with a baseline — statistics / achievement history
+function _svgStats(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 10.5h9"/><path d="M3 8.5V6M6 8.5V2.5M9 8.5V4.5"/></svg>`;
+}
+
 // Magnifying glass — show / hide a search field
 function _svgSearch(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="5" r="3.5"/><line x1="7.6" y1="7.6" x2="10.8" y2="10.8"/></svg>`;
@@ -365,6 +370,7 @@ const SVGICONS = {
   schedule:       _svgSchedule,
   today:          _svgToday,
   search:         _svgSearch,
+  stats:          _svgStats,
   expandAll:      _svgExpandAll,
   collapseAll:    _svgCollapseAll,
   wxSun:          _svgWxSun,
@@ -428,6 +434,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgPrint(16, 16),         name: 'Print',            usage: 'Print a card or column' },
   { type: 'svg', svg: _svgDashboard(16, 16),    name: 'Dashboard',        usage: 'Navigate to the dashboard view' },
   { type: 'svg', svg: _svgToday(16, 16),        name: 'Today',            usage: 'Navigate to the Today page' },
+  { type: 'svg', svg: _svgStats(16, 16),        name: 'Statistics',       usage: 'Open the statistics / achievement history (Today progress tile)' },
   { type: 'svg', svg: _svgSearch(16, 16),       name: 'Search',           usage: 'Show / hide the filter field of the Today Notes tile' },
   { type: 'svg', svg: _svgExpandAll(16, 16),    name: 'ExpandAll',        usage: 'Open all folders (Today Notes tile)' },
   { type: 'svg', svg: _svgCollapseAll(16, 16),  name: 'CollapseAll',      usage: 'Collapse all folders (Today Notes tile)' },

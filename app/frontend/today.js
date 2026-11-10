@@ -353,10 +353,17 @@ const TODAY_TILES = {
     },
   },
   progress: {
-    title: "Today's progress",
-    desc: 'Cards added to inboxes, created, moved and done today',
-    load: () => _todayFetchJson(`/api/achievements/today?date=${_todayToday()}`),
+    title: 'Achievements',
+    desc: 'Cards added to inboxes, created, moved and done today — or on an earlier day',
+    load: () => _todayFetchJson(`/api/achievements/today?date=${_todayAddDays(_todayToday(), _todayAchOffset)}`),
     render: _todayRenderProgress,
+    // Day navigation as in the overview's achievements: ‹ earlier, › later (up to today), back to today
+    actions: () => [
+      ...(_todayAchOffset < 0 ? [{ icon: SVGICONS.sync(12, 12), title: 'Jump to today', run: () => _todaySetAchOffset(0) }] : []),
+      { label: '‹', title: 'Previous day', disabled: !_todayAchHasPast, run: () => _todaySetAchOffset(_todayAchOffset - 1) },
+      { label: '›', title: 'Next day', disabled: _todayAchOffset >= 0, run: () => _todaySetAchOffset(_todayAchOffset + 1) },
+      { icon: SVGICONS.stats(13, 13), title: 'Statistics (achievement history)', run: () => openAchievementHistory() },
+    ],
   },
   boards: {
     title: 'Boards',
@@ -461,7 +468,7 @@ async function initToday() {
   let resizeT = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeT);
-    resizeT = setTimeout(() => { if (!_todayEdit) _todayRelayout(); else _todayMeasure(); }, 120);
+    resizeT = setTimeout(() => { if (!_todayEdit) _todayRelayout(); else _todayEditResize(); }, 120);
   });
   // The grid's height changes with the Today bar / edit bar (wrapping, weather loaded later)
   if (typeof ResizeObserver === 'function') new ResizeObserver(() => _todayMeasure()).observe(document.getElementById('todayGrid'));
@@ -524,6 +531,7 @@ function _todaySchedule() {
 // ---- Layout application ----
 
 function _todayViewportWidth() {
+  if (_todayEdit?.preview) return _TODAY_PREVIEW_W[_todayEdit.bp];
   return document.getElementById('today').clientWidth || window.innerWidth;
 }
 
@@ -561,8 +569,29 @@ function _todayTileEl(id) {
       </span>
     </div>
     <div class="today-tile-body"><p class="dashboard-loading">Loading…</p></div>`;
+  // Double-click on the header (not on its buttons / edit controls) collapses / expands the tile
+  const header = el.querySelector('.today-tile-header');
+  header.title = 'Double-click to hide / show the content';
+  header.addEventListener('dblclick', e => {
+    if (_todayEdit || e.target.closest('button, select, a, input, .today-tile-handle')) return;
+    _todaySetCollapsed(id, !el.classList.contains('today-tile--collapsed'));
+  });
+  el.classList.toggle('today-tile--collapsed', _todayCollapsed().has(id));
   _todayTileEls.set(id, el);
   return el;
+}
+
+/** Tiles collapsed to their header (double-click); per browser. */
+function _todayCollapsed() {
+  try { return new Set(JSON.parse(localStorage.getItem('today-collapsed') || '[]')); } catch { return new Set(); }
+}
+
+function _todaySetCollapsed(id, collapsed) {
+  const set = _todayCollapsed();
+  if (collapsed) set.add(id); else set.delete(id);
+  try { localStorage.setItem('today-collapsed', JSON.stringify([...set])); } catch { /* ignore */ }
+  _todayTileEls.get(id)?.classList.toggle('today-tile--collapsed', collapsed);
+  window.getSelection?.()?.removeAllRanges();   // a double-click selects the title text
 }
 
 function _todaySetTileActions(id) {
@@ -576,6 +605,7 @@ function _todaySetTileActions(id) {
     b.title = a.title;
     b.setAttribute('aria-label', a.title);
     if ('active' in a) b.setAttribute('aria-pressed', String(!!a.active));
+    if (a.disabled) b.disabled = true;
     b.innerHTML = a.icon || escHtml(a.label);
     b.addEventListener('click', e => { e.stopPropagation(); a.run(); });
     box.appendChild(b);
@@ -607,7 +637,8 @@ function _todayApplyLayout(layout) {
 function _todayMeasure() {
   const root = document.getElementById('today');
   const grid = document.getElementById('todayGrid');
-  const single = (_todayLayout?.columns.length || 1) === 1 && _todayBpFor(window.innerWidth) === 'sm';
+  const bp = _todayEdit?.bp || _todayBpFor(window.innerWidth);   // edit preview: the previewed size
+  const single = ((_todayEdit?.draft || _todayLayout)?.columns.length || 1) === 1 && bp === 'sm';
   root.classList.toggle('today--scroll', single);
   const header = document.querySelector('header')?.getBoundingClientRect().bottom || 0;
   const h = single
@@ -1120,15 +1151,40 @@ function _todayRenderCvApp(body, data, el) {
 
 // ---- Progress ----
 
+let _todayAchOffset  = 0;      // days back from today (0 = today)
+let _todayAchHasPast = false;  // the API reports activity before the shown day
+
+function _todaySetAchOffset(offset) {
+  _todayAchOffset = Math.min(0, offset);
+  _todayLoadTile('progress');
+}
+
+/** Label of the shown day: Today / Yesterday / weekday + date. */
+function _todayAchLabel(offset) {
+  if (offset === 0)  return 'Today';
+  if (offset === -1) return 'Yesterday';
+  const d = new Date(`${_todayAddDays(_todayToday(), offset)}T12:00:00`);
+  return d.toLocaleDateString([], { weekday: 'short', day: '2-digit', month: '2-digit',
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+}
+
 function _todayRenderProgress(body, data, el) {
-  const { done = 0, moved = 0, created = 0, inboxCreated = 0 } = data || {};
-  _todaySetCount(el, 0);
-  const stat = (v, label, color) => `<div class="today-stat" style="--stat-color:${color}"><span class="today-stat-value">${v}</span><span class="today-stat-label">${label}</span></div>`;
+  const { done = 0, moved = 0, created = 0, inboxCreated = 0,
+          createdCards = [], inboxCreatedCards = [], movedCards = [], doneCards = [] } = data || {};
+  _todayAchHasPast = !!data?.hasPast;
+  _todaySetTileActions('progress');
+  // The shown day goes into the header next to the title (where other tiles show their count)
+  const dayEl = el.querySelector('.today-tile-count');
+  dayEl.textContent = _todayAchLabel(_todayAchOffset);
+  dayEl.title = _todayAddDays(_todayToday(), _todayAchOffset);
+  // Tooltip: the cards behind a number (same list as the overview's achievements)
+  const tip = cards => (cards.length ? ` title="${escHtml(cardsTooltip(cards))}"` : '');
+  const stat = (v, label, color, cards) => `<div class="today-stat" style="--stat-color:${color}"${tip(cards)}><span class="today-stat-value">${v}</span><span class="today-stat-label">${label}</span></div>`;
   body.innerHTML = `<div class="today-stats">
-    ${stat(inboxCreated, 'to inbox', '#f97316')}
-    ${stat(created - inboxCreated, 'created', '#f97316')}
-    ${stat(moved, 'moved', '#eab308')}
-    ${stat(done, 'done', '#10b981')}
+    ${stat(inboxCreated, 'to inbox', '#f97316', inboxCreatedCards)}
+    ${stat(created - inboxCreated, 'created', '#f97316', createdCards)}
+    ${stat(moved, 'moved', '#eab308', movedCards)}
+    ${stat(done, 'done', '#10b981', doneCards)}
   </div>`;
 }
 
@@ -1173,16 +1229,53 @@ function _todayRenderNewBoard(body, focus = false) {
 }
 
 function _todayRenderBoards(body, [boards, recent], el) {
-  const active = (boards || []).filter(b => !b.archived);
+  const active   = (boards || []).filter(b => !b.archived);
+  const archived = (boards || []).filter(b => b.archived);
   _todaySetCount(el, active.length);
-  const chips = active.map(b => {
-    const badges = (b.columnBadges || []).filter(x => x.count > 0 && (x.type === 'inbox' || x.type === 'todo' || x.type === 'inprogress'))
-      .map(x => `<span class="board-card-count board-card-count-${x.type}">${x.count}</span>`).join('');
-    return `<a class="today-board" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}" title="${escHtml(b.description || b.name)}">${escHtml(b.name)}${badges}</a>`;
-  }).join('');
+  const chip = b => {
+    const badges = boardBadgesHtml(b.columnBadges, { numbersOnly: true });
+    return `<a class="today-board" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">
+      <span class="today-board-name board-card-name" title="${escHtml(b.description || b.name)}">${escHtml(b.name)}</span>
+      ${badges ? `<span class="today-board-counts">${badges}</span>` : ''}</a>`;
+  };
+  const chips = active.map(chip).join('');
   body.innerHTML = `<div class="today-boards">${chips || '<p class="dashboard-empty">No boards yet.</p>'}</div>
+    ${archived.length ? `<details class="today-recent today-archived"><summary>Archived boards <span class="today-ncount">${archived.length}</span></summary>
+      <div class="today-boards">${archived.map(chip).join('')}</div></details>` : ''}
     ${recent?.length ? `<details class="today-recent"><summary>Last edited</summary>${recent.map(_recentItemHtml).join('')}</details>` : ''}`;
   _todayRenderNewBoard(body);
+
+  // Equal-width board cards: as many per row as fit with name and all counts on one line (≥ 2).
+  // Widest card measured off-screen (archived ones live in a closed <details>, not rendered).
+  const measure = document.createElement('div');
+  measure.className = 'today-boards today-boards--measure';
+  measure.innerHTML = [...active, ...archived].map(chip).join('');
+  body.appendChild(measure);
+  body._todayBoardNeed = Math.max(0, ...[...measure.children].map(c => Math.ceil(c.getBoundingClientRect().width)));
+  body._todayBoardCount = active.length;
+  measure.remove();
+  _todayFitBoards(body);
+  if (!body._todayBoardRO && typeof ResizeObserver === 'function') {
+    body._todayBoardRO = new ResizeObserver(() => _todayFitBoards(body));
+    body._todayBoardRO.observe(body);
+  }
+}
+
+/** Board cards per row: as many as fit at `need` px each, at least 2, at most the number of boards. Pure. */
+function _todayBoardCols(width, need, gap, count) {
+  const fit = need > 0 ? Math.floor((width + gap) / (need + gap)) : 2;
+  return Math.max(2, Math.min(fit, Math.max(2, count)));
+}
+
+function _todayFitBoards(body) {
+  const grid = body.querySelector('.today-boards');
+  if (!grid || !body._todayBoardNeed) return;
+  const gap = parseFloat(getComputedStyle(grid).columnGap) || 8;
+  const n = _todayBoardCols(grid.clientWidth, body._todayBoardNeed, gap, body._todayBoardCount);
+  body.style.setProperty('--today-board-cols', String(n));
+  // Two per row is the minimum: when even that is too narrow, tighten paddings so the counts still fit
+  const cardW = (grid.clientWidth - gap * (n - 1)) / n;
+  body.classList.toggle('today-boards-compact', cardW < body._todayBoardNeed);
 }
 
 // ---- Notes ----
@@ -1402,9 +1495,19 @@ function _todayDropMail(accountId, msgId) {
 
 // ---- Layout editing ----
 
+/** Edit state of one breakpoint, started from the layout currently resolved for it. */
+function _todayEditState(bp, layout) {
+  return { bp, draft: JSON.parse(JSON.stringify({ columns: layout.columns, tiles: layout.tiles })),
+           derived: layout.derived, from: layout.from, dirty: false };
+}
+
+/**
+ * Edit mode spans screen sizes: each breakpoint has its own draft (`_todayEdit.drafts`). When the
+ * window crosses a breakpoint, the current draft is parked and the new size's layout is edited;
+ * Save writes every changed size.
+ */
 function _todayStartEdit() {
-  const bp = _todayBp;
-  _todayEdit = { bp, draft: JSON.parse(JSON.stringify({ columns: _todayLayout.columns, tiles: _todayLayout.tiles })), derived: _todayLayout.derived, dirty: false };
+  _todayEdit = { ..._todayEditState(_todayBp, _todayLayout), drafts: {} };
   document.getElementById('today').classList.add('today--editing');
   _todayMarkEditBtn(true);
   _todayRenderEditBar();
@@ -1412,8 +1515,58 @@ function _todayStartEdit() {
   _todayMeasure();
 }
 
+/** Window resized while editing: switch to the layout of the new screen size. */
+function _todayEditResize() {
+  if (!_todayEdit) return;
+  const bp = _todayBpFor(window.innerWidth);
+  // On an extra-large screen a smaller size picked in the edit badge stays selected
+  if (bp === _todayEdit.bp || (bp === 'xl' && _todayEdit.preview)) { _todayMeasure(); return; }
+  _todayEditSwitch(bp);
+}
+
+// Width a smaller screen size is previewed at on an extra-large screen (edit badge drop-down)
+const _TODAY_PREVIEW_W = { lg: 1400, md: 980, sm: 390 };
+
+/**
+ * Edit the layout of breakpoint `bp`. On an extra-large screen a smaller `bp` is previewed: the
+ * grid is narrowed to that size's width (`_TODAY_PREVIEW_W`) and the layout resolved for it.
+ */
+function _todayEditSwitch(bp) {
+  const { drafts, ...cur } = _todayEdit;
+  drafts[cur.bp] = cur;
+  const preview = _todayBpFor(window.innerWidth) === 'xl' && bp !== 'xl';
+  _todaySyncPreview(preview ? _TODAY_PREVIEW_W[bp] : 0);
+  const layout = _todayResolveLayout(_todayCfg?.layouts, bp, _todayKnownTiles(), _todayViewportWidth());
+  _todayBp = bp;
+  _todayLayout = layout;
+  _todayEdit = { ...(drafts[bp] || _todayEditState(bp, layout)), drafts, preview };
+  delete drafts[bp];
+  const shown = new Set([...document.querySelectorAll('#todayGrid .today-tile')].map(el => el.dataset.tile));
+  _todayApplyLayout(_todayEdit.draft);
+  for (const t of _todayEdit.draft.tiles) if (!shown.has(t.id) && _todayTileEls.get(t.id)?.dataset.loaded !== '1') _todayLoadTile(t.id);
+  _todayRenderEditBar();
+  _todayMeasure();
+}
+
+function _todaySyncPreview(width) {
+  const root = document.getElementById('today');
+  root.classList.toggle('today--preview', !!width);
+  if (width) root.style.setProperty('--today-preview-w', `${width}px`);
+  else root.style.removeProperty('--today-preview-w');
+}
+
+/** Layouts to store: the saved ones plus every changed draft (and the current one when `withCurrent`). */
+function _todayEditLayouts(withCurrent) {
+  const out = { ...(_todayCfg.layouts || {}) };
+  const plain = d => ({ columns: d.columns, tiles: d.tiles.map(({ id, col, order, size }) => ({ id, col, order, size })) });
+  for (const st of Object.values(_todayEdit.drafts)) if (st.dirty) out[st.bp] = plain(st.draft);
+  if (withCurrent) out[_todayEdit.bp] = plain(_todayEdit.draft);
+  return out;
+}
+
 function _todayEndEdit(saved) {
   _todayEdit = null;
+  _todaySyncPreview(0);
   document.getElementById('today').classList.remove('today--editing');
   _todayMarkEditBtn(false);
   document.getElementById('todayEditBar').style.display = 'none';
@@ -1445,12 +1598,21 @@ function _todayEditUpdate(id, patch) {
 
 function _todayRenderEditBar() {
   const bar = document.getElementById('todayEditBar');
-  const { bp, draft, derived, dirty } = _todayEdit;
+  const { bp, draft, derived, dirty, from } = _todayEdit;
   const bpDef = TODAY_BPS.find(b => b.key === bp);
   const hasOwn = !!_todayCfg?.layouts?.[bp];
   const hidden = _todayKnownTiles().filter(id => !draft.tiles.some(t => t.id === id));
+  const otherDirty = Object.values(_todayEdit.drafts).filter(st => st.dirty).map(st => st.bp);
   bar.style.display = '';
-  bar.innerHTML = `<span class="today-edit-badge" title="The layout applies to this screen size">${escHtml(bpDef.label)} · ${derived && !dirty ? `derived${_todayLayout.from ? ` from ${escHtml(_todayLayout.from)}` : ''}` : 'custom'}</span>
+  const status = derived && !dirty ? `derived${from ? ` from ${escHtml(from)}` : ''}` : 'custom';
+  // Extra-large screens can preview and edit every size; smaller ones edit their own (resize to switch)
+  const badge = _todayBpFor(window.innerWidth) === 'xl'
+    ? `<select class="today-edit-badge today-edit-bp" title="Screen size to edit — smaller sizes are previewed at their width">${TODAY_BPS.map(b =>
+        `<option value="${b.key}"${b.key === bp ? ' selected' : ''}>${escHtml(b.label)}${_todayEdit.drafts[b.key]?.dirty ? ' · changed' : ''}</option>`).join('')}</select>
+       <span class="today-edit-status">${status}</span>`
+    : `<span class="today-edit-badge" title="The layout applies to this screen size — resize the window to edit another one">${escHtml(bpDef.label)} · ${status}</span>`;
+  bar.innerHTML = `${badge}
+    ${otherDirty.length ? `<span class="today-edit-pending" title="Changed layouts of other screen sizes, saved together with this one">also changed: ${otherDirty.map(escHtml).join(', ')}</span>` : ''}
     <span class="today-edit-cols">${draft.columns.map((c, i) => `<span class="today-edit-col">Col ${i + 1}
       <select data-col-width="${i}" title="Relative column width">${[1, 2, 3].map(w => `<option value="${w}"${c.width === w ? ' selected' : ''}>${w}×</option>`).join('')}</select>
       ${draft.columns.length > 1 ? `<button class="today-edit-x" data-col-remove="${i}" title="Remove column (its tiles move to the neighbour)">${SVGICONS.close(8, 8)}</button>` : ''}</span>`).join('')}
@@ -1459,7 +1621,7 @@ function _todayRenderEditBar() {
     <span style="flex:1"></span>
     ${hasOwn ? '<button class="btn" data-edit="reset" title="Remove the custom layout of this screen size and derive it from a larger one">Reset to derived</button>' : ''}
     <button class="btn" data-edit="cancel">Cancel</button>
-    <button class="btn btn-accent" data-edit="save"${dirty || derived ? '' : ' disabled'}>Save</button>`;
+    <button class="btn btn-accent" data-edit="save"${dirty || derived || otherDirty.length ? '' : ' disabled'}>Save</button>`;
 
   bar.querySelectorAll('[data-col-width]').forEach(sel => sel.addEventListener('change', () => {
     draft.columns[+sel.dataset.colWidth].width = +sel.value;
@@ -1491,15 +1653,16 @@ function _todayRenderEditBar() {
       },
     })));
   });
+  bar.querySelector('.today-edit-bp')?.addEventListener('change', e => _todayEditSwitch(e.target.value));
   bar.querySelector('[data-edit="cancel"]').addEventListener('click', () => _todayEndEdit(false));
   bar.querySelector('[data-edit="reset"]')?.addEventListener('click', async () => {
-    const layouts = { ..._todayCfg.layouts };
+    const layouts = _todayEditLayouts(false);   // other sizes' changes are kept
     delete layouts[bp];
     if (await _todaySaveLayouts(layouts)) _todayEndEdit(true);
   });
   bar.querySelector('[data-edit="save"]').addEventListener('click', async () => {
-    const layout = { columns: draft.columns, tiles: draft.tiles.map(({ id, col, order, size }) => ({ id, col, order, size })) };
-    if (await _todaySaveLayouts({ ...(_todayCfg.layouts || {}), [bp]: layout })) _todayEndEdit(true);
+    // The current size is saved when changed or still derived (as before); other sizes when changed
+    if (await _todaySaveLayouts(_todayEditLayouts(dirty || derived))) _todayEndEdit(true);
   });
 }
 

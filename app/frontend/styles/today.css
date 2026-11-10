@@ -68,6 +68,15 @@
 }
 .today-editbar .btn { padding: 4px 10px; font-size: 0.8rem; }
 .today-edit-badge { padding: 2px 8px; border-radius: 6px; background: var(--accent-glow); color: var(--text); white-space: nowrap; }
+.today-edit-pending { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+select.today-edit-badge { font: inherit; border: 1px solid transparent; cursor: pointer; }
+select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
+.today-edit-status { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+/* Edit preview of a smaller screen size on an extra-large screen */
+#today.today--preview .today-grid {
+  width: var(--today-preview-w); max-width: 100%; margin: 0 auto;
+  outline: 1px dashed var(--border); outline-offset: 10px; border-radius: 4px;
+}
 .today-edit-cols { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .today-edit-col { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .today-edit-col select, .today-tile-size { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 5px; font-size: 0.75rem; padding: 1px 2px; }
@@ -134,7 +143,11 @@
 }
 .today-tile-count:not(:empty) { font-family: inherit; font-weight: normal; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0; opacity: 0.8; }
 .today-tile-count:not(:empty)::before { content: '\00b7  '; white-space: pre; }
-.today-tile-actions { display: flex; gap: 2px; margin-left: auto; }
+.today-tile-actions { display: flex; gap: 2px; margin-left: auto; flex-shrink: 0; }
+/* Narrow tiles: title and count shorten, the action icons always stay visible */
+.today-tile-title, .today-tile-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-tile-title { flex-shrink: 0; max-width: 70%; }
+.today-tile[data-tile="progress"] .today-tile-count { text-transform: none; }   /* shown day */
 .today-tile-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 24px; border: none; border-radius: 6px;
@@ -143,6 +156,9 @@
 .today-tile-btn { opacity: 0.6; }
 .today-tile:hover .today-tile-btn { opacity: 1; }
 .today-tile-btn:hover { background: var(--surface2); color: var(--text); }
+.today-tile-btn:disabled, .today-tile-btn:disabled:hover { opacity: 0.25; background: none; color: var(--text-muted); cursor: default; }
+.today-tile[data-tile="progress"] .today-tile-btn { width: 22px; }
+.today-tile[data-tile="progress"] .today-tile-btn--text { font-size: 1.2rem; line-height: 1; padding: 0 0 2px; }   /* ‹ › day navigation */
 .today-tile-body { padding: 10px 4px 2px; font-size: 0.85rem; overflow-x: clip; min-width: 0; }
 .today-tile-btn--text { width: auto; padding: 0 8px; font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0; text-transform: none; }
 .today-tile-btn--on { opacity: 1; color: var(--accent); background: var(--accent-glow); }
@@ -199,7 +215,8 @@
 
 /* ---- Agenda ---- */
 
-.today-allday { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.today-allday { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.today-allday .today-chip { display: flex; justify-content: center; text-align: center; width: 100%; box-sizing: border-box; padding: 4px 10px; }   /* full widget width */
 .today-chip {
   display: inline-flex; align-items: center; gap: 5px;
   max-width: 100%;
@@ -233,10 +250,10 @@
 .today-ev-link { display: inline-flex; color: var(--text-muted); margin-left: 4px; }
 .today-now { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: var(--danger); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
 .today-now::after { content: ''; flex: 1; height: 2px; border-radius: 1px; background: var(--danger); }
-.today-tomorrow { margin-top: 16px; }
+.today-tomorrow { margin-top: 26px; }
 
 /* 7-day agenda */
-.today-day { margin-top: 14px; }
+.today-day { margin-top: 26px; }
 .today-day-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   margin-bottom: 6px; padding-bottom: 3px;
@@ -344,7 +361,7 @@
 .today-app-meta { flex-wrap: nowrap; min-width: 0; overflow: hidden; white-space: nowrap; margin-top: 2px; }
 .today-app-meta > * { flex-shrink: 0; }
 .today-app-meta > .today-cv-sent { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.today-app-link { color: inherit; text-decoration: none; }
+.today-app-link, .today-app-link:visited { color: inherit; text-decoration: none; }
 .today-app-link:hover { color: var(--accent); }
 .today-cv-sent { white-space: nowrap; }
 .today-cv-sent--warn  { color: #E07B00; font-weight: 700; }
@@ -376,16 +393,31 @@
 
 /* ---- Boards ---- */
 
-.today-boards { display: flex; flex-wrap: wrap; gap: 6px; }
+.today-boards { display: grid; grid-template-columns: repeat(var(--today-board-cols, 2), minmax(0, 1fr)); gap: 8px; }
+/* Off-screen copy for measuring the widest card (_todayRenderBoards) */
+.today-boards.today-boards--measure {
+  display: block; position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; width: max-content;
+}
+.today-boards--measure .today-board { width: max-content; }
+.today-boards--measure .today-board-name { max-width: none; }
 .today-board {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 10px; border-radius: 12px;
-  color: var(--text); text-decoration: none; font-size: 0.8rem;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0;
+  padding: 8px 12px; border-radius: 10px; box-sizing: border-box;
+  color: var(--text); text-decoration: none;
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 .today-board:hover { border-color: var(--accent); }
-.today-board .board-card-count { font-size: 0.65rem; padding: 0 5px; }
+/* base.css colours visited links (a:visited) — board and note page links keep the text colour */
+.today-board:visited, .today-npage:visited { color: var(--text); }
+.today-board-name { max-width: 100%; }   /* .board-card-name: Syne 0.9rem bold, ellipsis */
+.today-board-counts { display: flex; flex-wrap: nowrap; gap: 4px; max-width: 100%; overflow: hidden; }
+.today-boards-compact .today-boards:not(.today-boards--measure) .today-board { padding: 7px 8px; }
+.today-boards-compact .today-boards:not(.today-boards--measure) .today-board-counts { gap: 3px; }
+.today-boards-compact .today-boards:not(.today-boards--measure) .board-card-count { padding: 2px 5px; }
+.today-board .board-card-count { font-family: var(--today-mono); }   /* as on the overview (body font) */
 .today-recent { margin-top: 12px; }
+.today-archived .today-board { opacity: 0.75; }
+.today-archived .today-board:hover { opacity: 1; }
 .today-recent > summary { color: var(--text-muted); transition: color 0.15s; }
 .today-recent > summary:hover { color: var(--text); }
 .today-newboard { margin: 0 0 10px; }
@@ -473,3 +505,20 @@
 }
 .today-npage svg { flex-shrink: 0; color: var(--text-muted); }
 .today-nempty { display: block; padding: 2px 4px 2px 20px; color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
+
+/* Dark mode: cards and board links in the tiles sit darker and take the normal card background on hover */
+@media not (prefers-color-scheme: light) {
+  #today .today-tile :is(.card, .today-board) { background: var(--surface); }
+  #today .today-tile :is(.card, .today-board):hover { background: var(--surface2); }
+}
+
+/* Collapsed tile (double-click on the header): header only, whatever its size; not while editing */
+#today:not(.today--editing) .today-tile.today-tile--collapsed { flex: 0 0 auto; min-height: 0; max-height: none; }
+#today:not(.today--editing) .today-tile--collapsed .today-tile-body { display: none; }
+#today:not(.today--editing) .today-tile--collapsed .today-tile-header { border-radius: 8px; border-bottom-color: transparent; }
+.today-tile-header { user-select: none; }
+
+/* Light mode: widget headers a little darker, tinted with the accent of the app title */
+@media (prefers-color-scheme: light) {
+  #today .today-tile-header { background: color-mix(in srgb, var(--accent) 9%, var(--surface2)); }
+}

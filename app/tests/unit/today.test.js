@@ -268,3 +268,11 @@ test('TU-17 _todayCvStatusCounts — counts per status in the CV-App order, unkn
   ])
   expect(plain(ctx._todayCvStatusCounts([]))).toEqual([])
 })
+
+test('TU-18 _todayBoardCols — as many equal cards as fit, at least 2, at most the number of boards', () => {
+  expect(ctx._todayBoardCols(400, 120, 8, 6)).toBe(3)    // (400 + 8) / 128 = 3.19
+  expect(ctx._todayBoardCols(400, 250, 8, 6)).toBe(2)    // only 1 fits → still 2
+  expect(ctx._todayBoardCols(1000, 120, 8, 4)).toBe(4)   // 7 would fit, 4 boards
+  expect(ctx._todayBoardCols(1000, 120, 8, 1)).toBe(2)
+  expect(ctx._todayBoardCols(400, 0, 8, 5)).toBe(2)
+})
