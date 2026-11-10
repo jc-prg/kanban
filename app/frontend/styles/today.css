@@ -477,7 +477,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   .today-bar { padding: 2px 0 10px; gap: 8px 14px; }
   .today-bar-actions { margin-left: 0; width: 100%; }
   .today-bar-actions .btn { flex: 1; justify-content: center; border-color: color-mix(in srgb, var(--border) 70%, transparent); }
-  .today-bar-actions .today-bar-edit { display: none; }   /* phones: "Edit layout" is in the header menu */
+  .today-bar-actions :is(.today-bar-edit, .today-bar-refresh) { display: none; }   /* phones: "Edit layout" is in the header menu, Refresh in the header */
   .today-bar-weather { display: none; }
   .today-wx-hour { flex-basis: 40px; }
 }
@@ -567,3 +567,8 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-col--stack > .today-tile--f12 > .today-tile-body { flex: 0 0 calc(var(--today-col-h) / 2 - var(--today-gap) / 2 - var(--today-hdr-h)); }
 .today-col--stack > .today-tile--f13 > .today-tile-body { flex: 0 0 calc(var(--today-col-h) / 3 - var(--today-gap) * 2 / 3 - var(--today-hdr-h)); }
 .today-col--stack > .today-tile--auto > .today-tile-body { flex: 0 0 auto; }
+
+/* Refresh sits in the Today bar on larger screens (_todaySyncRefreshBtn) */
+@media (min-width: 768px) {
+  #dashboardRefreshBtn.in-today-bar { display: none !important; }
+}

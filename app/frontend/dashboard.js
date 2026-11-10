@@ -142,6 +142,7 @@ function _syncOverlayHost() {
   const open = _cvIsOpen() || _mvIsOpen();
   document.getElementById('dashboard').style.display = open ? 'flex' : 'none';
   document.getElementById('today').style.display     = open ? 'none' : 'flex';
+  if (typeof _todaySyncRefreshBtn === 'function') _todaySyncRefreshBtn();
   // Back on Today after working in a view: refresh what may have changed there
   if (!open && typeof loadToday === 'function' && _todayCfg) {
     setTimeout(() => { if (!_cvIsOpen() && !_mvIsOpen()) loadToday(); }, 0);   // not when switching views

@@ -438,11 +438,7 @@ async function initToday() {
   const mailBtn = document.getElementById('dashboardMailBtn');
   mailBtn.style.display = '';
   mailBtn.onclick = () => (_mvIsOpen() ? closeMailView() : _todayOpenMail());
-  document.getElementById('dashboardRefreshBtn').addEventListener('click', () => {
-    loadToday();
-    if (_cvIsOpen()) _cvLoad();
-    if (_mvIsOpen()) _mvReload();
-  });
+  document.getElementById('dashboardRefreshBtn').addEventListener('click', _todayRefreshAll);
   // Edit button: last action of the Today bar (_todayRenderBar); the menu item covers phones and a hidden bar
   const menuEdit = document.getElementById('menuTodayEdit');
   menuEdit.style.display = '';
@@ -850,6 +846,19 @@ function _todayMarkEditBtn(on) {
   b.setAttribute('aria-pressed', String(on));
 }
 
+function _todayRefreshAll() {
+  loadToday();
+  if (_cvIsOpen()) _cvLoad();
+  if (_mvIsOpen()) _mvReload();
+}
+
+/** Refresh lives in the Today bar (not on phones, see today.css) — the header button only while
+ *  the bar is hidden or a calendar / mail view covers it. */
+function _todaySyncRefreshBtn() {
+  const inBar = _todayCfg?.showBar !== false && !_cvIsOpen() && !_mvIsOpen();
+  document.getElementById('dashboardRefreshBtn').classList.toggle('in-today-bar', inBar);
+}
+
 function _todayToggleEdit() {
   return _todayEdit ? _todayEndEdit(false) : _todayStartEdit();
 }
@@ -858,6 +867,7 @@ async function _todayRenderBar() {
   const bar = document.getElementById('todayBar');
   const show = _todayCfg?.showBar !== false;
   bar.style.display = show ? '' : 'none';
+  _todaySyncRefreshBtn();
   if (!show) return;
   const now = new Date();
   const dateStr = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
@@ -867,11 +877,13 @@ async function _todayRenderBar() {
       <button class="btn" data-bar="inbox" title="Add a card to an inbox">${SVGICONS.create(12, 12)}<span>Card</span></button>
       <button class="btn" data-bar="event" title="New calendar event">${SVGICONS.date(12, 12)}<span>Event</span></button>
       <button class="btn" data-bar="mail" title="Write a mail">${SVGICONS.email(12, 12)}<span>Mail</span></button>
+      <button class="btn today-bar-refresh" data-bar="refresh" title="Refresh" aria-label="Refresh">${SVGICONS.sync(12, 12)}</button>
       <button class="btn today-bar-edit${_todayEdit ? ' today-bar-btn--on' : ''}" id="todayEditBtn" data-bar="edit" title="Edit layout" aria-label="Edit layout" aria-pressed="${!!_todayEdit}">${SVGICONS.edit(12, 12)}</button>
     </div>`;
   bar.querySelector('[data-bar="inbox"]').addEventListener('click', () => openInboxModal(null, null, () => loadToday()));
   bar.querySelector('[data-bar="event"]').addEventListener('click', _todayNewEvent);
   bar.querySelector('[data-bar="mail"]').addEventListener('click', _todayCompose);
+  bar.querySelector('[data-bar="refresh"]').addEventListener('click', _todayRefreshAll);
   bar.querySelector('[data-bar="edit"]').addEventListener('click', _todayToggleEdit);
   const w = _todayCfg?.widgets?.weather;
   if (!w || w.lat == null) return;
