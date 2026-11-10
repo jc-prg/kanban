@@ -1012,6 +1012,16 @@ const _TODAY_CV_STATUS = {
   'Abgebrochen':    { bg: '#EFEBE9', color: '#5D4037' },
 };
 
+/** [{ status, count }] of a list of applications, in the CV-App's status order (unknown ones last). Pure. */
+function _todayCvStatusCounts(apps) {
+  const order = Object.keys(_TODAY_CV_STATUS);
+  const rank  = s => { const i = order.indexOf(s); return i < 0 ? order.length : i; };
+  const counts = new Map();
+  for (const a of apps || []) counts.set(a.status, (counts.get(a.status) || 0) + 1);
+  return [...counts].sort(([a], [b]) => rank(a) - rank(b) || String(a).localeCompare(String(b)))
+    .map(([status, count]) => ({ status, count }));
+}
+
 function _todayCvBadge(status, count) {
   const c = _TODAY_CV_STATUS[status] || { bg: 'var(--surface2)', color: 'var(--text)' };
   return `<span class="today-cv-badge" style="background:${c.bg};color:${c.color}">${escHtml(status)}${count != null ? ` <b>${count}</b>` : ''}</span>`;
@@ -1063,13 +1073,17 @@ function _todayCvSentHtml(a) {
 }
 
 function _todayRenderCvApp(body, data, el) {
-  _todaySetCount(el, data.total);
   _todaySetTileActions('cvapp');
   const mode = _todayCvMode();
-  // A stored filter whose status has no applications any more shows everything
-  const filter = data.statuses.some(s => s.status === _todayCvFilter()) ? _todayCvFilter() : '';
-  const list = ((mode === 'recent' ? data.recent : data.active) || []).filter(a => !filter || a.status === filter);
-  const chips = data.statuses.map(s => _todayCvFilterChip(s.status, s.count, filter)).join('');
+  const all  = (mode === 'recent' ? data.recent : data.active) || [];
+  // Header count = size of the current selection (Active: all active, even beyond the list cap)
+  _todaySetCount(el, mode === 'recent' ? all.length : data.total);
+  // Counters = statuses of the current selection (Active: server counts, the list may be capped)
+  const statuses = mode === 'recent' ? _todayCvStatusCounts(all) : data.statuses;
+  // A stored filter whose status is not in the selection shows everything
+  const filter = statuses.some(s => s.status === _todayCvFilter()) ? _todayCvFilter() : '';
+  const list = all.filter(a => !filter || a.status === filter);
+  const chips = statuses.map(s => _todayCvFilterChip(s.status, s.count, filter)).join('');
   const fit = f => f == null ? '' : `<span class="today-fit" title="Fit ${f}/4">${'●'.repeat(Math.round(f))}${'○'.repeat(4 - Math.round(f))}</span>`;
   const items = list.map((a, i) => {
     const hasInfo = a.statusNote || a.progress;

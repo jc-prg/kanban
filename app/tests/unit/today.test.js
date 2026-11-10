@@ -259,3 +259,12 @@ test('TU-16 _todayWidgetShown — deactivated or missing from every stored layou
   expect(ctx._todayWidgetShown({ layouts, disabled: ['agenda'] }, 'agenda')).toBe(false)
   expect(ctx._todayWidgetShown({ layouts: {} }, 'notes')).toBe(true)
 })
+
+test('TU-17 _todayCvStatusCounts — counts per status in the CV-App order, unknown statuses last', () => {
+  const apps = [{ status: 'Absage' }, { status: 'Versendet' }, { status: 'Research' }, { status: 'Versendet' }, { status: 'Neu' }, { status: 'Gespräch' }]
+  expect(plain(ctx._todayCvStatusCounts(apps))).toEqual([
+    { status: 'Research', count: 1 }, { status: 'Versendet', count: 2 }, { status: 'Gespräch', count: 1 },
+    { status: 'Absage', count: 1 }, { status: 'Neu', count: 1 },
+  ])
+  expect(plain(ctx._todayCvStatusCounts([]))).toEqual([])
+})
