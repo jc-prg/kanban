@@ -366,6 +366,8 @@ const TODAY_TILES = {
       _todayFetchJson('/api/dashboard/recent?limit=8').catch(() => []),
     ]),
     render: _todayRenderBoards,
+    actions: () => [{ icon: SVGICONS.create(12, 12), title: _todayNewBoardOpen ? 'Cancel new board' : 'New board', active: _todayNewBoardOpen,
+      run: () => _todayToggleNewBoard() }],
   },
   notes: {
     title: 'Notes',
@@ -1118,6 +1120,44 @@ function _todayRenderProgress(body, data, el) {
 
 // ---- Boards ----
 
+let _todayNewBoardOpen  = false;
+let _todayNewBoardDraft = '';   // typed name, kept across tile refreshes
+
+function _todayToggleNewBoard() {
+  _todayNewBoardOpen = !_todayNewBoardOpen;
+  _todayNewBoardDraft = '';
+  const el = _todayTileEls.get('boards');
+  if (!el) return;
+  _todaySetTileActions('boards');
+  _todayRenderNewBoard(el.querySelector('.today-tile-body'), true);
+}
+
+/** Inline "new board" form on top of the Boards tile (shown via the + action). */
+function _todayRenderNewBoard(body, focus = false) {
+  body.querySelector('.today-newboard')?.remove();
+  if (!_todayNewBoardOpen) return;
+  const form = document.createElement('form');
+  form.className = 'today-newboard';
+  form.innerHTML = `<div class="today-newboard-row">
+      <input class="today-newboard-input" type="text" placeholder="my-board" maxlength="64" spellcheck="false" autocomplete="off" aria-label="New board name">
+      <button class="btn btn-accent" type="submit">Create</button>
+    </div>
+    <p class="today-newboard-error" hidden></p>`;
+  const input = form.querySelector('input');
+  const errEl = form.querySelector('.today-newboard-error');
+  input.value = _todayNewBoardDraft;
+  input.addEventListener('input', () => { _todayNewBoardDraft = input.value; });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    errEl.hidden = true;
+    const err = await createBoardAndOpen(input.value);
+    if (err) { errEl.textContent = err; errEl.hidden = false; input.focus(); }
+  });
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); _todayToggleNewBoard(); } });
+  body.prepend(form);
+  if (focus) input.focus();
+}
+
 function _todayRenderBoards(body, [boards, recent], el) {
   const active = (boards || []).filter(b => !b.archived);
   _todaySetCount(el, active.length);
@@ -1128,6 +1168,7 @@ function _todayRenderBoards(body, [boards, recent], el) {
   }).join('');
   body.innerHTML = `<div class="today-boards">${chips || '<p class="dashboard-empty">No boards yet.</p>'}</div>
     ${recent?.length ? `<details class="today-recent"><summary>Last edited</summary>${recent.map(_recentItemHtml).join('')}</details>` : ''}`;
+  _todayRenderNewBoard(body);
 }
 
 // ---- Notes ----

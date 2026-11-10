@@ -2121,30 +2121,33 @@ document.getElementById('newBoardSectionBtn')?.addEventListener('click', () => {
   icon.textContent      = open ? ICONS.expand : ICONS.collapse;
 });
 
-document.getElementById('newBoardBtn').addEventListener('click', async () => {
-  const input = document.getElementById('newBoardInput');
-  const errEl = document.getElementById('newBoardError');
-  const name  = input.value.trim().toLowerCase();
-  errEl.style.display = 'none';
-  if (!name) return;
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
-    errEl.textContent = 'Use only lowercase letters, digits and hyphens.';
-    errEl.style.display = 'block';
-    return;
-  }
-  if (name === 'inbox') {
-    errEl.textContent = '"inbox" is a reserved name.';
-    errEl.style.display = 'block';
-    return;
-  }
+/**
+ * Create a board and open it (overview "Create board", Today Boards tile).
+ * Returns an error message, or null after navigating to the new board.
+ */
+async function createBoardAndOpen(rawName) {
+  const name = String(rawName || '').trim().toLowerCase();
+  if (!name) return 'Enter a board name.';
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) return 'Use only lowercase letters, digits and hyphens.';
+  if (name === 'inbox') return '"inbox" is a reserved name.';
   try {
     const r = await fetch(`/api/boards/${encodeURIComponent(name)}`, { method: 'POST' });
     const data = await r.json();
-    if (!r.ok) { errEl.textContent = data.error || 'Failed to create board.'; errEl.style.display = 'block'; return; }
+    if (!r.ok) return data.error || 'Failed to create board.';
     window.location.href = `${BASE_PATH}/board/${name}`;
-  } catch (e) {
-    errEl.textContent = 'Failed to create board.'; errEl.style.display = 'block';
+    return null;
+  } catch {
+    return 'Failed to create board.';
   }
+}
+
+document.getElementById('newBoardBtn').addEventListener('click', async () => {
+  const input = document.getElementById('newBoardInput');
+  const errEl = document.getElementById('newBoardError');
+  errEl.style.display = 'none';
+  if (!input.value.trim()) return;
+  const err = await createBoardAndOpen(input.value);
+  if (err) { errEl.textContent = err; errEl.style.display = 'block'; }
 });
 
 document.getElementById('newBoardInput').addEventListener('keydown', e => {

@@ -386,6 +386,17 @@
 .today-board:hover { border-color: var(--accent); }
 .today-board .board-card-count { font-size: 0.65rem; padding: 0 5px; }
 .today-recent { margin-top: 12px; }
+.today-recent > summary { color: var(--text-muted); transition: color 0.15s; }
+.today-recent > summary:hover { color: var(--text); }
+.today-newboard { margin: 0 0 10px; }
+.today-newboard-row { display: flex; gap: 6px; }
+.today-newboard-input {
+  flex: 1; min-width: 0; padding: 5px 10px; font: inherit; font-size: 0.8rem; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+}
+.today-newboard-input:focus { outline: none; border-color: var(--accent); }
+.today-newboard .btn { font-size: 0.78rem; padding: 4px 12px; }
+.today-newboard-error { margin: 6px 0 0; font-size: 0.75rem; color: var(--danger, #ef4444); }
 .today-recent .dashboard-recent-item { margin-bottom: 6px; }
 
 /* ---- Progress: four inline numbers ---- */
