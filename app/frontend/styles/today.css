@@ -440,9 +440,75 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-newboard-error { margin: 6px 0 0; font-size: 0.75rem; color: var(--danger, #ef4444); }
 .today-recent .dashboard-recent-item { margin-bottom: 6px; }
 
+/* ---- Quick access: icon + title links ---- */
+
+/* Sizes: icon edge (--today-qa-box, + 5 px margin each side), minimum column width (as many per row as
+   fit; titles shorten with an ellipsis) and gap scale together; items 54 / 69 / 96 px tall */
+.today-qa, .today-qa-preview { --today-qa-box: 41px; --today-qa-w: 62px; --today-qa-gap: 10px; --today-qa-font: 0.72rem; }   /* also the settings preview */
+.today-qa--s { --today-qa-box: 27px; --today-qa-w: 46px; --today-qa-gap: 8px; --today-qa-font: 0.66rem; }
+.today-qa--l { --today-qa-box: 67px; --today-qa-w: 84px; --today-qa-gap: 12px; --today-qa-font: 0.78rem; }
+.today-qa, .today-qa-preview {
+  --today-qa-glow: color-mix(in srgb, var(--accent) 30%, transparent);
+  --today-qa-glow-hover: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.today-qa {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--today-qa-w), 1fr));
+  gap: var(--today-qa-gap);
+}
+.today-qa .today-qa-icon { margin: 5px; }
+.today-qa-more { display: contents; }
+.today-qa-more[hidden] { display: none; }
+.today-qa-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0;
+  color: var(--text); text-decoration: none; border-radius: 6px;
+}
+.today-qa-item:visited { color: var(--text); }
+.today-qa-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.today-qa-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box;
+  width: var(--today-qa-box); height: var(--today-qa-box); transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.today-qa-item:hover .today-qa-icon { transform: translateY(-1px); }
+.today-qa-item:hover .today-qa-title { color: var(--accent); }
+/* App icon: just the image */
+.today-qa-img {
+  width: 100%; height: 100%; object-fit: contain; border-radius: calc(var(--today-qa-box) * 0.18);
+  filter: drop-shadow(0 0 4px var(--today-qa-glow)); transition: filter 0.15s;   /* glow follows the icon's shape */
+}
+.today-qa-item:hover .today-qa-img { filter: drop-shadow(0 0 6px var(--today-qa-glow-hover)); }
+/* Emoji / letter: framed area like a board card */
+.today-qa-icon--box {
+  border-radius: calc(var(--today-qa-box) * 0.24);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.today-qa .today-qa-icon--box { box-shadow: 0 0 6px var(--today-qa-glow); }
+.today-qa-item:hover .today-qa-icon--box { border-color: var(--accent); box-shadow: 0 0 9px var(--today-qa-glow-hover); }
+.today-qa-emoji {
+  font-size: calc(var(--today-qa-box) * 0.58); line-height: 1;
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', system-ui, sans-serif;
+}
+.today-qa-letter { color: var(--text-muted); font-weight: 700; font-size: calc(var(--today-qa-box) * 0.45); line-height: 1; }
+.today-qa-title {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--today-qa-font); line-height: 1.2; transition: color 0.15s;
+}
+/* Dark mode: icons marked "Invert in dark mode" (dark, monochrome logos); colours kept via hue-rotate */
+@media not (prefers-color-scheme: light) {
+  /* drop-shadow after the invert keeps the glow's colour */
+  .today-qa-img--invert { filter: invert(1) hue-rotate(180deg) drop-shadow(0 0 4px var(--today-qa-glow)); }
+  .today-qa-item:hover .today-qa-img--invert { filter: invert(1) hue-rotate(180deg) drop-shadow(0 0 6px var(--today-qa-glow-hover)); }
+}
+.today-qa-toggle {
+  display: block; margin: 8px auto 0; padding: 2px 8px; background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 0.75rem; color: var(--text-muted); transition: color 0.15s;
+}
+.today-qa-toggle:hover { color: var(--text); }
+.today-qa-empty { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.today-qa-empty .dashboard-empty { margin: 0; }
+
 /* ---- Progress: four inline numbers ---- */
 
-.today-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 8px; }
+.today-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 8px; margin-top: 8px; }
 .today-stat { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; }
 .today-stat-value { font-size: 1.35rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--stat-color); }
 .today-stat-label { font-size: 0.7rem; color: var(--text-muted); }
@@ -469,6 +535,26 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-wrow-body { margin: 10px 0 4px 18px; }
 .today-geo-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .today-geo-results .btn { font-size: 0.78rem; padding: 4px 10px; }
+/* Settings → Today → Quick access */
+.today-qa-list { margin: 8px 0 4px; }
+.today-qa-row .calendar-account-info { min-width: 0; }
+.today-qa-row .calendar-account-info .settings-item-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-qa-preview { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.today-qa-preview--sm { --today-qa-box: 24px; }
+.today-qa-form { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.today-qa-radio { display: inline-flex; align-items: center; gap: 4px; margin-right: 12px; font-size: 0.82rem; cursor: pointer; }
+.today-qa-form-icon { display: flex; align-items: center; gap: 12px; margin: 4px 0 8px; flex-wrap: wrap; }
+.today-qa-form-image, .today-qa-form-emoji { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.today-qa-form :is(.today-qa-form-image, .today-qa-form-emoji)[hidden] { display: none; }
+.today-qa-form .mv-emoji-pop button {
+  display: inline-flex; justify-content: center; align-items: center; padding: 3px 0;
+  background: none; border: 1px solid transparent; border-radius: 5px; cursor: pointer; color: var(--text);
+}
+.today-qa-form .mv-emoji-pop button:hover { background: var(--surface2); }
+.today-qa-form .mv-emoji-tabs button { font-size: 1rem; opacity: 0.6; padding: 2px 0; }
+.today-qa-form .mv-emoji-tabs button[aria-selected="true"] { opacity: 1; background: var(--surface2); border-color: var(--border); }
+.today-qa-form .mv-emoji-grid button { font-size: 1.25rem; line-height: 1.2; }
+.today-qa-msg--err { color: var(--danger, #ef4444); }
 
 /* ---- Phones ---- */
 
@@ -517,8 +603,8 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 
 /* Dark mode: cards and board links in the tiles sit darker and take the normal card background on hover */
 @media not (prefers-color-scheme: light) {
-  #today .today-tile :is(.card, .today-board) { background: var(--surface); }
-  #today .today-tile :is(.card, .today-board):hover { background: var(--surface2); }
+  #today .today-tile :is(.card, .today-board, .today-qa-icon--box) { background: var(--surface); }
+  #today .today-tile :is(.card, .today-board):hover, #today .today-qa-item:hover .today-qa-icon--box { background: var(--surface2); }
 }
 
 /* Collapsed tile (double-click on the header): header only, whatever its size; not while editing */

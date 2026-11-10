@@ -303,6 +303,8 @@ function validMailFolderPath(path) {
 }
 
 // ---- Today page config (/today) ----
+// Stored Quick access icon: content-addressed name (today/quickaccess.js)
+const QA_ICON_FILE = /^qa-[a-f0-9]{16}\.(png|ico|svg|jpg|webp|gif)$/;
 const _todayLayoutSchema = {
   type: 'object', required: ['columns', 'tiles'], additionalProperties: false,
   properties: {
@@ -355,6 +357,33 @@ const validateTodayConfig = ajv.compile({
             hasApiKey:  { type: 'boolean' },
           },
         },
+        quickaccess: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            visible: { type: 'integer', minimum: 0, maximum: 50 },   // 0 = all
+            size:    { type: 'string', enum: ['s', 'm', 'l'] },
+            items: {
+              type: 'array', maxItems: 100,
+              items: {
+                type: 'object', required: ['id', 'url', 'icon'], additionalProperties: false,
+                properties: {
+                  id:    { type: 'string', pattern: '^qa-[a-z0-9]{1,24}$' },
+                  url:   { type: 'string', maxLength: 2000, pattern: '^https?://\\S+$' },
+                  title: { type: 'string', maxLength: 80 },
+                  icon: {
+                    oneOf: [
+                      { type: 'object', required: ['type', 'file'], additionalProperties: false,
+                        properties: { type: { const: 'image' }, file: { type: 'string', pattern: QA_ICON_FILE.source },
+                                      invertDark: { type: 'boolean' } } },   // dark icon → inverted in dark mode
+                      { type: 'object', required: ['type', 'value'], additionalProperties: false,
+                        properties: { type: { const: 'emoji' }, value: { type: 'string', minLength: 1, maxLength: 16 } } },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       additionalProperties: { type: 'object' },
     },
@@ -369,4 +398,4 @@ function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, QA_ICON_FILE, schemaError };

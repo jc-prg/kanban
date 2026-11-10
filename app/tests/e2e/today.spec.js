@@ -420,4 +420,60 @@ test.describe('Today page', () => {
     await expect(page.locator('#cardText')).toHaveValue('Send offer');
     expect(new URL(page.url()).pathname).toBe('/today');
   });
+  test('E-T-13 Quick access: shown entries + "Show more"; settings form adds a link (emoji) and saves it', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [
+      { id: 'agenda', col: 0, order: 0, size: '1/1' }, { id: 'quickaccess', col: 1, order: 0, size: 'container' },
+    ] } } };
+    await mockApis(page, state);
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    let quickaccess = { visible: 2, size: 'm', items: [
+      { id: 'qa-1', url: 'https://one.example/', title: 'One', icon: { type: 'image', file: 'qa-0123456789abcdef.png' } },
+      { id: 'qa-2', url: 'https://two.example/', title: 'Two', icon: { type: 'emoji', value: '📈' } },
+      { id: 'qa-3', url: 'https://three.example/', icon: { type: 'image', file: 'qa-fedcba9876543210.png' } },   // missing file
+    ] };
+    const cfg = () => ({ showBar: true, refreshMinutes: 0, widgets: { quickaccess }, layouts: state.layouts });
+    // One handler for GET + PUT (registered last → runs before mockApis' handler)
+    await page.route('**/api/today/config', async r => {
+      if (r.request().method() === 'PUT') {
+        state.put = JSON.parse(r.request().postData());
+        quickaccess = state.put.widgets?.quickaccess || quickaccess;
+        return r.fulfill({ json: { ok: true, config: cfg() } });
+      }
+      return r.fulfill({ json: cfg() });
+    });
+    await page.route('**/api/today/quickaccess/icon/*', r => r.request().url().includes('0123456789abcdef')
+      ? r.fulfill({ body: PNG, contentType: 'image/png' })
+      : r.fulfill({ status: 404, json: { error: 'Icon not found' } }));
+    await page.goto('/today');
+
+    const tile = page.locator('.today-tile[data-tile="quickaccess"]');
+    await expect(tile.locator('.today-qa-item:visible')).toHaveCount(2);
+    await expect(tile.locator('[data-qa="qa-1"]')).toHaveAttribute('href', 'https://one.example/');
+    await expect(tile.locator('[data-qa="qa-1"]')).toHaveAttribute('target', '_blank');
+    await expect(tile.locator('[data-qa="qa-2"] .today-qa-emoji')).toHaveText('📈');
+    await tile.locator('.today-qa-toggle').click();
+    await expect(tile.locator('.today-qa-item:visible')).toHaveCount(3);
+    await expect(tile.locator('[data-qa="qa-3"] .today-qa-title')).toHaveText('three.example');   // host as title
+    await expect(tile.locator('[data-qa="qa-3"] .today-qa-letter')).toHaveText('T');              // broken icon → letter
+    await expect(tile.locator('.today-qa-toggle')).toHaveText('Show less');
+
+    // Gear action → Settings → Dashboard with the Quick access row expanded
+    await tile.locator('.today-tile-btn').click();
+    const row = page.locator('.today-wrow[data-widget="quickaccess"]');
+    await expect(row).toHaveClass(/today-wrow--open/);
+    await expect(row.locator('.today-qa-row')).toHaveCount(3);
+    await page.click('#todayQaAddBtn');
+    await page.fill('#todayQaUrl', 'https://nas.example:5000/');
+    await page.fill('#todayQaTitle', 'NAS');
+    await page.check('input[name="todayQaIconType"][value="emoji"]');
+    await page.click('#todayQaEmojiBtn');
+    await page.locator('#todayQaEmojiPop [data-mv-emoji]').first().click();
+    await page.click('#todayQaSaveBtn');
+    await expect(page.locator('#todayQaForm')).toBeHidden();
+    const added = state.put.widgets.quickaccess.items.at(-1);
+    expect(added).toMatchObject({ url: 'https://nas.example:5000/', title: 'NAS', icon: { type: 'emoji' } });
+    expect(added.id).toMatch(/^qa-[a-z0-9]+$/);
+    expect(state.put.widgets.quickaccess).toMatchObject({ visible: 2, size: 'm' });
+    await expect(row.locator('.today-qa-row')).toHaveCount(4);
+  });
 });

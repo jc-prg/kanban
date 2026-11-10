@@ -936,14 +936,14 @@
           </div>
         </div>
 
-        <div class="settings-section" id="todaySection" data-settings-label="Today" data-settings-keywords="today widgets agenda weather cv-app applications progress boards layout bar refresh update interval" style="display:none">
+        <div class="settings-section" id="todaySection" data-settings-label="Dashboard" data-settings-keywords="dashboard today widgets agenda weather cv-app applications progress boards quick access links apps favicon layout bar refresh update interval" style="display:none">
           <div class="settings-section-title">
-            <span>Today</span>
+            <span>Dashboard</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
           </div>
           <div class="settings-section-body">
             <div class="settings-field-row">
-              <span class="settings-field-label">Update all tiles</span>
+              <span class="settings-field-label">Update tiles</span>
               <select id="todayRefresh" class="new-board-input" style="width:auto;flex:none">
                 <option value="1">every minute</option>
                 <option value="2">every 2 minutes</option>
@@ -954,24 +954,25 @@
                 <option value="0">off (manual only)</option>
               </select>
             </div>
+            <p class="settings-item-desc">The weather is updated every 15 minutes at most.</p>
             <div class="settings-field-row">
               <span class="settings-field-label">Layouts</span>
               <button class="btn" id="todayResetLayoutsBtn">Reset all screen sizes to default</button>
             </div>
             <div class="settings-field-row">
               <span class="settings-field-label">Arrange tiles</span>
-              <button class="btn" id="todayEditLayoutBtn">Edit layout on the Today page</button>
+              <button class="btn" id="todayEditLayoutBtn">Edit layout on the dashboard</button>
             </div>
-            <p class="settings-item-desc">Opens the Today page in edit mode (also: <em>Edit layout</em> in the ☰ menu there). Columns, tile positions and heights are saved per screen size — edit on a narrow window to change the phone layout.</p>
+            <p class="settings-item-desc">Opens the dashboard in edit mode (also: <em>Edit layout</em> in the ☰ menu there). Columns, tile positions and heights are saved per screen size — edit on a narrow window to change the phone layout.</p>
 
             <p class="settings-subtitle">Widgets</p>
             <!-- Rows built from TODAY_TILES (_todayRenderWidgetRows); the settings blocks below move into them -->
             <div id="todayWidgetList" class="today-wlist">
               <div class="today-wrow" data-widget="bar">
                 <div class="today-wrow-head">
-                  <span class="today-wrow-expand today-wrow-expand--none"><span class="today-wrow-title">Today bar</span></span>
-                  <label class="settings-toggle" title="Show the Today bar above the tiles">
-                    <input type="checkbox" id="todayShowBar" checked aria-label="Today bar">
+                  <span class="today-wrow-expand today-wrow-expand--none"><span class="today-wrow-title">Dashboard bar</span></span>
+                  <label class="settings-toggle" title="Show the dashboard bar above the tiles">
+                    <input type="checkbox" id="todayShowBar" checked aria-label="Dashboard bar">
                     <span class="settings-toggle-track"></span>
                   </label>
                 </div>
@@ -1015,6 +1016,62 @@
             <div class="settings-webdav-actions">
               <button class="btn btn-accent" id="todayCvSaveBtn">Save</button>
             </div>
+            </div>
+
+            <div data-wset="quickaccess">
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="todayQaVisible">Always shown</label>
+              <input id="todayQaVisible" class="new-board-input" type="number" min="0" max="50" step="1" style="width:5.5em;flex:none">
+            </div>
+            <p class="settings-item-desc">Entries beyond this number appear after <em>Show more …</em> (0 = show all).</p>
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="todayQaSize">Icon size</label>
+              <select id="todayQaSize" class="new-board-input" style="width:auto;flex:none">
+                <option value="s">Small</option>
+                <option value="m">Medium</option>
+                <option value="l">Large</option>
+              </select>
+            </div>
+            <div id="todayQaList" class="today-qa-list"></div>
+            <div class="settings-webdav-actions">
+              <button class="btn" type="button" id="todayQaAddBtn">+ Add link</button>
+            </div>
+            <form id="todayQaForm" class="today-qa-form" hidden>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="todayQaUrl">URL</label>
+                <input id="todayQaUrl" class="new-board-input" type="url" placeholder="https://example.com" maxlength="2000" autocomplete="off" required>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="todayQaTitle">Title</label>
+                <input id="todayQaTitle" class="new-board-input" type="text" placeholder="shown below the icon (default: host name)" maxlength="80" autocomplete="off">
+              </div>
+              <div class="settings-field-row">
+                <span class="settings-field-label">Image</span>
+                <label class="today-qa-radio"><input type="radio" name="todayQaIconType" value="image" checked> App icon</label>
+                <label class="today-qa-radio"><input type="radio" name="todayQaIconType" value="emoji"> Emoji</label>
+              </div>
+              <div class="today-qa-form-icon">
+                <span id="todayQaPreview" class="today-qa-preview" aria-label="Icon preview"></span>
+                <div class="today-qa-form-image">
+                  <button class="btn" type="button" id="todayQaFetchBtn">Fetch icon</button>
+                  <button class="btn" type="button" id="todayQaUploadBtn">Upload image…</button>
+                  <label class="today-qa-radio" title="For dark, monochrome icons that are hard to see on the dark theme"><input type="checkbox" id="todayQaInvert"> Invert in dark mode</label>
+                  <input id="todayQaFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.ico" hidden>
+                </div>
+                <div class="today-qa-form-emoji" hidden>
+                  <input id="todayQaEmoji" class="new-board-input" type="text" maxlength="16" placeholder="🚀" autocomplete="off" style="width:4.5em;flex:none">
+                  <span class="mv-emoji-wrap">
+                    <button class="btn" type="button" id="todayQaEmojiBtn" aria-haspopup="true" aria-expanded="false">Pick…</button>
+                    <div id="todayQaEmojiPop" class="mv-emoji-pop" hidden></div>
+                  </span>
+                </div>
+              </div>
+              <p id="todayQaMsg" class="settings-item-desc" hidden></p>
+              <div class="settings-webdav-actions">
+                <button class="btn btn-accent" type="submit" id="todayQaSaveBtn">Save link</button>
+                <button class="btn" type="button" id="todayQaCancelBtn">Cancel</button>
+              </div>
+            </form>
             </div>
             </div>
             <div id="todaySettingsResult" class="settings-webdav-result" style="display:none"></div>

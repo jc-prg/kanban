@@ -1,16 +1,19 @@
 'use strict';
 // "Today" page (/today): config (layouts per breakpoint + widget settings) and widget providers.
 const express = require('express');
+const multer  = require('multer');
 const router  = express.Router();
-const { writeRateLimit }                   = require('../auth');
+const { writeRateLimit, uploadRateLimit }  = require('../auth');
 const { withHandler }                      = require('../db');
 const { getTodayConfig, saveTodayConfig } = require('../global-db');
-const { validateTodayConfig, schemaError } = require('../schemas');
+const { validateTodayConfig, QA_ICON_FILE, schemaError } = require('../schemas');
+const { TODAY_ICONS_DIR }                  = require('../config');
 const { defaultTodayConfig, BREAKPOINTS }  = require('../today/defaults');
 const { fetchTodayCards }                  = require('../today/cards');
 const { fetchWeather, geocode }            = require('../today/weather');
 const { fetchApplications }                = require('../today/cvapp');
 const { fetchNoteTrees }                   = require('../today/notes');
+const { fetchIcon, saveIcon, pruneIcons, MAX_ICON } = require('../today/quickaccess');
 
 const _ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -92,6 +95,14 @@ function checkWidgets(widgets) {
       if (cv[k] && !/^https?:\/\/[^\s]+$/i.test(cv[k])) return `widgets.cvapp.${k} must be an http(s) URL`;
     }
   }
+  const qa = widgets?.quickaccess;
+  if (qa?.items) {
+    const ids = new Set();
+    for (const it of qa.items) {
+      if (ids.has(it.id)) return `widgets.quickaccess: entry "${it.id}" appears twice`;
+      ids.add(it.id);
+    }
+  }
   const w = widgets?.weather;
   if (w && (('lat' in w) !== ('lon' in w))) return 'widgets.weather needs both lat and lon';
   return null;
@@ -111,6 +122,7 @@ router.put('/today/config', writeRateLimit, withHandler(async (req, res) => {
   const incoming = 'widgets' in req.body ? mergeSecrets(stored, req.body) : req.body;
   const merged = { ...stored, ...incoming };
   await saveTodayConfig(merged);
+  if ('widgets' in req.body) pruneIcons(merged).catch(() => {});   // icons of removed Quick access entries
   res.json({ ok: true, config: stripSecrets(merged) });
 }));
 
@@ -130,6 +142,45 @@ router.get('/today/widgets/:id', withHandler(async (req, res) => {
     res.status(e.statusCode || 502).json({ error: e.message || 'Widget failed' });
   }
 }));
+
+// ---- Quick access icons (stored once under TODAY_ICONS_DIR, content-addressed names) ----
+
+router.post('/today/quickaccess/icon', writeRateLimit, withHandler(async (req, res) => {
+  const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+  if (!/^https?:\/\/\S+$/i.test(url) || url.length > 2000) return res.status(400).json({ error: 'url must be an http(s) URL' });
+  try {
+    res.json(await fetchIcon(url));
+  } catch (e) {
+    res.status(e.statusCode || 502).json({ error: e.message || 'Icon could not be loaded' });
+  }
+}));
+
+const _iconUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ICON, files: 1 } }).single('file');
+
+router.post('/today/quickaccess/icon/upload', uploadRateLimit, (req, res) => {
+  _iconUpload(req, res, async err => {
+    if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Image too large (max 512 KB)' : err.message });
+    if (!req.file) return res.status(400).json({ error: 'file missing' });
+    try {
+      res.json(await saveIcon(req.file.buffer));
+    } catch (e) {
+      res.status(e.statusCode || 500).json({ error: e.message });
+    }
+  });
+});
+
+router.get('/today/quickaccess/icon/:file', (req, res) => {
+  const { file } = req.params;
+  if (!QA_ICON_FILE.test(file)) return res.status(400).json({ error: 'Invalid icon name' });
+  res.set({
+    'Cache-Control': 'private, max-age=31536000, immutable',   // content-addressed name
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",   // SVG opened directly
+  });
+  res.sendFile(file, { root: TODAY_ICONS_DIR }, err => {
+    if (err && !res.headersSent) res.status(err.statusCode === 404 || err.code === 'ENOENT' ? 404 : 500).json({ error: 'Icon not found' });
+  });
+});
 
 router.get('/today/geocode', withHandler(async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';

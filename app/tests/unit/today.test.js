@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page unit tests — TU-1 … TU-11
+ * Today page unit tests — TU-1 … TU-22
  *
  * today.js is loaded via vm.runInContext with minimal browser-global stubs; only the pure
  * helpers are exercised (layout resolution / folding, agenda model, weather mapping, ISO week).
@@ -224,7 +224,7 @@ test('TU-13 size "available": one per column — stored, folded and edited layou
 })
 
 test('TU-14 deactivated widgets: _todayKnownTiles skips them; _todayLayoutsWith re-adds a tile where it is missing', () => {
-  expect(plain(ctx._todayKnownTiles({ disabled: ['weather', 'cvapp'] }))).toEqual(['agenda', 'attention', 'progress', 'boards', 'notes'])
+  expect(plain(ctx._todayKnownTiles({ disabled: ['weather', 'cvapp'] }))).toEqual(['agenda', 'attention', 'progress', 'quickaccess', 'boards', 'notes'])
   const layouts = {
     lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: '1/1' }, { id: 'boards', col: 1, order: 0, size: 'container' }] },
     sm: { columns: [{ width: 1 }], tiles: [{ id: 'weather', col: 0, order: 0, size: 'container' }] },
@@ -304,4 +304,39 @@ test('TU-20 _todayMeetingLink — Teams / Webex / Google Meet / Zoom from locati
   expect(m({ location: 'https://acme.webex.com/acme/j.php?MTID=m1' }).name).toBe('Webex')
   expect(m({ location: 'https://zoom.us/', description: 'https://example.com/zoom.us/j/1' })).toBeNull()
   expect(m({ location: '', description: '' })).toBeNull()
+})
+
+test('TU-21 Quick access: _todayQaCfg defaults, _todayQaSplit (0 = all), _todayQaMove', () => {
+  expect(plain(ctx._todayQaCfg({}))).toEqual({ visible: 8, size: 'm', items: [] })
+  expect(plain(ctx._todayQaCfg({ widgets: { quickaccess: { visible: 0, size: 'x', items: [{ id: 'qa-1' }] } } })))
+    .toEqual({ visible: 0, size: 'm', items: [{ id: 'qa-1' }] })
+  const items = ['a', 'b', 'c', 'd'].map(id => ({ id }))
+  const ids = r => ({ shown: r.shown.map(i => i.id), more: r.more.map(i => i.id) })
+  expect(ids(ctx._todayQaSplit(items, 2))).toEqual({ shown: ['a', 'b'], more: ['c', 'd'] })
+  expect(ids(ctx._todayQaSplit(items, 0))).toEqual({ shown: ['a', 'b', 'c', 'd'], more: [] })
+  expect(ids(ctx._todayQaSplit(items, 9))).toEqual({ shown: ['a', 'b', 'c', 'd'], more: [] })
+  expect(ids(ctx._todayQaSplit(undefined, 3))).toEqual({ shown: [], more: [] })
+  expect(plain(ctx._todayQaMove(items, 0, 2)).map(i => i.id)).toEqual(['b', 'c', 'a', 'd'])
+  expect(plain(ctx._todayQaMove(items, 3, 0)).map(i => i.id)).toEqual(['d', 'a', 'b', 'c'])
+  expect(items.map(i => i.id)).toEqual(['a', 'b', 'c', 'd'])   // not mutated
+})
+
+test('TU-22 Quick access: icon markup — stored image (bare, optional invert), emoji / letter (framed); escaped', () => {
+  ctx.BASE_PATH = '/kb'
+  ctx.URL = URL
+  ctx.escHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  expect(ctx._todayQaIconHtml({ icon: { type: 'image', file: 'qa-0123456789abcdef.png' } }))
+    .toContain('src="/kb/api/today/quickaccess/icon/qa-0123456789abcdef.png"')
+  expect(ctx._todayQaIconHtml({ icon: { type: 'emoji', value: '🚀' } })).toContain('🚀')
+  expect(ctx._todayQaIconHtml({ title: 'grafana', icon: null })).toContain('>G<')
+  expect(ctx._todayQaIconHtml({ url: 'https://www.example.com/x' })).toContain('>E<')   // host without www.
+  expect(ctx._todayQaIconHtml({ title: '<b>', icon: { type: 'emoji', value: '<i>' } })).not.toContain('<i>')
+  expect(ctx._todayQaHost('https://www.github.com/foo')).toBe('github.com')
+  // App icons stand alone, emoji / letter get the framed area; invert class only when set
+  expect(ctx._todayQaIconBoxHtml({ icon: { type: 'image', file: 'qa-0123456789abcdef.png' } })).toContain('today-qa-icon--img')
+  expect(ctx._todayQaIconBoxHtml({ icon: { type: 'emoji', value: '🚀' } })).toContain('today-qa-icon--box')
+  expect(ctx._todayQaIconBoxHtml({ title: 'x' })).toContain('today-qa-icon--box')
+  expect(ctx._todayQaIconHtml({ icon: { type: 'image', file: 'qa-0123456789abcdef.png', invertDark: true } })).toContain('today-qa-img--invert')
+  expect(ctx._todayQaIconHtml({ icon: { type: 'image', file: 'qa-0123456789abcdef.png' } })).not.toContain('--invert')
+  delete ctx.BASE_PATH
 })

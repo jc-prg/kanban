@@ -231,6 +231,7 @@ function _todayIsoWeek(d) {
 // ---- State ----
 
 let _todayCfg      = null;    // GET /api/today/config
+let _todayExpandWidget = null; // widget row to expand when Settings → Today opens (tile action)
 let _todayBp       = null;    // breakpoint of the shown layout
 let _todayLayout   = null;    // resolved layout on screen
 let _todayEdit     = null;    // { bp, draft, dirty } while editing
@@ -303,6 +304,20 @@ function _todayKanbanCardHtml(item) {
   </div>`;
 }
 
+// Weather (tile + Today bar): reused for 15 minutes by the automatic refresh (the server caches
+// Open-Meteo for as long); a failed request is not kept.
+const _TODAY_WEATHER_MS = 15 * 60 * 1000;
+let _todayWeatherCache = null;   // { at, promise }
+
+function _todayWeather() {
+  if (!_todayWeatherCache || Date.now() - _todayWeatherCache.at >= _TODAY_WEATHER_MS) {
+    const promise = _todayFetchJson('/api/today/widgets/weather');
+    _todayWeatherCache = { at: Date.now(), promise };
+    promise.catch(() => { if (_todayWeatherCache?.promise === promise) _todayWeatherCache = null; });
+  }
+  return _todayWeatherCache.promise;
+}
+
 // ---- Tile registry ----
 // { title, desc, settings? (block [data-wset=<id>] in Settings → Today), load() → data, render(body, data),
 //   actions?() → [{ icon, title, run }] }
@@ -331,9 +346,9 @@ const TODAY_TILES = {
   },
   weather: {
     title: 'Weather',
-    desc: 'Forecast for the rest of the day (Open-Meteo)',
+    desc: 'Forecast for the rest of the day (Open-Meteo), updated every 15 minutes',
     settings: true,
-    load: () => _todayFetchJson('/api/today/widgets/weather'),
+    load: () => _todayWeather(),
     render: _todayRenderWeather,
   },
   cvapp: {
@@ -364,6 +379,14 @@ const TODAY_TILES = {
       { label: '›', title: 'Next day', disabled: _todayAchOffset >= 0, run: () => _todaySetAchOffset(_todayAchOffset + 1) },
       { icon: SVGICONS.stats(13, 13), title: 'Statistics (achievement history)', run: () => openAchievementHistory() },
     ],
+  },
+  quickaccess: {
+    title: 'Quick access',
+    desc: 'Direct links to web apps and pages — app icon or emoji',
+    settings: true,
+    load: () => Promise.resolve(_todayCfg?.widgets?.quickaccess || {}),
+    render: _todayRenderQuickAccess,
+    actions: () => [{ icon: SVGICONS.settings(12, 12), title: 'Edit entries', run: () => _todayOpenWidgetSettings('quickaccess') }],
   },
   boards: {
     title: 'Boards',
@@ -723,6 +746,7 @@ function _todayScheduleFit() {
 
 async function loadToday({ quiet = false } = {}) {
   _todayFetchMemo = new Map();
+  if (!quiet) _todayWeatherCache = null;   // manual refresh / settings change: fresh weather
   _todayStale = false;
   const fetchedAt = document.getElementById('dashboardFetchedAt');
   clearTimeout(_fetchedAtTimer);
@@ -888,7 +912,7 @@ async function _todayRenderBar() {
   const w = _todayCfg?.widgets?.weather;
   if (!w || w.lat == null) return;
   try {
-    const data = await _todayFetchJson('/api/today/widgets/weather');
+    const data = await _todayWeather();
     const el = document.getElementById('todayBarWeather');
     if (!el) return;
     const kind = _todayWeatherKind(data.current.code, data.current.isDay);
@@ -1407,6 +1431,96 @@ function _todayFitBoards(body) {
   // Two per row is the minimum: when even that is too narrow, tighten paddings so the counts still fit
   const cardW = (grid.clientWidth - gap * (n - 1)) / n;
   body.classList.toggle('today-boards-compact', cardW < body._todayBoardNeed);
+}
+
+// ---- Quick access ----
+// Entries live in the Today config (`widgets.quickaccess`); fetched icons are stored on the server
+// (routes/today.js, content-addressed → cached by the browser for good).
+
+const _TODAY_QA_SIZES = ['s', 'm', 'l'];
+
+/** Entries always shown and the ones behind "Show more"; `visible` 0 (or unset) = all. Pure. */
+function _todayQaSplit(items, visible) {
+  const list = Array.isArray(items) ? items : [];
+  const n = Number(visible) > 0 ? Number(visible) : list.length;
+  return { shown: list.slice(0, n), more: list.slice(n) };
+}
+
+function _todayQaHost(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return String(url || ''); }
+}
+
+/** Icon markup of an entry: stored image, emoji, or the first letter of the title. Pure. */
+function _todayQaIconHtml(item) {
+  const icon = item?.icon;
+  if (icon?.type === 'image' && icon.file) return `<img class="today-qa-img${icon.invertDark ? ' today-qa-img--invert' : ''}" src="${BASE_PATH}/api/today/quickaccess/icon/${encodeURIComponent(icon.file)}" alt="" loading="lazy" draggable="false">`;
+  if (icon?.type === 'emoji' && icon.value) return `<span class="today-qa-emoji">${escHtml(icon.value)}</span>`;
+  return _todayQaLetterHtml(item);
+}
+
+function _todayQaLetterHtml(item) {
+  const t = (item?.title || _todayQaHost(item?.url)).trim();
+  return `<span class="today-qa-letter">${escHtml((Array.from(t)[0] || '?').toUpperCase())}</span>`;
+}
+
+/**
+ * Icon in its wrapper: app icons stand alone (`--img`), emojis and the letter fallback sit in a
+ * framed area (`--box`). Pure.
+ */
+function _todayQaIconBoxHtml(item) {
+  const img = item?.icon?.type === 'image' && item.icon.file;
+  return `<span class="today-qa-icon today-qa-icon--${img ? 'img' : 'box'}">${_todayQaIconHtml(item)}</span>`;
+}
+
+function _todayQaItemHtml(item) {
+  const title = item.title || _todayQaHost(item.url);
+  return `<a class="today-qa-item" href="${escHtml(safeLink(item.url) || '#')}" target="_blank" rel="noopener noreferrer" title="${escHtml(`${title} — ${item.url}`)}" data-qa="${escHtml(item.id)}">
+      ${_todayQaIconBoxHtml(item)}
+      <span class="today-qa-title">${escHtml(title)}</span></a>`;
+}
+
+/** Stored icon missing / broken → first letter (no inline onerror: CSP script-src-attr 'none'). */
+function _todayQaImgFallback(root, items) {
+  for (const img of root.querySelectorAll('img')) {
+    img.addEventListener('error', () => {
+      const item = items.find(i => i.id === img.closest('[data-qa]')?.dataset.qa);
+      img.parentElement?.classList.replace('today-qa-icon--img', 'today-qa-icon--box');
+      img.outerHTML = _todayQaLetterHtml(item);
+    }, { once: true });
+  }
+}
+
+/** "Show more" expanded; per browser. */
+function _todayQaMore() {
+  try { return localStorage.getItem('today-qa-more') === '1'; } catch { return false; }
+}
+
+function _todayRenderQuickAccess(body, data, el) {
+  const { items, size, visible } = _todayQaCfg({ widgets: { quickaccess: data } });
+  _todaySetCount(el, items.length);
+  if (!items.length) {
+    body.innerHTML = `<div class="today-qa-empty"><p class="dashboard-empty">No links yet.</p>
+      <button class="btn" type="button" data-qa-setup>Add links</button></div>`;
+    body.querySelector('[data-qa-setup]').addEventListener('click', () => _todayOpenWidgetSettings('quickaccess'));
+    return;
+  }
+  const { shown, more } = _todayQaSplit(items, visible);
+  const open = _todayQaMore();
+  body.innerHTML = `<div class="today-qa today-qa--${size}">${shown.map(_todayQaItemHtml).join('')}${
+      more.length ? `<div class="today-qa-more"${open ? '' : ' hidden'}>${more.map(_todayQaItemHtml).join('')}</div>` : ''}</div>
+    ${more.length ? `<button class="today-qa-toggle" type="button" aria-expanded="${open}">${open ? 'Show less' : `Show more … (${more.length})`}</button>` : ''}`;
+  _todayQaImgFallback(body, items);
+  body.querySelector('.today-qa-toggle')?.addEventListener('click', () => {
+    try { localStorage.setItem('today-qa-more', open ? '0' : '1'); } catch { /* ignore */ }
+    _todayRenderQuickAccess(body, data, el);
+    _todayScheduleFit();
+  });
+}
+
+/** Settings → Today with the widget's row expanded (from a tile action). */
+function _todayOpenWidgetSettings(id) {
+  _todayExpandWidget = id;
+  if (typeof window.openSettingsDialog === 'function') window.openSettingsDialog('todaySection');
 }
 
 // ---- Notes ----
@@ -2026,6 +2140,10 @@ async function loadTodaySettings() {
   keyEl.value = '';
   keyEl.placeholder = cv.hasApiKey ? '•••••• (stored — leave empty to keep)' : 'API key';
   sec.dataset.cfg = JSON.stringify(cfg);
+  const qa = _todayQaCfg(cfg);
+  document.getElementById('todayQaVisible').value = String(qa.visible);
+  document.getElementById('todayQaSize').value    = qa.size;
+  _todayQaRenderList(cfg);
 }
 
 /**
@@ -2075,6 +2193,12 @@ function _todayRenderWidgetRows(cfg) {
     const on = _todayWidgetShown(cfg, input.dataset.widgetToggle);
     input.checked = on;
     input.closest('.today-wrow').classList.toggle('today-wrow--off', !on);
+  }
+  if (_todayExpandWidget) {
+    const row = list.querySelector(`.today-wrow[data-widget="${_todayExpandWidget}"]`);
+    _todayExpandWidget = null;
+    if (row && !row.classList.contains('today-wrow--open')) row.querySelector('button.today-wrow-expand')?.click();
+    requestAnimationFrame(() => row?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
   }
 }
 
@@ -2166,6 +2290,8 @@ function initTodaySettings() {
     } catch (err) { report(err.message, false); }
   });
 
+  _todayQaWire(report);
+
   document.getElementById('todayEditLayoutBtn').addEventListener('click', () => {
     if (APP_PATH !== '/today') { window.location.href = appUrl('/today?edit=1'); return; }
     document.getElementById('settingsBackdrop')?.style.setProperty('display', 'none');
@@ -2173,7 +2299,7 @@ function initTodaySettings() {
   });
 
   document.getElementById('todayResetLayoutsBtn').addEventListener('click', async () => {
-    if (!(await showConfirm('Reset the Today layouts of all screen sizes to the default?', { okLabel: 'Reset' }))) return;
+    if (!(await showConfirm('Reset the dashboard layouts of all screen sizes to the default?', { okLabel: 'Reset' }))) return;
     try {
       const res = await fetch('/api/today/config/reset-layouts', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
@@ -2181,5 +2307,291 @@ function initTodaySettings() {
       if (APP_PATH === '/today') { _todayCfg = data.config; _todayRelayout(); loadToday(); }
       report('Layouts reset.', true);
     } catch (err) { report(err.message, false); }
+  });
+}
+
+// ---- Settings → Today → Quick access ----
+
+let _todayQaEdit    = null;   // open form: { idx (-1 = new), icon, iconFor (URL the fetched icon belongs to) }
+let _todayQaDragIdx = null;
+
+/** Stored Quick access settings with defaults (8 always shown, medium icons). Pure. */
+function _todayQaCfg(cfg) {
+  const qa = cfg?.widgets?.quickaccess || {};
+  return {
+    visible: Number.isInteger(qa.visible) ? qa.visible : 8,
+    size:    _TODAY_QA_SIZES.includes(qa.size) ? qa.size : 'm',
+    items:   Array.isArray(qa.items) ? qa.items : [],
+  };
+}
+
+async function _todayQaSave(patch, msg) {
+  const cfg = _todaySettingsCfg();
+  const quickaccess = { ..._todayQaCfg(cfg), ...patch };
+  const saved = await _todaySaveSettings({ widgets: { ...(cfg.widgets || {}), quickaccess } }, msg);
+  _todayQaRenderList(saved);
+  return saved;
+}
+
+function _todayQaRenderList(cfg) {
+  const list = document.getElementById('todayQaList');
+  if (!list) return;
+  const { items } = _todayQaCfg(cfg);
+  list.innerHTML = items.length
+    ? items.map((it, i) => `
+      <div class="calendar-account-row cs-source-row today-qa-row" draggable="true" data-qa-idx="${i}" data-qa="${escHtml(it.id)}">
+        <span class="cs-drag-handle" title="Drag to reorder">${_svgDragHandle()}</span>
+        <span class="today-qa-preview today-qa-preview--sm">${_todayQaIconBoxHtml(it)}</span>
+        <div class="calendar-account-info">
+          <strong>${escHtml(it.title || _todayQaHost(it.url))}</strong>
+          <span class="settings-item-desc">${escHtml(it.url)}</span>
+        </div>
+        <div class="calendar-account-actions">
+          <button class="btn btn--icon" type="button" data-qa-edit="${i}" title="Edit">${SVGICONS.edit(14, 14)}</button>
+          <button class="btn btn--icon" type="button" data-qa-del="${i}" title="Delete">${_svgDelete()}</button>
+        </div>
+      </div>`).join('')
+    : '<p class="settings-item-desc" style="margin:4px 0 8px">No links yet.</p>';
+  _todayQaImgFallback(list, items);
+}
+
+/** Move entry `from` before / onto position `to`. Pure. */
+function _todayQaMove(items, from, to) {
+  const out = items.slice();
+  const [moved] = out.splice(from, 1);
+  out.splice(to, 0, moved);
+  return out;
+}
+
+function _todayQaMsg(text, ok = false) {
+  const el = document.getElementById('todayQaMsg');
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.classList.toggle('today-qa-msg--err', !!text && !ok);
+}
+
+function _todayQaIconType() {
+  return document.querySelector('input[name="todayQaIconType"]:checked')?.value === 'emoji' ? 'emoji' : 'image';
+}
+
+/** Form preview: emoji / fetched image / first letter, and the matching controls. */
+function _todayQaSyncForm() {
+  const type  = _todayQaIconType();
+  const form  = document.getElementById('todayQaForm');
+  form.querySelector('.today-qa-form-image').hidden = type !== 'image';
+  form.querySelector('.today-qa-form-emoji').hidden = type !== 'emoji';
+  const emoji = document.getElementById('todayQaEmoji').value.trim();
+  const item  = {
+    url: document.getElementById('todayQaUrl').value.trim(),
+    title: document.getElementById('todayQaTitle').value.trim(),
+    icon: type === 'emoji' ? (emoji ? { type: 'emoji', value: emoji } : null) : _todayQaImageIcon(),
+  };
+  const prev = document.getElementById('todayQaPreview');
+  prev.className = `today-qa-preview today-qa--${document.getElementById('todayQaSize').value || 'm'}`;
+  prev.innerHTML = _todayQaIconBoxHtml(item);
+  _todayQaImgFallback(prev, [item]);
+}
+
+/** Image icon of the open form (fetched / uploaded file + the invert checkbox), or null. */
+function _todayQaImageIcon() {
+  const file = _todayQaEdit?.icon?.file;
+  if (!file) return null;
+  return document.getElementById('todayQaInvert').checked ? { type: 'image', file, invertDark: true } : { type: 'image', file };
+}
+
+function _todayQaOpenForm(idx) {
+  const items = _todayQaCfg(_todaySettingsCfg()).items;
+  const it = idx >= 0 ? items[idx] : null;
+  _todayQaEdit = { idx, icon: it?.icon?.type === 'image' ? it.icon : null, iconFor: it?.url || '' };
+  document.getElementById('todayQaUrl').value   = it?.url || '';
+  document.getElementById('todayQaTitle').value = it?.title || '';
+  document.getElementById('todayQaEmoji').value = it?.icon?.type === 'emoji' ? it.icon.value : '';
+  document.getElementById('todayQaInvert').checked = !!it?.icon?.invertDark;
+  for (const r of document.querySelectorAll('input[name="todayQaIconType"]')) r.checked = r.value === (it?.icon?.type === 'emoji' ? 'emoji' : 'image');
+  document.getElementById('todayQaSaveBtn').textContent = it ? 'Save link' : 'Add link';
+  _todayQaMsg('');
+  const form = document.getElementById('todayQaForm');
+  form.hidden = false;
+  document.getElementById('todayQaAddBtn').hidden = true;
+  _todayQaSyncForm();
+  document.getElementById('todayQaUrl').focus();
+}
+
+function _todayQaCloseForm() {
+  _todayQaEdit = null;
+  _todayQaToggleEmoji(false);
+  document.getElementById('todayQaForm').hidden = true;
+  document.getElementById('todayQaAddBtn').hidden = false;
+}
+
+/** POST the URL / file to the icon endpoint; stores `{ type: 'image', file }` in the form state. */
+async function _todayQaLoadIcon(request, iconFor) {
+  const res  = await fetch(request.url, request.init);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (_todayQaEdit) _todayQaEdit = { ..._todayQaEdit, icon: { type: 'image', file: data.file }, iconFor };
+  _todayQaSyncForm();
+  return data.file;
+}
+
+function _todayQaFetchIcon(url) {
+  return _todayQaLoadIcon({ url: '/api/today/quickaccess/icon',
+    init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) } }, url);
+}
+
+function _todayQaToggleEmoji(show) {
+  const pop = document.getElementById('todayQaEmojiPop');
+  const btn = document.getElementById('todayQaEmojiBtn');
+  if (!pop || typeof _mvRenderEmojiPop !== 'function') return;
+  show ??= pop.hidden;
+  if (show) _mvRenderEmojiPop(pop);
+  pop.hidden = !show;
+  btn.setAttribute('aria-expanded', String(show));
+}
+
+function _todayQaWire(report) {
+  const sizeEl = document.getElementById('todayQaSize');
+  document.getElementById('todayQaVisible').addEventListener('change', async e => {
+    const n = Math.max(0, Math.min(50, Math.round(Number(e.target.value) || 0)));
+    e.target.value = String(n);
+    try { await _todayQaSave({ visible: n }); } catch (err) { report(err.message, false); }
+  });
+  sizeEl.addEventListener('change', async () => {
+    if (_todayQaEdit) _todayQaSyncForm();
+    try { await _todayQaSave({ size: sizeEl.value }); } catch (err) { report(err.message, false); }
+  });
+
+  // Entry list: edit / delete / drag to reorder
+  const list = document.getElementById('todayQaList');
+  list.addEventListener('click', async e => {
+    const edit = e.target.closest('[data-qa-edit]');
+    if (edit) { _todayQaOpenForm(Number(edit.dataset.qaEdit)); return; }
+    const del = e.target.closest('[data-qa-del]');
+    if (!del) return;
+    const items = _todayQaCfg(_todaySettingsCfg()).items;
+    const it = items[Number(del.dataset.qaDel)];
+    if (!it || !(await showConfirm(`Remove "${it.title || _todayQaHost(it.url)}" from Quick access?`, { okLabel: 'Remove' }))) return;
+    if (_todayQaEdit && _todayQaEdit.idx === Number(del.dataset.qaDel)) _todayQaCloseForm();
+    try { await _todayQaSave({ items: items.filter(x => x !== it) }, 'Link removed'); } catch (err) { report(err.message, false); }
+  });
+  list.addEventListener('dragstart', e => {
+    const row = e.target.closest('.today-qa-row');
+    if (!row) return;
+    _todayQaDragIdx = Number(row.dataset.qaIdx);
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => row.classList.add('cs-row-dragging'), 0);
+  });
+  list.addEventListener('dragend', () => {
+    _todayQaDragIdx = null;
+    list.querySelectorAll('.today-qa-row').forEach(r => r.classList.remove('cs-row-dragging', 'cs-row-drag-over'));
+  });
+  list.addEventListener('dragover', e => {
+    const row = e.target.closest('.today-qa-row');
+    if (!row || _todayQaDragIdx === null || Number(row.dataset.qaIdx) === _todayQaDragIdx) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    list.querySelectorAll('.today-qa-row').forEach(r => r.classList.toggle('cs-row-drag-over', r === row));
+  });
+  list.addEventListener('drop', async e => {
+    const row = e.target.closest('.today-qa-row');
+    if (!row || _todayQaDragIdx === null) return;
+    e.preventDefault();
+    const to = Number(row.dataset.qaIdx);
+    if (to === _todayQaDragIdx) return;
+    const items = _todayQaMove(_todayQaCfg(_todaySettingsCfg()).items, _todayQaDragIdx, to);
+    _todayQaDragIdx = null;
+    if (_todayQaEdit) _todayQaCloseForm();   // indices changed
+    try { await _todayQaSave({ items }, 'Order saved'); } catch (err) { report(err.message, false); }
+  });
+
+  // Add / edit form
+  const form = document.getElementById('todayQaForm');
+  document.getElementById('todayQaAddBtn').addEventListener('click', () => _todayQaOpenForm(-1));
+  document.getElementById('todayQaCancelBtn').addEventListener('click', _todayQaCloseForm);
+  form.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();   // keep the settings dialog open
+    if (!document.getElementById('todayQaEmojiPop').hidden) _todayQaToggleEmoji(false); else _todayQaCloseForm();
+  });
+  form.addEventListener('input', e => { if (e.target.id !== 'todayQaUrl') _todayQaSyncForm(); });
+  form.addEventListener('change', e => { if (e.target.name === 'todayQaIconType') _todayQaSyncForm(); });
+  document.getElementById('todayQaUrl').addEventListener('change', e => {
+    const url = e.target.value.trim();
+    const title = document.getElementById('todayQaTitle');
+    if (!title.value.trim() && safeLink(url)) title.placeholder = _todayQaHost(url);
+  });
+
+  const fetchBtn = document.getElementById('todayQaFetchBtn');
+  fetchBtn.addEventListener('click', async () => {
+    const url = document.getElementById('todayQaUrl').value.trim();
+    if (!safeLink(url)) { _todayQaMsg('Enter an http(s) URL first.'); return; }
+    fetchBtn.disabled = true;
+    _todayQaMsg('Looking for the best icon…', true);
+    try { await _todayQaFetchIcon(url); _todayQaMsg(''); }
+    catch (err) { _todayQaMsg(`${err.message} — upload an image or choose an emoji.`); }
+    finally { fetchBtn.disabled = false; }
+  });
+  const fileEl = document.getElementById('todayQaFile');
+  document.getElementById('todayQaUploadBtn').addEventListener('click', () => fileEl.click());
+  fileEl.addEventListener('change', async () => {
+    const file = fileEl.files?.[0];
+    fileEl.value = '';
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      // iconFor null: an uploaded image stays when the URL changes
+      await _todayQaLoadIcon({ url: '/api/today/quickaccess/icon/upload', init: { method: 'POST', body: fd } }, null);
+      _todayQaMsg('');
+    } catch (err) { _todayQaMsg(err.message); }
+  });
+
+  // Emoji picker (the mail compose picker's categories and recent list)
+  const pop = document.getElementById('todayQaEmojiPop');
+  document.getElementById('todayQaEmojiBtn').addEventListener('click', () => _todayQaToggleEmoji());
+  pop.addEventListener('click', e => {
+    const tab = e.target.closest('[data-mv-emoji-tab]');
+    if (tab) { _mvEmojiTab = tab.dataset.mvEmojiTab; _mvRenderEmojiPop(pop); return; }
+    const em = e.target.closest('[data-mv-emoji]');
+    if (!em) return;
+    document.getElementById('todayQaEmoji').value = em.dataset.mvEmoji;
+    _mvEmojiRemember(em.dataset.mvEmoji);
+    _todayQaToggleEmoji(false);
+    _todayQaSyncForm();
+  });
+  document.addEventListener('click', e => {
+    if (!pop.hidden && !e.target.closest('#todayQaForm .mv-emoji-wrap')) _todayQaToggleEmoji(false);
+  });
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!_todayQaEdit) return;
+    const url   = document.getElementById('todayQaUrl').value.trim();
+    const title = document.getElementById('todayQaTitle').value.trim();
+    if (!safeLink(url)) { _todayQaMsg('Enter an http(s) URL.'); return; }
+    let icon;
+    if (_todayQaIconType() === 'emoji') {
+      const value = document.getElementById('todayQaEmoji').value.trim();
+      if (!value) { _todayQaMsg('Choose an emoji.'); return; }
+      icon = { type: 'emoji', value };
+    } else {
+      // No icon yet, or one fetched for a different URL → fetch it now
+      if (!_todayQaEdit.icon || (_todayQaEdit.iconFor !== null && _todayQaEdit.iconFor !== url)) {
+        _todayQaMsg('Looking for the best icon…', true);
+        try { await _todayQaFetchIcon(url); }
+        catch (err) { _todayQaMsg(`${err.message} — upload an image or choose an emoji.`); return; }
+      }
+      icon = _todayQaImageIcon();
+    }
+    const items = _todayQaCfg(_todaySettingsCfg()).items.slice();
+    const { idx } = _todayQaEdit;
+    const entry = { id: idx >= 0 && items[idx] ? items[idx].id : `qa-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, url, icon };
+    if (title) entry.title = title;
+    if (idx >= 0 && items[idx]) items[idx] = entry; else items.push(entry);
+    try {
+      await _todayQaSave({ items }, idx >= 0 ? 'Link saved' : 'Link added');
+      _todayQaCloseForm();
+    } catch (err) { _todayQaMsg(err.message); }
   });
 }
