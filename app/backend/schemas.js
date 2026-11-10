@@ -319,7 +319,7 @@ const _todayLayoutSchema = {
           id:    { type: 'string', pattern: '^[a-z0-9-]{1,32}$' },
           col:   { type: 'integer', minimum: 0, maximum: 3 },
           order: { type: 'integer', minimum: 0, maximum: 999 },
-          size:  { type: 'string', enum: ['1/1', '2/3', '1/2', '1/3', 'container'] },
+          size:  { type: 'string', enum: ['1/1', '2/3', '1/2', '1/3', 'container', 'available'] },
         },
       },
     },
@@ -329,6 +329,7 @@ const validateTodayConfig = ajv.compile({
   type: 'object', additionalProperties: false,
   properties: {
     showBar: { type: 'boolean' },
+    refreshMinutes: { type: 'integer', minimum: 0, maximum: 60 },   // 0 = no automatic refresh
     widgets: {
       type: 'object',
       properties: {

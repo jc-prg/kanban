@@ -71,10 +71,13 @@ function checkLayouts(layouts) {
     const l = layouts?.[bp];
     if (!l) continue;
     const ids = new Set();
+    const fill = new Set();   // columns that already have an "available" tile
     for (const t of l.tiles) {
       if (t.col >= l.columns.length) return `layouts.${bp}: tile "${t.id}" is in column ${t.col + 1}, but the layout has ${l.columns.length}`;
       if (ids.has(t.id)) return `layouts.${bp}: tile "${t.id}" appears twice`;
+      if (t.size === 'available' && fill.has(t.col)) return `layouts.${bp}: column ${t.col + 1} has more than one tile of size "available"`;
       ids.add(t.id);
+      if (t.size === 'available') fill.add(t.col);
     }
   }
   return null;

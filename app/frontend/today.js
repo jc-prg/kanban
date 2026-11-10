@@ -13,9 +13,11 @@ const TODAY_BPS = [
   { key: 'md', min: 768,  cols: 2, label: 'Medium (≥ 768 px)' },
   { key: 'sm', min: 0,    cols: 1, label: 'Small (< 768 px)' },
 ];
-const TODAY_SIZES      = ['1/1', '2/3', '1/2', '1/3', 'container'];
+// `available` = fit content, at most the space the other tiles leave in the column (one per column)
+const TODAY_SIZES      = ['1/1', '2/3', '1/2', '1/3', 'container', 'available'];
 const _TODAY_SIZE_FRAC = { '1/1': 1, '2/3': 2 / 3, '1/2': 1 / 2, '1/3': 1 / 3 };
-const _TODAY_SIZE_CLS  = { '1/1': 'f1', '2/3': 'f23', '1/2': 'f12', '1/3': 'f13', container: 'auto' };
+const _TODAY_SIZE_CLS  = { '1/1': 'f1', '2/3': 'f23', '1/2': 'f12', '1/3': 'f13', container: 'auto', available: 'fill' };
+const _TODAY_SIZE_LABEL = { container: 'fit content', available: 'available space' };
 const _TODAY_MIN_COL_W = 320;
 const _TODAY_GAP       = 16;
 const _TODAY_SOON_DAYS = 2;   // "Needs attention": cards due within this many days after today
@@ -30,6 +32,21 @@ function _todayBpFor(width) {
 /** Relative height of a tile for balancing; `container` counts as 1/3. */
 function _todaySizeWeight(size) {
   return _TODAY_SIZE_FRAC[size] ?? 1 / 3;
+}
+
+/**
+ * Only one `available` tile per column: `keepId` (if given) wins, else the first in order;
+ * the others become `container`. `tiles` must be sorted by column + order. Mutates and returns it.
+ */
+function _todayOneAvailable(tiles, keepId) {
+  const keep = new Map();
+  if (keepId) for (const t of tiles) if (t.id === keepId && t.size === 'available') keep.set(t.col, t.id);
+  for (const t of tiles) {
+    if (t.size !== 'available') continue;
+    if (!keep.has(t.col)) keep.set(t.col, t.id);
+    if (keep.get(t.col) !== t.id) t.size = 'container';
+  }
+  return tiles;
 }
 
 /** Drop unknown / duplicate tiles, clamp columns, sort by column + order and renumber orders. */
@@ -50,7 +67,7 @@ function _todayNormalise(layout, known) {
   tiles.sort((a, b) => a.col - b.col || a.order - b.order);
   const next = columns.map(() => 0);
   for (const t of tiles) t.order = next[t.col]++;
-  return { columns, tiles };
+  return { columns, tiles: _todayOneAvailable(tiles) };
 }
 
 /**
@@ -75,6 +92,7 @@ function _todayFold(layout, n) {
       tiles.push({ ...t, col: c, order: next[c]++ });
     }
     tiles.sort((a, b) => a.col - b.col || a.order - b.order);
+    tiles = _todayOneAvailable(tiles.map(t => ({ ...t })));
   }
   if (columns.length === 1) {
     tiles = tiles.map(t => (_TODAY_SIZE_FRAC[t.size] ?? 0) >= 0.5 ? { ...t, size: 'container' } : t);
@@ -218,6 +236,7 @@ let _todayLayout   = null;    // resolved layout on screen
 let _todayEdit     = null;    // { bp, draft, dirty } while editing
 let _todayFetchMemo = new Map();   // url → promise, one load cycle
 let _todayTimer    = null;
+let _todayStale    = false;   // a refresh was skipped while the tab was hidden
 const _todayTileEls = new Map();   // tile id → <section>
 const _todayCardMap = new Map();   // "board\0cardId" → { board, card }
 
@@ -355,7 +374,7 @@ async function initToday() {
   document.getElementById('today').style.display = 'flex';
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('dashboardBtn').style.display = '';
-  for (const id of ['dashboardRefreshBtn', 'todayEditBtn']) document.getElementById(id).style.display = '';
+  document.getElementById('dashboardRefreshBtn').style.display = '';
   document.getElementById('dashboardBtn').classList.add('header-menu-btn--hide-mobile');   // in the board menu on phones
   document.getElementById('dashboardRefreshBtn').title = 'Refresh';
 
@@ -373,26 +392,28 @@ async function initToday() {
     if (_cvIsOpen()) _cvLoad();
     if (_mvIsOpen()) _mvReload();
   });
-  const toggleEdit = () => (_todayEdit ? _todayEndEdit(false) : _todayStartEdit());
-  document.getElementById('todayEditBtn').addEventListener('click', toggleEdit);
-  // Phones: the header has no room for the edit button — it is in the menu there
+  // Edit button: last action of the Today bar (_todayRenderBar); the menu item covers phones and a hidden bar
   const menuEdit = document.getElementById('menuTodayEdit');
   menuEdit.style.display = '';
   menuEdit.addEventListener('click', () => {
     document.getElementById('headerDropdown').classList.remove('open');
     document.getElementById('headerMenuBtn').classList.remove('open');
-    toggleEdit();
+    _todayToggleEdit();
   });
 
   _todayWireDelegation();
 
-  const [cfg, dashCfg] = await Promise.all([
+  const [cfg] = await Promise.all([
     fetch('/api/today/config').then(r => r.ok ? r.json() : null).catch(() => null),
-    _initOverlayHost().then(() => fetch('/api/dashboard/config').then(r => r.ok ? r.json() : {}).catch(() => ({}))),
+    _initOverlayHost(),
   ]);
-  _todayCfg = cfg || { showBar: true, widgets: {}, layouts: {} };
-  if (dashCfg?.autoRefreshMs > 0) _todayTimer = setInterval(() => { if (!_todayEdit) loadToday(); }, dashCfg.autoRefreshMs);
+  _todayCfg = cfg || { showBar: true, refreshMinutes: 1, widgets: {}, layouts: {} };
+  _todaySchedule();
   window.addEventListener('pagehide', () => clearInterval(_todayTimer), { once: true });
+  // A hidden tab skips its refreshes; catch up as soon as it is visible again
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && _todayStale && !_todayEdit) loadToday({ quiet: true });
+  });
 
   let resizeT = null;
   window.addEventListener('resize', () => {
@@ -440,6 +461,23 @@ async function _todayCompose() {
   if ((_mvAccounts || []).length) _mvOpenCompose('new');
 }
 
+/** Refresh interval in minutes from the Today config (default 1, 0 = off). */
+function _todayRefreshMinutes(cfg) {
+  const m = cfg?.refreshMinutes;
+  return Number.isInteger(m) && m >= 0 && m <= 60 ? m : 1;
+}
+
+function _todaySchedule() {
+  clearInterval(_todayTimer);
+  _todayTimer = null;
+  const min = _todayRefreshMinutes(_todayCfg);
+  if (!min) return;
+  _todayTimer = setInterval(() => {
+    if (document.hidden) { _todayStale = true; return; }
+    if (!_todayEdit) loadToday({ quiet: true });
+  }, min * 60_000);
+}
+
 // ---- Layout application ----
 
 function _todayViewportWidth() {
@@ -475,7 +513,7 @@ function _todayTileEl(id) {
       <span class="today-tile-actions"></span>
       <span class="today-tile-edit">
         <span class="today-tile-handle" title="Drag to move">${SVGICONS.dragHandle(12, 12)}</span>
-        <select class="today-tile-size" title="Height relative to the column">${TODAY_SIZES.map(s => `<option value="${s}">${s === 'container' ? 'fit content' : s}</option>`).join('')}</select>
+        <select class="today-tile-size" title="Height relative to the column">${TODAY_SIZES.map(s => `<option value="${s}">${_TODAY_SIZE_LABEL[s] || s}</option>`).join('')}</select>
         <button class="today-tile-hide" title="Hide tile">${SVGICONS.close(10, 10)}</button>
       </span>
     </div>
@@ -537,32 +575,72 @@ function _todayMeasure() {
 
 // ---- Loading ----
 
-async function loadToday() {
+async function loadToday({ quiet = false } = {}) {
   _todayFetchMemo = new Map();
+  _todayStale = false;
   const fetchedAt = document.getElementById('dashboardFetchedAt');
   clearTimeout(_fetchedAtTimer);
   fetchedAt.classList.add('show');
   fetchedAt.textContent = 'Loading…';
   _todayRenderBar();
   const ids = (_todayEdit?.draft || _todayLayout)?.tiles.map(t => t.id) || [];
-  const results = await Promise.all(ids.map(id => _todayLoadTile(id)));
+  const results = await Promise.all(ids.map(id => _todayLoadTile(id, { keepState: quiet })));
   fetchedAt.textContent = (results.includes(false) ? 'Partial load — ' : 'Refreshed at ') +
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   _fetchedAtTimer = setTimeout(() => fetchedAt.classList.remove('show'), 10000);
 }
 
-async function _todayLoadTile(id) {
+/**
+ * UI state of a tile body that a re-render would reset: scroll position, open <details>
+ * (by data-key / class + index) and expanded (i) infos. `_todayRestoreState` reapplies it.
+ */
+function _todayDetailsKeys(body) {
+  const seen = new Map();
+  return [...body.querySelectorAll('details')].map(d => {
+    const base = d.dataset.key || d.className;
+    const n = seen.get(base) || 0;
+    seen.set(base, n + 1);
+    return [`${base}#${n}`, d];
+  });
+}
+
+function _todaySaveState(body) {
+  return {
+    scroll: body.scrollTop,
+    details: new Map(_todayDetailsKeys(body).map(([k, d]) => [k, d.open])),
+    infos: [...body.querySelectorAll('[data-info]:not([hidden])')].map(i => i.dataset.info),
+  };
+}
+
+function _todayRestoreState(body, st) {
+  for (const [k, d] of _todayDetailsKeys(body)) if (st.details.has(k)) d.open = st.details.get(k);
+  for (const key of st.infos) {
+    const info = [...body.querySelectorAll('[data-info]')].find(i => i.dataset.info === key);
+    const btn  = [...body.querySelectorAll('[data-info-btn]')].find(b => b.dataset.infoBtn === key);
+    if (!info || !btn) continue;
+    info.hidden = false;
+    btn.classList.add('today-info-btn--open');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+  body.scrollTop = st.scroll;
+}
+
+async function _todayLoadTile(id, { keepState = false } = {}) {
   const def = TODAY_TILES[id];
   const el  = _todayTileEl(id);
   const body = el.querySelector('.today-tile-body');
   _todaySetTileActions(id);
   try {
     const data = await def.load();
+    const st = keepState && el.dataset.loaded === '1' ? _todaySaveState(body) : null;
     def.render(body, data, el);
     body.querySelectorAll('[data-hscroll]').forEach(_todayHScroll);
+    if (st) _todayRestoreState(body, st);
     el.dataset.loaded = '1';
     return true;
   } catch (err) {
+    // A failed background refresh keeps what is shown
+    if (keepState && el.dataset.loaded === '1') return false;
     el.querySelector('.today-tile-count').textContent = '';
     body.innerHTML = err.status === 400
       ? `<p class="dashboard-empty">${escHtml(err.message)}. <a href="#" class="today-setup-link">Set up</a></p>`
@@ -610,6 +688,17 @@ function _todaySetCount(el, n) {
 
 // ---- Today bar ----
 
+function _todayMarkEditBtn(on) {
+  const b = document.getElementById('todayEditBtn');
+  if (!b) return;
+  b.classList.toggle('today-bar-btn--on', on);
+  b.setAttribute('aria-pressed', String(on));
+}
+
+function _todayToggleEdit() {
+  return _todayEdit ? _todayEndEdit(false) : _todayStartEdit();
+}
+
 async function _todayRenderBar() {
   const bar = document.getElementById('todayBar');
   const show = _todayCfg?.showBar !== false;
@@ -623,10 +712,12 @@ async function _todayRenderBar() {
       <button class="btn" data-bar="inbox" title="Add a card to an inbox">${SVGICONS.create(12, 12)}<span>Card</span></button>
       <button class="btn" data-bar="event" title="New calendar event">${SVGICONS.date(12, 12)}<span>Event</span></button>
       <button class="btn" data-bar="mail" title="Write a mail">${SVGICONS.email(12, 12)}<span>Mail</span></button>
+      <button class="btn today-bar-edit${_todayEdit ? ' today-bar-btn--on' : ''}" id="todayEditBtn" data-bar="edit" title="Edit layout" aria-label="Edit layout" aria-pressed="${!!_todayEdit}">${SVGICONS.edit(12, 12)}</button>
     </div>`;
   bar.querySelector('[data-bar="inbox"]').addEventListener('click', () => openInboxModal(null, null, () => loadToday()));
   bar.querySelector('[data-bar="event"]').addEventListener('click', _todayNewEvent);
   bar.querySelector('[data-bar="mail"]').addEventListener('click', _todayCompose);
+  bar.querySelector('[data-bar="edit"]').addEventListener('click', _todayToggleEdit);
   const w = _todayCfg?.widgets?.weather;
   if (!w || w.lat == null) return;
   try {
@@ -636,10 +727,10 @@ async function _todayRenderBar() {
     const kind = _todayWeatherKind(data.current.code, data.current.isDay);
     const rain = _todayNextRain(data.hours);
     const t = v => v == null ? '–' : `${Math.round(v)}°`;
-    el.innerHTML = `<span class="today-wx-icon">${SVGICONS[kind.icon](20, 20)}</span>
-      <span><strong>${t(data.current.temp)}</strong> <span class="today-muted">${t(data.today?.min)} / ${t(data.today?.max)}</span></span>
-      <span class="today-muted">${escHtml(kind.label)}${rain ? ` · rain ${rain.precip} % from ${escHtml(rain.time.slice(11, 16))}` : ''}</span>`;
-    el.title = data.label || '';
+    // Icon + temperature only; the rest is in the tooltip and the weather tile
+    el.innerHTML = `<span class="today-wx-icon">${SVGICONS[kind.icon](20, 20)}</span><strong>${t(data.current.temp)}</strong>`;
+    el.title = [data.label, kind.label, `${t(data.today?.min)} / ${t(data.today?.max)}`,
+      rain ? `rain ${rain.precip} % from ${rain.time.slice(11, 16)}` : ''].filter(Boolean).join(' · ');
   } catch { /* weather is optional in the bar */ }
 }
 
@@ -919,12 +1010,12 @@ function _todayRenderCvApp(body, data, el) {
         ${a.url ? `<a class="today-app-line today-app-title today-app-link" href="${escHtml(a.url)}" target="_blank" rel="noopener noreferrer" title="${title}">${title}</a>` : `<span class="today-app-line today-app-title" title="${title}">${title}</span>`}
         ${a.company ? `<span class="today-app-line today-app-company" title="${escHtml(a.company)}">${escHtml(a.company)}</span>` : ''}
         <span class="today-row-meta today-app-meta">${_todayCvBadge(a.status)}${_todayCvSentHtml(a)}${fit(a.fitScore)}</span>
-        ${hasInfo ? `<span class="today-app-info" data-info="${i}" hidden>
+        ${hasInfo ? `<span class="today-app-info" data-info="${escHtml(String(a.id ?? i))}" hidden>
           ${a.statusNote ? `<span class="today-app-note">${escHtml(a.statusNote)}</span>` : ''}
           ${a.progress ? `<span class="today-app-progress">${renderMarkdown(a.progress)}</span>` : ''}
         </span>` : ''}
       </span>
-      ${hasInfo ? `<button class="today-info-btn" data-info-btn="${i}" title="${escHtml(a.statusNote || 'Show the application status')}" aria-label="Show the application status" aria-expanded="false">i</button>` : ''}
+      ${hasInfo ? `<button class="today-info-btn" data-info-btn="${escHtml(String(a.id ?? i))}" title="${escHtml(a.statusNote || 'Show the application status')}" aria-label="Show the application status" aria-expanded="false">i</button>` : ''}
     </div>`;
   }).join('');
   const empty = `<p class="dashboard-empty">${mode === 'recent' ? 'No applications yet.' : 'No active applications.'}</p>`;
@@ -932,7 +1023,7 @@ function _todayRenderCvApp(body, data, el) {
     + `<div class="today-subhead">${mode === 'recent' ? 'Recently updated' : 'Active'}</div>${items || empty}`;
   body.querySelectorAll('[data-info-btn]').forEach(btn => btn.addEventListener('click', e => {
     e.stopPropagation();
-    const info = body.querySelector(`[data-info="${btn.dataset.infoBtn}"]`);
+    const info = [...body.querySelectorAll('[data-info]')].find(x => x.dataset.info === btn.dataset.infoBtn);
     info.hidden = !info.hidden;
     btn.classList.toggle('today-info-btn--open', !info.hidden);
     btn.setAttribute('aria-expanded', String(!info.hidden));
@@ -1066,7 +1157,7 @@ function _todayStartEdit() {
   const bp = _todayBp;
   _todayEdit = { bp, draft: JSON.parse(JSON.stringify({ columns: _todayLayout.columns, tiles: _todayLayout.tiles })), derived: _todayLayout.derived, dirty: false };
   document.getElementById('today').classList.add('today--editing');
-  document.getElementById('todayEditBtn').classList.add('open');
+  _todayMarkEditBtn(true);
   _todayRenderEditBar();
   _todayApplyLayout(_todayEdit.draft);
   _todayMeasure();
@@ -1075,18 +1166,19 @@ function _todayStartEdit() {
 function _todayEndEdit(saved) {
   _todayEdit = null;
   document.getElementById('today').classList.remove('today--editing');
-  document.getElementById('todayEditBtn').classList.remove('open');
+  _todayMarkEditBtn(false);
   document.getElementById('todayEditBar').style.display = 'none';
   _todayLayout = null;   // force re-applying the stored (saved: new) layout over the draft
   _todayRelayout();
 }
 
-function _todayEditCommit() {
+function _todayEditCommit(keepId) {
   const d = _todayEdit.draft;
   // Renumber orders per column
   d.tiles.sort((a, b) => a.col - b.col || a.order - b.order);
   const next = d.columns.map(() => 0);
   for (const t of d.tiles) t.order = next[t.col]++;
+  _todayOneAvailable(d.tiles, keepId);
   _todayEdit.dirty = true;
   const shown = new Set([...document.querySelectorAll('#todayGrid .today-tile')].map(el => el.dataset.tile));
   _todayApplyLayout(d);
@@ -1099,7 +1191,7 @@ function _todayEditUpdate(id, patch) {
   const t = _todayEdit.draft.tiles.find(x => x.id === id);
   if (!t) return;
   Object.assign(t, patch);
-  _todayEditCommit();
+  _todayEditCommit(patch.size === 'available' ? id : undefined);
 }
 
 function _todayRenderEditBar() {
@@ -1234,7 +1326,7 @@ function _todayDragEnd() {
   others.splice(target.index, 0, moving);
   moving.col = target.col;
   others.forEach((t, i) => { t.order = i; });
-  _todayEditCommit();
+  _todayEditCommit(id);   // a dragged "available" tile keeps its size, another one in the column falls back
 }
 
 // ---- Settings (Settings → Today) ----
@@ -1247,6 +1339,7 @@ async function loadTodaySettings() {
   const w  = cfg.widgets?.weather || {};
   const cv = cfg.widgets?.cvapp   || {};
   document.getElementById('todayShowBar').checked = cfg.showBar !== false;
+  document.getElementById('todayRefresh').value = String(_todayRefreshMinutes(cfg));
   document.getElementById('todayWeatherLabel').textContent = w.lat != null ? `${w.label || ''} (${(+w.lat).toFixed(2)}, ${(+w.lon).toFixed(2)})` : 'not set';
   document.getElementById('todayCvApiUrl').value    = cv.apiUrl || '';
   document.getElementById('todayCvPublicUrl').value = cv.publicUrl || '';
@@ -1265,7 +1358,7 @@ async function _todaySaveSettings(body, okMsg = 'saved') {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   document.getElementById('todaySection').dataset.cfg = JSON.stringify(data.config);
-  if (APP_PATH === '/today') { _todayCfg = data.config; _todayRelayout(); loadToday(); }
+  if (APP_PATH === '/today') { _todayCfg = data.config; _todaySchedule(); _todayRelayout(); loadToday(); }
   _todayFlash(`${ICONS.done} ${okMsg}`);
   return data.config;
 }
@@ -1279,6 +1372,9 @@ function initTodaySettings() {
 
   document.getElementById('todayShowBar').addEventListener('change', async e => {
     try { await _todaySaveSettings({ showBar: e.target.checked }); } catch (err) { report(err.message, false); }
+  });
+  document.getElementById('todayRefresh').addEventListener('change', async e => {
+    try { await _todaySaveSettings({ refreshMinutes: Number(e.target.value) }); } catch (err) { report(err.message, false); }
   });
 
   const results = document.getElementById('todayWeatherResults');

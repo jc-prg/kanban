@@ -205,3 +205,20 @@ test('TU-12 _todayAgendaDays — 7-day range uses dueWeek / startsWeek per day; 
   expect(ctx._todayAgendaRange({ widgets: { agenda: { days: 7 } } })).toBe(7)
   expect(ctx._todayAgendaRange({})).toBe(2)
 })
+
+test('TU-13 size "available": one per column — stored, folded and edited layouts keep only one', () => {
+  const two = { columns: [{ width: 1 }, { width: 1 }], tiles: [
+    { id: 'agenda', col: 0, order: 0, size: 'available' },
+    { id: 'attention', col: 0, order: 1, size: 'available' },
+    { id: 'weather', col: 1, order: 0, size: 'available' },
+  ] }
+  // own layout: the first one per column keeps it
+  const own = plain(ctx._todayResolveLayout({ lg: two }, 'lg', KNOWN))
+  expect(own.tiles.map(t => t.size)).toEqual(['available', 'container', 'available'])
+  // folded to one column: the moved tile falls back to container, "available" is not a tall fraction
+  const one = plain(ctx._todayResolveLayout({ lg: two }, 'sm', KNOWN))
+  expect(one.tiles.map(t => [t.id, t.size])).toEqual([['agenda', 'available'], ['attention', 'container'], ['weather', 'container']])
+  // edit: keepId wins over the earlier tile
+  const tiles = [{ id: 'a', col: 0, size: 'available' }, { id: 'b', col: 0, size: 'available' }, { id: 'c', col: 1, size: 'available' }]
+  expect(plain(ctx._todayOneAvailable(tiles, 'b')).map(t => t.size)).toEqual(['container', 'available', 'available'])
+})

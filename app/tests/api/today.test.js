@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page API tests — TD-1 … TD-14
+ * Today page API tests — TD-1 … TD-17
  *
  * routes/today.js is mounted on its own with db.js / global-db.js replaced via require.cache;
  * Open-Meteo and the CV-App are mocked with vi.stubGlobal('fetch').
@@ -264,4 +264,25 @@ test('TD-14 geocode: validates q and maps Open-Meteo results', async () => {
   const res = await request(app).get('/api/today/geocode?q=Berlin')
   expect(res.status).toBe(200)
   expect(res.body.results).toEqual([{ name: 'Berlin', admin1: 'Berlin', country: 'Deutschland', lat: 52.52, lon: 13.41 }])
+})
+
+test('TD-16 layout size "available": accepted once per column, rejected twice in one column', async () => {
+  const layout = tiles => ({ layouts: { lg: { columns: [{ width: 1 }, { width: 1 }], tiles } } })
+  const ok = await request(app).put('/api/today/config').send(layout([
+    { id: 'agenda', col: 0, order: 0, size: 'available' }, { id: 'weather', col: 1, order: 0, size: 'available' },
+  ]))
+  expect(ok.status).toBe(200)
+  const bad = await request(app).put('/api/today/config').send(layout([
+    { id: 'agenda', col: 0, order: 0, size: 'available' }, { id: 'weather', col: 0, order: 1, size: 'available' },
+  ]))
+  expect(bad.status).toBe(400)
+  expect(bad.body.error).toMatch(/more than one/)
+})
+
+test('TD-17 refreshMinutes: default 1, 0–60 accepted, others rejected', async () => {
+  expect((await request(app).get('/api/today/config')).body.refreshMinutes).toBe(1)
+  expect((await request(app).put('/api/today/config').send({ refreshMinutes: 0 })).status).toBe(200)
+  expect((await request(app).put('/api/today/config').send({ refreshMinutes: 5 })).body.config.refreshMinutes).toBe(5)
+  expect((await request(app).put('/api/today/config').send({ refreshMinutes: 61 })).status).toBe(400)
+  expect((await request(app).put('/api/today/config').send({ refreshMinutes: 1.5 })).status).toBe(400)
 })

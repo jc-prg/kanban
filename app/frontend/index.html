@@ -42,7 +42,6 @@
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
     <button class="header-menu-btn header-menu-btn--hide-mobile" id="schedToggleBtn" title="Toggle scheduled column" style="display:none"><span data-icon="schedule" data-icon-w="14" data-icon-h="14"></span></button>
     <a class="header-menu-btn header-menu-btn--hide-mobile" id="todayBtn" href="/today" title="Today" style="display:none"><span data-icon="today" data-icon-w="12" data-icon-h="12"></span></a>
-    <button class="header-menu-btn header-menu-btn--hide-mobile" id="todayEditBtn" title="Edit layout" style="display:none"><span data-icon="edit" data-icon-w="12" data-icon-h="12"></span></button>
     <a class="header-menu-btn" id="dashboardBtn" href="/focus" title="Focus" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh focus" style="display:none"><span data-icon="sync"></span></button>
     <button class="header-menu-btn" id="dashboardMailBtn" title="Show / hide mail" style="display:none"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span></button>
@@ -1081,7 +1080,7 @@
           </div>
         </div>
 
-        <div class="settings-section" id="todaySection" data-settings-label="Today" data-settings-keywords="today weather cv-app applications layout bar" style="display:none">
+        <div class="settings-section" id="todaySection" data-settings-label="Today" data-settings-keywords="today weather cv-app applications layout bar refresh update interval" style="display:none">
           <div class="settings-section-title">
             <span>Today</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
@@ -1093,6 +1092,18 @@
                 <input type="checkbox" id="todayShowBar" checked>
                 <span class="settings-toggle-track"></span>
               </label>
+            </div>
+            <div class="settings-field-row">
+              <span class="settings-field-label">Update all tiles</span>
+              <select id="todayRefresh" class="new-board-input" style="width:auto;flex:none">
+                <option value="1">every minute</option>
+                <option value="2">every 2 minutes</option>
+                <option value="5">every 5 minutes</option>
+                <option value="10">every 10 minutes</option>
+                <option value="15">every 15 minutes</option>
+                <option value="30">every 30 minutes</option>
+                <option value="0">off (manual only)</option>
+              </select>
             </div>
             <div class="settings-field-row">
               <span class="settings-field-label">Layouts</span>

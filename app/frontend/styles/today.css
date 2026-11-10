@@ -50,6 +50,7 @@
   background: none; border-color: transparent; color: var(--text-muted);
 }
 .today-bar-actions .btn:hover { color: var(--text); border-color: var(--border); }
+.today-bar-actions .btn.today-bar-btn--on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 
 /* ---- Edit bar ---- */
 
@@ -110,6 +111,9 @@
 .today-tile--f13 { flex-basis: calc(var(--today-col-h) / 3 - var(--today-gap) * 2 / 3); }
 .today-tile:not(.today-tile--auto) { flex-shrink: 0; flex-grow: 0; }
 .today-tile:not(.today-tile--auto) .today-tile-body { overflow-x: hidden; overflow-y: auto; flex: 1; min-height: 0; scrollbar-width: thin; }
+/* "available": content height, shrinks to the space the other tiles leave (only shrinking tile of its column) */
+.today-tile.today-tile--fill { flex: 0 1 auto; min-height: min(120px, var(--today-col-h)); max-height: var(--today-col-h); }
+.today-tile.today-tile--fill .today-tile-body { flex: 0 1 auto; }
 
 .today-tile-header {
   display: flex;
@@ -399,5 +403,7 @@
   .today-bar { padding: 2px 0 10px; gap: 8px 14px; }
   .today-bar-actions { margin-left: 0; width: 100%; }
   .today-bar-actions .btn { flex: 1; justify-content: center; border-color: color-mix(in srgb, var(--border) 70%, transparent); }
+  .today-bar-actions .today-bar-edit { display: none; }   /* phones: "Edit layout" is in the header menu */
+  .today-bar-weather { display: none; }
   .today-wx-hour { flex-basis: 40px; }
 }

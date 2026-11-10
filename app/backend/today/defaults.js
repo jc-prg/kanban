@@ -2,7 +2,7 @@
 // Default "Today" page config (/today). Layouts are per breakpoint; a breakpoint without a
 // layout is derived from the next larger one in the frontend (today.js#_todayResolveLayout).
 
-const TILE_SIZES   = ['1/1', '2/3', '1/2', '1/3', 'container'];
+const TILE_SIZES   = ['1/1', '2/3', '1/2', '1/3', 'container', 'available'];
 const BREAKPOINTS  = ['xl', 'lg', 'md', 'sm'];
 
 const DEFAULT_LAYOUTS = {
@@ -44,6 +44,7 @@ const DEFAULT_LAYOUTS = {
 function defaultTodayConfig() {
   return {
     showBar: true,
+    refreshMinutes: 1,
     widgets: {},
     layouts: JSON.parse(JSON.stringify(DEFAULT_LAYOUTS)),
   };
