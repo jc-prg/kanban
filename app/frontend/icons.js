@@ -262,6 +262,41 @@ function _svgShieldCheck(w = 14, h = 14) {
   return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z" stroke-width="1.4"/><polyline points="5.4,8.1 7.3,10 10.7,6.3" stroke-width="1.6"/></svg>`;
 }
 
+// Calendar page with a filled day — the "Today" page
+function _svgToday(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="9.6" rx="1.3"/><line x1="3.5" y1="0.7" x2="3.5" y2="3.3"/><line x1="8.5" y1="0.7" x2="8.5" y2="3.3"/><rect x="3.6" y="5.4" width="4.8" height="3.6" rx="0.6" fill="currentColor" stroke="none"/></svg>`;
+}
+
+// ---- Weather (Today page) — 24×24, drawn with currentColor ----
+const _WX_CLOUD = 'M7 18.5h10a3.6 3.6 0 0 0 .4-7.2 5.2 5.2 0 0 0-10-.6A3.9 3.9 0 0 0 7 18.5z';
+function _wxSvg(w, h, body) {
+  return `<svg viewBox="0 0 24 24" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+}
+function _svgWxSun(w = 24, h = 24) {
+  return _wxSvg(w, h, '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/>');
+}
+function _svgWxMoon(w = 24, h = 24) {
+  return _wxSvg(w, h, '<path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/>');
+}
+function _svgWxPartly(w = 24, h = 24) {
+  return _wxSvg(w, h, '<circle cx="8.5" cy="8.5" r="3.2"/><path d="M8.5 2v1.4M2 8.5h1.4M3.9 3.9l1 1M13.1 3.9l-1 1"/><path d="M9 19.5h8.5a3.2 3.2 0 0 0 .3-6.4 4.6 4.6 0 0 0-8.8-.4A3.4 3.4 0 0 0 9 19.5z" fill="var(--wx-fill, transparent)"/>');
+}
+function _svgWxCloud(w = 24, h = 24) {
+  return _wxSvg(w, h, `<path d="${_WX_CLOUD}"/>`);
+}
+function _svgWxRain(w = 24, h = 24) {
+  return _wxSvg(w, h, '<path d="M7 15h10a3.6 3.6 0 0 0 .4-7.2 5.2 5.2 0 0 0-10-.6A3.9 3.9 0 0 0 7 15z"/><path d="M8.5 17.5l-1 2.5M12.5 17.5l-1 2.5M16.5 17.5l-1 2.5"/>');
+}
+function _svgWxSnow(w = 24, h = 24) {
+  return _wxSvg(w, h, '<path d="M7 15h10a3.6 3.6 0 0 0 .4-7.2 5.2 5.2 0 0 0-10-.6A3.9 3.9 0 0 0 7 15z"/><path d="M8 18.5h.01M12 20h.01M16 18.5h.01M10 21.5h.01M14 21.5h.01" stroke-width="2.2"/>');
+}
+function _svgWxThunder(w = 24, h = 24) {
+  return _wxSvg(w, h, '<path d="M7 15h10a3.6 3.6 0 0 0 .4-7.2 5.2 5.2 0 0 0-10-.6A3.9 3.9 0 0 0 7 15z"/><path d="M12.5 15.5l-2 3.5h3l-2 3.5"/>');
+}
+function _svgWxFog(w = 24, h = 24) {
+  return _wxSvg(w, h, '<path d="M7 13h10a3.6 3.6 0 0 0 .4-7.2 5.2 5.2 0 0 0-10-.6A3.9 3.9 0 0 0 7 13z"/><path d="M4 16.5h16M6 19.5h12"/>');
+}
+
 const SVGICONS = {
   close:          _svgClose,
   shield:         _svgShield,
@@ -313,6 +348,15 @@ const SVGICONS = {
   dashboard:      _svgDashboard,
   openLink:       _svgOpenLink,
   schedule:       _svgSchedule,
+  today:          _svgToday,
+  wxSun:          _svgWxSun,
+  wxMoon:         _svgWxMoon,
+  wxPartly:       _svgWxPartly,
+  wxCloud:        _svgWxCloud,
+  wxRain:         _svgWxRain,
+  wxSnow:         _svgWxSnow,
+  wxThunder:      _svgWxThunder,
+  wxFog:          _svgWxFog,
 };
 
 // ---- Icon registry (used to render the icon library in settings) ----
@@ -365,6 +409,15 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgFilter(16, 16),        name: 'Filter',           usage: 'Filter duplicates in a column' },
   { type: 'svg', svg: _svgPrint(16, 16),         name: 'Print',            usage: 'Print a card or column' },
   { type: 'svg', svg: _svgDashboard(16, 16),    name: 'Dashboard',        usage: 'Navigate to the dashboard view' },
+  { type: 'svg', svg: _svgToday(16, 16),        name: 'Today',            usage: 'Navigate to the Today page' },
+  { type: 'svg', svg: _svgWxSun(16, 16),        name: 'Weather: clear',   usage: 'Today page weather (clear sky, day)' },
+  { type: 'svg', svg: _svgWxMoon(16, 16),       name: 'Weather: night',   usage: 'Today page weather (clear sky, night)' },
+  { type: 'svg', svg: _svgWxPartly(16, 16),     name: 'Weather: partly cloudy', usage: 'Today page weather' },
+  { type: 'svg', svg: _svgWxCloud(16, 16),      name: 'Weather: cloudy',  usage: 'Today page weather' },
+  { type: 'svg', svg: _svgWxRain(16, 16),       name: 'Weather: rain',    usage: 'Today page weather (drizzle, rain, showers)' },
+  { type: 'svg', svg: _svgWxSnow(16, 16),       name: 'Weather: snow',    usage: 'Today page weather' },
+  { type: 'svg', svg: _svgWxThunder(16, 16),    name: 'Weather: thunder', usage: 'Today page weather' },
+  { type: 'svg', svg: _svgWxFog(16, 16),        name: 'Weather: fog',     usage: 'Today page weather' },
   { type: 'svg', svg: _svgEmail(16, 16),        name: 'Email',            usage: 'Mail account / email message' },
   { type: 'svg', svg: _svgReply(16, 16),        name: 'Reply',            usage: 'Reply to a mail (mail view)' },
   { type: 'svg', svg: _svgReplyAll(16, 16),     name: 'Reply all',        usage: 'Reply to all recipients of a mail (mail view)' },

@@ -326,11 +326,11 @@ function _wireDetailPanel() {
 
 /** Paths whose page hosts the calendar / mail overlays (URL state + back button). */
 function _isOverlayHostPage() {
-  return APP_PATH === '/focus' || APP_PATH === '/';
+  return APP_PATH === '/focus' || APP_PATH === '/' || APP_PATH === '/today';
 }
 
 let _overlayHostReady = null;
-/** Overview only: prepare the overlays once — detail panel, config the views read from dashboard.js globals. */
+/** Overview / Today: prepare the overlays once — detail panel, config the views read from dashboard.js globals. */
 function _initOverlayHost() {
   if (_overlayHostReady) return _overlayHostReady;
   document.getElementById('dashboard').classList.add('dashboard--overlay-host');
@@ -353,12 +353,17 @@ function _initOverlayHost() {
   return _overlayHostReady;
 }
 
-/** Overview only: show the overlay host while the calendar or mail view is open, the overview otherwise. */
+/** Overview / Today: show the overlay host while the calendar or mail view is open, the page otherwise. */
 function _syncOverlayHost() {
-  if (APP_PATH !== '/') return;
+  const page = APP_PATH === '/' ? 'overview' : APP_PATH === '/today' ? 'today' : null;
+  if (!page) return;
   const open = _cvIsOpen() || _mvIsOpen();
   document.getElementById('dashboard').style.display = open ? 'flex' : 'none';
-  document.getElementById('overview').style.display  = open ? 'none' : 'flex';
+  document.getElementById(page).style.display        = open ? 'none' : 'flex';
+  // Back on Today after working in a view: refresh what may have changed there
+  if (!open && page === 'today' && typeof loadToday === 'function' && _todayCfg) {
+    setTimeout(() => { if (!_cvIsOpen() && !_mvIsOpen()) loadToday(); }, 0);   // not when switching views
+  }
 }
 
 async function initDashboard() {
@@ -373,6 +378,7 @@ async function initDashboard() {
   document.getElementById('dashboardRefreshBtn').style.display = '';
   document.getElementById('dashboardCalBtn').style.display = '';
   document.getElementById('dashboardMailBtn').style.display = '';
+  document.getElementById('todayBtn').style.display = '';
 
   // Match overview menu: hide board-specific items; Inbox/Analyze/Settings stay visible
   ['menuWebhook', 'menuDashboardSettings'].forEach(id => {
@@ -759,10 +765,14 @@ async function _reloadBoardsPanel() {
 }
 
 function _reloadCardsPanel() {
+  if (APP_PATH === '/today') { _todayRefresh('cards'); return Promise.resolve(); }
   _reloadBoardsPanel();
   return _reloadPanel('/api/dashboard/cards', _renderCardsPanel, 'dashboardCardsPanel');
 }
-function _reloadMailPanel()  { return _reloadPanel('/api/dashboard/mail',  _renderMailPanel,  'dashboardMailPanel');  }
+function _reloadMailPanel()  {
+  if (APP_PATH === '/today') { _todayRefresh('mail'); return Promise.resolve(); }
+  return _reloadPanel('/api/dashboard/mail',  _renderMailPanel,  'dashboardMailPanel');
+}
 
 function _panelShown(id) {
   return document.getElementById(id).closest('.dashboard-panel').style.display !== 'none';
@@ -2746,6 +2756,8 @@ async function _mailToggleRead(accountId, msgId, unread) {
       { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seen }) }
     );
     if (!res.ok) throw new Error('Failed');
+    // Today lists unread mails only: a read one leaves the list, an unread one may join it
+    if (APP_PATH === '/today') { if (seen) _todayDropMail(accountId, msgId); _todayRefresh('mail'); return; }
     if (item) {
       const textEl = item.querySelector('.card-text');
       if (textEl) {
@@ -2766,6 +2778,7 @@ async function _mailToggleRead(accountId, msgId, unread) {
 }
 
 function _mailRemoveItem(accountId, msgId) {
+  if (APP_PATH === '/today') _todayDropMail(accountId, msgId);
   const panel = document.getElementById('dashboardMailPanel');
   const item  = panel?.querySelector(
     `.dashboard-mail-item[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`
@@ -2791,6 +2804,7 @@ async function _mailDelete(accountId, msgId) {
       { method: 'DELETE' }
     );
     if (!res.ok) throw new Error('Failed');
+    if (APP_PATH === '/today') _todayRefresh('mail');
   } catch {
     _reloadMailPanel();
   }
@@ -2805,6 +2819,7 @@ async function _mailMove(accountId, msgId, folder) {
     );
     if (!res.ok) throw new Error('Failed');
     _addRecentFolder(accountId, folder);
+    if (APP_PATH === '/today') _todayRefresh('mail');
   } catch {
     _reloadMailPanel();
   }

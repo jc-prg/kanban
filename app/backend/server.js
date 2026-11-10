@@ -120,11 +120,13 @@ site.use('/api', createNotesRouter({ adapter: notesAdapter, withBoard, withExist
   baseUrl: req => `${req.protocol}://${req.get('host')}${BASE_PATH}/board` }));
 site.use('/api', require('./routes/attachments'));
 site.use('/api', require('./routes/dashboard'));
+site.use('/api', require('./routes/today'));
 site.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit }));
 site.use('/api', require('./routes/recurring'));
 site.use('/api', require('./routes/templates'));
 
 site.get('/focus',              sendSpa);
+site.get('/today',              sendSpa);
 site.get('/dashboard',          (req, res) => res.redirect(301, `${BASE_PATH}/focus`));
 site.get('/inbox',              sendSpa);
 site.get('/board/:board',       sendSpa);

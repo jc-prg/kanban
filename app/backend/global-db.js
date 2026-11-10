@@ -163,4 +163,21 @@ async function setTrustedSender(address, trusted) {
   return list;
 }
 
-module.exports = { getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender };
+const TODAY_CONFIG_ID = 'today-config';
+
+/** "Today" page config (/today); null when none was saved yet (the route falls back to defaults). */
+async function getTodayConfig() {
+  try {
+    const { _id, _rev, ...data } = await globalDb.get(TODAY_CONFIG_ID);
+    return data;
+  } catch (err) {
+    if (err.statusCode === 404) return null;
+    throw err;
+  }
+}
+
+async function saveTodayConfig(data) {
+  return upsertDoc(globalDb, TODAY_CONFIG_ID, data);
+}
+
+module.exports = { getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender };

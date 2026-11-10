@@ -302,8 +302,69 @@ function validMailFolderPath(path) {
   return typeof path === 'string' && path.length >= 1 && path.length <= 255 && !/[\x00-\x1f\x7f]/.test(path);
 }
 
+// ---- Today page config (/today) ----
+const _todayLayoutSchema = {
+  type: 'object', required: ['columns', 'tiles'], additionalProperties: false,
+  properties: {
+    columns: {
+      type: 'array', minItems: 1, maxItems: 4,
+      items: { type: 'object', required: ['width'], additionalProperties: false,
+               properties: { width: { type: 'integer', minimum: 1, maximum: 3 } } },
+    },
+    tiles: {
+      type: 'array', maxItems: 50,
+      items: {
+        type: 'object', required: ['id', 'col', 'size'], additionalProperties: false,
+        properties: {
+          id:    { type: 'string', pattern: '^[a-z0-9-]{1,32}$' },
+          col:   { type: 'integer', minimum: 0, maximum: 3 },
+          order: { type: 'integer', minimum: 0, maximum: 999 },
+          size:  { type: 'string', enum: ['1/1', '2/3', '1/2', '1/3', 'container'] },
+        },
+      },
+    },
+  },
+};
+const validateTodayConfig = ajv.compile({
+  type: 'object', additionalProperties: false,
+  properties: {
+    showBar: { type: 'boolean' },
+    widgets: {
+      type: 'object',
+      properties: {
+        weather: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            lat:   { type: 'number', minimum: -90,  maximum: 90 },
+            lon:   { type: 'number', minimum: -180, maximum: 180 },
+            label: { type: 'string', maxLength: 120 },
+          },
+        },
+        agenda: {
+          type: 'object', additionalProperties: false,
+          properties: { days: { type: 'integer', enum: [2, 7] } },
+        },
+        cvapp: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            apiUrl:     { type: 'string', maxLength: 500 },
+            publicUrl:  { type: 'string', maxLength: 500 },
+            apiKey:     { type: 'string', maxLength: 500 },
+            hasApiKey:  { type: 'boolean' },
+          },
+        },
+      },
+      additionalProperties: { type: 'object' },
+    },
+    layouts: {
+      type: 'object', additionalProperties: false,
+      properties: { xl: _todayLayoutSchema, lg: _todayLayoutSchema, md: _todayLayoutSchema, sm: _todayLayoutSchema },
+    },
+  },
+});
+
 function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, schemaError };

@@ -1,0 +1,403 @@
+/* ---- Today page (/today) ---- */
+
+#today {
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 28px 16px;
+  gap: 18px;
+  --today-gap: 26px;   /* vertical gap between tiles (used by the size maths) */
+  --today-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --today-mono: 'DM Mono', monospace;
+}
+
+/* Tile content in a sans-serif font; dates, times and the progress numbers stay monospaced */
+.today-tile-body, .today-tile-body button { font-family: var(--today-sans); }
+.today-tile-body :is(.today-ev-time, .today-now, .today-row-date, .today-cv-sent,
+  .today-wx-hour > span:first-child, .today-wx-day .today-muted:last-child, .today-stat-value,
+  .today-day-head > span:first-child) {
+  font-family: var(--today-mono);
+}
+#today.today--scroll { overflow-y: auto; }
+
+/* Elements with scrollbar-width ignore the ::-webkit-scrollbar colours (base.css) in Chrome and
+   fall back to the light default — colour them from the theme tokens instead */
+#today, #today * { scrollbar-color: var(--border) transparent; }
+#today *:hover { scrollbar-color: var(--text-muted) transparent; }
+
+.today-muted { color: var(--text-muted); font-weight: normal; }
+
+/* ---- Today bar ---- */
+
+.today-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding: 2px 0 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.today-bar-date { display: flex; align-items: baseline; gap: 10px; font-size: 1.05rem; }
+.today-bar-date strong { font-family: 'Syne', sans-serif; letter-spacing: 0.02em; }
+.today-bar-week { font-size: 0.75rem; color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+.today-bar-weather { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; min-height: 22px; }
+.today-wx-icon { display: inline-flex; color: var(--accent); }
+.today-bar-actions { display: flex; gap: 6px; margin-left: auto; }
+.today-bar-actions .btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 0.78rem;
+  background: none; border-color: transparent; color: var(--text-muted);
+}
+.today-bar-actions .btn:hover { color: var(--text); border-color: var(--border); }
+
+/* ---- Edit bar ---- */
+
+.today-editbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 90%, var(--accent));
+  font-size: 0.8rem;
+}
+.today-editbar .btn { padding: 4px 10px; font-size: 0.8rem; }
+.today-edit-badge { padding: 2px 8px; border-radius: 6px; background: var(--accent-glow); color: var(--text); white-space: nowrap; }
+.today-edit-cols { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.today-edit-col { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.today-edit-col select, .today-tile-size { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 5px; font-size: 0.75rem; padding: 1px 2px; }
+.today-edit-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: none; background: none; color: var(--text-muted); cursor: pointer; border-radius: 4px; }
+.today-edit-x:hover { color: var(--danger); background: var(--surface2); }
+
+/* ---- Grid, columns, tiles ---- */
+
+.today-grid {
+  display: grid;
+  row-gap: var(--today-gap);
+  column-gap: 44px;
+  flex: 1;
+  min-height: 0;
+}
+.today-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--today-gap);
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;   /* never a horizontal scrollbar — wide content scrolls with arrows (_todayHScroll) */
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+#today.today--scroll .today-grid { flex: none; }
+#today.today--scroll .today-col  { overflow-y: visible; }
+#today.today--scroll { overflow-x: hidden; }
+
+.today-tile {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+/* Height relative to the column: n × column height minus the share of the gaps */
+.today-tile--f1  { flex-basis: var(--today-col-h); }
+.today-tile--f23 { flex-basis: calc(var(--today-col-h) * 2 / 3 - var(--today-gap) / 3); }
+.today-tile--f12 { flex-basis: calc(var(--today-col-h) / 2 - var(--today-gap) / 2); }
+.today-tile--f13 { flex-basis: calc(var(--today-col-h) / 3 - var(--today-gap) * 2 / 3); }
+.today-tile:not(.today-tile--auto) { flex-shrink: 0; flex-grow: 0; }
+.today-tile:not(.today-tile--auto) .today-tile-body { overflow-x: hidden; overflow-y: auto; flex: 1; min-height: 0; scrollbar-width: thin; }
+
+.today-tile-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--surface2) 55%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.today-tile-count:not(:empty) { font-family: inherit; font-weight: normal; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0; opacity: 0.8; }
+.today-tile-count:not(:empty)::before { content: '\00b7  '; white-space: pre; }
+.today-tile-actions { display: flex; gap: 2px; margin-left: auto; }
+.today-tile-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; border: none; border-radius: 6px;
+  background: none; color: var(--text-muted); cursor: pointer;
+}
+.today-tile-btn { opacity: 0.6; }
+.today-tile:hover .today-tile-btn { opacity: 1; }
+.today-tile-btn:hover { background: var(--surface2); color: var(--text); }
+.today-tile-body { padding: 10px 4px 2px; font-size: 0.85rem; overflow-x: clip; min-width: 0; }
+.today-tile-btn--text { width: auto; padding: 0 8px; font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0; text-transform: none; }
+.today-tile-btn--on { opacity: 1; color: var(--accent); background: var(--accent-glow); }
+.today-tile-btn--on:hover { color: var(--accent); background: var(--accent-glow); }
+.today-tile-edit { display: none; align-items: center; gap: 6px; margin-left: auto; }
+
+/* Edit mode */
+#today.today--editing .today-tile { outline: 1px dashed var(--accent); outline-offset: 3px; border-radius: 4px; overflow: visible; }
+#today.today--editing .today-tile-header { color: var(--text); }
+#today.today--editing .today-tile-actions { display: none; }
+#today.today--editing .today-tile-edit { display: inline-flex; }
+#today.today--editing .today-tile-body { opacity: 0.45; pointer-events: none; user-select: none; }
+#today.today--editing .today-col { min-height: 80px; padding: 4px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.today-tile-handle { display: inline-flex; cursor: grab; touch-action: none; color: var(--text-muted); padding: 2px; }
+.today-tile-hide { display: inline-flex; border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 3px; border-radius: 4px; }
+.today-tile-hide:hover { color: var(--danger); background: var(--surface); }
+.today-tile--dragging { opacity: 0.5; }
+.today-drop-indicator { height: 4px; border-radius: 2px; background: var(--accent); flex-shrink: 0; }
+
+/* ---- Shared rows ---- */
+
+.today-subhead { margin: 12px 0 4px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.today-subhead:first-child { margin-top: 0; }
+
+.today-card-row, .today-mail-row, .today-app-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  margin: 0 -4px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+}
+.today-card-row:hover, .today-mail-row:hover, .today-app-row:hover { background: var(--surface2); }
+.today-card-row--unread .today-row-title { font-weight: 600; }
+.today-card-row--unread::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--unread); margin-top: 6px; flex-shrink: 0; }
+.today-card-row--done { opacity: 0.4; text-decoration: line-through; }
+.today-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.today-row-title { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+.today-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 0.72rem; color: var(--text-muted); }
+.today-row-date { margin-left: auto; white-space: nowrap; }
+.today-prio { font-weight: 700; }
+.today-check {
+  flex-shrink: 0;
+  width: 16px; height: 16px; margin-top: 1px;
+  border: 1.5px solid var(--text-muted); border-radius: 50%;
+  background: none; cursor: pointer; padding: 0;
+}
+.today-check:hover { border-color: var(--unread); background: var(--unread-glow); }
+.today-more { margin: 4px 0 0 4px; font-size: 0.75rem; }
+.today-link-btn { margin: 6px 0 0 4px; border: none; background: none; color: var(--link); cursor: pointer; font-size: 0.78rem; padding: 0; }
+
+/* ---- Agenda ---- */
+
+.today-allday { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.today-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 100%;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card-color, var(--accent)) 12%, transparent);
+  border: 1px solid transparent;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.today-timeline { display: flex; flex-direction: column; gap: 2px; }
+.today-ev-row {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 5px 8px; margin: 0 -4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.today-ev-row::before {
+  content: ''; flex-shrink: 0; align-self: center;
+  width: 3px; height: 1.1em; border-radius: 2px;
+  background: var(--card-color, var(--accent));
+}
+.today-ev-row:hover { background: var(--surface2); }
+.today-ev--past { opacity: 0.5; }
+.today-ev-time { font-variant-numeric: tabular-nums; font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; min-width: 88px; }
+.today-ev-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Title and location on their own lines, each cut with … when too long */
+.today-ev-line { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.today-ev-loc { font-size: 0.75rem; color: var(--text-muted); }
+.today-ev-link { display: inline-flex; color: var(--text-muted); margin-left: 4px; }
+.today-now { display: flex; align-items: center; gap: 6px; margin: 2px 0; color: var(--danger); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+.today-now::after { content: ''; flex: 1; height: 2px; border-radius: 1px; background: var(--danger); }
+.today-tomorrow { margin-top: 16px; }
+
+/* 7-day agenda */
+.today-day { margin-top: 14px; }
+.today-day-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin-bottom: 6px; padding-bottom: 3px;
+  border-bottom: 1px dotted color-mix(in srgb, var(--border) 70%, transparent);
+  font-weight: 600; font-size: 0.8rem;
+}
+.today-day-head--first { margin-top: 0; }
+.today-day--empty .today-day-head { opacity: 0.6; font-weight: normal; }
+.today-tomorrow > summary, .today-recent > summary { cursor: pointer; font-weight: 600; font-size: 0.8rem; margin-bottom: 6px; }
+
+/* ---- Needs attention ---- */
+
+.today-att { border-radius: 8px; margin-bottom: 4px; }
+.today-att > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 8px; border-radius: 8px;
+  cursor: pointer; list-style: none;
+}
+.today-att > summary::-webkit-details-marker { display: none; }
+.today-att > summary:hover { background: var(--surface2); }
+.today-att-icon { display: inline-flex; width: 16px; justify-content: center; }
+.today-att-count { font-weight: 700; font-size: 1rem; min-width: 1.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.today-att-label { flex: 1; }
+.today-att--danger .today-att-icon, .today-att--danger .today-att-count { color: var(--danger); }
+.today-att--warn   .today-att-icon, .today-att--warn   .today-att-count { color: #f97316; }
+.today-att--soon   .today-att-icon, .today-att--soon   .today-att-count { color: #eab308; }
+.today-att--soon   .today-row-date { color: #eab308; }
+.today-att--mail   .today-att-icon, .today-att--mail   .today-att-count { color: var(--link); }
+.today-att--new    .today-att-icon, .today-att--new    .today-att-count { color: var(--unread); }
+.today-att-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px 4px; }
+/* Cards like the "Last edited" entries (dashboard.css .dashboard-recent-item) with a done circle */
+.today-card-list { display: flex; flex-direction: column; gap: 6px; }
+:is(.today-att-list, .today-card-list) .today-kcard { margin: 0; gap: 8px; }
+.today-kcard .card-body { min-width: 0; flex: 1; }
+.today-kcard .today-check { margin-top: 2px; }
+.today-kcard--link .card-text { padding-right: 20px; }   /* clear of the link badge in the corner */
+.today-all-clear { color: var(--unread); text-align: center; padding: 12px 0; margin: 0; }
+
+/* ---- Weather ---- */
+
+.today-wx { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.today-wx-big { display: inline-flex; color: var(--accent); }
+.today-wx-now { display: flex; flex-direction: column; line-height: 1.25; }
+.today-wx-now strong { font-size: 1.6rem; font-weight: 600; }
+.today-wx-day { display: flex; flex-direction: column; margin-left: auto; text-align: right; font-size: 0.8rem; gap: 2px; }
+.today-wx-hours { display: flex; gap: 2px; margin-top: 10px; }
+
+/* Horizontal scroller without scrollbar: ‹ › buttons at the edges (only where content is hidden) */
+.today-hscroll { position: relative; min-width: 0; }
+.today-hscroll > [data-hscroll] { overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
+.today-hscroll > [data-hscroll]::-webkit-scrollbar { display: none; }
+.today-hscroll-btn {
+  position: absolute; top: 50%; z-index: 1;
+  transform: translateY(-50%);
+  width: 24px; height: 24px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--surface); color: var(--text);
+  font-size: 1rem; line-height: 1; cursor: pointer;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.today-hscroll-btn[hidden] { display: none; }
+.today-hscroll-btn:hover { border-color: var(--accent); color: var(--accent); }
+.today-hscroll-btn--left  { left: 0; }
+.today-hscroll-btn--right { right: 0; }
+.today-wx-hour {
+  flex: 1 0 44px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  font-size: 0.72rem; font-variant-numeric: tabular-nums;
+  padding: 4px 0; border-radius: 6px;
+}
+.today-wx-hour svg { color: var(--text-muted); }
+.today-wx-precip { font-size: 0.65rem; color: var(--link); background: linear-gradient(to top, color-mix(in srgb, var(--link) 25%, transparent) var(--p), transparent var(--p)); border-radius: 3px; padding: 0 3px; }
+.today-wx-tomorrow { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 0.78rem; }
+
+/* ---- CV-App ---- */
+
+.today-statuses { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0 8px; }
+.today-status { display: inline-flex; gap: 5px; align-items: center; padding: 1px 0; font-size: 0.75rem; color: var(--text-muted); }
+.today-status strong { color: var(--text); }
+.today-status--sm { font-size: 0.68rem; }
+
+/* Status labels in the CV-App's colours (pastel background, same in light and dark mode) */
+.today-cv-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; border-radius: 20px;
+  font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.today-cv-badge b { font-weight: 800; }
+/* Status label of each entry: subdued until the entry is hovered (the counters on top stay full) */
+.today-app-row .today-cv-badge { opacity: 0.6; transition: opacity 0.15s; }
+.today-app-row:hover .today-cv-badge { opacity: 1; }
+.today-app-row { align-items: flex-start; cursor: default; padding-top: 10px; padding-bottom: 10px; }
+.today-app-row + .today-app-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
+/* Entry: position / company / status line — one line each, cut with … when too long */
+.today-app-line { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.today-app-title { line-height: 1.35; }
+.today-app-company { font-size: 0.75rem; color: var(--text-muted); }
+.today-app-meta { flex-wrap: nowrap; min-width: 0; overflow: hidden; white-space: nowrap; margin-top: 2px; }
+.today-app-meta > * { flex-shrink: 0; }
+.today-app-meta > .today-cv-sent { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.today-app-link { color: inherit; text-decoration: none; }
+.today-app-link:hover { color: var(--accent); }
+.today-cv-sent { white-space: nowrap; }
+.today-cv-sent--warn  { color: #E07B00; font-weight: 700; }
+.today-cv-sent--late  { color: var(--danger); font-weight: 700; }
+.today-cv-sent--alarm { color: #fff; background: var(--danger); font-weight: 700; padding: 0 5px; border-radius: 3px; }
+.today-info-btn {
+  flex-shrink: 0; width: 18px; height: 18px; margin-top: 1px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: none; color: var(--text-muted);
+  font: italic 700 0.68rem Georgia, serif; cursor: pointer;
+}
+.today-info-btn:hover, .today-info-btn--open { color: var(--accent); border-color: var(--accent); }
+.today-app-info {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 4px; padding: 6px 8px;
+  border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--surface2) 50%, transparent);
+  font-size: 0.75rem;
+}
+.today-app-info[hidden] { display: none; }
+.today-app-note { font-style: italic; }
+.today-app-progress { font-size: 0.72rem; line-height: 1.45; }
+.today-app-progress ul, .today-app-progress ol { margin: 2px 0; padding-left: 16px; }
+.today-app-progress p { margin: 2px 0; }
+.today-app-progress > :first-child { margin-top: 0; }
+.today-app-progress > :last-child { margin-bottom: 0; }
+.today-fit { letter-spacing: 1px; color: var(--accent); font-size: 0.6rem; }
+
+/* ---- Boards ---- */
+
+.today-boards { display: flex; flex-wrap: wrap; gap: 6px; }
+.today-board {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 12px;
+  color: var(--text); text-decoration: none; font-size: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.today-board:hover { border-color: var(--accent); }
+.today-board .board-card-count { font-size: 0.65rem; padding: 0 5px; }
+.today-recent { margin-top: 12px; }
+.today-recent .dashboard-recent-item { margin-bottom: 6px; }
+
+/* ---- Progress: four inline numbers ---- */
+
+.today-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 8px; }
+.today-stat { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; }
+.today-stat-value { font-size: 1.35rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--stat-color); }
+.today-stat-label { font-size: 0.7rem; color: var(--text-muted); }
+
+/* ---- Settings ---- */
+
+.settings-subtitle { margin: 18px 0 6px; font-weight: 600; font-size: 0.85rem; }
+.today-geo-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.today-geo-results .btn { font-size: 0.78rem; padding: 4px 10px; }
+
+/* ---- Phones ---- */
+
+@media (max-width: 767px) {
+  #today { padding: 8px 14px 12px; gap: 10px; --today-gap: 22px; }
+  .today-bar { padding: 2px 0 10px; gap: 8px 14px; }
+  .today-bar-actions { margin-left: 0; width: 100%; }
+  .today-bar-actions .btn { flex: 1; justify-content: center; border-color: color-mix(in srgb, var(--border) 70%, transparent); }
+  .today-wx-hour { flex-basis: 40px; }
+}

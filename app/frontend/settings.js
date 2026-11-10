@@ -268,6 +268,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('iconLibrarySection').style.display = 'none';
     document.getElementById('accountsSection').style.display = 'none';
     document.getElementById('dashboardSection').style.display = 'none';
+    document.getElementById('todaySection').style.display = 'none';
   } else {
     document.getElementById('menuSettings').textContent = 'Global settings';
     document.getElementById('webdavSection').style.display = 'none';
@@ -275,6 +276,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('aboutSection').style.display = '';
     document.getElementById('accountsSection').style.display = '';
     document.getElementById('dashboardSection').style.display = '';
+    document.getElementById('todaySection').style.display = '';
   }
 
   // ---- Prompts tabs (overview only) ----
@@ -429,7 +431,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
   function openGlobalSettings() {
     openSettings();
     // openSettings() skips global loaders when _isBoard — load them now
-    loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings();
+    loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); _loadTodaySettingsSection();
     document.getElementById('settingsTitle').textContent = 'Global settings';
     ['boardRenameSection','importSection','archiveSection','boardDeleteSection',
      'boardExportSection','webdavSection','webhookSection','recurringSection'].forEach(id => {
@@ -437,7 +439,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       if (el) el.style.display = 'none';
     });
     ['dbSection','apiKeySection','colorPaletteSection','promptsSection',
-     'iconLibrarySection','accountsSection','dashboardSection','aboutSection'].forEach(id => {
+     'iconLibrarySection','accountsSection','dashboardSection','todaySection','aboutSection'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = '';
     });
@@ -495,12 +497,19 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       loadWebhookSettings();
       if (typeof renderRecurringList === 'function') renderRecurringList();
     }
-    if (!_isBoard) { loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); }
+    if (!_isBoard) { loadPrompts(); renderColorPalette(); renderIconLibrary(); loadCardSourcesSettings(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); _loadTodaySettingsSection(); }
     if (typeof renderTemplatesList === 'function') renderTemplatesList();
     document.getElementById('colorPaletteSection').style.display = _isBoard ? 'none' : '';
     document.getElementById('recurringSection').style.display    = _isBoard ? ''     : 'none';
     buildSettingsNav();
     backdrop.style.display = 'flex';
+  }
+
+  // Settings → Today lives in today.js (loaded later)
+  function _loadTodaySettingsSection() {
+    if (typeof initTodaySettings !== 'function') return;
+    initTodaySettings();
+    loadTodaySettings();
   }
 
   function closeSettings() { backdrop.style.display = 'none'; }
@@ -1866,6 +1875,7 @@ async function afterAuth() {
   if (API_BASE && typeof loadRecurringTasks  === 'function') await loadRecurringTasks();
   if (typeof loadTemplates === 'function') await loadTemplates();
   if (BOARD_NAME === 'focus') { await initDashboard(); return; }
+  if (BOARD_NAME === 'today') { await initToday(); return; }
   if (BOARD_NAME === 'inbox') { await initInbox(); return; }
   if (BOARD_NAME) {
     document.title = `jc://${BOARD_NAME}/`;
@@ -1874,6 +1884,7 @@ async function afterAuth() {
     if (window.matchMedia('(min-width: 640px)').matches) {
       document.getElementById('schedToggleBtn').style.display = '';
       document.getElementById('dashboardBtn').style.display = '';
+      document.getElementById('todayBtn').style.display = '';
     }
     await load();
     if (typeof ensureScheduledColumn === 'function' && state.settings?.scheduledColumnId && state.columns.find(c => c.id === state.settings.scheduledColumnId)) ensureScheduledColumn();
@@ -1949,6 +1960,7 @@ async function initOverview() {
   document.querySelector('.header-menu').style.marginLeft = 'auto';
   document.getElementById('menuFindCard').style.display = 'none';
   document.getElementById('dashboardBtn').style.display = '';
+  document.getElementById('todayBtn').style.display = '';
   // Calendar / mail buttons open the views as overlays over the overview (no switch to Focus)
   const calBtn = document.getElementById('dashboardCalBtn');
   calBtn.style.display = '';
@@ -2154,9 +2166,10 @@ document.getElementById('newBoardInput').addEventListener('keydown', e => {
       const isDashboard = APP_PATH === '/focus';
       const isDesktop = window.matchMedia('(min-width: 640px)').matches;
       const dashEntry = isDashboard || isDesktop ? '' : `<a class="board-switch-item" href="${BASE_PATH}/focus">Focus</a>`;
+      const todayEntry = APP_PATH === '/today' ? '' : `<a class="board-switch-item" href="${BASE_PATH}/today">Today</a>`;
       const allEntry  = `<a class="board-switch-item" href="${BASE_PATH}/">all boards</a>`;
       const sep = others.length ? '<div class="header-dd-separator"></div>' : '';
-      menu.innerHTML = dashEntry + allEntry + sep + others
+      menu.innerHTML = todayEntry + dashEntry + allEntry + sep + others
         .map(b => `<a class="board-switch-item" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
         .join('');
     } catch { return; }

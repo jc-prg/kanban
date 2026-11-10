@@ -23,6 +23,7 @@
 <link rel="stylesheet" href="/styles/dashboard.css">
 <link rel="stylesheet" href="/styles/calview.css">
 <link rel="stylesheet" href="/styles/mailview.css">
+<link rel="stylesheet" href="/styles/today.css">
 </head>
 <body>
 
@@ -40,6 +41,8 @@
     </div>
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
     <button class="header-menu-btn header-menu-btn--hide-mobile" id="schedToggleBtn" title="Toggle scheduled column" style="display:none"><span data-icon="schedule" data-icon-w="14" data-icon-h="14"></span></button>
+    <a class="header-menu-btn header-menu-btn--hide-mobile" id="todayBtn" href="/today" title="Today" style="display:none"><span data-icon="today" data-icon-w="12" data-icon-h="12"></span></a>
+    <button class="header-menu-btn header-menu-btn--hide-mobile" id="todayEditBtn" title="Edit layout" style="display:none"><span data-icon="edit" data-icon-w="12" data-icon-h="12"></span></button>
     <a class="header-menu-btn" id="dashboardBtn" href="/focus" title="Focus" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh focus" style="display:none"><span data-icon="sync"></span></button>
     <button class="header-menu-btn" id="dashboardMailBtn" title="Show / hide mail" style="display:none"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span></button>
@@ -51,6 +54,7 @@
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
     <div class="header-dropdown" id="headerDropdown">
 <button class="header-dd-item" id="menuFindCard">Find</button>
+      <button class="header-dd-item" id="menuTodayEdit" style="display:none">Edit layout</button>
       <button class="header-dd-item" id="menuAnalytics">Statistics</button>
       <button class="header-dd-item" id="menuWebhook" style="display:none"></button>
       <button class="header-dd-item" id="menuScheduled" style="display:none">Scheduled cards</button>
@@ -165,6 +169,12 @@
       <div class="dashboard-panel-body" id="dashboardCalendarPanel"></div>
     </div>
   </div>
+</div>
+
+<div id="today" style="display:none">
+  <div class="today-bar" id="todayBar"></div>
+  <div class="today-editbar" id="todayEditBar" style="display:none"></div>
+  <div class="today-grid" id="todayGrid"></div>
 </div>
 
 <div id="overview" style="display:none">
@@ -1071,6 +1081,57 @@
           </div>
         </div>
 
+        <div class="settings-section" id="todaySection" data-settings-label="Today" data-settings-keywords="today weather cv-app applications layout bar" style="display:none">
+          <div class="settings-section-title">
+            <span>Today</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="settings-field-row">
+              <span class="settings-field-label">Today bar (date, weather, quick actions)</span>
+              <label class="settings-toggle">
+                <input type="checkbox" id="todayShowBar" checked>
+                <span class="settings-toggle-track"></span>
+              </label>
+            </div>
+            <div class="settings-field-row">
+              <span class="settings-field-label">Layouts</span>
+              <button class="btn" id="todayResetLayoutsBtn">Reset all screen sizes to default</button>
+            </div>
+            <div class="settings-field-row">
+              <span class="settings-field-label">Arrange tiles</span>
+              <button class="btn" id="todayEditLayoutBtn">Edit layout on the Today page</button>
+            </div>
+            <p class="settings-item-desc">Opens the Today page in edit mode (also: <em>Edit layout</em> in the ☰ menu there). Columns, tile positions and heights are saved per screen size — edit on a narrow window to change the phone layout.</p>
+
+            <p class="settings-subtitle">Weather</p>
+            <p class="settings-item-desc">Location: <span id="todayWeatherLabel">not set</span>. Forecast by Open-Meteo.</p>
+            <div class="new-board-row">
+              <input id="todayWeatherQuery" class="new-board-input" type="text" placeholder="Search a place, e.g. Berlin" autocomplete="off">
+              <button class="btn" id="todayWeatherSearchBtn">Search</button>
+            </div>
+            <div id="todayWeatherResults" class="today-geo-results"></div>
+
+            <p class="settings-subtitle">CV-App (applications)</p>
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="todayCvApiUrl">API URL</label>
+              <input id="todayCvApiUrl" class="new-board-input" type="url" placeholder="http://localhost:8000" autocomplete="off">
+            </div>
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="todayCvPublicUrl">App URL</label>
+              <input id="todayCvPublicUrl" class="new-board-input" type="url" placeholder="https://example.com/cvapp/" autocomplete="off">
+            </div>
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="todayCvApiKey">API key</label>
+              <input id="todayCvApiKey" class="new-board-input" type="password" autocomplete="new-password">
+            </div>
+            <div class="settings-webdav-actions">
+              <button class="btn btn-accent" id="todayCvSaveBtn">Save</button>
+            </div>
+            <div id="todaySettingsResult" class="settings-webdav-result" style="display:none"></div>
+          </div>
+        </div>
+
         <div class="settings-section" id="recurringSection" data-settings-label="Recurring tasks" style="display:none">
           <div class="settings-section-title">
             <span>Recurring tasks</span>
@@ -1736,6 +1797,7 @@
 <script src="/dashboard.js"></script>
 <script src="/calview.js"></script>
 <script src="/mailview.js"></script>
+<script src="/today.js"></script>
 <script src="/recurring.js"></script>
 <script src="/templates.js"></script>
 <script src="/scheduled.js"></script>
