@@ -1244,6 +1244,11 @@ function initNotes(cfg) {
     document.querySelector('#noteModal .modal')?.classList.remove('modal--fullscreen');
   }
 
+  /** Set the note dialog's full-screen mode (host: Edit from a full-screen detail panel). */
+  function setNoteFullscreen(on) {
+    if (!!on !== _noteFullscreen) toggleNoteFullscreen();
+  }
+
   async function _crumbNavigate(pageId) {
     if (noteModalHasChanges()) {
       const result = await _showConfirm('Save changes before navigating?', { okLabel: 'Save', altLabel: "Don't save", cancelLabel: 'Cancel' });
@@ -2531,6 +2536,7 @@ function initNotes(cfg) {
     restoreNotesSidebar,
     openNoteModal,
     closeNoteModal,
+    setNoteFullscreen,
     linkCardToPage,
     printNote,
     buildToc,

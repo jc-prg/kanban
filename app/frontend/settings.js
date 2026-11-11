@@ -1804,7 +1804,9 @@ async function createBoardAndOpen(rawName) {
     if (menu.classList.contains('open')) { closeBoardMenu(); return; }
     try {
       const boards = await fetch('/api/boards').then(r => r.json());
-      const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
+      // All active boards; only on a board page the current one is left out (on Today BOARD_NAME is just the
+      // context of the last in-place edit)
+      const others = boards.filter(b => !b.archived && !(ROUTE === 'board' && b.name === BOARD_NAME));
       // The dashboard has its own header icon (#todayBtn) — the menu lists boards only
       menu.innerHTML = others
         .map(b => `<a class="board-switch-item" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)

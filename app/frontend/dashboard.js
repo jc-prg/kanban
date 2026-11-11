@@ -166,15 +166,17 @@ function _fmtRecentDate(at) {
 }
 
 function _recentItemHtml(item) {
+  // Cards open the detail panel on Today (today.js delegation); the href (card on its board) stays for new tabs
   const href = item.type === 'note'
     ? `${BASE_PATH}/board/${encodeURIComponent(item.board)}#note:${encodeURIComponent(item.id)}`
-    : `${BASE_PATH}/board/${encodeURIComponent(item.board)}`;
+    : `${BASE_PATH}/board/${encodeURIComponent(item.board)}#card:${encodeURIComponent(item.id)}`;
+  const data = item.type === 'note' ? '' : ` data-board="${escHtml(item.board)}" data-card-id="${escHtml(item.id)}"`;
   const icon = item.type === 'note' ? SVGICONS.notePages(10, 10) : SVGICONS.card(14, 10);
   const color = item.type === 'note' ? COLORS_NEUTRAL[0] : (item.color || '');
   const colorStyle = color ? ` style="--card-color:${escHtml(color)}"` : '';
   const contextLabel = item.type === 'note' ? escHtml(item.board) : `${escHtml(item.board)} \xb7 ${escHtml(item.context)}`;
   const metaHtml = `<div class="card-meta"><span class="dashboard-recent-icon">${icon}</span><span class="dashboard-recent-context">${contextLabel}</span><span class="card-date">${escHtml(_fmtRecentDate(item.at))}</span></div>`;
-  return `<a class="dashboard-recent-item card" href="${href}"${colorStyle}>
+  return `<a class="dashboard-recent-item card" href="${href}"${data}${colorStyle}>
     <div class="card-body">
       <div class="card-text">${escHtml(item.title)}</div>
       ${metaHtml}
@@ -839,8 +841,8 @@ function _dashScheduleHtml(card, col, boardData) {
     + (span ? `<br><span class="dash-sched-span">${escHtml(span)}</span>` : '');
 }
 
+// Viewing does not mark the card read — the board and Edit (openEditModal) do
 async function _openCardDetail(board, card) {
-  _dashMarkRead(board, card);
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const editBtn   = document.getElementById('dashboardDetailEditBtn');
@@ -856,8 +858,9 @@ async function _openCardDetail(board, card) {
   editBtn.onclick = e => {
     if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
     e.preventDefault();
+    const fullscreen = _detailFullscreen();
     _closeDetail();
-    _todayEditCard(board, card.id);
+    _todayEditCard(board, card.id, { fullscreen });
   };
   editBtn.title = 'Edit card';
   editBtn.style.display = '';
@@ -1018,8 +1021,9 @@ async function _openCardDetail(board, card) {
       const a = e.target.closest('.dash-card-note-link');
       if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
       e.preventDefault();
+      const fullscreen = _detailFullscreen();
       _closeDetail();
-      _todayEditNote(board, a.dataset.pageId);
+      _todayEditNote(board, a.dataset.pageId, { fullscreen });
     });
     bottom().appendChild(section);
   }
@@ -1045,8 +1049,9 @@ async function _openNoteDetail(board, pageId) {
   editBtn.onclick = e => {
     if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
     e.preventDefault();
+    const fullscreen = _detailFullscreen();
     _closeDetail();
-    _todayEditNote(board, pageId);
+    _todayEditNote(board, pageId, { fullscreen });
   };
   editBtn.title = 'Edit note';
   editBtn.style.display = '';
@@ -1531,6 +1536,11 @@ document.getElementById('dashboardDetailBody').addEventListener('click', async e
   _closeDetail();
   _todayCompose({ to });
 });
+
+/** Whether the detail panel is in full screen — Edit opens the dialog the same way. */
+function _detailFullscreen() {
+  return !!document.querySelector('#dashboardDetail .modal')?.classList.contains('modal--fullscreen');
+}
 
 function _closeDetail() {
   document.getElementById('dashboardDetail').style.display = 'none';

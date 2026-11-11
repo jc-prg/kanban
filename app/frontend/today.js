@@ -263,6 +263,20 @@ function _todayFmtTime(iso) {
 // Board names never contain '/' (a NUL separator would not survive an HTML attribute)
 function _todayCardKey(board, id) { return `${board}/${id}`; }
 
+/** Full-screen mode of the calendar / mail view on phones (today.css .views-fs); per browser. */
+function _todayViewFs() {
+  try { return localStorage.getItem('view-fullscreen') === '1'; } catch { return false; }
+}
+
+function _todaySetViewFs(on) {
+  try { localStorage.setItem('view-fullscreen', on ? '1' : '0'); } catch { /* ignore */ }
+  document.documentElement.classList.toggle('views-fs', on);
+  document.querySelectorAll('[data-view-fs]').forEach(b => {
+    b.setAttribute('aria-pressed', String(on));
+    b.title = on ? 'Exit full screen' : 'Full screen';
+  });
+}
+
 /** Short status message in the header (settings.js#flashIndicator is not global). */
 function _todayFlash(text) {
   const el = document.getElementById('dashboardFetchedAt');
@@ -469,6 +483,9 @@ async function initToday() {
   document.getElementById('dashboardRefreshBtn').addEventListener('click', _todayRefreshAll);
   // Calendar / mail view: the refresh icon sits in the view header (the app header button is hidden then)
   for (const id of ['calViewRefresh', 'mailViewRefresh']) document.getElementById(id).addEventListener('click', _todayRefreshAll);
+  // Phones: full-screen calendar / mail view (header icon), kept per browser
+  _todaySetViewFs(_todayViewFs());
+  document.querySelectorAll('[data-view-fs]').forEach(b => b.addEventListener('click', () => _todaySetViewFs(!_todayViewFs())));
   // Edit button: last action of the Today bar (_todayRenderBar); the menu item covers phones and a hidden bar
   const menuEdit = document.getElementById('menuTodayEdit');
   menuEdit.style.display = '';
@@ -1923,7 +1940,15 @@ function _todayWireDelegation() {
     if (check) { e.stopPropagation(); const c = cardAt(check); if (c?.entry) _todayMarkDone(c.el, c.entry); return; }
     const c = cardAt(e.target);
     if (c?.entry && e.target.closest('.card-link-badge')) { _dashMarkRead(c.entry.board, c.entry.card); c.el.classList.remove('card--unread'); return; }
-    if (c?.entry) { _openCardDetail(c.entry.board, c.entry.card); c.el.classList.remove('today-card-row--unread', 'card--unread'); return; }
+    if (c?.entry) { _openCardDetail(c.entry.board, c.entry.card); return; }   // viewing keeps it unread
+    // Boards tile → Last edited: a card opens the detail panel (modifier / middle click: its board)
+    const recent = e.target.closest('a.dashboard-recent-item[data-card-id]');
+    if (recent) {
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      _openLinkedCard(recent.dataset.board, recent.dataset.cardId);
+      return;
+    }
     if (e.target.closest('.today-ev-meet')) return;   // meeting link opens itself in a new tab
     const ev = e.target.closest('.today-ev[data-uid]');
     if (ev) { _openEventDetail(ev.dataset.accountId, ev.dataset.uid, ev.dataset.webUrl || ''); return; }
@@ -2021,7 +2046,8 @@ function _todayBoardUrl(board, hash) {
 }
 
 /** Open the card edit dialog on Today. */
-function _todayEditCard(board, cardId) {
+// fullscreen (Edit from the detail panel): open the dialog in the panel's mode; omitted = the dialog's own last mode
+function _todayEditCard(board, cardId, { fullscreen } = {}) {
   return _todayEditSerial(async () => {
     try { await _todaySwitchBoard(board); }
     catch (e) { showMessage(e.message || 'Failed to load the board.'); return; }
@@ -2029,6 +2055,7 @@ function _todayEditCard(board, cardId) {
     const card = col?.cards.find(k => k.id === cardId);
     if (!card) { showMessage('This card no longer exists.'); _todayRefresh('cards'); return; }
     openEditModal(col.id, card);
+    if (fullscreen !== undefined && fullscreen !== _cardFullscreen) toggleCardFullscreen();
     const goBtn = document.getElementById('modalGoBoardBtn');
     goBtn.href = _todayBoardUrl(board, `card:${cardId}`);
     goBtn.style.display = '';
@@ -2083,7 +2110,7 @@ async function _todayNotesFor(board) {
 }
 
 /** Open the note page dialog on Today. */
-function _todayEditNote(board, pageId) {
+function _todayEditNote(board, pageId, { fullscreen } = {}) {
   return _todayEditSerial(async () => {
     let nm;
     try {
@@ -2093,6 +2120,7 @@ function _todayEditNote(board, pageId) {
     } catch (e) { showMessage(e.message || 'Failed to load the notes.'); return; }
     if (!nm.findNotePage(pageId, nm.getNotesState().items)) { showMessage('This note page no longer exists.'); _todayReloadNotes(); return; }
     await nm.openNoteModal(pageId);
+    if (fullscreen !== undefined) nm.setNoteFullscreen?.(fullscreen);
   });
 }
 

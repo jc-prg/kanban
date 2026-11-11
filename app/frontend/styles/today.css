@@ -757,7 +757,7 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
 }
 @media (max-width: 639px), (max-height: 500px) {
   :is(.calview, .mailview) {
-    inset: calc(var(--app-header-h, 0px) + 8px) 14px 12px;
+    inset: calc(var(--app-header-h, 0px) + 8px) 14px calc(12px - var(--vp-gap, 0px));   /* --vp-gap: viewport.js */
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -791,6 +791,27 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
   #calView > .calview-bar .calview-nav .btn { height: auto; padding: 8px 16px; font-size: 0.75rem; border-radius: 999px; }
   #calView > .calview-bar .calview-nav .calview-navbtn { width: auto; padding: 6px 12px; font-size: 1rem; }
 }
+
+/* Full-screen mode of the calendar / mail view (phones; header icon [data-view-fs], class views-fs on <html>,
+   per browser — today.js#_todaySetViewFs): the view covers the screen and the app header; its header runs under
+   the status bar like a full-screen dialog (overlay.css), the content keeps clear of the home indicator */
+.view-fs-btn { display: none; }
+@media (max-width: 639px), (max-height: 500px) {
+  :is(#calView, #mailView) > .calview-bar .view-fs-btn { display: inline-flex; }
+  .views-fs :is(.calview, .mailview) {
+    inset: 0 0 calc(0px - var(--vp-gap, 0px));
+    border-radius: 0;
+    padding-bottom: var(--safe-bottom);
+  }
+  .views-fs :is(#calView, #mailView) > .calview-bar {
+    padding-top: calc(6px + var(--safe-top) + min(var(--safe-top), 16px));
+    padding-left: max(12px, var(--safe-left));
+    padding-right: max(8px, var(--safe-right));
+    border-radius: 0;
+  }
+  .views-fs body:is(.calview-open, .mailview-open) header { z-index: 10; }   /* under the view (calview.css lifts it) */
+}
+.view-fs-btn[aria-pressed="true"] { opacity: 1; color: var(--accent); }
 
 #mailView, #calView { border: none; }   /* mail and calendar view panels without a frame (all screen sizes) */
 

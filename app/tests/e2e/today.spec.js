@@ -817,6 +817,103 @@ test.describe('Today page', () => {
     expect(cardLoads).toBe(base + 1);
     await expect(page.locator('.today-search-input')).toHaveValue('acme');
   });
+  test('E-T-23 detail panel keeps a card unread, Edit marks it read; "Last edited" cards open the panel', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 1 }, { width: 1 }], tiles: [
+      { id: 'attention', col: 0, order: 0, size: 'container' }, { id: 'boards', col: 1, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    const board = { columns: [{ id: 'c-todo', title: 'TODO', cards: [{ id: 'id-new1', text: 'Fresh import', unread: true }, { id: 'id-r1', text: 'Recently edited', priority: 2 }] }] };
+    await mockBoard(page, 'e2e-today', { board }, state);
+    await page.route('**/api/today/widgets/cards?**', r => r.fulfill({ json: {
+      date: TODAY, overdue: [], dueToday: [], startsToday: [], dueTomorrow: [], dueWeek: [], startsWeek: [],
+      unread: [item('id-new1', 'Fresh import', { unread: true })],
+      counts: { overdue: 0, dueToday: 0, startsToday: 0, dueTomorrow: 0, unread: 1 } } }));
+    await page.route('**/api/boards', r => r.fulfill({ json: [{ name: 'e2e-today', columnBadges: [] }] }));
+    await page.route('**/api/dashboard/recent?**', r => r.fulfill({ json: [
+      { type: 'card', id: 'id-r1', title: 'Recently edited', board: 'e2e-today', context: 'TODO', at: new Date().toISOString(), color: '' }] }));
+    await page.addInitScript(() => localStorage.setItem('today-att-open', JSON.stringify({ new: true })));
+    await page.goto('/today');
+
+    // Viewing in the panel: still unread, nothing written
+    const row = page.locator('details.today-att[data-key="new"] .today-kcard', { hasText: 'Fresh import' });
+    await expect(row).toHaveClass(/card--unread/);
+    await row.locator('.card-text').click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Fresh import');
+    await page.waitForTimeout(300);
+    expect(state.patches['e2e-today'] || []).toEqual([]);
+    await expect(row).toHaveClass(/card--unread/);
+
+    // Edit from the panel opens the dialog and marks it read (saved to the board)
+    await page.click('#dashboardDetailEditBtn');
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect.poll(() => JSON.stringify(state.patches['e2e-today'] || [])).toContain('"unread":false');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#modal')).toBeHidden();
+
+    // Boards tile → Last edited: a card opens the panel (href keeps the card on its board for new tabs)
+    const recent = page.locator('.today-tile[data-tile="boards"] .today-recent');
+    await recent.locator('summary').click();
+    const link = recent.locator('a.dashboard-recent-item', { hasText: 'Recently edited' });
+    await expect(link).toHaveAttribute('href', '/board/e2e-today#card:id-r1');
+    await link.click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Recently edited');
+    await expect(page.locator('#dashboardDetail .dash-card-where')).toHaveText('e2e-today › TODO');
+    expect(new URL(page.url()).pathname).toBe('/today');
+  });
+  test('E-T-24 Edit from a full-screen detail panel opens the card / note dialog in full screen', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 1 }], tiles: [{ id: 'notes', col: 0, order: 0, size: '1/1' }] } } };
+    await mockApis(page, state);
+    await page.route('**/api/today/widgets/notes', r => r.fulfill({ json: {
+      total: 1, boards: [{ board: 'e2e-today', pages: 1, webdav: false, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes' }] }],
+    } }));
+    await mockBoard(page, 'e2e-today', { ...BOARD_TODAY, notes: { schemaVersion: 2, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes', description: 'hi' }] } }, state);
+    await page.goto('/today');
+    const panel = page.locator('#dashboardDetail .modal');
+
+    // Card: panel in full screen → Edit → dialog in full screen
+    await page.evaluate(() => _openCardDetail('e2e-today', { id: 'id-due1', text: 'Send offer' }));
+    await page.click('#dashboardDetailFsBtn');
+    await expect(panel).toHaveClass(/modal--fullscreen/);
+    await page.click('#dashboardDetailEditBtn');
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#modal .modal')).toHaveClass(/modal--fullscreen/);
+    await page.keyboard.press('Escape');   // leaves full screen
+    await page.keyboard.press('Escape');   // closes
+    await expect(page.locator('#modal')).toBeHidden();
+
+    // Panel not in full screen → dialog not in full screen
+    await page.evaluate(() => _openCardDetail('e2e-today', { id: 'id-due1', text: 'Send offer' }));
+    await expect(panel).not.toHaveClass(/modal--fullscreen/);
+    await page.click('#dashboardDetailEditBtn');
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#modal .modal')).not.toHaveClass(/modal--fullscreen/);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#modal')).toBeHidden();
+
+    // Note: same
+    await page.locator('.today-tile[data-tile="notes"] .today-nboard > summary').click();
+    await page.locator('.today-npage', { hasText: 'Meeting notes' }).click();
+    await page.click('#dashboardDetailFsBtn');
+    await page.click('#dashboardDetailEditBtn');
+    await expect(page.locator('#noteModal')).toBeVisible();
+    await expect(page.locator('#noteModal .modal')).toHaveClass(/modal--fullscreen/);
+  });
+  test('E-T-26 board menu on Today lists all active boards (also after an in-place edit); full-screen icon only on phones', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await page.route('**/api/boards', r => r.fulfill({ json: [
+      { name: 'alpha', columnBadges: [] }, { name: 'e2e-today', columnBadges: [] }, { name: 'old', archived: true, columnBadges: [] }] }));
+    await page.goto('/today');
+    await page.evaluate(() => setBoardContext('e2e-today'));   // as after editing a card of that board in place
+    await page.click('#headerHomeBtn');
+    await expect(page.locator('#boardSwitchMenu .board-switch-item')).toHaveText(['alpha', 'e2e-today']);
+    await page.keyboard.press('Escape');
+
+    await page.goto('/today?cal=week');
+    await expect(page.locator('#calView')).toBeVisible();
+    await expect(page.locator('#calView [data-view-fs]')).toBeHidden();
+    await page.click('#headerHomeBtn');
+    await expect(page.locator('#boardSwitchMenu .board-switch-item')).toHaveText(['alpha', 'e2e-today']);
+  });
 });
 
 // Touch swipe via CDP (Chromium): real touch events → pointer events with pointerType 'touch'
@@ -834,6 +931,35 @@ async function swipe(page, locator, dx) {
 
 test.describe('Today page — phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('E-T-25 calendar / mail view full screen on phones: header icon, covers the screen, kept per browser', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    await page.addInitScript(() => {   // start without the mode once; later navigations keep it
+      if (!sessionStorage.getItem('e2e-fs-reset')) { localStorage.removeItem('view-fullscreen'); sessionStorage.setItem('e2e-fs-reset', '1'); }
+    });
+    await page.goto('/today?cal=week');
+    const view = page.locator('#calView');
+    await expect(view).toBeVisible();
+    const fsBtn = view.locator('[data-view-fs]');
+    await expect(fsBtn).toBeVisible();
+    const before = await view.boundingBox();
+    expect(before.y).toBeGreaterThan(20);   // below the app header
+
+    await fsBtn.click();
+    await expect(fsBtn).toHaveAttribute('aria-pressed', 'true');
+    const vp = page.viewportSize();
+    const fs = await view.boundingBox();
+    expect([Math.round(fs.x), Math.round(fs.y), Math.round(fs.width), Math.round(fs.height)]).toEqual([0, 0, vp.width, vp.height]);
+    expect(await page.evaluate(() => localStorage.getItem('view-fullscreen'))).toBe('1');
+
+    // The mail view shares the mode
+    await page.goto('/today?mail=ma-x');
+    await expect(page.locator('#mailView [data-view-fs]')).toHaveAttribute('aria-pressed', 'true');
+    await page.goto('/today?cal=week');
+    await page.locator('#calView [data-view-fs]').click();
+    expect((await page.locator('#calView').boundingBox()).y).toBeGreaterThan(20);
+  });
 
   test('E-T-22 detail panel stays inside the safe area (iPhone insets): centred, full screen below the status bar', async ({ page }) => {
     const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'attention', col: 0, order: 0, size: 'container' }] } } };
