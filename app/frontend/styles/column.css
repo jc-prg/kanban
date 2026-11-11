@@ -186,7 +186,7 @@
   flex-shrink: 0;
   align-self: flex-start;
   width: var(--col-width);
-  height: 56px;
+  height: 38px;   /* = column header: 1px column border + 6px + 24px .col-btn + 6px + 1px border-bottom */
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   background: none;
@@ -205,6 +205,8 @@
 }
 
 @media (prefers-color-scheme: light) {
+  /* the transparent border would show the (near-white) column background as a frame around the header */
+  .column { background-clip: padding-box; }
   .column-header {
     background: color-mix(in srgb, var(--col-color) 9%, var(--surface2));
     border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
