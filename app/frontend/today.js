@@ -295,8 +295,12 @@ function _todayKanbanCardHtml(item) {
   const href  = card.link ? safeLink(card.link) : '';
   const link  = href ? getLinkBadgeHtml(card.link, href) : '';
   const color = card.color ? ` style="--card-color:${escHtml(card.color)}"` : '';
-  return `<div class="card dashboard-recent-item today-kcard${link ? ' today-kcard--link' : ''}${card.unread ? ' card--unread' : ''}" data-card-key="${escHtml(_todayCardKey(board, card.id))}"${color}>
-    <button class="today-check" data-act="done" title="Mark as done" aria-label="Mark as done"></button>
+  // Done cards (search results) show the filled circle; it is not a button then
+  const check = card.done
+    ? `<span class="today-check today-check--done" title="Done" aria-label="Done">${ICONS.done}</span>`
+    : '<button class="today-check" data-act="done" title="Mark as done" aria-label="Mark as done"></button>';
+  return `<div class="card dashboard-recent-item today-kcard${link ? ' today-kcard--link' : ''}${card.unread ? ' card--unread' : ''}${card.done ? ' today-kcard--done' : ''}" data-card-key="${escHtml(_todayCardKey(board, card.id))}"${color}>
+    ${check}
     <div class="card-body">
       <div class="card-text" title="${escHtml(card.text || '')}">${escHtml(card.text || '')}</div>
       <div class="card-meta"><span class="dashboard-recent-icon">${SVGICONS.card(14, 10)}</span><span class="dashboard-recent-context">${escHtml(board)} · ${escHtml(column)}</span>${date}${link}</div>
@@ -1878,12 +1882,13 @@ function _todayWireDelegation() {
   grid.addEventListener('click', e => {
     if (_todayEdit) return;
     if (e.target.closest('.today-setup-link')) { e.preventDefault(); openSettingsDialog('todaySection'); return; }
-    // Note page: plain click edits in place; modifier / middle click keeps the board link
+    // Note page (Notes tile, search): plain click opens the detail panel (Edit there = note dialog);
+    // modifier / middle click keeps the board link
     const npage = e.target.closest('.today-npage[data-page-id]');
     if (npage) {
       if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
-      _todayEditNote(npage.dataset.board, npage.dataset.pageId);
+      _openNoteDetail(npage.dataset.board, npage.dataset.pageId);
       return;
     }
     const check = e.target.closest('[data-act="done"]');

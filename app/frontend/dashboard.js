@@ -764,9 +764,23 @@ function _mailFormatToggle(plain) {
 // ---- Detail panel ----
 
 async function _resolveDashCardAttachments(container, board, cardId) {
-  const base = `/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(cardId)}`;
-  for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
-    const fn = img.getAttribute('src').slice('attachment:'.length);
+  return _resolveDashAttachments(container, `/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(cardId)}`, 'attachment:');
+}
+
+/** Note pages reference their files as `_attachments/<pageId>_<name>` (notes.js#resolveAttachments). */
+async function _resolveDashNoteAttachments(container, board, pageId) {
+  return _resolveDashAttachments(container, `/api/${encodeURIComponent(board)}/notes/attachments/${encodeURIComponent(pageId)}`, `_attachments/${pageId}_`);
+}
+
+/**
+ * Attachment images / links in a rendered description: images and PDFs become blob URLs
+ * (auth-safe), links open the viewer (image / PDF) or download the file.
+ */
+async function _resolveDashAttachments(container, base, prefix) {
+  for (const img of container.querySelectorAll('img[src]')) {
+    const src = img.getAttribute('src');
+    if (!src.startsWith(prefix)) continue;
+    const fn = src.slice(prefix.length);
     try {
       const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
       if (!r.ok) continue;
@@ -780,8 +794,10 @@ async function _resolveDashCardAttachments(container, board, cardId) {
       }
     } catch { /* ignore */ }
   }
-  for (const a of container.querySelectorAll('a[href^="attachment:"]')) {
-    const fn = a.getAttribute('href').slice('attachment:'.length);
+  for (const a of container.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href');
+    if (!href.startsWith(prefix)) continue;
+    const fn = href.slice(prefix.length);
     const url = `${base}/${encodeURIComponent(fn)}`;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
@@ -799,6 +815,28 @@ function _dashMarkRead(board, card) {
   card.unread = false;
   document.querySelectorAll(`.dashboard-card-item[data-card-id="${CSS.escape(card.id)}"]`).forEach(el => el.classList.remove('card--unread'));
   _dashPatchCard(board, card.id, c => { c.unread = false; }).catch(() => {});
+}
+
+/**
+ * Scheduling line for a card in the board's Scheduled column (scheduled.js): one-time
+ * "<date> → <column>" (⚠ when past), recurring "↻ <rhythm> · next <date> → <column>"
+ * plus start / end. '' for cards outside that column or without a schedule.
+ */
+function _dashScheduleHtml(card, col, boardData) {
+  const schedId = boardData?.settings?.scheduledColumnId;
+  const isSched = schedId ? col.id === schedId : col.title === '\u23f0 Scheduled';
+  if (!isSched || (!card.scheduledFor && !card.recurrence)) return '';
+  const target = (boardData.columns || []).find(c => c.id === card.scheduledTarget)?.title || (card.scheduledTarget ? '?' : '\u2014');
+  const to = `<span class="dash-sched-target">\u2192 ${escHtml(target)}</span>`;
+  if (!card.recurrence) {
+    const overdue = card.scheduledFor < new Date().toISOString().slice(0, 10);
+    return `<span${overdue ? ' class="dash-sched-overdue" title="Date has passed"' : ''}>${overdue ? '\u26a0 ' : ''}${escHtml(fmtDate(card.scheduledFor))}</span> ${to}`;
+  }
+  const rhythm = typeof _describeRecurrenceBrief === 'function' ? _describeRecurrenceBrief(card.recurrence) : card.recurrence.type;
+  const next   = typeof _schedSortKey === 'function' ? _schedSortKey(card) : (card.nextDueDate || '');
+  const span   = [card.scheduledFor ? `from ${fmtDate(card.scheduledFor)}` : '', card.scheduledEndDate ? `until ${fmtDate(card.scheduledEndDate)}` : ''].filter(Boolean).join(' ');
+  return `\u21bb ${escHtml(rhythm)} \u00b7 next ${escHtml(next ? fmtDate(next) : 'none')} ${to}`
+    + (span ? `<br><span class="dash-sched-span">${escHtml(span)}</span>` : '');
 }
 
 async function _openCardDetail(board, card) {
@@ -835,7 +873,8 @@ async function _openCardDetail(board, card) {
   const today = new Date().toISOString().slice(0, 10);
   const rows = [];
 
-  rows.push(['Board', escHtml(board)]);
+  // Column filled in once the board is loaded (the Today card lists don't always carry it)
+  rows.push(['Board', `<span class="dash-card-where">${escHtml(board)}</span>`]);
 
   if (card.priority) {
     const pc = PRIORITY_COLORS[card.priority];
@@ -865,9 +904,12 @@ async function _openCardDetail(board, card) {
     if (safe) rows.push(['Link', `<a href="${escHtml(safe)}" target="_blank" rel="noopener noreferrer">${escHtml(card.link)}</a>`]);
   }
 
-  body.innerHTML = `<table class="dashboard-detail-table">${
+  // Layout (dashboard.css, .dash-doc-detail — same as notes): table fixed at the top, attachments /
+  // linked notes at the bottom, the description scrolls in between
+  body.innerHTML = `<div class="dash-doc-detail"><table class="dashboard-detail-table">${
     rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
-  }</table>`;
+  }</table></div>`;
+  const layout = body.querySelector('.dash-doc-detail');
 
   // Fetch full card (description is a boolean flag in dashboard API), attachments and linked notes in parallel
   const [boardData, attachments, notesDoc] = await Promise.all([
@@ -888,17 +930,33 @@ async function _openCardDetail(board, card) {
     }
   }
 
+  if (!layout.isConnected) return;   // another panel opened meanwhile
+  const div = document.createElement('div');
+  div.className = 'cm-preview card-desc-preview dash-doc-preview';
   if (fullDescription) {
-    const div = document.createElement('div');
-    div.className = 'cm-preview card-desc-preview dash-card-desc-preview';
     div.innerHTML = renderMarkdown(fullDescription);
-    body.appendChild(div);
     // buildToc is exposed by the notes module, which isn't initialised in focus mode
     if (window.buildToc) window.buildToc(div);
     _resolveDashCardAttachments(div, board, card.id);
+  } else {
+    div.innerHTML = '<p class="dashboard-empty">No description.</p>';
   }
+  layout.appendChild(div);
+  const bottom = () => layout.querySelector(':scope > .dash-doc-bottom')
+    || layout.appendChild(Object.assign(document.createElement('div'), { className: 'dash-doc-bottom' }));
 
   const fullCard = (boardData?.columns || []).flatMap(c => c.cards || []).find(c => c.id === card.id);
+  const homeCol  = (boardData?.columns || []).find(c => (c.cards || []).some(x => x.id === card.id));
+  const where    = body.querySelector('.dash-card-where');
+  if (where && homeCol) where.innerHTML = `${escHtml(board)} <span class="dash-card-where-sep">›</span> ${escHtml(homeCol.title)}`;
+
+  // Scheduled column: when / how often the card is created, and into which column
+  const schedHtml = homeCol && fullCard ? _dashScheduleHtml(fullCard, homeCol, boardData) : '';
+  if (schedHtml) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<th>Scheduled</th><td>${schedHtml}</td>`;
+    where?.closest('tr')?.after(tr);
+  }
   // Mail the card was created from
   const mailRef = fullCard?.mailRef;
   if (mailRef) {
@@ -945,7 +1003,7 @@ async function _openCardDetail(board, card) {
         const url = `/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(card.id)}/${encodeURIComponent(a.name)}`;
         return `<a class="dash-card-attach-item" href="${escHtml(url)}" download="${escHtml(a.name)}">${SVGICONS.attachment(12, 12)} ${escHtml(a.name)}<span class="dash-card-attach-size">${fmtSize(a.size)}</span></a>`;
       }).join('');
-    body.appendChild(section);
+    bottom().appendChild(section);
   }
 
   if (linkedPages.length) {
@@ -963,7 +1021,114 @@ async function _openCardDetail(board, card) {
       _closeDetail();
       _todayEditNote(board, a.dataset.pageId);
     });
-    body.appendChild(section);
+    bottom().appendChild(section);
+  }
+}
+
+/**
+ * Note page in the detail panel (read-only, like a card): board / folder, link, last change,
+ * linked cards (open in the panel), attachments and the Markdown body. Edit in the header opens
+ * the note dialog in place (Today, `_todayEditNote`); its href = the page on the board (new tab).
+ */
+let _noteDetailSeq = 0;
+
+async function _openNoteDetail(board, pageId) {
+  const seq = ++_noteDetailSeq;
+  const detail    = document.getElementById('dashboardDetail');
+  const body      = document.getElementById('dashboardDetailBody');
+  const editBtn   = document.getElementById('dashboardDetailEditBtn');
+  detail.querySelector('.dash-detail-footer')?.remove();
+  detail.querySelector('.dashboard-detail-titlebar').style.removeProperty('--detail-accent');
+  document.getElementById('dashboardDetailWebUrl').style.display = 'none';
+  document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
+  editBtn.href = `${BASE_PATH}/board/${encodeURIComponent(board)}#note:${encodeURIComponent(pageId)}`;
+  editBtn.onclick = e => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    _closeDetail();
+    _todayEditNote(board, pageId);
+  };
+  editBtn.title = 'Edit note';
+  editBtn.style.display = '';
+  // Marker: another panel (or a newer note) replaces the body, so a slow load then stops
+  body.innerHTML = `<span hidden data-note-detail="${seq}"></span>`;
+  const current = () => detail.style.display !== 'none' && !!body.querySelector(`[data-note-detail="${seq}"]`);
+  detail.style.display = '';
+  { const modal = detail.querySelector('.modal');
+    const maxH  = modal.offsetHeight;
+    modal.style.height    = 'auto';
+    modal.style.minHeight = '450px';
+    modal.style.maxHeight = maxH + 'px'; }
+
+  const notesDoc = await fetch(`/api/${encodeURIComponent(board)}/notes`).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!current()) return;
+  // Page + its folder path
+  let page = null, path = [];
+  (function find(items, trail) {
+    for (const it of items || []) {
+      if (page) return;
+      if (it.type === 'page' && it.id === pageId) { page = it; path = trail; return; }
+      if (it.type === 'folder') find(it.children, [...trail, it.title || '']);
+    }
+  })(notesDoc?.items, []);
+  if (!page) {
+    document.getElementById('dashboardDetailTitle').textContent = 'Note';
+    body.innerHTML = `<p class="dashboard-empty">${notesDoc ? 'Note page not found.' : 'Failed to load the note.'}</p>`;
+    return;
+  }
+  document.getElementById('dashboardDetailTitle').textContent = page.title || 'Untitled';
+
+  const rows = [['Board', escHtml(board)]];
+  if (path.length) rows.push(['Folder', escHtml(path.join(' / '))]);
+  if (page.link) {
+    const safe = safeLink(page.link);
+    if (safe) rows.push(['Link', `<a href="${escHtml(safe)}" target="_blank" rel="noopener noreferrer">${escHtml(page.link)}</a>`]);
+  }
+  if (page.lastModified) rows.push(['Changed', escHtml(new Date(page.lastModified).toLocaleString())]);
+  const cards = (page.linkedCards || []).map(cardId => ({ board, cardId }));
+  if (cards.length) rows.push([cards.length > 1 ? 'Cards' : 'Card', _linkedCardLinksHtml(cards)]);
+  // Layout (dashboard.css, .dash-doc-detail — same as cards): table fixed at the top, attachments at the bottom,
+  // the note text scrolls in between
+  body.innerHTML = `<span hidden data-note-detail="${seq}"></span><div class="dash-doc-detail"><table class="dashboard-detail-table">${
+    rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
+  }</table></div>`;
+  const layout = body.querySelector('.dash-doc-detail');
+  _resolveLinkedCardLinks(body);
+
+  const div = document.createElement('div');
+  div.className = 'cm-preview card-desc-preview dash-doc-preview';
+  if (page.description) {
+    div.innerHTML = renderMarkdown(page.description);
+    if (window.buildToc) window.buildToc(div);
+    _resolveDashNoteAttachments(div, board, pageId);
+  } else {
+    div.innerHTML = '<p class="dashboard-empty">No text.</p>';
+  }
+  layout.appendChild(div);
+
+  const attachments = page.hasAttachments
+    ? await fetch(`/api/${encodeURIComponent(board)}/notes/attachments/${encodeURIComponent(pageId)}`).then(r => r.ok ? r.json() : []).catch(() => [])
+    : [];
+  if (attachments.length && current()) {
+    const fmtSize = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+    const base = `/api/${encodeURIComponent(board)}/notes/attachments/${encodeURIComponent(pageId)}`;
+    const section = document.createElement('div');
+    section.className = 'dash-card-detail-section';
+    section.innerHTML = '<div class="dash-card-detail-section-hdr">Attachments</div>' +
+      attachments.map(a => `<a class="dash-card-attach-item" href="${escHtml(`${base}/${encodeURIComponent(a.name)}`)}" download="${escHtml(a.name)}" data-name="${escHtml(a.name)}">${SVGICONS.attachment(12, 12)} ${escHtml(a.name)}<span class="dash-card-attach-size">${fmtSize(a.size)}</span></a>`).join('');
+    // Images / PDFs in the viewer, everything else downloads (fetch with the session token)
+    section.addEventListener('click', e => {
+      const a = e.target.closest('.dash-card-attach-item');
+      if (!a) return;
+      e.preventDefault();
+      const ft = _attachType(a.dataset.name);
+      if (ft === 'image' || ft === 'pdf') openAttachmentViewer(a.href, a.dataset.name, ft);
+      else _downloadAttachment(a.href, a.dataset.name);
+    });
+    const bottom = document.createElement('div');
+    bottom.className = 'dash-doc-bottom';
+    bottom.appendChild(section);
+    layout.appendChild(bottom);
   }
 }
 

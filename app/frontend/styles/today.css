@@ -212,6 +212,13 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   background: none; cursor: pointer; padding: 0;
 }
 .today-check:hover { border-color: var(--unread); background: var(--unread-glow); }
+.today-check--done {
+  display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+  border-color: #10b981; background: #10b981; color: #fff;
+  font-size: 10px; line-height: 1; cursor: default;
+}
+.today-check--done:hover { border-color: #10b981; background: #10b981; }
+.today-kcard--done .card-text { text-decoration: line-through; color: var(--text-muted); }
 .today-more { margin: 4px 0 0 4px; font-size: 0.75rem; }
 .today-link-btn { margin: 6px 0 0 4px; border: none; background: none; color: var(--link); cursor: pointer; font-size: 0.78rem; padding: 0; }
 

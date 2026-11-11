@@ -376,18 +376,49 @@ test.describe('Today page', () => {
     expect(JSON.stringify(state.patches['e2e-today'])).not.toContain('Call Bob');
   });
 
-  test('E-T-11 a note page in the Notes tile opens the note dialog on Today; Save writes that board\'s notes', async ({ page }) => {
+  test('E-T-11 a note page in the Notes tile opens the note detail panel; Edit opens the note dialog on Today; Save writes that board\'s notes', async ({ page }) => {
     const state = { layouts: { lg: { columns: [{ width: 1 }], tiles: [{ id: 'notes', col: 0, order: 0, size: '1/1' }] } } };
     await mockApis(page, state);
     await page.route('**/api/today/widgets/notes', r => r.fulfill({ json: {
       total: 1, boards: [{ board: 'e2e-today', pages: 1, webdav: false, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes' }] }],
     } }));
-    await mockBoard(page, 'e2e-today', { ...BOARD_TODAY, notes: { schemaVersion: 2, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes', description: 'hello' }] } }, state);
+    await mockBoard(page, 'e2e-today', { ...BOARD_TODAY, notes: { schemaVersion: 2, items: [{ type: 'folder', id: 'f-1', title: 'Team', children: [
+      { type: 'page', id: 'n-abc1', title: 'Meeting notes', description: '## Agenda\n\nhello **world**\n\n' + Array.from({ length: 80 }, (_, i) => `line ${i}`).join('\n\n'), link: 'https://example.com/m', linkedCards: ['id-due1'],
+        hasAttachments: true, lastModified: '2026-11-10T09:00:00Z' },
+    ] }] } }, state);
+    await page.route('**/api/e2e-today/notes/attachments/n-abc1', r => r.fulfill({ json: [{ name: 'minutes.pdf', size: 2048 }] }));
     await page.goto('/today');
     const tile = page.locator('.today-tile[data-tile="notes"]');
     await tile.locator('.today-nboard > summary').click();
     await tile.locator('.today-npage', { hasText: 'Meeting notes' }).click();
 
+    // Detail panel: board / folder / link / linked card, Markdown body, attachments; no dialog yet
+    const detail = page.locator('#dashboardDetail');
+    await expect(detail).toBeVisible();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Meeting notes');
+    await expect(detail.locator('.dashboard-detail-table')).toContainText('Team');
+    await expect(detail.locator('.dashboard-detail-table a[href="https://example.com/m"]')).toBeVisible();
+    await expect(detail.locator('.dash-linked-card')).toHaveText('Send offer · e2e-today / TODO');
+    await expect(detail.locator('.dash-doc-preview h2')).toHaveText('Agenda');
+    await expect(detail.locator('.dash-doc-preview strong')).toHaveText('world');
+    await expect(detail.locator('.dash-card-attach-item')).toContainText('minutes.pdf');
+    // Layout: table at the top, attachments at the bottom of the panel, only the text scrolls in between
+    const box = await page.evaluate(() => {
+      const r = sel => document.querySelector(`#dashboardDetail ${sel}`).getBoundingClientRect();
+      const body = document.getElementById('dashboardDetailBody'), pv = document.querySelector('#dashboardDetail .dash-doc-preview');
+      return { table: r('.dashboard-detail-table'), preview: r('.dash-doc-preview'), section: r('.dash-card-detail-section'), body: body.getBoundingClientRect(),
+        bodyScrolls: body.scrollHeight > body.clientHeight, previewScrolls: pv.scrollHeight > pv.clientHeight };
+    });
+    expect(box.table.bottom).toBeLessThanOrEqual(box.preview.top);
+    expect(box.preview.bottom).toBeLessThanOrEqual(box.section.top);
+    expect(box.body.bottom - box.section.bottom).toBeLessThan(20);
+    expect(box.bodyScrolls).toBe(false);
+    expect(box.previewScrolls).toBe(true);
+    await expect(page.locator('#noteModal')).toBeHidden();
+    await expect(page.locator('#dashboardDetailEditBtn')).toHaveAttribute('href', '/board/e2e-today#note:n-abc1');
+
+    await page.click('#dashboardDetailEditBtn');
+    await expect(detail).toBeHidden();
     await expect(page.locator('#noteModal')).toBeVisible();
     await expect(page.locator('#notePageTitle')).toHaveValue('Meeting notes');
     expect(new URL(page.url()).pathname).toBe('/today');
@@ -624,8 +655,9 @@ test.describe('Today page', () => {
       const type = url.pathname.split('/').pop();
       calls.push(`${type}${url.searchParams.get('full') ? '+full' : ''}:${url.searchParams.get('q')}`);
       const json = {
-        cards: { items: [item('id-s1', 'ACME | Backend Dev', { created: TODAY })], total: 1 },
-        notes: { items: [], total: 0 },
+        cards: { items: [item('id-s1', 'ACME | Backend Dev', { created: TODAY }), item('id-s2', 'ACME old task', { done: true }),
+          { board: 'e2e-today', column: '⏰ Scheduled', card: { id: 'id-s3', text: 'ACME weekly report', description: false, link: '' } }], total: 3 },
+        notes: url.searchParams.get('full') ? { items: [{ board: 'e2e-today', id: 'n-s1', title: 'ACME research', path: ['Jobs'] }], total: 1 } : { items: [], total: 0 },
         events: { items: [{ uid: 'ev-s1', title: 'Interview ACME', location: 'Köln', start: at(14), end: at(15), accountId: 'ca-e2e', label: 'Work', color: '#7c6af7', webUrl: '' }], total: 1 },
         mail: { items: [{ id: '42', subject: 'Offer from ACME', from: 'HR <hr@acme.com>', to: 'me@x', date: now.toISOString(), folder: 'Archive', unread: false }], total: 1 },
         applications: { items: [{ id: 'a9', title: 'Data Engineer', company: 'ACME', location: 'Berlin', status: 'Versendet', url: 'https://cv.example/#/applications?id=a9' }], total: 1 },
@@ -638,6 +670,13 @@ test.describe('Today page', () => {
       mailUrl = r.request().url();
       r.fulfill({ json: { id: '42', subject: 'Offer from ACME', from: 'hr@acme.com', to: 'me@x', date: now.toISOString(), text: 'Hello', attachments: [] } });
     });
+    const SEARCH_BOARD = { settings: { scheduledColumnId: 'c-sched' }, columns: [
+      { id: 'c-sched', title: '⏰ Scheduled', cards: [{ id: 'id-s3', text: 'ACME weekly report', scheduledFor: '2026-01-05', scheduledTarget: 'c-todo',
+        recurrence: { type: 'weekly', interval: 1, daysOfWeek: [1] } }] },
+      { id: 'c-todo', title: 'TODO', cards: [{ id: 'id-s1', text: 'ACME | Backend Dev', description: '## Role\n\n' + Array.from({ length: 60 }, (_, i) => `req ${i}`).join('\n\n') }, { id: 'id-s2', text: 'ACME old task', done: true }] },
+    ] };
+    await mockBoard(page, 'e2e-today', { board: SEARCH_BOARD, notes: { schemaVersion: 2, items: [{ type: 'folder', id: 'f-j', title: 'Jobs', children: [
+      { type: 'page', id: 'n-s1', title: 'ACME research', description: 'Salary range' }] }] } }, state);
     await page.addInitScript(() => localStorage.removeItem('today-search'));
     await page.goto('/today');
 
@@ -651,7 +690,7 @@ test.describe('Today page', () => {
     await expect(tile.locator('.today-search-dots')).toHaveCount(0);   // no category still searching
     expect(await tile.locator('.today-search-group').evaluateAll(els => els.map(e => e.dataset.type))).toEqual(['cards', 'notes', 'events', 'mail', 'applications']);
     expect(calls.sort()).toEqual(['applications:acme', 'cards:acme', 'events:acme', 'mail:acme', 'notes:acme']);
-    await expect(tile.locator('.today-tile-count')).toHaveText('4');
+    await expect(tile.locator('.today-tile-count')).toHaveText('6');
     // A source without hits stays listed: "0", no triangle (not a <details>)
     const notesRow = tile.locator('.today-search-group[data-type="notes"]');
     await expect(notesRow).toHaveClass(/today-search-group--empty/);
@@ -660,13 +699,35 @@ test.describe('Today page', () => {
 
     // Categories start collapsed; the summary shows the hit count; a click opens one
     await expect(tile.locator('details.today-search-group[open]')).toHaveCount(0);
-    await expect(tile.locator('.today-search-group[data-type="cards"] .today-search-n')).toHaveText('1');
-    await expect(tile.locator('.today-search-group[data-type="cards"] .today-kcard')).toBeHidden();
+    await expect(tile.locator('.today-search-group[data-type="cards"] .today-search-n')).toHaveText('3');
+    await expect(tile.locator('.today-search-group[data-type="cards"] .today-kcard').first()).toBeHidden();
     for (const type of ['cards', 'events', 'mail', 'applications']) await tile.locator(`.today-search-group[data-type="${type}"] > summary`).click();
 
     // Card → detail panel; mail → detail panel with its folder; application → new tab link
-    await tile.locator('.today-search-group[data-type="cards"] .today-kcard .card-text').click();
+    await tile.locator('.today-search-group[data-type="cards"] .today-kcard', { hasText: 'ACME | Backend Dev' }).locator('.card-text').click();
     await expect(page.locator('#dashboardDetailTitle')).toHaveText('ACME | Backend Dev');
+    await expect(page.locator('#dashboardDetail .dash-card-where')).toHaveText('e2e-today › TODO');
+    // Same layout as notes: table on top, the description scrolls in its own box, the body doesn't
+    await expect(page.locator('#dashboardDetail .dash-doc-preview h2')).toHaveText('Role');
+    expect(await page.evaluate(() => {
+      const body = document.getElementById('dashboardDetailBody'), pv = document.querySelector('#dashboardDetail .dash-doc-preview');
+      const t = document.querySelector('#dashboardDetail .dashboard-detail-table').getBoundingClientRect();
+      return [t.bottom <= pv.getBoundingClientRect().top, body.scrollHeight > body.clientHeight, pv.scrollHeight > pv.clientHeight];
+    })).toEqual([true, false, true]);
+    await expect(page.locator('#dashboardDetail th', { hasText: 'Scheduled' })).toHaveCount(0);
+    await page.click('#dashboardDetailClose');
+    // Done card: filled circle (no button), struck through
+    const doneCard = tile.locator('.today-kcard', { hasText: 'ACME old task' });
+    await expect(doneCard.locator('.today-check--done')).toBeVisible();
+    await expect(doneCard.locator('button.today-check')).toHaveCount(0);
+    await expect(tile.locator('.today-kcard', { hasText: 'ACME | Backend Dev' }).locator('button.today-check')).toHaveCount(1);
+    // Card in the Scheduled column: scheduling line in the detail panel
+    await tile.locator('.today-kcard', { hasText: 'ACME weekly report' }).locator('.card-text').click();
+    await expect(page.locator('#dashboardDetail .dash-card-where')).toHaveText('e2e-today › ⏰ Scheduled');
+    const sched = page.locator('#dashboardDetail tr', { has: page.locator('th', { hasText: 'Scheduled' }) });
+    await expect(sched).toContainText('↻ weekly Mon');
+    await expect(sched).toContainText('→ TODO');
+    await expect(sched).toContainText('from');
     await page.click('#dashboardDetailClose');
     await tile.locator('.today-search-group[data-type="mail"] .today-mail-row').click();
     await expect(page.locator('#dashboardDetailTitle')).toHaveText('Offer from ACME');
@@ -686,7 +747,7 @@ test.describe('Today page', () => {
     await mailRow.locator('.today-search-check').uncheck();
     await expect(mailRow).toHaveClass(/today-search-group--off/);
     await expect(mailRow.locator('summary, .today-search-n')).toHaveCount(0);
-    await expect(tile.locator('.today-tile-count')).toHaveText('3');
+    await expect(tile.locator('.today-tile-count')).toHaveText('5');
     await tile.locator('[data-ts-all="0"]').click();
     await expect(tile.locator('.today-search-group--off')).toHaveCount(5);
     await expect(tile.locator('.today-search-check:checked')).toHaveCount(0);
@@ -707,6 +768,13 @@ test.describe('Today page', () => {
     expect(calls.every(c => c.includes('+full:acme'))).toBe(true);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('today-search')).full)).toBe(true);
     await expect(tile.locator('details.today-search-group[open]')).toHaveCount(0);   // new search: collapsed again
+
+    // A note hit opens the note detail panel
+    await tile.locator('.today-search-group[data-type="notes"] > summary').click();
+    await tile.locator('.today-search-group[data-type="notes"] .today-npage').click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('ACME research');
+    await expect(page.locator('#dashboardDetail .dash-doc-preview')).toContainText('Salary range');
+    await page.click('#dashboardDetailClose');
 
     // Auto-refresh keeps query and results without searching again
     calls.length = 0;
@@ -732,6 +800,27 @@ async function swipe(page, locator, dx) {
 
 test.describe('Today page — phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('E-T-20 note detail on a phone: table and attachments are not fixed, the whole panel scrolls', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'notes', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    await page.route('**/api/today/widgets/notes', r => r.fulfill({ json: {
+      total: 1, boards: [{ board: 'e2e-today', pages: 1, webdav: false, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes' }] }],
+    } }));
+    await mockBoard(page, 'e2e-today', { ...BOARD_TODAY, notes: { schemaVersion: 2, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes',
+      description: Array.from({ length: 80 }, (_, i) => `line ${i}`).join('\n\n'), hasAttachments: true }] } }, state);
+    await page.route('**/api/e2e-today/notes/attachments/n-abc1', r => r.fulfill({ json: [{ name: 'minutes.pdf', size: 2048 }] }));
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="notes"]');
+    await tile.locator('.today-nboard > summary').click();
+    await tile.locator('.today-npage', { hasText: 'Meeting notes' }).click();
+    await expect(page.locator('#dashboardDetail .dash-card-attach-item')).toBeVisible();
+    const m = await page.evaluate(() => {
+      const body = document.getElementById('dashboardDetailBody'), pv = document.querySelector('#dashboardDetail .dash-doc-preview');
+      return { bodyScrolls: body.scrollHeight > body.clientHeight, previewScrolls: pv.scrollHeight > pv.clientHeight };
+    });
+    expect(m).toEqual({ bodyScrolls: true, previewScrolls: false });
+  });
 
   test('E-T-15 swipe actions in "Needs attention": mail read / move, card move to column / edit / delete', async ({ page }) => {
     const state = { layouts: LAYOUTS };
