@@ -232,24 +232,11 @@
   display: flex;
   flex-direction: column;
   padding: 0;
-  border: none;   /* widget format (today.css): no frame, 8 px corners, --panel-bg */
-  border-radius: 8px;
-  background: var(--panel-bg);
+  border: none;   /* widget format: no frame; background and 8 px corners from .panel (panel.css) */
 }
 
-/* Header in the widget header format, tinted with the event's calendar colour (--detail-accent) or the accent */
-.dashboard-detail-titlebar {
-  --hdr-accent: var(--detail-accent, var(--accent));
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 6px 8px 6px 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--hdr-accent) 30%, var(--border));
-  flex-shrink: 0;
-  background: color-mix(in srgb, var(--hdr-accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
-  user-select: none;
-}
+/* Header (.dashboard-detail-titlebar): the widget header format from .panel-hdr (panel.css), tinted with the
+   card / calendar / mail account colour (--detail-accent) or the accent */
 
 .dashboard-detail-title {
   font-family: 'Syne', sans-serif;
@@ -257,7 +244,6 @@
   font-weight: 700;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--hdr-accent) 35%, var(--text-muted));
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -278,14 +264,6 @@
 .dashboard-detail-close:hover {
   background: var(--surface2);
   color: var(--text);
-}
-
-@media (prefers-color-scheme: light) {
-  .dashboard-detail-titlebar {
-    background: color-mix(in srgb, var(--hdr-accent) 9%, var(--surface2));
-    border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
-  }
-  .dashboard-detail-title { color: var(--text-muted); }
 }
 
 /* Header buttons (Edit, Webmail, Full screen, Close) like widget header buttons (.today-tile-btn) */

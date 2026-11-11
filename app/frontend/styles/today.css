@@ -133,22 +133,15 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-tile.today-tile--fill { flex: 0 1 auto; min-height: min(120px, var(--today-col-h)); max-height: var(--today-col-h); }
 .today-tile.today-tile--fill .today-tile-body { flex: 0 1 auto; }
 
+/* Box, bar and colours: .panel-hdr (panel.css) */
 .today-tile-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 6px 8px 6px 12px;
   border-radius: 8px 8px 0 0;
-  background: color-mix(in srgb, var(--surface2) 55%, var(--bg));
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   font-family: 'Syne', sans-serif;
   font-weight: 700;
   font-size: 0.7rem;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--text-muted);
-  flex-shrink: 0;
 }
 .today-tile-count:not(:empty) { font-family: inherit; font-weight: normal; font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0; opacity: 0.8; }
 .today-tile-count:not(:empty)::before { content: '\00b7  '; white-space: pre; }
@@ -175,7 +168,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-tile-edit { display: none; align-items: center; gap: 6px; margin-left: auto; }
 
 /* Edit mode */
-#today.today--editing .today-tile { outline: 1px dashed var(--accent); outline-offset: 3px; border-radius: 4px; overflow: visible; }
+#today.today--editing .today-tile { outline: 1px dashed var(--accent); outline-offset: 3px; overflow: visible; }
 #today.today--editing .today-tile-header { color: var(--text); }
 #today.today--editing .today-tile-actions { display: none; }
 #today.today--editing .today-tile-edit { display: inline-flex; }
@@ -639,21 +632,6 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 #today:not(.today--editing) .today-tile.today-tile--collapsed { flex: 0 0 auto; min-height: 0; max-height: none; }
 #today:not(.today--editing) .today-tile--collapsed .today-tile-body { display: none; }
 #today:not(.today--editing) .today-tile--collapsed .today-tile-header { border-radius: 8px; border-bottom-color: transparent; }
-.today-tile-header { user-select: none; }
-
-/* Light mode: widget headers a little darker, tinted with the accent of the app title */
-@media (prefers-color-scheme: light) {
-  #today .today-tile-header { background: color-mix(in srgb, var(--accent) 9%, var(--surface2)); }
-}
-
-/* Dark mode: widget headers tinted with the accent of the app title as well */
-@media not (prefers-color-scheme: light) {
-  #today .today-tile-header {
-    background: color-mix(in srgb, var(--accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
-    border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  }
-  #today .today-tile-title { color: color-mix(in srgb, var(--accent) 35%, var(--text-muted)); }
-}
 
 /* Column whose tiles need more than its height (it scrolls anyway — _todayFitColumns): an
    "available" tile shows all its content, like "fit content" */
@@ -689,9 +667,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 #dashboardRefreshBtn.in-view-bar { display: none !important; }
 
 /* The page (Today and the calendar / mail views opened over it): --page-bg (dark: a bit lighter than --bg);
-   the widgets: --panel-bg (dark: the calendar / mail view panel colour, light: a bit brighter than the page) */
+   the widgets: --panel-bg (.panel in panel.css; dark: the calendar / mail view panel colour, light: a bit
+   brighter than the page) */
 body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page-bg); }
-#today .today-tile, #today.today--editing .today-tile { background: var(--panel-bg); border-radius: 8px; }
 /* Bodies round their own bottom corners: the tile box doesn't clip in edit mode (overflow: visible) or in a stack */
 #today .today-tile-body { padding-left: 10px; padding-right: 10px; padding-bottom: 8px; border-radius: 0 0 8px 8px; }
 /* Stacked headers: the tile boxes dissolve (display: contents), so the bodies carry the background */
@@ -700,30 +678,15 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
   box-shadow: 0 calc(-1 * var(--today-stack-gap)) 0 var(--today-page-bg), 0 var(--today-stack-gap) 0 var(--panel-bg);
 }
 
-/* Calendar and mail view: header in the widget header format */
-:is(.calview, .mailview) > .calview-bar {
-  background: color-mix(in srgb, var(--surface2) 55%, var(--bg));
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-}
+/* Calendar and mail view: header in the widget header format (bar and colours: .panel-hdr, panel.css) */
 :is(.calview, .mailview) .calview-title {
   font-family: 'Syne', sans-serif;
   font-weight: 700;
   font-size: 0.8rem;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--text-muted);
 }
 .mailview-title .mv-title-acc { text-transform: none; letter-spacing: 0; }
-@media (prefers-color-scheme: light) {
-  :is(.calview, .mailview) > .calview-bar { background: color-mix(in srgb, var(--accent) 9%, var(--surface2)); }
-}
-@media not (prefers-color-scheme: light) {
-  :is(.calview, .mailview) > .calview-bar {
-    background: color-mix(in srgb, var(--accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
-    border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  }
-  :is(.calview, .mailview) .calview-title { color: color-mix(in srgb, var(--accent) 35%, var(--text-muted)); }
-}
 
 /* Small screens: the views keep the same distance to the edges as the widgets (#today padding) */
 @media (max-width: 767px) and (min-width: 640px) and (min-height: 501px) {

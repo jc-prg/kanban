@@ -270,6 +270,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('iconLibrarySection').style.display = 'none';
     document.getElementById('accountsSection').style.display = 'none';
     document.getElementById('todaySection').style.display = 'none';
+    document.getElementById('appearanceSection').style.display = 'none';
   } else {
     document.getElementById('menuSettings').textContent = 'Global settings';
     document.getElementById('webdavSection').style.display = 'none';
@@ -277,6 +278,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     document.getElementById('aboutSection').style.display = '';
     document.getElementById('accountsSection').style.display = '';
     document.getElementById('todaySection').style.display = '';
+    document.getElementById('appearanceSection').style.display = '';
   }
 
   // ---- Prompts tabs (overview only) ----
@@ -414,6 +416,30 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     }
   }
 
+  // ---- Appearance (skin) ----
+  function syncSkinOptions() {
+    document.querySelectorAll('#skinOptions input[name="appSkin"]').forEach(r => { r.checked = r.value === currentSkin(); });
+  }
+  document.querySelectorAll('#skinOptions input[name="appSkin"]').forEach(radio => {
+    radio.addEventListener('change', async () => {
+      if (!radio.checked) return;
+      const previous = currentSkin();
+      applySkin(radio.value);
+      try {
+        const r = await fetch('/api/appearance', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ skin: radio.value }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        flashIndicator(`${ICONS.done} saved`);
+      } catch {
+        applySkin(previous);
+        syncSkinOptions();
+      }
+    });
+  });
+
   window.openSettings = openSettings;
 
   // Open settings in global mode even when on a board page
@@ -428,7 +454,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       if (el) el.style.display = 'none';
     });
     ['dbSection','apiKeySection','colorPaletteSection','promptsSection',
-     'iconLibrarySection','accountsSection','todaySection','aboutSection'].forEach(id => {
+     'iconLibrarySection','accountsSection','appearanceSection','todaySection','aboutSection'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = '';
     });
@@ -481,6 +507,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       renderTrackedCols();
     }
     loadApiKey();
+    syncSkinOptions();
     if (_isBoard) {
       loadWebdavSettings();
       loadWebhookSettings();
@@ -1617,7 +1644,26 @@ function _createCardInInbox(text) {
 }
 
 // ---- After-auth routing ----
+// ---- Skin (Settings → Appearance) ----
+// <html data-skin="<id>"> activates styles/skin-<id>.css; 'default' = no attribute. Cached in localStorage
+// so skin.js can apply it before the first paint; the server value wins after login.
+function currentSkin() { return document.documentElement.dataset.skin || 'default'; }
+
+function applySkin(skin) {
+  if (!skin || skin === 'default') delete document.documentElement.dataset.skin;
+  else document.documentElement.dataset.skin = skin;
+  try { localStorage.setItem('app-skin', skin || 'default'); } catch { /* storage blocked */ }
+}
+
+async function loadAppearance() {
+  try {
+    const r = await fetch('/api/appearance');
+    if (r.ok) applySkin((await r.json()).skin);
+  } catch { /* keep the cached skin */ }
+}
+
 async function afterAuth() {
+  loadAppearance();
   if (typeof loadTemplates === 'function') await loadTemplates();
   if (ROUTE !== 'board') { await initToday(); return; }
   if (location.hash.startsWith('#note:')) {

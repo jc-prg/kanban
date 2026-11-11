@@ -24,6 +24,9 @@
 <link rel="stylesheet" href="/styles/calview.css">
 <link rel="stylesheet" href="/styles/mailview.css">
 <link rel="stylesheet" href="/styles/today.css">
+<link rel="stylesheet" href="/styles/panel.css">
+<link rel="stylesheet" href="/styles/skin-glass.css">
+<script src="/skin.js"></script>
 </head>
 <body>
 
@@ -68,9 +71,9 @@
 <div id="dashboard" style="display:none">
 
   <div class="modal-backdrop" id="dashboardDetail" style="display:none">
-    <div class="modal dashboard-detail-modal">
-      <div class="dashboard-detail-titlebar">
-        <span id="dashboardDetailTitle" class="dashboard-detail-title"></span>
+    <div class="modal dashboard-detail-modal panel">
+      <div class="dashboard-detail-titlebar panel-hdr">
+        <span id="dashboardDetailTitle" class="dashboard-detail-title panel-hdr-title"></span>
         <a class="modal-fs-btn" id="dashboardDetailEditBtn" href="#" title="Edit card" style="position:static;opacity:0.55;display:none"><span data-icon="edit"></span></a>
         <a class="modal-fs-btn" id="dashboardDetailWebUrl" href="#" target="_blank" rel="noopener noreferrer" title="Open in Webmail" style="position:static;opacity:0.55;display:none">&#x2197;</a>
         <button class="modal-fs-btn" id="dashboardDetailFsBtn" title="Full screen" style="position:static;opacity:0.55"><span data-icon="fullscreen"></span></button>
@@ -80,9 +83,9 @@
     </div>
   </div>
   <div class="mailview" id="mailView" style="display:none" data-pane="list">
-    <div class="calview-bar mailview-bar">
+    <div class="calview-bar mailview-bar panel-hdr">
       <button class="btn calview-navbtn mv-folders-btn" id="mailViewFoldersBtn" title="Folders"><span data-icon="folder"></span></button>
-      <h2 class="calview-title mailview-title" id="mailViewTitle">Mail</h2>
+      <h2 class="calview-title mailview-title panel-hdr-title" id="mailViewTitle">Mail</h2>
       <button class="btn" id="mailViewCompose" title="New message (c)"><span data-icon="email"></span>Mail</button>
       <button class="today-tile-btn" id="mailViewRefresh" title="Refresh"><span data-icon="sync"></span></button>
       <button class="dashboard-detail-close" id="mailViewClose" title="Close (Esc)"><span data-icon="close"></span></button>
@@ -117,13 +120,13 @@
     </div>
   </div>
   <div class="calview" id="calView" style="display:none">
-    <div class="calview-bar">
+    <div class="calview-bar panel-hdr">
       <div class="calview-nav">
         <button class="btn calview-navbtn" id="calViewPrev" title="Previous (←)">&#x2039;</button>
         <button class="btn" id="calViewToday" title="Today (t)">Today</button>
         <button class="btn calview-navbtn" id="calViewNext" title="Next (→)">&#x203a;</button>
       </div>
-      <h2 class="calview-title" id="calViewTitle"></h2>
+      <h2 class="calview-title panel-hdr-title" id="calViewTitle"></h2>
       <div class="calview-modes" role="group" aria-label="View">
         <button class="calview-mode" data-cv-mode="workweek" title="Work week">5</button>
         <button class="calview-mode" data-cv-mode="week" title="Week">7</button>
@@ -937,7 +940,37 @@
           </div>
         </div>
 
-        <div class="settings-section" id="todaySection" data-settings-label="Dashboard" data-settings-keywords="dashboard today widgets agenda weather cv-app applications progress boards quick access links apps favicon layout bar refresh update interval" style="display:none">
+        <div class="settings-section" id="appearanceSection" data-settings-label="Appearance" data-settings-keywords="skin theme look style design glass colors appearance widgets" style="display:none">
+          <div class="settings-section-title">
+            <span>Appearance</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <p class="settings-subtitle">Skin</p>
+            <!-- One option per skin (styles/skin-<id>.css, ids from SKINS in backend/routes/appearance.js) -->
+            <div id="skinOptions" class="skin-options">
+              <label class="settings-item skin-option">
+                <input type="radio" name="appSkin" value="default">
+                <span class="skin-preview skin-preview--default" aria-hidden="true"><i></i><b></b></span>
+                <div class="settings-item-info">
+                  <div class="settings-item-label">Default</div>
+                  <div class="settings-item-desc">Flat widgets with an accent-tinted header</div>
+                </div>
+              </label>
+              <label class="settings-item skin-option">
+                <input type="radio" name="appSkin" value="glass">
+                <span class="skin-preview skin-preview--glass" aria-hidden="true"><i></i><b></b></span>
+                <div class="settings-item-info">
+                  <div class="settings-item-label">Glass</div>
+                  <div class="settings-item-desc">Dashboard widgets as coloured glass — glossy headers, tinted bodies with a fine edge</div>
+                </div>
+              </label>
+            </div>
+            <p class="settings-item-desc">Applies to every browser and device you sign in with.</p>
+          </div>
+        </div>
+
+        <div class="settings-section" id="todaySection"data-settings-label="Dashboard" data-settings-keywords="dashboard today widgets agenda weather cv-app applications progress boards quick access links apps favicon layout bar refresh update interval" style="display:none">
           <div class="settings-section-title">
             <span>Dashboard</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>

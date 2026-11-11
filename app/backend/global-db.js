@@ -178,4 +178,21 @@ async function saveTodayConfig(data) {
   return upsertDoc(globalDb, TODAY_CONFIG_ID, data);
 }
 
-module.exports = { getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender };
+const APPEARANCE_ID = 'appearance';
+
+/** App-wide appearance (skin); null when none was saved yet. */
+async function getAppearance() {
+  try {
+    const { _id, _rev, ...data } = await globalDb.get(APPEARANCE_ID);
+    return data;
+  } catch (err) {
+    if (err.statusCode === 404) return null;
+    throw err;
+  }
+}
+
+async function saveAppearance(data) {
+  return upsertDoc(globalDb, APPEARANCE_ID, data);
+}
+
+module.exports = { getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender };

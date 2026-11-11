@@ -106,7 +106,7 @@ function render() {
     const isScheduledCol = col.id === _scheduledColId;
 
     const colEl = document.createElement('div');
-    colEl.className = 'column' + (isScheduledCol ? ' column--scheduled' : '');
+    colEl.className = 'column panel' + (isScheduledCol ? ' column--scheduled' : '');
     colEl.dataset.colId = col.id;
     colEl.setAttribute('dragover', 'true');
 
@@ -140,11 +140,11 @@ function render() {
     });
 
     colEl.innerHTML = `
-      <div class="column-header" style="--col-color:${color}">
+      <div class="column-header panel-hdr" style="--col-color:${color}">
         ${isScheduledCol
           ? `<span class="col-sched-icon">${_svgSchedule()}</span>`
           : `<div class="col-drag-handle" draggable="true" title="Drag to reorder">${_svgDragHandle()}</div>`}
-        <input class="column-title" value="${escHtml(isScheduledCol ? col.title.replace(/^⏰\s*/, '') : col.title)}" spellcheck="false"${isScheduledCol ? ' readonly' : ''} />
+        <input class="column-title panel-hdr-title" value="${escHtml(isScheduledCol ? col.title.replace(/^⏰\s*/, '') : col.title)}" spellcheck="false"${isScheduledCol ? ' readonly' : ''} />
         ${isScheduledCol ? '' : `<button class="col-btn" title="Column options" style="margin-left:auto">${_svgMoreOptions()}</button>`}
         ${(colColorFilter[col.id] || colDupFilter.has(col.id) || colPriorityFilter[col.id]) ? `<span class="col-filter-icon" title="Filter active — click to clear">${SVGICONS.filter(15, 15)}</span>` : ''}
         <span class="column-count">${(() => { const filterColor = colColorFilter[col.id]; const filterDup = colDupFilter.has(col.id); const filterPriority = colPriorityFilter[col.id]; const total = col.cards.filter(c => !c.text.startsWith('#')).length; if (!filterColor && !filterDup && !filterPriority) return total; const filtered = col.cards.filter(c => !c.text.startsWith('#') && (!filterColor || c.color === filterColor) && (!filterDup || c.duplicate || c.text.startsWith('(copy) ')) && (!filterPriority || c.priority === filterPriority)).length; return `${filtered}/${total}`; })()}</span>

@@ -31,15 +31,8 @@ body.calview-open header { z-index: 96; }
 }
 .calview.cv-dragging, .calview.cv-dragging * { user-select: none; cursor: grabbing !important; }
 
-.calview-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface2) 92%, var(--accent));   /* same as .dashboard-panel-header */
-  flex-wrap: wrap;
-}
+/* Bar, background and border: .panel-hdr (panel.css); gap and button sizes: today.css */
+.calview-bar { flex-wrap: wrap; }
 .calview-nav { display: flex; gap: 4px; }
 .calview-navbtn { padding: 6px 12px; font-size: 1rem; line-height: 1; }
 .calview-title {

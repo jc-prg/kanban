@@ -41,6 +41,7 @@ Single-page kanban board with a minimal three-layer design:
 | `backup.js` | `runBackup`, `runPromptsBackup`, `checkDataDirectories`, `refreshDbSize`/`getDbSizeBytes` |
 | `routes/auth.js` | `POST /api/auth`, `GET /api/auth/verify`, `POST /api/auth/logout` |
 | `routes/prompts.js` | `GET /api/settings`, `GET/PUT /api/prompts` |
+| `routes/appearance.js` | `GET/PUT /api/appearance` — app skin (`SKINS`: `default`, `glass`), doc `appearance` in `jc-config-dashboard` (`getAppearance` / `saveAppearance` in `global-db.js`) |
 | `routes/boards.js` | `GET /api/boards`, achievements, board create/rename/delete |
 | `routes/board.js` | All `/:board/board`, `all-columns`, `column`, `card`, `move-to`, `import` |
 | `routes/notes.js` | All `/:board/notes*` including ZIP export |
@@ -70,6 +71,8 @@ Single-page kanban board with a minimal three-layer design:
 | `dashboard.css` | Overlay host (`#dashboard`), mail / card items, detail modal, settings drag handles |
 | `mailview.css` | Mail view — same overlay slot as `calview.css`; folder tree, message list, reader, compose editor, folder picker; one column at a time on phones (`data-pane`) |
 | `today.css` | Today page — dark mode: page lighter (`body.route-today`, `--today-page-bg`, class set in `initToday`), widgets keep `--bg`; calendar / mail view headers in the widget header format and, on small screens, the widgets' edge distance; Today bar, edit bar, column grid (`--today-col-h`, tile size classes `today-tile--f1/f23/f12/f13/auto/fill`), agenda / attention / widget tiles, Quick access (`.today-qa--s/m/l` set `--today-qa-box` / `--today-qa-w` / `--today-qa-gap`: icon edge + 5 px margin, minimum column width — as many per row as fit — and gap; title below the icon; accent glow (`drop-shadow` on app icons, `box-shadow` on frames); app icons bare (`.today-qa-icon--img`), emoji / letter framed (`--box`); `.today-qa-img--invert` inverts in dark mode), Settings → Dashboard widget rows |
+| `panel.css` | Widget format shared by Today tiles, board columns, the dashboard detail panel and the calendar / mail view headers: `.panel` (box: `--panel-bg`, 8 px corners), `.panel-hdr` (header bar + accent-tinted background / bottom line), `.panel-hdr-title` (title colour). `--hdr-accent` = column colour (`--col-color`), detail colour (`--detail-accent`) or `--accent`. Loaded after the component stylesheets — don't re-add header backgrounds / colours there |
+| `skin-glass.css` | Skin "glass" — overrides only, every rule scoped to `:root[data-skin="glass"]`; restyles `.panel` / `.panel-hdr` / `.panel-hdr-title` (plus `#calView` / `#mailView` panels) as coloured glass, header colours via `--hdr-accent`; tunables as `--glass-*` on `:root`; backdrop blur only on Today headers (stacked headers). A new skin = `skin-<id>.css` + id in `SKINS` + option in `#skinOptions` |
 | `calview.css` | Calendar view — panel covering the dashboard grid (full-screen on phones), week/work-week time grid, all-day row, month grid |
 
 ### JS (`app/frontend/`) — load order matters, no bundler
@@ -78,6 +81,7 @@ Vendor libraries loaded first: `marked.min.js` (Markdown → HTML), `purify.min.
 
 | File | Contents |
 |---|---|
+| `skin.js` | Loaded in `<head>`: applies the skin cached in `localStorage` `app-skin` as `<html data-skin>` before the first paint |
 | `icons.js` | `ICONS` object (unicode/emoji constants) and SVG icon builder functions (`_svgAttachment`, `_svgLink`, `_svgNoteDoc`, …) |
 | `state.js` | `ROUTE` (`'board'` | `'today'`), board context `BOARD_NAME` / `API_BASE` / `API` (`let`: `setBoardContext(name)` switches them on Today, `flushBoardSave()` runs a pending save now), API constants, fetch interceptor (auto-attaches session token), `showConfirm`, color/priority constants, state vars, `load`, `buildPatch`, `schedulesSave`, save indicators, `uid`, all state mutations, `mergeStates` |
 | `drag.js` | Drag state vars, mouse D&D for columns and cards, touch D&D (`spawnGhost`, `endTouchDrag`, all touch/drag event listeners) |
@@ -155,6 +159,8 @@ All `/api/*` routes require authentication via one of:
 | `GET` | `/api/auth/verify` | Check if the current session token is valid |
 | `GET` | `/api/settings` | Returns `{ apiKey }` (null if not configured) |
 | `GET` | `/api/prompts` | Load global search prompts |
+| `GET` | `/api/appearance` | `{ skin, skins }` — active skin (`default` when nothing / an unknown one is stored) |
+| `PUT` | `/api/appearance` | Body `{ skin }` (one of `skins`, else 400); returns `{ ok, skin }`. Set in Settings → Appearance (`#appearanceSection`, global only); `loadAppearance()` in `afterAuth` applies the server value (`applySkin` in `settings.js`, cached for `skin.js`) |
 | `PUT` | `/api/prompts` | Save global search prompts; body: `{ searchProfile, criteriaInclude, criteriaExclude, searchRadius }` |
 
 ### Board management

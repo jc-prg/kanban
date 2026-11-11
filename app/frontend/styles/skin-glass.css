@@ -1,0 +1,86 @@
+/* Skin "glass" (Settings → Appearance; <html data-skin="glass">): everything in the widget format (.panel,
+   .panel-hdr, .panel-hdr-title — panel.css) as coloured glass: dashboard widgets, board columns, the
+   dashboard detail panel and the calendar / mail views. Headers keep their own colour (--hdr-accent: column
+   colour, card / calendar / mail account colour, else the accent of the app title). Only overrides — the
+   default look lives in the regular stylesheets. */
+
+:root[data-skin="glass"] {
+  --glass-tint: 30%;                              /* header: colour share at the top left (a third at the bottom right) */
+  --glass-sheen: rgba(255, 255, 255, 0.09);       /* header: gloss on the upper half */
+  --glass-highlight: rgba(255, 255, 255, 0.16);   /* header: light top edge */
+  --glass-body-tint: 7%;                          /* body: accent share in --panel-bg */
+  --glass-body-sheen: rgba(255, 255, 255, 0.035); /* body: faint sheen from the top left */
+  --glass-edge-mix: 20%;                          /* body: accent share of the edge */
+  --glass-drop: 0 6px 20px rgba(0, 0, 0, 0.22);
+  --glass-pane: rgba(0, 0, 0, 0.14);              /* inner side panes (mail folders): a veil instead of an opaque fill */
+  --card-bg: color-mix(in srgb, var(--surface2) 94%, #fff);   /* board cards a bit brighter (card.css) */
+}
+@media (prefers-color-scheme: light) {
+  :root[data-skin="glass"] {
+    --glass-tint: 24%;
+    --glass-sheen: rgba(255, 255, 255, 0.6);
+    --glass-highlight: rgba(255, 255, 255, 0.85);
+    --glass-body-tint: 4%;
+    --glass-body-sheen: rgba(255, 255, 255, 0.55);
+    --glass-edge-mix: 16%;
+    --glass-drop: 0 6px 18px color-mix(in srgb, var(--accent) 8%, transparent);
+    --glass-pane: rgba(255, 255, 255, 0.4);
+    --card-bg: color-mix(in srgb, var(--surface2) 72%, #fff);
+  }
+}
+:root[data-skin="glass"] {
+  --glass-body-solid: color-mix(in srgb, var(--accent) var(--glass-body-tint), var(--panel-bg));
+  --glass-body: linear-gradient(160deg, var(--glass-body-sheen) 0%, transparent 45%), var(--glass-body-solid);
+  --glass-edge: color-mix(in srgb, var(--accent) var(--glass-edge-mix), transparent);
+}
+
+/* ---- Bodies: accent-tinted --panel-bg, sheen, thin accent edge, soft drop shadow. Opaque (no
+   backdrop-filter: it would become the containing block of fixed popups inside, and what lies behind is
+   flat anyway). The calendar / mail view panels join in (default: --surface, no .panel). ---- */
+:root[data-skin="glass"] :is(.panel, #calView, #mailView) {
+  background: var(--glass-body);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-drop);
+}
+:root[data-skin="glass"] .dashboard-detail-modal { box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5); }   /* keeps the dialog shadow */
+:root[data-skin="glass"] .calview--multi .calview-legend { background: transparent; }
+:root[data-skin="glass"] .mailview-folders { background: var(--glass-pane); }
+
+/* Stacked widget headers: the tile boxes dissolve (display: contents), so the bodies carry background and edge */
+:root[data-skin="glass"] #today .today-col--stack > .today-tile > .today-tile-body {
+  background: var(--glass-body);
+  border: 1px solid var(--glass-edge);
+  border-top: none;
+}
+
+/* Board columns: drag feedback over the glass shadow */
+:root[data-skin="glass"] .column.drag-over { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 32px var(--accent-glow); }
+:root[data-skin="glass"] .column.col-drop-left  { box-shadow: -3px 0 0 var(--accent), var(--glass-drop); }
+:root[data-skin="glass"] .column.col-drop-right { box-shadow:  3px 0 0 var(--accent), var(--glass-drop); }
+
+/* ---- Headers: translucent colour with a glossy upper half, a light top edge and a coloured bottom line ---- */
+:root[data-skin="glass"] .panel-hdr {
+  --glass-hdr-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 -1px 0 color-mix(in srgb, var(--hdr-accent) 22%, transparent);
+  background:
+    linear-gradient(180deg, var(--glass-sheen) 0%, transparent 55%),
+    linear-gradient(135deg, color-mix(in srgb, var(--hdr-accent) var(--glass-tint), transparent),
+                            color-mix(in srgb, var(--hdr-accent) calc(var(--glass-tint) / 3), transparent));
+  border-bottom-color: color-mix(in srgb, var(--hdr-accent) 40%, transparent);
+  box-shadow: var(--glass-hdr-shadow);
+}
+/* Dashboard widgets: frosted — content scrolling under a stacked header (.today-col--stack) shows through
+   blurred. Only there: elsewhere nothing passes beneath, and the filter would trap header dropdowns in a
+   stacking context. */
+:root[data-skin="glass"] #today .panel-hdr {
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(160%);
+}
+:root[data-skin="glass"] #today .today-col--stack > .today-tile > .panel-hdr {
+  box-shadow: var(--glass-hdr-shadow), 0 calc(-1 * var(--today-stack-gap)) 0 var(--today-page-bg), 0 var(--today-stack-gap) 0 var(--glass-body-solid);
+}
+
+:root[data-skin="glass"] .panel-hdr-title { color: color-mix(in srgb, var(--hdr-accent) 35%, var(--text)); }
+:root[data-skin="glass"] .column-title.panel-hdr-title:focus { color: var(--accent); }
+@media (prefers-color-scheme: light) {
+  :root[data-skin="glass"] .panel-hdr-title { color: color-mix(in srgb, var(--hdr-accent) 60%, var(--text)); }
+}

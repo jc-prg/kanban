@@ -595,10 +595,10 @@ function _todayTileEl(id) {
   if (el) return el;
   const def = TODAY_TILES[id];
   el = document.createElement('section');
-  el.className = 'today-tile';
+  el.className = 'today-tile panel';
   el.dataset.tile = id;
-  el.innerHTML = `<div class="today-tile-header">
-      <span class="today-tile-title">${escHtml(def.title)}</span><span class="today-tile-count"></span>
+  el.innerHTML = `<div class="today-tile-header panel-hdr">
+      <span class="today-tile-title panel-hdr-title">${escHtml(def.title)}</span><span class="today-tile-count"></span>
       <span class="today-tile-actions"></span>
       <span class="today-tile-edit">
         <span class="today-tile-handle" title="Drag to move">${SVGICONS.dragHandle(12, 12)}</span>

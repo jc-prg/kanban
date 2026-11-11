@@ -3,9 +3,8 @@
   flex-shrink: 0;
   width: var(--col-width);
   height: 100%;
-  background: var(--panel-bg);   /* same as the Today widgets */
+  /* background and corners: .panel (panel.css), like the Today widgets */
   border: 1px solid transparent;   /* widget format: no frame (accent border only while dragging over) */
-  border-radius: 8px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -25,18 +24,8 @@
   box-shadow: 0 0 0 1px var(--accent), 0 8px 32px var(--accent-glow);
 }
 
-/* Column header — same format as the Today widget headers (today.css), tinted with the column colour
-   instead of the accent */
-.column-header {
-  min-height: 30px;
-  padding: 6px 8px 6px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--col-color) 30%, var(--border));
-  background: color-mix(in srgb, var(--col-color) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
-  user-select: none;
-}
+/* Column header: bar and colours from .panel-hdr (panel.css) — the Today widget header format, tinted with
+   the column colour instead of the accent */
 
 .column-title {
   font-family: 'Syne', sans-serif;
@@ -49,7 +38,6 @@
   outline: none;
   background: transparent;
   border: none;
-  color: color-mix(in srgb, var(--col-color) 35%, var(--text-muted));
   cursor: text;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -207,14 +195,11 @@
 @media (prefers-color-scheme: light) {
   /* the transparent border would show the (near-white) column background as a frame around the header */
   .column { background-clip: padding-box; }
-  .column-header {
-    background: color-mix(in srgb, var(--col-color) 9%, var(--surface2));
-    border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
-  }
-  .column-title { color: var(--text-muted); }
 }
 
 /* ---- Scheduled column ---- */
-.column--scheduled .column-header { opacity: 0.9; }
+/* No options button in the scheduled column: keep its header as high as the others
+   (6 px padding + 24 px .col-btn + 6 px padding + 1 px bottom line, border-box) */
+.column--scheduled .column-header { opacity: 0.9; min-height: 37px; }
 .column--scheduled .column-title[readonly] { cursor: default; pointer-events: none; }
 .col-sched-icon { display: flex; align-items: center; opacity: 0.6; flex-shrink: 0; }

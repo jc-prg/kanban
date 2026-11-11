@@ -1,0 +1,36 @@
+/* Widget format — one look for the dashboard widgets (.today-tile), board columns (.column), the dashboard
+   detail panel (.dashboard-detail-modal) and the calendar / mail view headers (.calview-bar):
+     .panel           the box (background, corners)
+     .panel-hdr       its header bar
+     .panel-hdr-title the header title (colour only — font and size stay with each component)
+   --hdr-accent tints a header: the column colour, the card / calendar / mail account colour of the detail
+   panel (--detail-accent, set by dashboard.js), else the accent of the app title.
+   Loaded after the component stylesheets, so these rules win over their base rules; skins (skin-*.css)
+   restyle the same classes. */
+
+.panel { background: var(--panel-bg); border-radius: 8px; }
+
+.panel-hdr {
+  --hdr-accent: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 8px 6px 12px;
+  flex-shrink: 0;
+  user-select: none;
+  background: color-mix(in srgb, var(--hdr-accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
+  border-bottom: 1px solid color-mix(in srgb, var(--hdr-accent) 30%, var(--border));
+}
+.column-header             { --hdr-accent: var(--col-color, var(--accent)); }
+.dashboard-detail-titlebar { --hdr-accent: var(--detail-accent, var(--accent)); }
+
+.panel-hdr-title { color: color-mix(in srgb, var(--hdr-accent) 35%, var(--text-muted)); }
+
+@media (prefers-color-scheme: light) {
+  .panel-hdr {
+    background: color-mix(in srgb, var(--hdr-accent) 9%, var(--surface2));
+    border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
+  }
+  .panel-hdr-title { color: var(--text-muted); }
+}
