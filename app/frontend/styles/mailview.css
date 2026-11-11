@@ -47,13 +47,7 @@ body.mailview-open header { z-index: 96; }
   background: var(--card-color, var(--accent));
 }
 .mailview-listsearch { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
-.mailview-listsearch .calview-navbtn { display: inline-flex; align-items: center; justify-content: center; padding: 6px 10px; flex-shrink: 0; }
 .mailview-search { flex: 1; min-width: 0; box-sizing: border-box; padding: 6px 10px; }
-#mailViewCompose {
-  padding: 7px 12px;
-  background: color-mix(in srgb, var(--accent) 65%, var(--surface2));
-  border-color: color-mix(in srgb, var(--accent) 65%, var(--surface2));
-}
 #mailViewCompose:disabled { opacity: 0.5; cursor: not-allowed; }
 .mailview-bar .calview-navbtn { display: inline-flex; align-items: center; justify-content: center; padding: 7px 10px; }
 .mv-folders-btn { display: none !important; }
@@ -518,7 +512,7 @@ button.mv-att-name:hover { color: var(--accent); }
   border-radius: var(--radius);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
-.mv-picker-title { font-weight: 600; font-size: 0.9rem; }
+.mv-picker-title { font-weight: 600; font-size: 0.9rem; padding-bottom: 10px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
 .mv-picker-filter { padding: 6px 10px; }
 .mv-picker-list { overflow-y: auto; min-height: 60px; }
 .mv-picker-item {
@@ -605,11 +599,21 @@ button.mv-att-name:hover { color: var(--accent); }
   .mv-title-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mv-title-acc { display: none; }   /* account shown as the folders button's border colour instead */
   .mv-folders-btn { border-color: var(--mv-acc-color, var(--border)); }
-  .mv-compose-long { display: none; }
   /* Opened mail: icon-only buttons (container query above) get a larger touch target */
   .mv-reader-actions .btn { padding: 7px 11px; }
-  #mailViewCompose { padding: 6px 10px; flex-shrink: 0; }
+  #mailViewCompose { flex-shrink: 0; }
   .mailview-reader { padding: 10px 12px 20px; }
   .mv-folder { padding-top: 8px; padding-bottom: 8px; }
   .mv-account-more { opacity: 1; }
+}
+
+/* Folder / column pickers ("Move to" — mail view and Today) on touch screens: larger entries */
+@media (pointer: coarse), (max-width: 767px) {
+  .mv-picker-title { font-size: 1rem; }
+  .mv-picker-filter { font-size: 16px; padding: 8px 10px; }   /* 16 px: no zoom-in on iOS */
+  .mv-picker-list { display: flex; flex-direction: column; gap: 4px; }
+  .mv-picker-item { gap: 10px; padding: 11px 10px 11px calc(10px + var(--mv-depth, 0) * 16px); font-size: 0.95rem; border-radius: 6px; }
+  .mv-picker-item svg { width: 15px; height: 15px; }
+  .today-pick-dot { width: 10px; height: 10px; }
+  .mv-picker-foot .btn { padding: 10px 18px; font-size: 0.85rem; }
 }

@@ -818,6 +818,7 @@ async function _openCardDetail(board, card) {
     _closeDetail();
     _todayEditCard(board, card.id);
   };
+  editBtn.title = 'Edit card';
   editBtn.style.display = '';
   webUrlBtn.style.display = 'none';
   body.innerHTML = '';
@@ -1237,16 +1238,11 @@ async function _openLinkedCard(board, cardId) {
 function _openEventDetail(accountId, uid, webUrl, evOverride) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
-  const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
-  document.getElementById('dashboardDetailEditBtn').style.display = 'none';
+  const editBtn   = document.getElementById('dashboardDetailEditBtn');
+  editBtn.style.display = 'none';
+  document.getElementById('dashboardDetailWebUrl').style.display = 'none';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
-  if (webUrl) {
-    webUrlBtn.href = webUrl;
-    webUrlBtn.title = 'Open in Calendar';
-    webUrlBtn.style.display = '';
-  } else {
-    webUrlBtn.style.display = 'none';
-  }
+  detail.querySelector('.dash-detail-footer')?.remove();
   body.innerHTML = '';
   detail.style.display = '';
   const modal = detail.querySelector('.modal');
@@ -1262,7 +1258,11 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
     else titlebar.style.removeProperty('--detail-accent');
     const rows = [];
     if (ev.start) rows.push(['When', escHtml(_calEventWhen(ev))]);
-    if (ev.location) {
+    // Online meeting (Teams / Webex / Meet / Zoom in the location or description): direct link, as in the agenda
+    const meet = typeof _todayMeetingLink === 'function' ? _todayMeetingLink(ev) : null;
+    if (meet) {
+      rows.push(['Where', _todayMeetingHtml(meet)]);
+    } else if (ev.location) {
       const locSafe = safeLink(ev.location);
       const locHtml = locSafe
         ? `<a href="${locSafe}" target="_blank" rel="noopener noreferrer">${escHtml(ev.location)}</a>`
@@ -1270,7 +1270,7 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
       rows.push(['Where', locHtml]);
     }
     if (ev.status)    rows.push(['Status',     escHtml(ev.status)]);
-    if (ev.organizer) rows.push(['Organiser',  escHtml(ev.organizer)]);
+    if (ev.organizer) rows.push(['Organiser',  _calOrganizerHtml(ev.organizer)]);
     if (ev._label)    rows.push(['Calendar',   escHtml(ev._label)]);
     if (ev.hasRrule)  rows.push(['Recurrence', escHtml(_formatRRule(ev.rruleStr || null, ev.seriesStart || ev.start))]);
     const cardRefs = ev.cardRefs || [];
@@ -1306,69 +1306,22 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
       iframe.addEventListener('load', resize);
     }
 
-    // Edit / Delete footer — only for CalDAV accounts, hidden for iCal-URL or recurring events
-    const existingFooter = detail.querySelector('.dash-detail-footer');
-    if (existingFooter) existingFooter.remove();
-
-    const isReadOnly  = (ev._accountType || 'caldav') === 'ical-url';
-    const isRecurring = !!ev.hasRrule;
-
-    if (!isReadOnly) {
-      const footer = document.createElement('div');
-      footer.className = 'dash-detail-footer';
-
-      if (isRecurring) {
-        // Two rows: occurrence actions, series actions
-        const occRow = document.createElement('div');
-        occRow.className = 'dash-detail-footer-row';
-        const occLabel = document.createElement('span');
-        occLabel.className = 'dash-detail-footer-scope-label';
-        occLabel.textContent = 'This occurrence:';
-        const delOccBtn = document.createElement('button');
-        delOccBtn.className = 'btn btn-secondary';
-        delOccBtn.style.color = 'var(--danger)';
-        delOccBtn.textContent = 'Delete';
-        delOccBtn.addEventListener('click', () => _deleteCalEvent(ev._accountId, ev.uid, ev.etag, ev.href, 'occurrence', ev.start));
-        const editOccBtn = document.createElement('button');
-        editOccBtn.className = 'btn btn-primary';
-        editOccBtn.textContent = 'Edit';
-        editOccBtn.addEventListener('click', () => openCalEventModal(ev._accountId, ev, null, 'occurrence'));
-        occRow.append(occLabel, delOccBtn, editOccBtn);
-
-        const serRow = document.createElement('div');
-        serRow.className = 'dash-detail-footer-row';
-        const serLabel = document.createElement('span');
-        serLabel.className = 'dash-detail-footer-scope-label';
-        serLabel.textContent = 'Entire series:';
-        const delSerBtn = document.createElement('button');
-        delSerBtn.className = 'btn btn-secondary';
-        delSerBtn.style.color = 'var(--danger)';
-        delSerBtn.textContent = 'Delete';
-        delSerBtn.addEventListener('click', () => _deleteCalEvent(ev._accountId, ev.uid, ev.etag, ev.href, 'series'));
-        const editSerBtn = document.createElement('button');
-        editSerBtn.className = 'btn btn-primary';
-        editSerBtn.textContent = 'Edit';
-        editSerBtn.addEventListener('click', () => openCalEventModal(ev._accountId, ev, null, 'series'));
-        serRow.append(serLabel, delSerBtn, editSerBtn);
-
-        footer.append(occRow, serRow);
-      } else {
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'btn btn-secondary';
-        deleteBtn.style.color = 'var(--danger)';
-        deleteBtn.textContent = 'Delete';
-        deleteBtn.addEventListener('click', () => _deleteCalEvent(ev._accountId, ev.uid, ev.etag, ev.href));
-
-        const editBtn = document.createElement('button');
-        editBtn.className = 'btn btn-primary';
-        editBtn.textContent = 'Edit';
-        editBtn.addEventListener('click', () => openCalEventModal(ev._accountId, ev));
-
-        footer.append(deleteBtn, editBtn);
-      }
-
-      detail.querySelector('.modal').appendChild(footer);
-    }
+    // Edit in the header (CalDAV only; iCal-URL calendars are read-only). Series: choose occurrence or series.
+    // Delete stays in the event's context menu.
+    const isReadOnly = (ev._accountType || 'caldav') === 'ical-url';
+    editBtn.style.display = isReadOnly ? 'none' : '';
+    editBtn.title = ev.hasRrule ? 'Edit event (this occurrence or the series)' : 'Edit event';
+    editBtn.href = '#';
+    editBtn.onclick = e => {
+      e.preventDefault();
+      e.stopPropagation();   // the document click handler would close the menu right away
+      if (!ev.hasRrule) { openCalEventModal(ev._accountId, ev); return; }
+      const r = editBtn.getBoundingClientRect();
+      openContextMenu({ clientX: r.left, clientY: r.bottom + 4, stopPropagation() {}, preventDefault() {} }, [
+        { label: 'This occurrence', action: () => openCalEventModal(ev._accountId, ev, null, 'occurrence') },
+        { label: 'Entire series',   action: () => openCalEventModal(ev._accountId, ev, null, 'series') },
+      ]);
+    };
   }
 
   // Use cached event data if available — avoids a full CalDAV round-trip
@@ -1383,6 +1336,33 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
     })
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load event.</p>'; });
 }
+
+/**
+ * Organiser of an event: "mailto:a@b" (optionally with a name) becomes a link that writes a mail in
+ * the mail view — or, without a mail account that can send, opens the default mail program.
+ */
+function _calOrganizerHtml(organizer) {
+  const m = String(organizer).match(/mailto:([^\s<>"?]+)/i);
+  if (!m) return escHtml(organizer);
+  const addr = m[1];
+  const name = String(organizer).replace(/<?mailto:[^\s<>"]+>?/i, '').replace(/^[\s"]+|[\s":]+$/g, '').replace(/^CN=/i, '');
+  return `<a href="mailto:${escHtml(addr)}" data-compose-to="${escHtml(addr)}" title="Write a mail to ${escHtml(addr)}">${escHtml(name || addr)}</a>`;
+}
+
+document.getElementById('dashboardDetailBody').addEventListener('click', async e => {
+  const a = e.target.closest('a[data-compose-to]');
+  if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  e.preventDefault();
+  const to = a.dataset.composeTo;
+  let canSend = false;
+  try {
+    const cfg = await fetch('/api/dashboard/config').then(r => r.ok ? r.json() : {});
+    canSend = (cfg.mailAccounts || []).some(acc => acc.smtp?.host);
+  } catch { /* fall back to the mail program */ }
+  if (!canSend || typeof _todayCompose !== 'function') { window.location.href = `mailto:${to}`; return; }
+  _closeDetail();
+  _todayCompose({ to });
+});
 
 function _closeDetail() {
   document.getElementById('dashboardDetail').style.display = 'none';

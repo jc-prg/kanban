@@ -1632,10 +1632,15 @@ async function afterAuth() {
   document.title = `jc://${BOARD_NAME}/`;
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('notesToggleBtn').style.display = '';
-  if (window.matchMedia('(min-width: 640px)').matches) {
-    document.getElementById('schedToggleBtn').style.display = '';
-    document.getElementById('todayBtn').style.display = '';
+  document.getElementById('todayBtn').style.display = '';   // dashboard (Today) link, all screen sizes
+  // Mail and calendar: open their views on the dashboard (they only exist there); not on small screens
+  for (const [id, path] of [['dashboardMailBtn', '/today?mail='], ['dashboardCalBtn', () => `/today?cal=${_cvStoredMode() || 'week'}`]]) {
+    const btn = document.getElementById(id);
+    btn.classList.add('header-menu-btn--hide-mobile');
+    btn.style.display = '';
+    btn.onclick = () => { window.location.href = appUrl(typeof path === 'function' ? path() : path); };
   }
+  if (window.matchMedia('(min-width: 640px)').matches) document.getElementById('schedToggleBtn').style.display = '';
   await load();
   if (typeof ensureScheduledColumn === 'function' && state.settings?.scheduledColumnId && state.columns.find(c => c.id === state.settings.scheduledColumnId)) ensureScheduledColumn();
   window._notesModule = _createNotesModule();
@@ -1754,11 +1759,10 @@ async function createBoardAndOpen(rawName) {
     try {
       const boards = await fetch('/api/boards').then(r => r.json());
       const others = boards.filter(b => !b.archived && b.name !== BOARD_NAME);
-      const todayEntry = ROUTE === 'today' ? '' : `<a class="board-switch-item" href="${BASE_PATH}/today">Today</a>`;
-      const sep = todayEntry && others.length ? '<div class="header-dd-separator"></div>' : '';
-      menu.innerHTML = todayEntry + sep + others
+      // The dashboard has its own header icon (#todayBtn) — the menu lists boards only
+      menu.innerHTML = others
         .map(b => `<a class="board-switch-item" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
-        .join('');
+        .join('') || '<span class="board-switch-item board-switch-empty">No other boards</span>';
     } catch { return; }
     menu.classList.add('open');
     btn.classList.add('open');

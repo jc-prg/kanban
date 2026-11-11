@@ -53,6 +53,8 @@
   --link: #93c5fd;
   --link-visited: #c4b5fd;
   --radius: 12px;
+  --page-bg: #16161b;   /* Today page and board area: a bit lighter than --bg in dark mode */
+  --panel-bg: var(--surface);   /* widgets and board columns */
   --col-width: 300px;
   --mark-bg: rgba(161, 118, 0, 0.7);
   /* Scrollbar thumb: idle (barely visible in dark mode) / hovered */
@@ -63,6 +65,8 @@
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f0f0f5;
+    --page-bg: var(--bg);
+    --panel-bg: color-mix(in srgb, var(--surface) 65%, var(--bg));
     --surface: #ffffff;
     --surface2: #e8e8f0;
     --border: #d0d0de;

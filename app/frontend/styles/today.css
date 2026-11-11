@@ -41,7 +41,16 @@
 }
 .today-bar-date { display: flex; align-items: baseline; gap: 10px; font-size: 1.05rem; }
 .today-bar-date strong { font-family: 'Syne', sans-serif; letter-spacing: 0.02em; }
-.today-bar-week { font-size: 0.75rem; color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+.today-bar-week {   /* label in the widget header colours */
+  font-size: 0.75rem; border-radius: 6px; padding: 2px 8px;
+  background: color-mix(in srgb, var(--accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
+  color: color-mix(in srgb, var(--accent) 35%, var(--text-muted));
+}
+@media (prefers-color-scheme: light) {
+  .today-bar-week { background: color-mix(in srgb, var(--accent) 9%, var(--surface2)); color: var(--text-muted); }
+}
+/* Refresh in the first line of the bar — phones only (larger screens: in the actions) */
+.today-bar-refresh-sm { display: none; }
 .today-bar-weather { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; min-height: 22px; }
 .today-wx-icon { display: inline-flex; color: var(--accent); }
 .today-bar-actions { display: flex; gap: 6px; margin-left: auto; }
@@ -88,7 +97,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-grid {
   display: grid;
   row-gap: var(--today-gap);
-  column-gap: 44px;
+  column-gap: 31px;   /* 44 px − 30 % */
   flex: 1;
   min-height: 0;
 }
@@ -129,7 +138,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   align-items: center;
   gap: 8px;
   min-height: 30px;
-  padding: 4px 6px 4px 10px;
+  padding: 6px 8px 6px 12px;
   border-radius: 8px 8px 0 0;
   background: color-mix(in srgb, var(--surface2) 55%, var(--bg));
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
@@ -159,7 +168,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-tile-btn:disabled, .today-tile-btn:disabled:hover { opacity: 0.25; background: none; color: var(--text-muted); cursor: default; }
 .today-tile[data-tile="progress"] .today-tile-btn { width: 22px; }
 .today-tile[data-tile="progress"] .today-tile-btn--text { font-size: 1.2rem; line-height: 1; padding: 0 0 2px; }   /* ‹ › day navigation */
-.today-tile-body { padding: 10px 4px 2px; font-size: 0.85rem; overflow-x: clip; min-width: 0; }
+.today-tile-body { padding: 12px 6px 4px; font-size: 0.85rem; overflow-x: clip; min-width: 0; }
 .today-tile-btn--text { width: auto; padding: 0 8px; font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0; text-transform: none; }
 .today-tile-btn--on { opacity: 1; color: var(--accent); background: var(--accent-glow); }
 .today-tile-btn--on:hover { color: var(--accent); background: var(--accent-glow); }
@@ -361,7 +370,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-app-row:hover .today-cv-badge { opacity: 1; }
 .today-app-row { align-items: flex-start; cursor: default; padding-top: 10px; padding-bottom: 10px; }
 .today-app-row + .today-app-row,
-.today-mail-row + .today-mail-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
+.today-swipe + .today-swipe > .today-mail-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
 /* Entry: position / company / status line — one line each, cut with … when too long */
 .today-app-line { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .today-app-title { line-height: 1.35; }
@@ -439,6 +448,14 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-newboard .btn { font-size: 0.78rem; padding: 4px 12px; }
 .today-newboard-error { margin: 6px 0 0; font-size: 0.75rem; color: var(--danger, #ef4444); }
 .today-recent .dashboard-recent-item { margin-bottom: 6px; }
+
+/* Edit mode: "+ Add widget" at the end of each column (widgets missing from the layout) */
+.today-col-add {
+  flex: none; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px; border: 1px dashed var(--border); border-radius: 8px; background: none;
+  color: var(--text-muted); font: inherit; font-size: 0.78rem; cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+.today-col-add:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ---- Quick access: icon + title links ---- */
 
@@ -559,11 +576,19 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 /* ---- Phones ---- */
 
 @media (max-width: 767px) {
-  #today { padding: 8px 14px 12px; gap: 10px; --today-gap: 22px; }
+  #today { padding: 8px 14px 32px; gap: 10px; --today-gap: 22px; }   /* 20 px extra at the end of the page */
   .today-bar { padding: 2px 0 10px; gap: 8px 14px; }
-  .today-bar-actions { margin-left: 0; width: 100%; }
+  /* Line between the date and the buttons */
+  .today-bar-actions {
+    margin-left: 0; width: 100%;
+    padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  }
   .today-bar-actions .btn { flex: 1; justify-content: center; border-color: color-mix(in srgb, var(--border) 70%, transparent); }
-  .today-bar-actions :is(.today-bar-edit, .today-bar-refresh) { display: none; }   /* phones: "Edit layout" is in the header menu, Refresh in the header */
+  .today-bar-actions :is(.today-bar-edit, .today-bar-refresh) { display: none; }   /* phones: "Edit layout" is in the header menu */
+  .today-bar-refresh-sm {   /* Refresh: first line, right-aligned (the actions wrap into the second line) */
+    display: inline-flex; align-items: center; justify-content: center; margin-left: auto;
+    padding: 4px 8px; background: none; border-color: transparent; color: var(--text-muted);
+  }
   .today-bar-weather { display: none; }
   .today-wx-hour { flex-basis: 40px; }
 }
@@ -601,9 +626,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-npage svg { flex-shrink: 0; color: var(--text-muted); }
 .today-nempty { display: block; padding: 2px 4px 2px 20px; color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
 
-/* Dark mode: cards and board links in the tiles sit darker and take the normal card background on hover */
+/* Dark mode: cards and board links in the tiles a shade lighter than the widget (--surface), normal card background on hover */
 @media not (prefers-color-scheme: light) {
-  #today .today-tile :is(.card, .today-board, .today-qa-icon--box) { background: var(--surface); }
+  #today .today-tile :is(.card, .today-board, .today-qa-icon--box) { background: color-mix(in srgb, var(--surface2) 45%, var(--surface)); }
   #today .today-tile :is(.card, .today-board):hover, #today .today-qa-item:hover .today-qa-icon--box { background: var(--surface2); }
 }
 
@@ -643,7 +668,8 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   height: var(--today-hdr-h);
   top: calc(var(--today-stack-i) * (var(--today-hdr-h) + var(--today-stack-gap)));
   bottom: calc((var(--today-stack-n) - 1 - var(--today-stack-i)) * (var(--today-hdr-h) + var(--today-stack-gap)));
-  /* Page-coloured strips above and below keep the 5 px between stacked headers clear of scrolling content */
+  /* Strips above (page colour) and below (widget colour, so no gap shows above the own body) keep the 5 px
+     between stacked headers clear of scrolling content; the next header's page strip paints over the one below */
   box-shadow: 0 calc(-1 * var(--today-stack-gap)) 0 var(--bg), 0 var(--today-stack-gap) 0 var(--bg);
 }
 .today-col--stack > .today-tile + .today-tile > .today-tile-header { margin-top: var(--today-gap); }
@@ -654,7 +680,143 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-col--stack > .today-tile--f13 > .today-tile-body { flex: 0 0 calc(var(--today-col-h) / 3 - var(--today-gap) * 2 / 3 - var(--today-hdr-h)); }
 .today-col--stack > .today-tile--auto > .today-tile-body { flex: 0 0 auto; }
 
-/* Refresh sits in the Today bar on larger screens (_todaySyncRefreshBtn) */
-@media (min-width: 768px) {
-  #dashboardRefreshBtn.in-today-bar { display: none !important; }
+/* Refresh sits in the Today bar while it is shown (_todaySyncRefreshBtn) */
+#dashboardRefreshBtn.in-today-bar { display: none !important; }
+/* ...and in the calendar / mail view header while a view is open (all screen sizes) */
+#dashboardRefreshBtn.in-view-bar { display: none !important; }
+
+/* The page (Today and the calendar / mail views opened over it): --page-bg (dark: a bit lighter than --bg);
+   the widgets: --panel-bg (dark: the calendar / mail view panel colour, light: a bit brighter than the page) */
+body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page-bg); }
+#today .today-tile, #today.today--editing .today-tile { background: var(--panel-bg); border-radius: 8px; }
+/* Bodies round their own bottom corners: the tile box doesn't clip in edit mode (overflow: visible) or in a stack */
+#today .today-tile-body { padding-left: 10px; padding-right: 10px; padding-bottom: 8px; border-radius: 0 0 8px 8px; }
+/* Stacked headers: the tile boxes dissolve (display: contents), so the bodies carry the background */
+#today .today-col--stack > .today-tile > .today-tile-body { background: var(--panel-bg); }
+#today .today-col--stack > .today-tile > .today-tile-header {
+  box-shadow: 0 calc(-1 * var(--today-stack-gap)) 0 var(--today-page-bg), 0 var(--today-stack-gap) 0 var(--panel-bg);
 }
+
+/* Calendar and mail view: header in the widget header format */
+:is(.calview, .mailview) > .calview-bar {
+  background: color-mix(in srgb, var(--surface2) 55%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+:is(.calview, .mailview) .calview-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mailview-title .mv-title-acc { text-transform: none; letter-spacing: 0; }
+@media (prefers-color-scheme: light) {
+  :is(.calview, .mailview) > .calview-bar { background: color-mix(in srgb, var(--accent) 9%, var(--surface2)); }
+}
+@media not (prefers-color-scheme: light) {
+  :is(.calview, .mailview) > .calview-bar {
+    background: color-mix(in srgb, var(--accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
+    border-bottom-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  }
+  :is(.calview, .mailview) .calview-title { color: color-mix(in srgb, var(--accent) 35%, var(--text-muted)); }
+}
+
+/* Small screens: the views keep the same distance to the edges as the widgets (#today padding) */
+@media (max-width: 767px) and (min-width: 640px) and (min-height: 501px) {
+  :is(.calview, .mailview) { inset: 8px 14px 12px; }
+}
+@media (max-width: 639px), (max-height: 500px) {
+  :is(.calview, .mailview) {
+    inset: calc(var(--app-header-h, 0px) + 8px) 14px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+}
+
+/* Calendar and mail view header: bar and buttons the size of a widget header and its buttons
+   (24 px high, icon-only 26 px wide, 12 px icons, 0.7rem text) */
+:is(#calView, #mailView) > .calview-bar { min-height: 30px; padding: 6px 8px 6px 12px; gap: 6px; }
+/* display only where calview.css / mailview.css never hide the button (burger menu, "New event") */
+:is(#calView, #mailView) > .calview-bar :is(.btn, .dashboard-detail-close):not(.calview-menu-btn, .mv-folders-btn, #calViewNew) { display: inline-flex; }
+:is(#calView, #mailView) > .calview-bar :is(.btn, .dashboard-detail-close) {
+  align-items: center; justify-content: center; gap: 4px;
+  box-sizing: border-box; height: 24px; min-width: 26px; padding: 0 8px;
+  font-size: 0.7rem; line-height: 1; border-radius: 6px;
+}
+:is(#calView, #mailView) > .calview-bar :is(.btn, .dashboard-detail-close) svg { width: 12px; height: 12px; }
+:is(#calView, #mailView) > .calview-bar :is(.calview-menu-btn, .mv-folders-btn, .dashboard-detail-close) { width: 26px; padding: 0; }
+#calView > .calview-bar .calview-navbtn { width: 26px; padding: 0 0 2px; font-size: 1rem; }   /* ‹ › */
+#calView > .calview-bar .calview-nav { gap: 2px; }
+#calView > .calview-bar .calview-modes { height: 24px; border-radius: 6px; }
+@media (min-width: 640px) and (min-height: 501px) {
+  #calViewNew { display: inline-flex; }
+}
+#calView > .calview-bar .calview-mode { display: inline-flex; align-items: center; padding: 0 8px; font-size: 0.7rem; }
+
+/* Phones in portrait: Prev / Today / Next float at the bottom — they keep their touch size */
+@media (max-width: 639px) and (min-height: 501px) {
+  #calView > .calview-bar .calview-nav { gap: 6px; }
+  #calView > .calview-bar .calview-nav .btn { height: auto; padding: 8px 16px; font-size: 0.75rem; border-radius: 999px; }
+  #calView > .calview-bar .calview-nav .calview-navbtn { width: auto; padding: 6px 12px; font-size: 1rem; }
+}
+
+/* Mail view: "<mail icon> Mail" (new message) styled like an active widget header button ("7 days" in the agenda) */
+#mailView > .calview-bar #mailViewCompose {
+  padding: 0 8px; border: none; border-radius: 6px;
+  background: var(--accent-glow); color: var(--accent);
+  font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0; box-shadow: none;
+}
+#mailView > .calview-bar #mailViewCompose:hover { background: var(--accent-glow); color: var(--accent); border: none; box-shadow: none; }
+#mailView, #calView { border: none; }   /* mail and calendar view panels without a frame (all screen sizes) */
+
+/* Refresh icon in the calendar / mail view header: a widget header button (.today-tile-btn) */
+.calview-bar:hover .today-tile-btn { opacity: 1; }
+
+/* Calendar view header: 5 / 7 / 31 and ‹ Today › like inactive widget header text buttons, the selected
+   view and the burger menu while open like the active "7 days" button; Event always in that active style */
+#calView > .calview-bar .calview-modes { border: none; border-radius: 0; gap: 2px; overflow: visible; }
+#calView > .calview-bar :is(.calview-mode, .calview-nav .btn, .calview-menu-btn) {
+  justify-content: center; min-width: 26px; height: 24px; padding: 0 8px; border: none; border-radius: 6px;
+  background: none; color: var(--text-muted); opacity: 0.6;
+  font-family: 'DM Mono', monospace; font-size: 0.7rem;
+}
+#calView > .calview-bar:hover :is(.calview-mode, .calview-nav .btn, .calview-menu-btn) { opacity: 1; }
+#calView > .calview-bar :is(.calview-mode, .calview-nav .btn, .calview-menu-btn):hover { background: var(--surface2); color: var(--text); border: none; box-shadow: none; transform: none; }
+#calView > .calview-bar :is(.calview-mode.active, .calview-menu-btn.cv-menu-open),
+#calView > .calview-bar #calViewNew {
+  opacity: 1; border: none; background: var(--accent-glow); color: var(--accent); box-shadow: none;
+  font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0;
+}
+#calView > .calview-bar :is(.calview-mode.active, .calview-menu-btn.cv-menu-open):hover,
+#calView > .calview-bar #calViewNew:hover {
+  background: var(--accent-glow); color: var(--accent); border: none; box-shadow: none; transform: none;
+}
+#calView > .calview-bar .calview-nav :is(#calViewPrev, #calViewNext) { font-size: 1rem; }   /* ‹ › (ids: beat the rule above) */
+/* Phones in portrait: the floating Prev / Today / Next keep their touch size */
+@media (max-width: 639px) and (min-height: 501px) {
+  #calView > .calview-bar .calview-nav #calViewToday { font-size: 0.75rem; }
+  #calView > .calview-bar .calview-nav .btn { opacity: 1; }   /* no hover on touch screens */
+}
+/* ‹ Today › in the middle of the header (wide enough not to collide with title and buttons) */
+@media (min-width: 1000px) and (min-height: 501px) {
+  #calView > .calview-bar { position: relative; }
+  #calView > .calview-bar .calview-nav { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+}
+#calView > .calview-bar .calview-navbtn.calview-menu-btn { padding: 0; }   /* icon-only, 26 px */
+
+/* Swipe actions in Needs attention (small screens, today.js _todayWireSwipe; layers styled in mailview.css) */
+.today-swipe { position: relative; }
+.today-swipe > :is(.today-mail-row, .today-kcard) { position: relative; }
+@media (max-width: 767px), (max-height: 500px) {
+  .today-swipe > :is(.today-mail-row, .today-kcard) { touch-action: pan-y; }   /* horizontal = swipe */
+}
+.today-swipe > .mv-swipe-actions { border-radius: 6px; }
+/* Cards bring their own transform transition (card.css): off while following the finger, only the snap animates */
+.today-swipe > .today-kcard { transition: none; }
+.today-swipe > .today-kcard.mv-swipe-anim { transition: transform 0.2s ease; }
+/* Picker on Today (mail folders, board columns): over the whole page */
+.mv-picker.today-picker { position: fixed; z-index: 150; }
+.today-pick-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--card-color); }

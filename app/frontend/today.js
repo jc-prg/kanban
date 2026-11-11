@@ -442,6 +442,7 @@ function _todayLayoutsWith(layouts, id) {
 
 async function initToday() {
   document.title = 'jc://today/';
+  document.body.classList.add('route-today');   /* lighter page background in dark mode (today.css) */
   document.querySelector('.board-area').style.display = 'none';
   document.getElementById('saveIndicator').style.display = 'none';
   document.getElementById('dashboardFetchedAt').style.display = '';
@@ -462,6 +463,8 @@ async function initToday() {
   mailBtn.style.display = '';
   mailBtn.onclick = () => (_mvIsOpen() ? closeMailView() : _todayOpenMail());
   document.getElementById('dashboardRefreshBtn').addEventListener('click', _todayRefreshAll);
+  // Calendar / mail view: the refresh icon sits in the view header (the app header button is hidden then)
+  for (const id of ['calViewRefresh', 'mailViewRefresh']) document.getElementById(id).addEventListener('click', _todayRefreshAll);
   // Edit button: last action of the Today bar (_todayRenderBar); the menu item covers phones and a hidden bar
   const menuEdit = document.getElementById('menuTodayEdit');
   menuEdit.style.display = '';
@@ -539,11 +542,11 @@ async function _todayNewEvent() {
   openCalEventModal(acc.accountId, null, acc);
 }
 
-async function _todayCompose() {
+async function _todayCompose(prefill = null) {
   await _todayOpenMail();
   // The mail view loads its accounts asynchronously
   for (let i = 0; i < 40 && !(_mvAccounts || []).length; i++) await new Promise(r => setTimeout(r, 100));
-  if ((_mvAccounts || []).length) _mvOpenCompose('new');
+  if ((_mvAccounts || []).length) _mvOpenCompose('new', prefill);
 }
 
 /** Refresh interval in minutes from the Today config (default 1, 0 = off). */
@@ -876,11 +879,13 @@ function _todayRefreshAll() {
   if (_mvIsOpen()) _mvReload();
 }
 
-/** Refresh lives in the Today bar (not on phones, see today.css) — the header button only while
- *  the bar is hidden or a calendar / mail view covers it. */
+/** Refresh lives in the Today bar (phones: in its first line, see today.css) and in the calendar / mail
+ *  view header — the app header button only while the bar is hidden and no view is open. */
 function _todaySyncRefreshBtn() {
-  const inBar = _todayCfg?.showBar !== false && !_cvIsOpen() && !_mvIsOpen();
-  document.getElementById('dashboardRefreshBtn').classList.toggle('in-today-bar', inBar);
+  const inView = _cvIsOpen() || _mvIsOpen();
+  const btn = document.getElementById('dashboardRefreshBtn');
+  btn.classList.toggle('in-today-bar', _todayCfg?.showBar !== false && !inView);
+  btn.classList.toggle('in-view-bar', inView);
 }
 
 function _todayToggleEdit() {
@@ -897,6 +902,7 @@ async function _todayRenderBar() {
   const dateStr = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
   bar.innerHTML = `<div class="today-bar-date"><strong>${escHtml(dateStr)}</strong><span class="today-bar-week">CW ${_todayIsoWeek(now)}</span></div>
     <div class="today-bar-weather" id="todayBarWeather"></div>
+    <button class="btn today-bar-refresh-sm" data-bar="refresh" title="Refresh" aria-label="Refresh">${SVGICONS.sync(14, 14)}</button>
     <div class="today-bar-actions">
       <button class="btn" data-bar="inbox" title="Add a card to an inbox">${SVGICONS.create(12, 12)}<span>Card</span></button>
       <button class="btn" data-bar="event" title="New calendar event">${SVGICONS.date(12, 12)}<span>Event</span></button>
@@ -906,8 +912,8 @@ async function _todayRenderBar() {
     </div>`;
   bar.querySelector('[data-bar="inbox"]').addEventListener('click', () => openInboxModal(null, null, () => loadToday()));
   bar.querySelector('[data-bar="event"]').addEventListener('click', _todayNewEvent);
-  bar.querySelector('[data-bar="mail"]').addEventListener('click', _todayCompose);
-  bar.querySelector('[data-bar="refresh"]').addEventListener('click', _todayRefreshAll);
+  bar.querySelector('[data-bar="mail"]').addEventListener('click', () => _todayCompose());
+  bar.querySelectorAll('[data-bar="refresh"]').forEach(b => b.addEventListener('click', _todayRefreshAll));   // actions (≥ 768 px) / first line (phones)
   bar.querySelector('[data-bar="edit"]').addEventListener('click', _todayToggleEdit);
   const w = _todayCfg?.widgets?.weather;
   if (!w || w.lat == null) return;
@@ -1115,24 +1121,27 @@ function _todayRenderAttention(body, data, el) {
     </details>`);
   };
   const moreNote = (shown, total) => total > shown ? `<p class="today-muted today-more">+ ${total - shown} more</p>` : '';
+  // Each mail / card row sits in a wrapper: on small screens it slides inside it to reveal swipe actions
+  const sw = html => `<div class="today-swipe">${html}</div>`;
+  const cardsHtml = list => list.slice(0, 15).map(it => sw(_todayKanbanCardHtml(it))).join('');
   row('mail', 'today-att--mail', SVGICONS.email(12, 12), unreadMail.length,
     `unread ${unreadMail.length === 1 ? 'mail' : 'mails'}${accCount > 1 ? ` <span class="today-muted">(${accCount} accounts)</span>` : ''}`,
-    unreadMail.slice(0, 8).map(({ acc, msg }) => `<div class="today-mail-row dashboard-mail-item" data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-unread="1" data-web-url="${escHtml(acc.webInterfaceUrl || '')}"${acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : ''}>
+    unreadMail.slice(0, 8).map(({ acc, msg }) => sw(`<div class="today-mail-row dashboard-mail-item" data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}" data-unread="1" data-web-url="${escHtml(acc.webInterfaceUrl || '')}"${acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : ''}>
         <span class="today-row-main"><span class="today-row-title card-text"><strong>${escHtml(msg.subject || '(no subject)')}</strong></span>
         <span class="today-row-meta"><span>${escHtml(_mailDisplayName(msg.from))}</span><span class="today-row-date">${escHtml(msg.date ? _fmtRecentDate(msg.date) : '')}</span></span></span>
-      </div>`).join('') + moreNote(Math.min(8, unreadMail.length), unreadMail.length)
+      </div>`)).join('') + moreNote(Math.min(8, unreadMail.length), unreadMail.length)
       + '<button class="today-link-btn" data-act="mailview">Open mail view →</button>');
   row('overdue', 'today-att--danger', '⚠', cards.counts.overdue, cards.counts.overdue === 1 ? 'overdue card' : 'overdue cards',
-    cards.overdue.slice(0, 15).map(it => _todayKanbanCardHtml(it)).join('') + moreNote(Math.min(15, cards.overdue.length), cards.counts.overdue));
+    cardsHtml(cards.overdue) + moreNote(Math.min(15, cards.overdue.length), cards.counts.overdue));
   row('due', 'today-att--warn', '●', cards.counts.dueToday, 'due today',
-    cards.dueToday.slice(0, 15).map(it => _todayKanbanCardHtml(it)).join('') + moreNote(Math.min(15, cards.dueToday.length), cards.counts.dueToday));
+    cardsHtml(cards.dueToday) + moreNote(Math.min(15, cards.dueToday.length), cards.counts.dueToday));
   // Due soon: the next _TODAY_SOON_DAYS days after today
   const soonEnd = _todayAddDays(_todayToday(), _TODAY_SOON_DAYS);
   const dueSoon = (cards.dueWeek || []).filter(it => it.card.endDate <= soonEnd);
   row('soon', 'today-att--soon', '\u25d4', dueSoon.length, `due in the next ${_TODAY_SOON_DAYS === 1 ? 'day' : `${_TODAY_SOON_DAYS} days`}`,
-    dueSoon.slice(0, 15).map(it => _todayKanbanCardHtml(it)).join('') + moreNote(Math.min(15, dueSoon.length), dueSoon.length));
+    cardsHtml(dueSoon) + moreNote(Math.min(15, dueSoon.length), dueSoon.length));
   row('new', 'today-att--new', '✱', cards.counts.unread, cards.counts.unread === 1 ? 'new card' : 'new cards',
-    cards.unread.slice(0, 15).map(it => _todayKanbanCardHtml(it)).join('') + moreNote(Math.min(15, cards.unread.length), cards.counts.unread));
+    cardsHtml(cards.unread) + moreNote(Math.min(15, cards.unread.length), cards.counts.unread));
   const mailErrors = _mailAccountsMeta.filter(a => a.error).map(a => `<div class="dashboard-source-error">⚠ ${escHtml(a.label || a.accountId)}: ${escHtml(a.error)}</div>`).join('');
 
   _todaySetCount(el, unreadMail.length + cards.counts.overdue + cards.counts.dueToday + dueSoon.length + cards.counts.unread);
@@ -1145,6 +1154,206 @@ function _todayRenderAttention(body, data, el) {
     } catch { /* ignore */ }
   }));
   body.querySelector('[data-act="mailview"]')?.addEventListener('click', () => _todayOpenMail());
+  _todaySwipeOpen = null;
+  if (!body._todaySwipeWired) { body._todaySwipeWired = true; _todayWireSwipe(body); }
+}
+
+// ---- Swipe actions on small screens (Needs attention) ----
+// Like the mail view's message list (mailview.js — same CSS, _mvSwipeSnap, _MV_SWIPE_BTN):
+// mails: right → Mark as read, left → Move (folder) + Delete; cards: right → Edit, left → Move (column) + Delete.
+
+const _TODAY_SWIPE_MQ = '(max-width: 767px), (max-height: 500px)';
+let _todaySwipeOpen = null;   // { row, offset } of the row that is swiped open
+
+function _todaySwipeLayers(row) {
+  const wrap = row.parentElement;
+  let start = wrap.querySelector(':scope > .mv-swipe-actions--start');
+  let end   = wrap.querySelector(':scope > .mv-swipe-actions--end');
+  if (!end) {
+    const mail = row.classList.contains('today-mail-row');
+    const btn = (act, icon, label, cls) =>
+      `<button type="button" class="mv-swipe-btn mv-swipe-btn--${cls}" data-today-swipe="${act}" title="${label}" aria-label="${label}">${icon}</button>`;
+    wrap.insertAdjacentHTML('afterbegin',
+      `<div class="mv-swipe-actions mv-swipe-actions--start">${mail
+        ? btn('read', SVGICONS.markRead(20, 20), 'Mark as read', 'read')
+        : btn('edit', SVGICONS.edit(20, 20), 'Edit', 'read')}</div>`
+      + `<div class="mv-swipe-actions mv-swipe-actions--end">${btn('move', SVGICONS.moveTo(20, 20), mail ? 'Move to folder' : 'Move to column', 'move')}`
+      + `${btn('delete', SVGICONS.delete(20, 20), 'Delete', 'delete')}</div>`);
+    start = wrap.querySelector(':scope > .mv-swipe-actions--start');
+    end   = wrap.querySelector(':scope > .mv-swipe-actions--end');
+  }
+  return { start, end, startW: _MV_SWIPE_BTN, endW: end.children.length * _MV_SWIPE_BTN };
+}
+
+function _todaySwipeSet(row, offset, animate) {
+  const { start, end } = _todaySwipeLayers(row);
+  for (const el of [row, start, end]) el.classList.toggle('mv-swipe-anim', !!animate);
+  row.style.transform = offset ? `translateX(${offset}px)` : '';
+  start.style.width = `${Math.max(0, offset)}px`;
+  end.style.width   = `${Math.max(0, -offset)}px`;
+}
+
+function _todaySwipeClose(animate = true) {
+  if (!_todaySwipeOpen) return;
+  const { row } = _todaySwipeOpen;
+  _todaySwipeOpen = null;
+  if (!row.isConnected) return;
+  _todaySwipeSet(row, 0, animate);
+  setTimeout(() => {
+    if (_todaySwipeOpen?.row !== row) row.parentElement?.querySelectorAll(':scope > .mv-swipe-actions').forEach(el => el.remove());
+  }, animate ? 220 : 0);
+}
+
+async function _todaySwipeAction(act, row) {
+  _todaySwipeClose(false);
+  if (row.classList.contains('today-mail-row')) {
+    const { accountId, msgId } = row.dataset;
+    if (act === 'read') _mailToggleRead(accountId, msgId, true);
+    else if (act === 'delete') _mailDelete(accountId, msgId);
+    else if (act === 'move') {
+      const folder = await _todayPickMailFolder(accountId);
+      if (folder) _mailMove(accountId, msgId, folder);
+    }
+    return;
+  }
+  const entry = _todayCardMap.get(row.dataset.cardKey);
+  if (!entry) return;
+  const { board, card } = entry;
+  if (act === 'edit') { _todayEditCard(board, card.id); return; }
+  try {
+    if (act === 'delete') {
+      if (!await showConfirm(`Delete card "${card.text}"?`, { okLabel: 'Delete', danger: true })) return;
+      await _dashDeleteCard(board, card.id);
+      _todayFlash('Card deleted');
+    } else if (act === 'move') {
+      const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+      const from = data.columns.find(c => c.cards.some(x => x.id === card.id));
+      if (!from) throw new Error('card not found');
+      const to = await _todayPick('Move to column', data.columns.filter(c => c !== from)
+        .map(c => ({ value: c.id, label: c.title, icon: `<span class="today-pick-dot" style="--card-color:${escHtml(c.color || 'var(--text-muted)')}"></span>` })));
+      if (!to) return;
+      await _dashMoveCard(board, card.id, from.id, to);
+      _todayFlash(`Moved to ${escHtml(data.columns.find(c => c.id === to)?.title || '')}`);
+    }
+  } catch (err) {
+    showMessage(`Could not ${act === 'delete' ? 'delete' : 'move'} the card: ${err.message}`);
+  }
+  _todayRefresh('cards');
+}
+
+/** Folder of the account to move a mail to: recent folders first, then all (indented by depth). */
+async function _todayPickMailFolder(accountId) {
+  let folders;
+  try {
+    const res = await fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/folders`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    folders = ((await res.json()).folders || []).filter(f => !f.noselect);
+  } catch (err) {
+    showMessage(`Could not load the mail folders: ${err.message}`);
+    return null;
+  }
+  const current = _mailAccountsMeta.find(a => a.accountId === accountId)?.folder || 'INBOX';
+  folders = folders.filter(f => f.path !== current).sort((a, b) => a.path.localeCompare(b.path));
+  const icon = SVGICONS.folder(12, 12);
+  const item = f => ({ value: f.path, label: f.name || f.path, icon,
+    depth: f.delimiter ? f.path.split(f.delimiter).length - 1 : 0 });
+  const recents = _getRecentFolders(accountId).map(p => folders.find(f => f.path === p)).filter(Boolean);
+  return _todayPick('Move to folder', [
+    ...recents.map(f => ({ ...item(f), depth: 0 })),
+    ...(recents.length ? [{ separator: true }] : []),
+    ...folders.map(item),
+  ], { filter: folders.length > 8 });
+}
+
+/** Small modal list (mail view picker look); resolves with the chosen value or null. */
+function _todayPick(title, items, { filter = false } = {}) {
+  document.querySelector('.today-picker')?._todayDone?.(null);
+  const box = document.createElement('div');
+  box.className = 'mv-picker today-picker';
+  box.innerHTML = `<div class="mv-picker-box" role="dialog" aria-modal="true">
+      <div class="mv-picker-title">${escHtml(title)}</div>
+      ${filter ? '<input type="search" class="modal-input mv-picker-filter" placeholder="Filter…" autocomplete="off" spellcheck="false">' : ''}
+      <div class="mv-picker-list">${items.map(it => it.separator ? '<div class="ctx-separator"></div>'
+        : `<button class="mv-picker-item" data-pick="${escHtml(it.value)}" style="--mv-depth:${it.depth || 0}">${it.icon || ''}<span>${escHtml(it.label)}</span></button>`).join('')
+        || '<p class="today-muted">Nothing to choose from.</p>'}</div>
+      <div class="mv-picker-foot"><button class="btn" data-pick-cancel="1">Cancel</button></div>
+    </div>`;
+  document.body.appendChild(box);
+  return new Promise(resolve => {
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); } };
+    const done = v => { box.remove(); document.removeEventListener('keydown', onKey, true); resolve(v); };
+    box._todayDone = done;
+    document.addEventListener('keydown', onKey, true);
+    box.addEventListener('click', e => {
+      if (e.target === box || e.target.closest('[data-pick-cancel]')) { done(null); return; }
+      const it = e.target.closest('[data-pick]');
+      if (it) done(it.dataset.pick);
+    });
+    box.querySelector('.mv-picker-filter')?.addEventListener('input', e => {
+      const q = e.target.value.trim().toLowerCase();
+      box.querySelectorAll('.mv-picker-item').forEach(el => { el.hidden = !!q && !el.textContent.toLowerCase().includes(q); });
+      box.querySelectorAll('.ctx-separator').forEach(el => { el.hidden = !!q; });
+    });
+  });
+}
+
+/** Touch swipe on the rows of the Needs attention tile (small screens only, not while editing the layout). */
+function _todayWireSwipe(body) {
+  let g = null;   // gesture: { row, x0, y0, base, mode: 'pending' | 'swipe', startW, endW, offset, closedOther }
+  let suppressClick = 0;
+  body.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch' || _todayEdit || !matchMedia(_TODAY_SWIPE_MQ).matches) return;
+    if (e.target.closest('.mv-swipe-actions, .today-check, .card-link-badge')) return;
+    const row = e.target.closest('.today-swipe > :is(.today-mail-row, .today-kcard)');
+    if (!row) return;
+    const closedOther = !!_todaySwipeOpen && _todaySwipeOpen.row !== row;
+    if (closedOther) _todaySwipeClose();
+    g = { row, x0: e.clientX, y0: e.clientY, base: _todaySwipeOpen?.row === row ? _todaySwipeOpen.offset : 0, mode: 'pending', offset: 0, closedOther };
+  });
+  body.addEventListener('pointermove', e => {
+    if (!g || e.pointerType !== 'touch') return;
+    const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+    if (g.mode === 'pending') {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }   // vertical: let the page scroll
+      if (Math.abs(dx) < 10) return;
+      g.mode = 'swipe';
+      Object.assign(g, _todaySwipeLayers(g.row));
+    }
+    const raw = g.base + dx;
+    const max = raw > 0 ? g.startW : g.endW;
+    const over = Math.abs(raw) - max;
+    g.offset = over > 0 ? Math.sign(raw) * (max + over / 4) : raw;   // rubber band beyond the actions
+    _todaySwipeSet(g.row, g.offset, false);
+  });
+  const end = e => {
+    if (!g || e.pointerType !== 'touch') return;
+    const done = g;
+    g = null;
+    if (done.mode !== 'swipe') {
+      if (_todaySwipeOpen?.row === done.row) { suppressClick = Date.now(); _todaySwipeClose(); }
+      else if (done.closedOther) suppressClick = Date.now();
+      return;
+    }
+    suppressClick = Date.now();
+    const target = e.type === 'pointercancel' ? 0 : _mvSwipeSnap(done.offset, done.startW, done.endW);
+    _todaySwipeOpen = { row: done.row, offset: target };
+    if (target) _todaySwipeSet(done.row, target, true);
+    else _todaySwipeClose();
+  };
+  body.addEventListener('pointerup', end);
+  body.addEventListener('pointercancel', end);
+  // Capture: a swipe or the closing tap must not also open the card / mail
+  body.addEventListener('click', e => {
+    const btn = e.target.closest('[data-today-swipe]');
+    if (btn) {
+      e.stopPropagation();
+      _todaySwipeAction(btn.dataset.todaySwipe, btn.closest('.today-swipe').querySelector(':scope > :is(.today-mail-row, .today-kcard)'));
+      return;
+    }
+    if (Date.now() - suppressClick < 400) { e.stopPropagation(); e.preventDefault(); return; }
+    if (_todaySwipeOpen) { e.stopPropagation(); _todaySwipeClose(); }
+  }, true);
+  window.addEventListener('scroll', () => { if (_todaySwipeOpen && !g) _todaySwipeClose(); }, { passive: true, capture: true });
 }
 
 // ---- Weather ----
@@ -1862,7 +2071,7 @@ function _todayDropMail(accountId, msgId) {
   const row = document.querySelector(`.today-mail-row[data-account-id="${CSS.escape(accountId)}"][data-msg-id="${CSS.escape(msgId)}"]`);
   if (!row) return;
   const att = row.closest('details.today-att');
-  row.remove();
+  (row.closest('.today-swipe') || row).remove();
   const count = att?.querySelector('.today-att-count');
   if (count) {
     const n = Math.max(0, (parseInt(count.textContent, 10) || 1) - 1);
@@ -1979,7 +2188,7 @@ function _todayRenderEditBar() {
   const { bp, draft, derived, dirty, from } = _todayEdit;
   const bpDef = TODAY_BPS.find(b => b.key === bp);
   const hasOwn = !!_todayCfg?.layouts?.[bp];
-  const hidden = _todayKnownTiles().filter(id => !draft.tiles.some(t => t.id === id));
+  const hidden = _todayEditHidden();
   const otherDirty = Object.values(_todayEdit.drafts).filter(st => st.dirty).map(st => st.bp);
   bar.style.display = '';
   const status = derived && !dirty ? `derived${from ? ` from ${escHtml(from)}` : ''}` : 'custom';
@@ -1995,7 +2204,9 @@ function _todayRenderEditBar() {
       <select data-col-width="${i}" title="Relative column width">${[1, 2, 3].map(w => `<option value="${w}"${c.width === w ? ' selected' : ''}>${w}×</option>`).join('')}</select>
       ${draft.columns.length > 1 ? `<button class="today-edit-x" data-col-remove="${i}" title="Remove column (its tiles move to the neighbour)">${SVGICONS.close(8, 8)}</button>` : ''}</span>`).join('')}
       ${draft.columns.length < 4 ? '<button class="btn" data-edit="add-col">+ Column</button>' : ''}</span>
-    <button class="btn" data-edit="add-tile"${hidden.length ? '' : ' disabled'}>+ Tile</button>
+    <button class="btn" data-edit="add-tile"${hidden.length ? '' : ' disabled'} title="${hidden.length
+      ? 'Add an active widget that is not on this layout (removed before) — also at the end of each column'
+      : 'All active widgets are on this layout (inactive ones: Settings → Dashboard → Widgets)'}">+ Widget${hidden.length ? ` (${hidden.length})` : ''}</button>
     <span style="flex:1"></span>
     ${hasOwn ? '<button class="btn" data-edit="reset" title="Remove the custom layout of this screen size and derive it from a larger one">Reset to derived</button>' : ''}
     <button class="btn" data-edit="cancel">Cancel</button>
@@ -2021,16 +2232,7 @@ function _todayRenderEditBar() {
     draft.columns.push({ width: 1 });
     _todayEditCommit();
   });
-  bar.querySelector('[data-edit="add-tile"]').addEventListener('click', e => {
-    openContextMenu(e, hidden.map(id => ({
-      label: TODAY_TILES[id].title,
-      action: () => {
-        const col = draft.columns.length - 1;
-        draft.tiles.push({ id, col, order: 999, size: 'container' });
-        _todayEditCommit();
-      },
-    })));
-  });
+  bar.querySelector('[data-edit="add-tile"]').addEventListener('click', e => _todayEditAddMenu(e, draft.columns.length - 1));
   bar.querySelector('.today-edit-bp')?.addEventListener('change', e => _todayEditSwitch(e.target.value));
   bar.querySelector('[data-edit="cancel"]').addEventListener('click', () => _todayEndEdit(false));
   bar.querySelector('[data-edit="reset"]')?.addEventListener('click', async () => {
@@ -2042,6 +2244,41 @@ function _todayRenderEditBar() {
     // The current size is saved when changed or still derived (as before); other sizes when changed
     if (await _todaySaveLayouts(_todayEditLayouts(dirty || derived))) _todayEndEdit(true);
   });
+  _todayEditAddSlots();
+}
+
+/** Active widgets (not deactivated in the settings) missing from the layout being edited. */
+function _todayEditHidden() {
+  return _todayKnownTiles().filter(id => !_todayEdit.draft.tiles.some(t => t.id === id));
+}
+
+/** Menu of the missing widgets; the chosen one goes to the end of column `col`. */
+function _todayEditAddMenu(e, col) {
+  e.stopPropagation();
+  openContextMenu(e, _todayEditHidden().map(id => ({
+    label: TODAY_TILES[id].title,
+    action: () => {
+      _todayEdit.draft.tiles.push({ id, col, order: 999, size: 'container' });
+      _todayEditCommit();
+    },
+  })));
+}
+
+/** Edit mode: "+ Add widget" at the end of every column while widgets are missing from the layout. */
+function _todayEditAddSlots() {
+  document.querySelectorAll('#todayGrid .today-col-add').forEach(b => b.remove());
+  if (!_todayEdit) return;
+  const n = _todayEditHidden().length;
+  if (!n) return;
+  for (const col of document.querySelectorAll('#todayGrid .today-col')) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'today-col-add';
+    b.title = `Add one of ${n} widget${n > 1 ? 's' : ''} not on this layout to this column`;
+    b.innerHTML = `${SVGICONS.create(12, 12)}<span>Add widget</span>`;
+    b.addEventListener('click', e => _todayEditAddMenu(e, +col.dataset.col));
+    col.appendChild(b);
+  }
 }
 
 async function _todaySaveLayouts(layouts) {
@@ -2098,7 +2335,10 @@ function _todayDragMove(e) {
     if (e.clientY < r.top + r.height / 2) { index = i; break; }
   }
   _todayDrag.target = { col: +col.dataset.col, index };
-  if (index < tiles.length) tiles[index].before(_todayDrag.ind); else col.appendChild(_todayDrag.ind);
+  const addBtn = col.querySelector('.today-col-add');   // end of the column = above "+ Add widget"
+  if (index < tiles.length) tiles[index].before(_todayDrag.ind);
+  else if (addBtn) addBtn.before(_todayDrag.ind);
+  else col.appendChild(_todayDrag.ind);
 }
 
 function _todayDragEnd() {

@@ -5,7 +5,7 @@
  * All data endpoints are mocked with page.route (no CalDAV / IMAP / Open-Meteo / CV-App, and no
  * writes to the shared CouchDB — PUT /api/today/config is captured in the test).
  *
- * Scenarios: E-T-1 … E-T-12
+ * Scenarios: E-T-1 … E-T-17
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -475,5 +475,198 @@ test.describe('Today page', () => {
     expect(added.id).toMatch(/^qa-[a-z0-9]+$/);
     expect(state.put.widgets.quickaccess).toMatchObject({ visible: 2, size: 'm' });
     await expect(row.locator('.today-qa-row')).toHaveCount(4);
+  });
+  test('E-T-14 edit mode: a removed widget is added back via "Add widget" at the end of a column', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(LAYOUTS)) };
+    await mockApis(page, state);
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
+    await page.click('#todayEditBtn');
+
+    // Every active widget missing from this layout counts (weather, quickaccess, boards, notes)
+    const addBtn = page.locator('[data-edit="add-tile"]');
+    await expect(addBtn).toHaveText('+ Widget (4)');
+    await page.locator('.today-tile[data-tile="progress"] .today-tile-hide').click();
+    await expect(addBtn).toHaveText('+ Widget (5)');
+    await expect(page.locator('#todayGrid .today-col-add')).toHaveCount(2);   // one per column
+    // The add slot is the last element of each column
+    expect(await page.locator('#todayGrid .today-col').evaluateAll(cols => cols.map(c => c.lastElementChild.className))).toEqual(['today-col-add', 'today-col-add']);
+
+    await page.locator('#todayGrid .today-col[data-col="0"] .today-col-add').click();
+    await page.locator('#_genericCtxMenu .ctx-item', { hasText: 'Achievements' }).click();
+    expect((await columnsOf(page))[0]).toEqual(['agenda:1/1', 'progress:container']);
+    await expect(page.locator('.today-tile[data-tile="progress"] .today-stat').first()).toBeVisible();   // data loaded
+    await expect(addBtn).toHaveText('+ Widget (4)');
+
+    await page.click('[data-edit="save"]');
+    await expect(page.locator('#todayEditBar')).toBeHidden();
+    await expect(page.locator('#todayGrid .today-col-add')).toHaveCount(0);
+    expect(state.put.layouts.lg.tiles.find(t => t.id === 'progress')).toMatchObject({ col: 0, size: 'container' });
+  });
+
+  test('E-T-16 event detail: Edit in the header (series → occurrence / series menu), no footer, online meeting as link', async ({ page }) => {
+    await mockApis(page, { layouts: LAYOUTS });
+    const teams = 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc';
+    await page.route('**/api/dashboard/calendar/ca-e2e?**', r => r.fulfill({ json: { type: 'caldav', events: [
+      { uid: 'ev1', title: 'Planning meeting', start: at(9), end: at(10), location: `Microsoft Teams Meeting ${teams}` },
+      { uid: 'ev2', title: 'Weekly sync', start: at(11), end: at(12), location: 'Room 4', hasRrule: true, rruleStr: 'FREQ=WEEKLY' },
+    ] } }));
+    await page.goto('/today');
+    const agenda = page.locator('.today-tile[data-tile="agenda"]');
+
+    // Single event: Where = meeting link; Edit opens the event dialog directly
+    await agenda.locator('.today-ev-row', { hasText: 'Planning meeting' }).click();
+    const detail = page.locator('#dashboardDetail');
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Planning meeting');
+    const where = detail.locator('.dashboard-detail-table tr', { hasText: 'Where' }).locator('a');
+    await expect(where).toHaveText(/Teams/);
+    await expect(where).toHaveAttribute('href', teams);
+    await expect(page.locator('#dashboardDetailWebUrl')).toBeHidden();
+    await expect(detail.locator('.dash-detail-footer')).toHaveCount(0);
+    await page.click('#dashboardDetailEditBtn');
+    await expect(page.locator('#calEventModal')).toBeVisible();
+    await expect(page.locator('#calEventTitle')).toHaveValue('Planning meeting');
+    await page.click('#calEventModalClose');
+    await page.click('#dashboardDetailClose');
+
+    // Series: Edit asks first — this occurrence or the entire series
+    await agenda.locator('.today-ev-row', { hasText: 'Weekly sync' }).click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Weekly sync');
+    await expect(detail.locator('.dashboard-detail-table tr', { hasText: 'Where' })).toContainText('Room 4');
+    await expect(detail.locator('.dash-detail-footer')).toHaveCount(0);
+    await page.click('#dashboardDetailEditBtn');
+    const menu = page.locator('#_genericCtxMenu');
+    await expect(menu.locator('.ctx-item')).toHaveText(['This occurrence', 'Entire series']);
+    await menu.locator('.ctx-item', { hasText: 'Entire series' }).click();
+    await expect(page.locator('#calEventModal')).toBeVisible();
+    await expect(page.locator('#calEventTitle')).toHaveValue('Weekly sync');
+  });
+
+  test('E-T-17 event organiser "mailto:" writes a mail in the mail view (default mail program without a sending account)', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await page.route('**/api/dashboard/calendar/ca-e2e?**', r => r.fulfill({ json: { type: 'caldav', events: [
+      { uid: 'ev1', title: 'Planning meeting', start: at(9), end: at(10), organizer: 'mailto:boss@example.org' },
+    ] } }));
+    let smtp = null;   // no sending account at first
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: {
+      calendarAccounts: [{ id: 'ca-e2e', label: 'Work', type: 'caldav', color: '#7c6af7' }],
+      mailAccounts: smtp ? [{ id: 'ma-e2e', label: 'Mail', user: 'me@example.org', smtp }] : [],
+    } }));
+    await page.route('**/api/dashboard/mail/ma-e2e/**', r => r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/' }], messages: [], total: 0, page: 1, pageSize: 50 } }));
+    await page.goto('/today');
+    const agenda = page.locator('.today-tile[data-tile="agenda"]');
+    const organiser = page.locator('#dashboardDetail .dashboard-detail-table tr', { hasText: 'Organiser' }).locator('a');
+
+    // Without a sending account: a plain mailto: link (the click hands it to the mail program)
+    await agenda.locator('.today-ev-row', { hasText: 'Planning meeting' }).click();
+    await expect(organiser).toHaveText('boss@example.org');
+    await expect(organiser).toHaveAttribute('href', 'mailto:boss@example.org');
+    const mailto = page.waitForRequest(req => req.url().startsWith('mailto:'), { timeout: 3000 }).catch(() => null);
+    await organiser.click();
+    await mailto;
+    await expect(page.locator('#mailView')).toBeHidden();
+    await page.click('#dashboardDetailClose');
+
+    // With a sending account: the mail view opens a new message to the organiser
+    smtp = { host: 'smtp.example.org', port: 587 };
+    await agenda.locator('.today-ev-row', { hasText: 'Planning meeting' }).click();
+    await organiser.click();
+    await expect(page.locator('#mailView')).toBeVisible();
+    await expect(page.locator('#dashboardDetail')).toBeHidden();
+    await expect(page.locator('#mailViewReader input[name="to"]')).toHaveValue('boss@example.org');
+  });
+});
+
+// Touch swipe via CDP (Chromium): real touch events → pointer events with pointerType 'touch'
+async function swipe(page, locator, dx) {
+  await page.waitForLoadState('networkidle');   // the tile re-renders after each action: let it settle
+  await locator.waitFor();
+  const b = await locator.boundingBox();
+  const y = b.y + b.height / 2, x0 = b.x + b.width / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y }] });
+  for (let i = 1; i <= 8; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + dx * i / 8, y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+}
+
+test.describe('Today page — phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('E-T-15 swipe actions in "Needs attention": mail read / move, card move to column / edit / delete', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const board = { board: { columns: [
+      { id: 'c-todo', title: 'TODO', cards: [{ id: 'id-od1', text: 'Overdue report', endDate: '2020-01-01' }, { id: 'id-due1', text: 'Send offer', endDate: TODAY }] },
+      { id: 'c-done', title: 'DONE', cards: [] },
+    ] } };
+    await mockBoard(page, 'e2e-today', board, state);
+    const mails = [
+      { id: '11', subject: 'First unread', from: 'a@example.org', date: at(8), unread: true },
+      { id: '12', subject: 'Second unread', from: 'b@example.org', date: at(7), unread: true },
+    ];
+    const mailCalls = [];
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [{ accountId: 'ma-e2e', label: 'Mail', messages: mails.filter(m => m.unread && !m.gone) }] }));
+    await page.route('**/api/dashboard/mail/ma-e2e/folders', r => r.fulfill({ json: { folders: [
+      { path: 'INBOX', name: 'INBOX', delimiter: '/' }, { path: 'Archive', name: 'Archive', delimiter: '/' },
+    ] } }));
+    await page.route('**/api/dashboard/mail/ma-e2e/message/**', r => {
+      const [id, action] = r.request().url().split('/message/')[1].split('?')[0].split('/');
+      mailCalls.push({ method: r.request().method(), id, action, body: r.request().postData() });
+      const m = mails.find(x => x.id === id);
+      if (r.request().method() === 'PATCH') m.unread = false; else m.gone = true;
+      r.fulfill({ json: { ok: true } });
+    });
+    await page.route('**/api/dashboard/mail/ma-e2e/recent-folders', r => r.fulfill({ json: { ok: true } }));
+    // Sections open from the start (clicking a summary could race the tile's re-render after an action)
+    await page.addInitScript(() => localStorage.setItem('today-att-open', JSON.stringify({ mail: true, overdue: true, due: true })));
+    await page.goto('/today');
+
+    // Mail: right swipe → Mark as read
+    const mail = page.locator('details.today-att[data-key="mail"]');
+    await swipe(page, mail.locator('.today-mail-row', { hasText: 'First unread' }), 120);
+    await mail.locator('[data-today-swipe="read"]').click();
+    await expect(mail.locator('.today-mail-row', { hasText: 'First unread' })).toHaveCount(0);
+    expect(mailCalls.at(-1)).toMatchObject({ method: 'PATCH', id: '11' });
+    expect(JSON.parse(mailCalls.at(-1).body)).toEqual({ seen: true });
+
+    // Mail: left swipe → Move → folder picker (current folder INBOX not offered)
+    await swipe(page, mail.locator('.today-mail-row', { hasText: 'Second unread' }), -200);
+    await mail.locator('[data-today-swipe="move"]').click();
+    await expect(page.locator('.today-picker .mv-picker-item')).toHaveText(['Archive']);
+    await page.locator('.today-picker .mv-picker-item', { hasText: 'Archive' }).click();
+    await expect.poll(() => mailCalls.at(-1)).toMatchObject({ method: 'POST', id: '12', action: 'move' });
+    expect(JSON.parse(mailCalls.at(-1).body)).toEqual({ folder: 'Archive' });
+    await expect(mail).toHaveCount(0);   // no unread mail left
+
+    // Card: left swipe → Move to column → DONE
+    const overdue = page.locator('details.today-att[data-key="overdue"]');
+    await swipe(page, overdue.locator('.today-kcard', { hasText: 'Overdue report' }), -200);
+    await overdue.locator('[data-today-swipe="move"]').click();
+    await expect(page.locator('.today-picker .mv-picker-item')).toHaveText(['DONE']);
+    await page.locator('.today-picker .mv-picker-item', { hasText: 'DONE' }).click();
+    await expect.poll(() => state.patches['e2e-today']?.length).toBe(1);
+    const cols = state.patches['e2e-today'][0].updatedColumns;
+    expect(cols.find(c => c.id === 'c-todo').cards.map(c => c.id)).toEqual(['id-due1']);
+    expect(cols.find(c => c.id === 'c-done').cards.map(c => c.id)).toEqual(['id-od1']);
+
+    // Card: right swipe → Edit opens the card dialog in place
+    const due = page.locator('details.today-att[data-key="due"]');
+    const sendOffer = due.locator('.today-kcard', { hasText: 'Send offer' });
+    await swipe(page, sendOffer, 120);
+    await expect(due.locator('[data-today-swipe="edit"]')).toBeVisible();
+    await due.locator('[data-today-swipe="edit"]').click();
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#cardText')).toHaveValue('Send offer');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#modal')).toBeHidden();
+
+    // Card: left swipe → Delete asks first; Cancel keeps the card
+    await swipe(page, due.locator('.today-kcard', { hasText: 'Send offer' }), -200);
+    await due.locator('[data-today-swipe="delete"]').click();
+    await expect(page.locator('#dialogMsg')).toHaveText('Delete card "Send offer"?');
+    await page.click('#dialogCancelBtn');
+    expect(state.patches['e2e-today']).toHaveLength(1);
   });
 });

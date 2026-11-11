@@ -1,5 +1,6 @@
 /* ---- Notes Sidebar ---- */
 .board-area {
+  background: var(--page-bg);   /* same as the Today page (#today) */
   flex: 1;
   min-height: 0;
   display: flex;

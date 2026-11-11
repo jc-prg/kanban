@@ -3,9 +3,9 @@
   flex-shrink: 0;
   width: var(--col-width);
   height: 100%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--panel-bg);   /* same as the Today widgets */
+  border: 1px solid transparent;   /* widget format: no frame (accent border only while dragging over) */
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -25,28 +25,31 @@
   box-shadow: 0 0 0 1px var(--accent), 0 8px 32px var(--accent-glow);
 }
 
-/* Column header */
+/* Column header — same format as the Today widget headers (today.css), tinted with the column colour
+   instead of the accent */
 .column-header {
-  padding: 14px 16px 12px;
+  min-height: 30px;
+  padding: 6px 8px 6px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 85%, var(--col-color));
+  border-bottom: 1px solid color-mix(in srgb, var(--col-color) 30%, var(--border));
+  background: color-mix(in srgb, var(--col-color) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
+  user-select: none;
 }
 
 .column-title {
   font-family: 'Syne', sans-serif;
   font-weight: 700;
-  font-size: 0.85rem;
-  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   min-width: 0;
   flex: 1;
   outline: none;
   background: transparent;
   border: none;
-  color: var(--text);
+  color: color-mix(in srgb, var(--col-color) 35%, var(--text-muted));
   cursor: text;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -65,21 +68,19 @@
 }
 .col-filter-icon:hover { opacity: 1; }
 
-.column-count {
-  font-size: 0.7rem;
-  color: #383850;
-  background: color-mix(in srgb, #b8b8cc 88%, var(--col-color));
-  border-radius: 4px;
+.column-count {   /* small pill, a shade off the header background (column colour tinted) */
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  min-width: 24px;
   padding: 2px 6px;
-  min-width: 22px;
+  border-radius: 6px;
   text-align: center;
+  background: color-mix(in srgb, var(--col-color) 18%, var(--surface2));
+  flex-shrink: 0;
+  margin-right: 5px;
 }
-
 @media (prefers-color-scheme: light) {
-  .column-count {
-    color: var(--text-muted);
-    background: var(--surface2);
-  }
+  .column-count { background: color-mix(in srgb, var(--col-color) 14%, var(--surface)); }
 }
 
 .col-drag-handle {
@@ -119,32 +120,38 @@
 .column--collapsed .cards,
 .column--collapsed .add-card-btn { display: none; }
 
-/* Column menu button */
+/* Column menu button — like a widget header button (.today-tile-btn) */
 .col-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 1.1rem;
   line-height: 1;
-  padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: all 0.15s;
-  opacity: 0;
+  opacity: 0.6;
+  flex-shrink: 0;
 }
 
-.column-header:hover .col-btn { opacity: 0.55; }
+.column-header:hover .col-btn { opacity: 1; }
 .col-btn:hover { opacity: 1 !important; color: var(--text); background: var(--surface2); }
 
 /* Cards area */
 .cards {
   flex: 1;
-  padding: 12px;
+  padding: 12px 8px 8px;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  overflow-y: scroll;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;   /* scrollbar space on both sides: same left and right margin of the cards */
 }
 
 .cards.drag-active {
@@ -199,8 +206,10 @@
 
 @media (prefers-color-scheme: light) {
   .column-header {
-    background: color-mix(in srgb, var(--surface2) 85%, var(--col-color));
+    background: color-mix(in srgb, var(--col-color) 9%, var(--surface2));
+    border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
   }
+  .column-title { color: var(--text-muted); }
 }
 
 /* ---- Scheduled column ---- */

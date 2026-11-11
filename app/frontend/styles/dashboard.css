@@ -232,21 +232,32 @@
   display: flex;
   flex-direction: column;
   padding: 0;
+  border: none;   /* widget format (today.css): no frame, 8 px corners, --panel-bg */
+  border-radius: 8px;
+  background: var(--panel-bg);
 }
 
+/* Header in the widget header format, tinted with the event's calendar colour (--detail-accent) or the accent */
 .dashboard-detail-titlebar {
+  --hdr-accent: var(--detail-accent, var(--accent));
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--hdr-accent) 30%, var(--border));
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--detail-accent, var(--surface)) 18%, var(--surface));
+  background: color-mix(in srgb, var(--hdr-accent) 12%, color-mix(in srgb, var(--surface2) 55%, var(--bg)));
+  user-select: none;
 }
 
 .dashboard-detail-title {
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-family: 'Syne', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--hdr-accent) 35%, var(--text-muted));
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -269,16 +280,45 @@
   color: var(--text);
 }
 
+@media (prefers-color-scheme: light) {
+  .dashboard-detail-titlebar {
+    background: color-mix(in srgb, var(--hdr-accent) 9%, var(--surface2));
+    border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
+  }
+  .dashboard-detail-title { color: var(--text-muted); }
+}
+
+/* Header buttons (Edit, Webmail, Full screen, Close) like widget header buttons (.today-tile-btn) */
+.dashboard-detail-titlebar :is(.modal-fs-btn, .dashboard-detail-close) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.6 !important;   /* inline style sets 0.55 */
+}
+.dashboard-detail-titlebar:hover :is(.modal-fs-btn, .dashboard-detail-close) { opacity: 1 !important; }
+.dashboard-detail-titlebar :is(.modal-fs-btn, .dashboard-detail-close):hover { background: var(--surface2); color: var(--text); }
+.dashboard-detail-titlebar :is(.modal-fs-btn, .dashboard-detail-close) svg { width: 12px; height: 12px; }
+
 .dashboard-detail-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 12px 10px 8px;   /* widget body padding */
 }
 
 .dashboard-detail-table {
   border-collapse: collapse;
   width: 100%;
   font-size: 0.82rem;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .dashboard-detail-table th {

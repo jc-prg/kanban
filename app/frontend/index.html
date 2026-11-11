@@ -41,7 +41,7 @@
     </div>
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
     <button class="header-menu-btn header-menu-btn--hide-mobile" id="schedToggleBtn" title="Toggle scheduled column" style="display:none"><span data-icon="schedule" data-icon-w="14" data-icon-h="14"></span></button>
-    <a class="header-menu-btn header-menu-btn--hide-mobile" id="todayBtn" href="/today" title="Today" style="display:none"><span data-icon="today" data-icon-w="12" data-icon-h="12"></span></a>
+    <a class="header-menu-btn" id="todayBtn" href="/today" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh" style="display:none"><span data-icon="sync"></span></button>
     <button class="header-menu-btn" id="dashboardMailBtn" title="Show / hide mail" style="display:none"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span></button>
     <button class="header-menu-btn" id="dashboardCalBtn" title="Show / hide calendar" style="display:none"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span></button>
@@ -83,7 +83,8 @@
     <div class="calview-bar mailview-bar">
       <button class="btn calview-navbtn mv-folders-btn" id="mailViewFoldersBtn" title="Folders"><span data-icon="folder"></span></button>
       <h2 class="calview-title mailview-title" id="mailViewTitle">Mail</h2>
-      <button class="btn btn-accent" id="mailViewCompose" title="New message (c)">+ New<span class="mv-compose-long"> message</span></button>
+      <button class="btn" id="mailViewCompose" title="New message (c)"><span data-icon="email"></span>Mail</button>
+      <button class="today-tile-btn" id="mailViewRefresh" title="Refresh"><span data-icon="sync"></span></button>
       <button class="dashboard-detail-close" id="mailViewClose" title="Close (Esc)"><span data-icon="close"></span></button>
     </div>
     <div class="mailview-body">
@@ -98,7 +99,6 @@
       <section class="mailview-listcol">
         <div class="mv-resizer" data-mv-resize="list" title="Drag to resize (double-click: reset)"></div>
         <div class="mailview-listsearch">
-          <button class="btn calview-navbtn" id="mailViewRefresh" title="Reload"><span data-icon="sync"></span></button>
           <input type="search" class="modal-input mailview-search" id="mailViewSearch" placeholder="Search folder… (/)" autocomplete="off" spellcheck="false">
         </div>
         <div class="mailview-list" id="mailViewList"></div>
@@ -125,12 +125,13 @@
       </div>
       <h2 class="calview-title" id="calViewTitle"></h2>
       <div class="calview-modes" role="group" aria-label="View">
-        <button class="calview-mode" data-cv-mode="week">Week</button>
-        <button class="calview-mode" data-cv-mode="workweek">Work week</button>
-        <button class="calview-mode" data-cv-mode="month">Month</button>
+        <button class="calview-mode" data-cv-mode="workweek" title="Work week">5</button>
+        <button class="calview-mode" data-cv-mode="week" title="Week">7</button>
+        <button class="calview-mode" data-cv-mode="month" title="Month">31</button>
       </div>
-      <button class="btn btn-accent" id="calViewNew">+ New event</button>
+      <button class="btn" id="calViewNew" title="New event"><span data-icon="date"></span>Event</button>
       <button class="btn calview-navbtn calview-menu-btn" id="calViewMenuBtn" title="Menu"><span data-icon="menu"></span></button>
+      <button class="today-tile-btn" id="calViewRefresh" title="Refresh"><span data-icon="sync"></span></button>
       <button class="dashboard-detail-close" id="calViewClose" title="Close (Esc)"><span data-icon="close"></span></button>
     </div>
     <div class="calview-body" id="calViewBody"></div>

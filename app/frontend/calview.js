@@ -462,7 +462,24 @@ function _cvOpenMenu(pos) {
     }
   }
   openContextMenu(pos, items);
+  _cvMarkMenuOpen();
 }
+
+/** Burger button in the active style while its menu is open (the generic menu just hides itself). */
+function _cvMarkMenuOpen() {
+  const btn  = document.getElementById('calViewMenuBtn');
+  const menu = document.getElementById('_genericCtxMenu');
+  if (!btn || !menu) return;
+  btn.classList.add('cv-menu-open');
+  _cvMenuObserver?.disconnect();
+  _cvMenuObserver = new MutationObserver(() => {
+    if (menu.style.display !== 'none') return;
+    btn.classList.remove('cv-menu-open');
+    _cvMenuObserver.disconnect();
+  });
+  _cvMenuObserver.observe(menu, { attributes: true, attributeFilter: ['style'] });
+}
+let _cvMenuObserver = null;
 
 function _cvEditable(ev) { return (ev._accountType || 'caldav') !== 'ical-url'; }
 
@@ -617,10 +634,14 @@ function _cvRenderHeader(range) {
   if (_cvMode === 'month') {
     title = _cvAnchor.toLocaleDateString([], { month: 'long', year: 'numeric' });
   } else {
-    const sameMonth = range.start.getMonth() === last.getMonth();
-    const from = range.start.toLocaleDateString([], sameMonth ? { day: 'numeric' } : { day: 'numeric', month: 'short' });
-    const to   = last.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
-    title = `CW ${_cvIsoWeek(range.start)} · ${from} – ${to}`;
+    // Compact: "CW 46 · 09-15.11.26", across months "27.10.-02.11.26", across years "29.12.25-04.01.26"
+    const p2 = n => String(n).padStart(2, '0');
+    const s = range.start;
+    const from = s.getFullYear() !== last.getFullYear() ? `${p2(s.getDate())}.${p2(s.getMonth() + 1)}.${p2(s.getFullYear() % 100)}`
+      : s.getMonth() !== last.getMonth() ? `${p2(s.getDate())}.${p2(s.getMonth() + 1)}.`
+      : p2(s.getDate());
+    const to = `${p2(last.getDate())}.${p2(last.getMonth() + 1)}.${p2(last.getFullYear() % 100)}`;
+    title = `CW ${_cvIsoWeek(s)} · ${from}-${to}`;
   }
   document.getElementById('calViewTitle').textContent = title;
   for (const btn of document.querySelectorAll('#calView [data-cv-mode]')) {

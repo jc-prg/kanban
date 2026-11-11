@@ -178,6 +178,7 @@ header h1 span { color: var(--accent); }
   background: var(--accent-glow);
   color: var(--accent);
 }
+.board-switch-empty, .board-switch-empty:hover { color: var(--text-muted); background: none; cursor: default; font-style: italic; }
 
 .header-dd-logout:hover {
   color: #ef4444;

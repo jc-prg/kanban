@@ -72,8 +72,6 @@ body.calview-open header { z-index: 96; }
 /* Active view and "New event": muted accent instead of the full-strength .btn-accent */
 .calview { --cv-accent-soft: color-mix(in srgb, var(--accent) 65%, var(--surface2)); }
 .calview-mode.active { background: var(--cv-accent-soft); color: #fff; }
-#calViewNew { padding: 7px 12px; background: var(--cv-accent-soft); border-color: var(--cv-accent-soft); }   /* same height as the view buttons */
-#calViewNew:hover { background: color-mix(in srgb, var(--accent) 80%, var(--surface2)); border-color: var(--accent); box-shadow: none; }
 
 .calview-body {
   flex: 1;

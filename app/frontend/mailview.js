@@ -1495,13 +1495,15 @@ function _mvRenderReader(mode, error) {
 
 // ---- Compose ----
 
-function _mvOpenCompose(mode) {
+/** `prefill` ({ to, subject }) fills a new message, e.g. from an event's organiser. */
+function _mvOpenCompose(mode, prefill = null) {
   const sendable = _mvAccounts.filter(a => a.canSend);
   if (!sendable.length) { _mvFlash('Configure an SMTP server in the mail settings first', true); return; }
   const reply   = (mode === 'reply' || mode === 'replyall') && _mvMsg ? _mvMsg : null;
   const forward = mode === 'forward' && _mvMsg ? _mvMsg : null;
   const fields  = reply ? _mvReplyFields(reply, mode === 'replyall', _mvAccounts.find(a => a.accountId === _mvAccountId)?.own)
-    : forward ? { to: '', cc: '', subject: _mvForwardSubject(forward.subject) } : null;
+    : forward ? { to: '', cc: '', subject: _mvForwardSubject(forward.subject) }
+    : prefill ? { to: prefill.to || '', cc: '', subject: prefill.subject || '' } : null;
   const fromAcc  = sendable.find(a => a.accountId === _mvAccountId) || sendable[0];
   const fromAddr = reply && fromAcc.accountId === _mvAccountId ? _mvReplySender(reply, fromAcc.senders) : fromAcc.senders[0];
   // One option per (account, sender address): the address with the account's colour swatch
@@ -1869,7 +1871,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const search  = document.getElementById('mailViewSearch');
 
   document.getElementById('mailViewClose').addEventListener('click', closeMailView);
-  document.getElementById('mailViewRefresh').addEventListener('click', () => _mvReload());
   document.getElementById('mailViewCompose').addEventListener('click', () => _mvOpenCompose('new'));
   document.getElementById('mailViewSettings').addEventListener('click', () => openSettingsDialog('mail-accounts'));
   document.getElementById('mailViewFoldersBtn').addEventListener('click', () => _mvSetPane('folders'));
