@@ -8,22 +8,31 @@
   overflow: hidden;
 }
 
+/* Docked to the app header, the window's left edge and its bottom (not a column): the widget format's
+   colours (.panel / .panel-hdr, panel.css — skins restyle them) without corners or margins, a frame line
+   only towards the board. Closed: no width, no frame. */
 .notes-sidebar {
   width: 0;
   min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid transparent;
-  background: var(--surface);
   flex-shrink: 0;
   position: relative;
+  border-right: 1px solid transparent;
   transition: width 0.22s ease, border-color 0.22s ease, min-width 0.22s ease;
 }
-
 .notes-sidebar--open {
   border-right-color: var(--border);
+  /* a little shadow onto the board, so columns scrolled under the edge disappear beneath it; z-index lifts it
+     above .board-wrapper (z-index 1), which would otherwise paint over the shadow */
+  z-index: 2;
+  box-shadow: 4px 0 12px -6px rgba(0, 0, 0, 0.45);
 }
+@media (prefers-color-scheme: light) {
+  .notes-sidebar--open { box-shadow: 4px 0 12px -6px rgba(0, 0, 0, 0.18); }
+}
+.notes-sidebar.panel { border-radius: 0; }   /* beats .panel (panel.css loads later) */
 
 .notes-sidebar--resizing {
   transition: none !important;
@@ -45,37 +54,43 @@
   opacity: 0.25;
 }
 
-.notes-sidebar-header {
-  display: flex;
-  align-items: center;
-  padding: 12px 10px 8px;
-  border-bottom: 1px solid var(--border);
-  gap: 4px;
-  flex-shrink: 0;
-}
+/* Header: bar and colours from .panel-hdr; title and buttons like a widget header (.today-tile-title,
+   .today-tile-btn) */
+.notes-sidebar-header { gap: 2px; white-space: nowrap; }
 
 .notes-sidebar-label {
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  font-family: 'Syne', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--text-muted);
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .notes-sidebar-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0;
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.9rem;
   line-height: 1;
-  padding: 2px 5px;
-  border-radius: 5px;
-  transition: color 0.15s, background 0.15s;
+  border-radius: 6px;
+  opacity: 0.6;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
 }
 
-.notes-sidebar-add-btn:hover { color: var(--accent); background: var(--accent-glow); }
+.notes-sidebar-header:hover .notes-sidebar-add-btn { opacity: 1; }
+.notes-sidebar-add-btn:hover { color: var(--text); background: var(--surface2); }
 
 .notes-sync-btn--spinning {
   animation: notes-spin 0.8s linear infinite;

@@ -414,11 +414,13 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0;
   padding: 8px 12px; border-radius: 10px; box-sizing: border-box;
   color: var(--text); text-decoration: none;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border: 1px solid transparent;   /* no frame (the glass skin colours it); background below, darker on hover */
+  background: color-mix(in srgb, var(--surface2) 60%, var(--panel-bg));
+  transition: background 0.15s;
 }
-.today-board:hover { border-color: var(--accent); }
+.today-board:hover { background: color-mix(in srgb, var(--accent) 8%, var(--surface2)); }
 /* Archived board (shown via the tile's folder action): dimmed, dashed border */
-.today-board--archived { border-style: dashed; opacity: 0.6; }
+.today-board--archived { border-style: dashed; border-color: color-mix(in srgb, var(--border) 70%, transparent); opacity: 0.6; }
 .today-board--archived:hover { opacity: 1; }
 /* base.css colours visited links (a:visited) — board and note page links keep the text colour */
 .today-board:visited, .today-npage:visited { color: var(--text); }
@@ -624,8 +626,11 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 
 /* Dark mode: cards and board links in the tiles a shade lighter than the widget (--surface), normal card background on hover */
 @media not (prefers-color-scheme: light) {
-  #today .today-tile :is(.card, .today-board, .today-qa-icon--box) { background: color-mix(in srgb, var(--surface2) 45%, var(--surface)); }
-  #today .today-tile :is(.card, .today-board):hover, #today .today-qa-item:hover .today-qa-icon--box { background: var(--surface2); }
+  #today .today-tile :is(.card, .today-qa-icon--box) { background: color-mix(in srgb, var(--surface2) 45%, var(--surface)); }
+  #today .today-tile .card:hover, #today .today-qa-item:hover .today-qa-icon--box { background: var(--surface2); }
+  /* Board links a little brighter than the cards */
+  #today .today-tile .today-board { background: color-mix(in srgb, var(--surface2) 80%, var(--surface)); }
+  #today .today-tile .today-board:hover { background: color-mix(in srgb, var(--accent) 10%, var(--surface2)); }
 }
 
 /* Collapsed tile (double-click on the header): header only, whatever its size; not while editing */

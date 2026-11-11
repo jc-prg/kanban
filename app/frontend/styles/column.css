@@ -130,6 +130,10 @@
 .column-header:hover .col-btn { opacity: 1; }
 .col-btn:hover { opacity: 1 !important; color: var(--text); background: var(--surface2); }
 
+/* Idle scrollbar thumb close to the column background (base.css ::-webkit-scrollbar-thumb uses --scrollbar;
+   hovered thumbs keep --scrollbar-active) */
+.column { --scrollbar: color-mix(in srgb, var(--scrollbar-active) 30%, var(--panel-bg)); }
+
 /* Cards area */
 .cards {
   flex: 1;
