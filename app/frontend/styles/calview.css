@@ -4,6 +4,7 @@
   position: fixed;
   inset: 0;
   top: var(--app-header-h, 0px);   /* phones: the app header stays visible above the view */
+  bottom: calc(0px - var(--vp-gap, 0px));   /* iOS Home-Screen app: into the band below the viewport (viewport.js) */
   z-index: 95;               /* below .modal-backdrop (100) so the event detail opens on top */
   background: var(--bg);
   display: flex;

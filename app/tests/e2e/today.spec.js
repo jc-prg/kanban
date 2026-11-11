@@ -852,11 +852,23 @@ test.describe('Today page — phone', () => {
     // centred in the safe area
     expect(Math.abs((r.y - 47) - (vh - 34 - (r.y + r.height)))).toBeLessThanOrEqual(2);
 
+    // Full screen: covers the screen, the header runs under the status bar; title and icons sit below the
+    // status bar plus the blurred band (16 px), the content above the home indicator
     await page.click('#dashboardDetailFsBtn');
     await page.waitForTimeout(100);
     const f = await modal.boundingBox();
-    expect(Math.round(f.y)).toBe(47);
-    expect(Math.round(f.y + f.height)).toBe(vh - 34);
+    expect(Math.round(f.y)).toBe(0);
+    expect(Math.round(f.y + f.height)).toBe(vh);
+    const title = await page.locator('#dashboardDetailTitle').boundingBox();
+    expect(title.y).toBeGreaterThanOrEqual(47 + 16);
+    const pad = await page.evaluate(() => getComputedStyle(document.getElementById('dashboardDetailBody')).paddingBottom);
+    expect(pad).toBe('42px');   // 8 px + home indicator
+
+    // iOS Home-Screen app with a short viewport (viewport.js sets --vp-gap): overlays reach the screen bottom
+    await page.evaluate(() => document.documentElement.style.setProperty('--vp-gap', '62px'));
+    const g = await page.locator('#dashboardDetail').boundingBox();
+    expect(Math.round(g.y + g.height)).toBe(vh + 62);
+    expect(await page.evaluate(() => Math.round(document.body.getBoundingClientRect().height))).toBe(vh + 62);
   });
 
   test('E-T-20 note detail on a phone: table and attachments are not fixed, the whole panel scrolls', async ({ page }) => {

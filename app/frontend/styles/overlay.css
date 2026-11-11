@@ -230,6 +230,7 @@
   inset: 0;
   box-sizing: border-box;
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  bottom: calc(0px - var(--vp-gap, 0px));   /* iOS Home-Screen app: into the band below the viewport (viewport.js) */
   background: rgba(0,0,0,0.7);
   backdrop-filter: blur(4px);
   z-index: 100;
@@ -1644,6 +1645,19 @@
   display: inline-flex;
   align-items: center;
 }
+
+/* Full-screen dialogs in the panel format cover the whole screen: the header runs under the status bar like
+   the app header (layout.css) — background up to the top edge, title and icons below the band the iOS status
+   bar blurs (safe area + up to 16 px) — and the content keeps clear of the home indicator */
+.modal-backdrop:has(> .modal--fullscreen.panel) { padding: 0; }
+.modal--fullscreen.panel > .dashboard-detail-titlebar,
+.modal--fullscreen.panel .panel-modal-bar {
+  padding-top: calc(6px + var(--safe-top) + min(var(--safe-top), 16px));
+  padding-left: max(12px, var(--safe-left));
+  padding-right: max(8px, var(--safe-right));
+}
+.modal--fullscreen.panel > .dashboard-detail-body { padding-bottom: calc(8px + var(--safe-bottom)); }
+.modal--fullscreen.panel-modal { padding-bottom: calc(28px + var(--safe-bottom)); }
 
 /* ---- Dialogs in the detail panel format (.panel-modal: card / note editors, settings, achievement
    history) ----
