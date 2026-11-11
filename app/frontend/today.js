@@ -465,7 +465,7 @@ async function initToday() {
   document.getElementById('saveIndicator').style.display = 'none';
   document.getElementById('dashboardFetchedAt').style.display = '';
   document.querySelector('.header-menu').style.marginLeft = 'auto';
-  ['menuWebhook', 'menuDashboardSettings'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  ['menuWebhook'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   document.getElementById('today').style.display = 'flex';
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('dashboardRefreshBtn').style.display = '';

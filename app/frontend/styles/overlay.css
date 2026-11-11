@@ -1000,6 +1000,27 @@
   overflow: hidden;
 }
 
+/* Board | Global switch in the header (board pages only, settings.js#applySettingsScope) — like the
+   widget header's text buttons: muted, the active one highlighted like the selected "7 days" button */
+.settings-scope { display: inline-flex; gap: 2px; margin-right: 6px; flex-shrink: 0; }
+.settings-scope[hidden] { display: none; }
+.settings-scope button {
+  height: 22px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.settings-scope button:hover { background: var(--surface2); color: var(--text); }
+.settings-scope button.active {
+  background: color-mix(in srgb, var(--hdr-accent, var(--accent)) 22%, transparent);
+  color: var(--text);
+}
+
 /* Two-column layout container */
 .settings-layout {
   flex: 1;

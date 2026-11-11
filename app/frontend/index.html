@@ -50,7 +50,7 @@
     <button class="header-menu-btn" id="dashboardMailBtn" title="Show / hide mail" style="display:none"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span></button>
     <button class="header-menu-btn" id="dashboardCalBtn" title="Show / hide calendar" style="display:none"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span></button>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
-      <a class="header-menu-btn" id="headerHomeBtn" href="/today" title="Boards"><span data-icon="allBoards" data-icon-w="12" data-icon-h="12"></span></a>
+      <a class="header-menu-btn" id="headerHomeBtn" href="/today" title="Kanban" aria-label="Kanban"><span data-icon="kanban" data-icon-w="12" data-icon-h="12"></span></a>
       <div class="board-switch-menu" id="boardSwitchMenu"></div>
     </div>
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
@@ -61,7 +61,6 @@
       <button class="header-dd-item" id="menuWebhook" style="display:none"></button>
       <button class="header-dd-item" id="menuScheduled" style="display:none">Scheduled cards</button>
       <button class="header-dd-item" id="menuSettings">Settings</button>
-      <button class="header-dd-item" id="menuDashboardSettings" style="display:none">Global settings</button>
       <div class="header-dd-separator"></div>
       <button class="header-dd-item header-dd-logout" id="menuLogout">Log out</button>
     </div>
@@ -754,7 +753,11 @@
 <div id="settingsBackdrop" class="modal-backdrop" style="display:none">
   <div class="modal settings-modal panel panel-modal">
     <div class="dashboard-detail-titlebar panel-hdr panel-modal-bar">
-      <span id="settingsTitle" class="dashboard-detail-title panel-hdr-title">Global settings</span>
+      <span id="settingsTitle" class="dashboard-detail-title panel-hdr-title">Settings</span>
+      <div class="settings-scope" id="settingsScope" role="tablist" aria-label="Settings scope" hidden>
+        <button type="button" data-scope="board" role="tab">Board</button>
+        <button type="button" data-scope="global" role="tab">Global</button>
+      </div>
       <button class="dashboard-detail-close" data-close-via="settingsCloseBtn" title="Close"><span data-icon="close"></span></button>
     </div>
     <div class="settings-layout">
@@ -788,21 +791,6 @@
           </div>
         </div>
 
-        <div class="settings-section" id="dbSection" data-settings-label="Database" data-settings-keywords="couchdb fauxton admin documents storage nosql query backup size">
-          <div class="settings-section-title">
-            <span>Database</span>
-            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
-          </div>
-          <div class="settings-section-body">
-            <a class="settings-item" id="fauxton-link" target="_blank" rel="noopener">
-              <div class="settings-item-info">
-                <div class="settings-item-label">Database admin (Fauxton)</div>
-                <div class="settings-item-desc">CouchDB management UI — browse documents, run queries, manage the database</div>
-              </div>
-              <span class="settings-item-arrow"><span data-icon="openLink"></span></span>
-            </a>
-          </div>
-        </div>
 
         <div class="settings-section" id="importSection" data-settings-label="Behavior" data-settings-keywords="import inbox date collapse persist auto-save autosave interval timer tracked columns overview done dates edit" style="display:none">
           <div class="settings-section-title">
@@ -1231,52 +1219,6 @@
           </div>
         </div>
 
-        <div class="settings-section" id="templatesSection" data-settings-label="Templates" data-settings-keywords="template card reuse prefill preset quick add">
-          <div class="settings-section-title">
-            <span>Templates</span>
-            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
-          </div>
-          <div class="settings-section-body">
-            <div class="recurring-header">
-              <p class="settings-item-desc">Reusable card presets. Select a template when adding a card to pre-fill its fields.</p>
-              <button class="btn" id="templatesAddBtn">+ Add template</button>
-            </div>
-            <ul id="templatesList" class="tpl-list"></ul>
-            <div id="tplForm" class="tpl-form" hidden>
-              <div class="settings-field-row">
-                <label class="settings-field-label" for="tplName">Template name *</label>
-                <input id="tplName" class="new-board-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" placeholder="e.g. Bug report">
-              </div>
-              <div class="settings-field-row">
-                <label class="settings-field-label" for="tplText">Card title (prefill)</label>
-                <input id="tplText" class="new-board-input" type="text" maxlength="300" autocomplete="off" spellcheck="false" placeholder="Optional — left blank for user to fill">
-              </div>
-              <div class="settings-field-row">
-                <label class="settings-field-label">Color</label>
-                <div id="tplColorRow" class="recurring-color-row"></div>
-              </div>
-              <div class="settings-field-row">
-                <label class="settings-field-label">Priority</label>
-                <div id="tplPriorityRow" class="recurring-priority-row"></div>
-              </div>
-              <div class="settings-field-row">
-                <label class="settings-field-label" for="tplLink">Link</label>
-                <input id="tplLink" class="new-board-input" type="url" maxlength="2000" placeholder="https://…" autocomplete="off">
-              </div>
-              <div class="settings-field-row">
-                <label class="settings-field-label" for="tplDesc">Description</label>
-                <textarea id="tplDesc" class="new-board-input recurring-desc-input" rows="3" spellcheck="false" placeholder="Optional markdown content…"></textarea>
-              </div>
-              <div id="tplFormError" class="recurring-form-error" hidden></div>
-              <div class="settings-webdav-actions">
-                <button class="btn" id="tplCancelBtn">Cancel</button>
-                <button class="btn btn-danger" id="tplDeleteBtn" style="display:none">Delete</button>
-                <button class="btn btn-accent" id="tplSaveBtn">Save template</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div class="settings-section" id="accountsSection" data-settings-label="Sources" data-settings-keywords="calendar caldav ical imap mail email webdav nextcloud accounts add account trusted senders images privacy" style="display:none">
           <div class="settings-section-title">
             <span>Sources</span>
@@ -1502,23 +1444,53 @@
             </div>
           </div>
         </div>
-
-        <div class="settings-section" id="apiKeySection" data-settings-label="API Access" data-settings-keywords="api key token authentication bearer external access env header rest">
+        <div class="settings-section" id="templatesSection" data-settings-label="Templates" data-settings-keywords="template card reuse prefill preset quick add">
           <div class="settings-section-title">
-            <span>API Access</span>
+            <span>Templates</span>
             <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
           </div>
           <div class="settings-section-body">
-            <div class="settings-apikey-row">
-              <input id="apiKeyDisplay" class="new-board-input settings-apikey-input" type="text" readonly placeholder="not configured">
-              <button class="btn" id="apiKeyCopyBtn">Copy</button>
+            <div class="recurring-header">
+              <p class="settings-item-desc">Reusable card presets. Select a template when adding a card to pre-fill its fields.</p>
+              <button class="btn" id="templatesAddBtn">+ Add template</button>
             </div>
-            <p class="settings-item-desc" style="margin-top:8px">
-              Send the key in HTTP requests via <code>x-api-key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.
-              Set <code>API_KEY</code> in <code>.env</code> to enable external access.
-            </p>
+            <ul id="templatesList" class="tpl-list"></ul>
+            <div id="tplForm" class="tpl-form" hidden>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplName">Template name *</label>
+                <input id="tplName" class="new-board-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" placeholder="e.g. Bug report">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplText">Card title (prefill)</label>
+                <input id="tplText" class="new-board-input" type="text" maxlength="300" autocomplete="off" spellcheck="false" placeholder="Optional — left blank for user to fill">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label">Color</label>
+                <div id="tplColorRow" class="recurring-color-row"></div>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label">Priority</label>
+                <div id="tplPriorityRow" class="recurring-priority-row"></div>
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplLink">Link</label>
+                <input id="tplLink" class="new-board-input" type="url" maxlength="2000" placeholder="https://…" autocomplete="off">
+              </div>
+              <div class="settings-field-row">
+                <label class="settings-field-label" for="tplDesc">Description</label>
+                <textarea id="tplDesc" class="new-board-input recurring-desc-input" rows="3" spellcheck="false" placeholder="Optional markdown content…"></textarea>
+              </div>
+              <div id="tplFormError" class="recurring-form-error" hidden></div>
+              <div class="settings-webdav-actions">
+                <button class="btn" id="tplCancelBtn">Cancel</button>
+                <button class="btn btn-danger" id="tplDeleteBtn" style="display:none">Delete</button>
+                <button class="btn btn-accent" id="tplSaveBtn">Save template</button>
+              </div>
+            </div>
           </div>
         </div>
+
+
 
         <div class="settings-section" id="colorPaletteSection" data-settings-label="Color Palette" data-settings-keywords="colors theme customise customize swatches cards accounts">
           <div class="settings-section-title">
@@ -1538,6 +1510,37 @@
           </div>
           <div class="settings-section-body">
             <div id="iconLibraryGrid" class="icon-lib-grid"></div>
+          </div>
+        </div>
+        <div class="settings-section" id="dbSection" data-settings-label="Database" data-settings-keywords="couchdb fauxton admin documents storage nosql query backup size">
+          <div class="settings-section-title">
+            <span>Database</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <a class="settings-item" id="fauxton-link" target="_blank" rel="noopener">
+              <div class="settings-item-info">
+                <div class="settings-item-label">Database admin (Fauxton)</div>
+                <div class="settings-item-desc">CouchDB management UI — browse documents, run queries, manage the database</div>
+              </div>
+              <span class="settings-item-arrow"><span data-icon="openLink"></span></span>
+            </a>
+          </div>
+        </div>
+        <div class="settings-section" id="apiKeySection" data-settings-label="API Access" data-settings-keywords="api key token authentication bearer external access env header rest">
+          <div class="settings-section-title">
+            <span>API Access</span>
+            <button class="settings-section-toggle" aria-label="Toggle section">▾</button>
+          </div>
+          <div class="settings-section-body">
+            <div class="settings-apikey-row">
+              <input id="apiKeyDisplay" class="new-board-input settings-apikey-input" type="text" readonly placeholder="not configured">
+              <button class="btn" id="apiKeyCopyBtn">Copy</button>
+            </div>
+            <p class="settings-item-desc" style="margin-top:8px">
+              Send the key in HTTP requests via <code>x-api-key: &lt;key&gt;</code> or <code>Authorization: Bearer &lt;key&gt;</code>.
+              Set <code>API_KEY</code> in <code>.env</code> to enable external access.
+            </p>
           </div>
         </div>
 

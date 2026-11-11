@@ -38,9 +38,9 @@ function _svgLinkedCards(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="3.7" width="7" height="5" rx="1"/><path d="M3.7 3V2.3A1 1 0 0 1 4.7 1.3h6a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H9.7"/></svg>`;
 }
 
-// 2×2 grid — navigate to board overview
-function _svgAllBoards(w = 12, h = 12) {
-  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="1" width="4" height="4" rx="0.8"/><rect x="7" y="1" width="4" height="4" rx="0.8"/><rect x="1" y="7" width="4" height="4" rx="0.8"/><rect x="7" y="7" width="4" height="4" rx="0.8"/></svg>`;
+// Kanban board — two columns (header line + card of different length); header board switcher ("Kanban")
+function _svgKanban(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 1.2h4M7 1.2h4"/><rect x="1" y="3.5" width="4" height="7.8" rx="1"/><rect x="7" y="3.5" width="4" height="4.6" rx="1"/></svg>`;
 }
 
 // Calendar — start / end dates
@@ -107,9 +107,9 @@ function _svgPrint(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="0.7" width="6" height="2.8" rx="0.8"/><rect x="0.7" y="3" width="10.6" height="5.5" rx="1.3"/><rect x="3" y="6.3" width="6" height="3" rx="0.5"/><circle cx="9" cy="5.5" r="0.6" fill="currentColor" stroke="none"/></svg>`;
 }
 
-// Three vertical columns — dashboard view
+// Dashboard — tiles of mixed sizes (widget grid of the Today page)
 function _svgDashboard(w = 12, h = 12) {
-  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="3" height="10.6" rx="1"/><rect x="4.5" y="0.7" width="3" height="10.6" rx="1"/><rect x="8.3" y="0.7" width="3" height="10.6" rx="1"/></svg>`;
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="4.2" height="5.4" rx="1"/><rect x="0.7" y="7.9" width="4.2" height="3.4" rx="1"/><rect x="7.1" y="0.7" width="4.2" height="2.8" rx="1"/><rect x="7.1" y="5.3" width="4.2" height="6" rx="1"/></svg>`;
 }
 
 // Funnel — filter / narrow down a list
@@ -356,7 +356,7 @@ const SVGICONS = {
   link:         _svgLink,
   noteDoc:      _svgNoteDoc,
   linkedCards:  _svgLinkedCards,
-  allBoards:    _svgAllBoards,
+  kanban:       _svgKanban,
   date:         _svgDate,
   priority:     _svgPriority,
   colorPalette: _svgColorPalette,
@@ -432,7 +432,7 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgLink(16, 16),         name: 'Link (chain)',     usage: 'URL link on a note page' },
   { type: 'svg', svg: _svgNoteDoc(12, 15),      name: 'Note / Document',  usage: 'Toggle notes sidebar; card linked to note' },
   { type: 'svg', svg: _svgLinkedCards(16, 16),  name: 'Linked cards',     usage: 'Cards linked from a note page' },
-  { type: 'svg', svg: _svgAllBoards(16, 16),    name: 'All boards',       usage: 'Board switcher' },
+  { type: 'svg', svg: _svgKanban(16, 16),       name: 'Kanban',           usage: 'Board switcher (header)' },
   { type: 'svg', svg: _svgDate(16, 16),         name: 'Date',             usage: 'Card start / end dates' },
   { type: 'svg', svg: _svgPriority(14, 16),     name: 'Priority',         usage: 'Card priority level (1–5)' },
   { type: 'svg', svg: _svgColorPalette(16, 16), name: 'Color palette',    usage: 'Color selection in card modal' },

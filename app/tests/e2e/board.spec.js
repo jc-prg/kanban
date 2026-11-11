@@ -3,7 +3,7 @@
  * E2E — 3.3 Column & card CRUD
  *
  * Each test resets the board to a known seed state before running.
- * Scenarios: E-B-1 … E-B-10, UR-E-1 … UR-E-5 (unread state)
+ * Scenarios: E-B-1 … E-B-11, UR-E-1 … UR-E-5 (unread state)
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -261,5 +261,50 @@ test.describe('3.3 Column & card CRUD', () => {
     await page.reload();
     await expect(page.locator('.card').filter({ hasText: 'First Card' })).toBeVisible();
     await expect(page.locator('.card--unread')).toHaveCount(0);
+  });
+
+  test('E-B-11: one "Settings" menu item; on a board the dialog starts with the board settings and switches to global', async ({ page }) => {
+    const navLabels = () => page.locator('#settingsNavList .settings-nav-item').allTextContents();
+    await page.click('#headerMenuBtn');
+    await expect(page.locator('#menuSettings')).toHaveText('Settings');
+    await expect(page.locator('#headerDropdown')).not.toContainText('Global settings');
+    await page.click('#menuSettings');
+    await expect(page.locator('#settingsBackdrop')).toBeVisible();
+    await expect(page.locator('#settingsTitle')).toHaveText(`Settings: ${BOARD}`);
+    const scope = page.locator('#settingsScope');
+    await expect(scope).toBeVisible();
+    await expect(scope.locator('[data-scope="board"]')).toHaveClass(/active/);
+    let labels = await navLabels();
+    expect(labels).toContain('Danger zone');
+    expect(labels).not.toContain('Appearance');
+
+    await scope.locator('[data-scope="global"]').click();
+    await expect(page.locator('#settingsTitle')).toHaveText('Settings');
+    await expect(scope.locator('[data-scope="global"]')).toHaveClass(/active/);
+    labels = await navLabels();
+    expect(labels).toEqual(expect.arrayContaining(['Appearance', 'Dashboard', 'Templates', 'Sources', 'About']));
+    // Database (local access only) and API Access sit below the Icon Library
+    expect(labels.filter(l => ['Icon Library', 'Database', 'API Access', 'Prompts'].includes(l))).toEqual(['Icon Library', 'Database', 'API Access', 'Prompts']);
+    expect(labels[0]).toBe('Appearance');
+    expect(labels.indexOf('Sources')).toBe(labels.indexOf('Templates') - 1);
+    expect(labels).not.toContain('Danger zone');
+    expect(labels).not.toContain('Board');
+
+    // Back to the board scope; reopening always starts there
+    await scope.locator('[data-scope="board"]').click();
+    expect(await navLabels()).toContain('Board');
+    await page.click('#settingsBackdrop [data-close-via="settingsCloseBtn"]');
+    await expect(page.locator('#settingsBackdrop')).toBeHidden();
+    await page.click('#headerMenuBtn');
+    await page.click('#menuSettings');
+    await expect(scope.locator('[data-scope="board"]')).toHaveClass(/active/);
+
+    // Today: global settings only, no switch
+    await page.goto('/today');
+    await page.click('#headerMenuBtn');
+    await page.click('#menuSettings');
+    await expect(page.locator('#settingsTitle')).toHaveText('Settings');
+    await expect(scope).toBeHidden();
+    expect(await navLabels()).not.toContain('Danger zone');
   });
 });

@@ -254,31 +254,17 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
   // Board settings only on board pages; on Today API_BASE may point at a board edited in place.
   const _isBoard = ROUTE === 'board';
 
+  // One "Settings" dialog with two scopes: on a board page a Board | Global switch in the header (starts with
+  // Board); elsewhere only the global sections
+  const BOARD_SECTIONS  = ['boardRenameSection', 'importSection', 'webdavSection', 'webhookSection', 'recurringSection',
+                           'boardExportSection', 'archiveSection', 'boardDeleteSection'];
+  const GLOBAL_SECTIONS = ['dbSection', 'appearanceSection', 'todaySection', 'templatesSection', 'accountsSection',
+                           'apiKeySection', 'colorPaletteSection', 'iconLibrarySection', 'promptsSection', 'aboutSection'];
+  let _settingsScope = _isBoard ? 'board' : 'global';
+
   if (_isBoard) {
-    document.getElementById('settingsTitle').textContent = `Board settings: ${BOARD_NAME}`;
-    document.getElementById('menuSettings').textContent  = 'Board settings';
-    document.getElementById('boardRenameSection').style.display = '';
-    document.getElementById('importSection').style.display = '';
-    document.getElementById('archiveSection').style.display = '';
-    document.getElementById('boardDeleteSection').style.display = '';
-    document.getElementById('boardExportSection').style.display = '';
-    document.getElementById('menuScheduled').style.display  = '';
-    document.getElementById('menuDashboardSettings').style.display = '';
-    document.getElementById('dbSection').style.display = 'none';
-    document.getElementById('apiKeySection').style.display = 'none';
-    document.getElementById('promptsSection').style.display = 'none';
-    document.getElementById('iconLibrarySection').style.display = 'none';
-    document.getElementById('accountsSection').style.display = 'none';
-    document.getElementById('todaySection').style.display = 'none';
-    document.getElementById('appearanceSection').style.display = 'none';
-  } else {
-    document.getElementById('menuSettings').textContent = 'Global settings';
-    document.getElementById('webdavSection').style.display = 'none';
-    document.getElementById('webhookSection').style.display = 'none';
-    document.getElementById('aboutSection').style.display = '';
-    document.getElementById('accountsSection').style.display = '';
-    document.getElementById('todaySection').style.display = '';
-    document.getElementById('appearanceSection').style.display = '';
+    document.getElementById('menuScheduled').style.display = '';
+    document.getElementById('settingsScope').hidden = false;
   }
 
   // ---- Prompts tabs (overview only) ----
@@ -442,29 +428,37 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
 
   window.openSettings = openSettings;
 
-  // Open settings in global mode even when on a board page
-  function openGlobalSettings() {
-    openSettings();
-    // openSettings() skips global loaders when _isBoard — load them now
-    loadPrompts(); renderColorPalette(); renderIconLibrary(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); _loadTodaySettingsSection();
-    document.getElementById('settingsTitle').textContent = 'Global settings';
-    ['boardRenameSection','importSection','archiveSection','boardDeleteSection',
-     'boardExportSection','webdavSection','webhookSection','recurringSection'].forEach(id => {
+  /** Show the sections of one scope ('board' — board pages only — or 'global'), load their data, rebuild the nav. */
+  function applySettingsScope(scope) {
+    _settingsScope = _isBoard && scope === 'board' ? 'board' : 'global';
+    const shown = new Set(_settingsScope === 'board' ? BOARD_SECTIONS : GLOBAL_SECTIONS);
+    if (!isLocal) shown.delete('dbSection');
+    [...BOARD_SECTIONS, ...GLOBAL_SECTIONS].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
+      if (el) el.style.display = shown.has(id) ? '' : 'none';
     });
-    ['dbSection','apiKeySection','colorPaletteSection','promptsSection',
-     'iconLibrarySection','accountsSection','appearanceSection','todaySection','aboutSection'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = '';
+    document.getElementById('settingsTitle').textContent = _settingsScope === 'board' ? `Settings: ${BOARD_NAME}` : 'Settings';
+    document.querySelectorAll('#settingsScope [data-scope]').forEach(btn => {
+      const on = btn.dataset.scope === _settingsScope;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on);
     });
+    if (_settingsScope === 'board') {
+      loadWebdavSettings();
+      loadWebhookSettings();
+      if (typeof renderRecurringList === 'function') renderRecurringList();
+    } else {
+      loadApiKey();
+      syncSkinOptions();
+      loadPrompts(); renderColorPalette(); renderIconLibrary(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); _loadTodaySettingsSection();
+      if (typeof renderTemplatesList === 'function') renderTemplatesList();
+    }
     buildSettingsNav();
+    document.getElementById('settingsContent').scrollTop = 0;
   }
-  window.openGlobalSettings = openGlobalSettings;
 
-  document.getElementById('menuDashboardSettings')?.addEventListener('click', () => {
-    hideMenu();
-    if (_isBoard) openGlobalSettings(); else openSettings();
+  document.querySelectorAll('#settingsScope [data-scope]').forEach(btn => {
+    btn.addEventListener('click', () => { if (btn.dataset.scope !== _settingsScope) applySettingsScope(btn.dataset.scope); });
   });
 
   /**
@@ -472,7 +466,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
    * section: 'calendar-accounts' | any settings-section id
    */
   window.openSettingsDialog = function openSettingsDialog(section) {
-    openSettings();
+    openSettings(BOARD_SECTIONS.includes(section) ? 'board' : 'global');
     if (section === 'calendar-accounts' || section === 'mail-accounts') {
       const tab    = section === 'mail-accounts' ? 'mail' : 'calendar';
       const anchor = section === 'mail-accounts' ? 'mail-accounts' : 'calendar-accounts';
@@ -493,7 +487,8 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     }
   };
 
-  function openSettings() {
+  /** Open the settings dialog — on a board page with the board settings unless `scope` is 'global'. */
+  function openSettings(scope = _isBoard ? 'board' : 'global') {
     if (_isBoard) {
       document.getElementById('boardDescription').value = state.settings?.description || '';
       document.getElementById('boardRenameInput').value = BOARD_NAME;
@@ -506,18 +501,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
       document.getElementById('hideDoneInOverviewToggle').checked = state.settings?.hideDoneInOverview   ?? true;
       renderTrackedCols();
     }
-    loadApiKey();
-    syncSkinOptions();
-    if (_isBoard) {
-      loadWebdavSettings();
-      loadWebhookSettings();
-      if (typeof renderRecurringList === 'function') renderRecurringList();
-    }
-    if (!_isBoard) { loadPrompts(); renderColorPalette(); renderIconLibrary(); loadWebdavAccountsSettings(); loadMailSettings(); loadCalendarSettings(); _loadTodaySettingsSection(); }
-    if (typeof renderTemplatesList === 'function') renderTemplatesList();
-    document.getElementById('colorPaletteSection').style.display = _isBoard ? 'none' : '';
-    document.getElementById('recurringSection').style.display    = _isBoard ? ''     : 'none';
-    buildSettingsNav();
+    applySettingsScope(scope);
     backdrop.style.display = 'flex';
   }
 
@@ -1370,7 +1354,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     btn.textContent = 'Test connection';
   });
 
-document.getElementById('menuSettings').addEventListener('click', () => {
+  document.getElementById('menuSettings').addEventListener('click', () => {
     hideMenu();
     openSettings();
   });
