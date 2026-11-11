@@ -473,6 +473,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   gap: var(--today-qa-gap);
 }
 .today-qa .today-qa-icon { margin: 5px; }
+/* Titles switched off (Settings → Quick access): icons only, columns as narrow as the icon (+ its margin) */
+.today-qa--notitles { --today-qa-w: calc(var(--today-qa-box) + 10px); }
+.today-qa--notitles .today-qa-title { display: none; }
 .today-qa-more { display: contents; }
 .today-qa-more[hidden] { display: none; }
 .today-qa-item {

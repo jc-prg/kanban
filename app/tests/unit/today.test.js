@@ -307,9 +307,9 @@ test('TU-20 _todayMeetingLink — Teams / Webex / Google Meet / Zoom from locati
 })
 
 test('TU-21 Quick access: _todayQaCfg defaults, _todayQaSplit (0 = all), _todayQaMove', () => {
-  expect(plain(ctx._todayQaCfg({}))).toEqual({ visible: 8, size: 'm', items: [] })
-  expect(plain(ctx._todayQaCfg({ widgets: { quickaccess: { visible: 0, size: 'x', items: [{ id: 'qa-1' }] } } })))
-    .toEqual({ visible: 0, size: 'm', items: [{ id: 'qa-1' }] })
+  expect(plain(ctx._todayQaCfg({}))).toEqual({ visible: 8, size: 'm', showTitles: true, items: [] })
+  expect(plain(ctx._todayQaCfg({ widgets: { quickaccess: { visible: 0, size: 'x', showTitles: false, items: [{ id: 'qa-1' }] } } })))
+    .toEqual({ visible: 0, size: 'm', showTitles: false, items: [{ id: 'qa-1' }] })
   const items = ['a', 'b', 'c', 'd'].map(id => ({ id }))
   const ids = r => ({ shown: r.shown.map(i => i.id), more: r.more.map(i => i.id) })
   expect(ids(ctx._todayQaSplit(items, 2))).toEqual({ shown: ['a', 'b'], more: ['c', 'd'] })

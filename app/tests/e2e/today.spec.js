@@ -5,7 +5,7 @@
  * All data endpoints are mocked with page.route (no CalDAV / IMAP / Open-Meteo / CV-App, and no
  * writes to the shared CouchDB — PUT /api/today/config is captured in the test).
  *
- * Scenarios: E-T-1 … E-T-17
+ * Scenarios: E-T-1 … E-T-18
  */
 const { test, expect } = require('@playwright/test');
 const path = require('path');
@@ -575,6 +575,40 @@ test.describe('Today page', () => {
     await expect(page.locator('#mailView')).toBeVisible();
     await expect(page.locator('#dashboardDetail')).toBeHidden();
     await expect(page.locator('#mailViewReader input[name="to"]')).toHaveValue('boss@example.org');
+  });
+
+  test('E-T-18 Notes tile: "Open next level" opens one folder level per click; "Collapse all" starts over', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 1 }], tiles: [{ id: 'notes', col: 0, order: 0, size: '1/1' }] } } };
+    await mockApis(page, state);
+    const page_ = (id, title) => ({ type: 'page', id, title });
+    await page.route('**/api/today/widgets/notes', r => r.fulfill({ json: { total: 3, boards: [
+      { board: 'b-one', pages: 2, webdav: false, items: [
+        { type: 'folder', id: 'f1', title: 'Projects', children: [{ type: 'folder', id: 'f2', title: 'Archive', children: [page_('n-1', 'Old plan')] }] },
+        page_('n-2', 'Ideas'),
+      ] },
+      { board: 'b-two', pages: 1, webdav: false, items: [page_('n-3', 'Todo list')] },
+    ] } }));
+    await page.addInitScript(() => localStorage.removeItem('today-notes-open'));
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="notes"]');
+    const open = () => tile.locator('.today-ntree details[open] > summary .today-nlabel').allTextContents();
+    await tile.locator('.today-ntree').waitFor();
+    expect(await open()).toEqual([]);
+
+    const next = tile.locator('.today-tile-btn[title="Open next level"]');
+    await next.click();
+    expect(await open()).toEqual(['b-one', 'b-two']);
+    await next.click();
+    expect(await open()).toEqual(['b-one', 'Projects', 'b-two']);
+    await next.click();
+    expect(await open()).toEqual(['b-one', 'Projects', 'Archive', 'b-two']);
+    await next.click();   // nothing left to open
+    expect(await open()).toEqual(['b-one', 'Projects', 'Archive', 'b-two']);
+
+    await tile.locator('.today-tile-btn[title="Collapse all"]').click();
+    expect(await open()).toEqual([]);
+    await next.click();
+    expect(await open()).toEqual(['b-one', 'b-two']);
   });
 });
 

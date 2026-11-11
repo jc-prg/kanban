@@ -411,7 +411,7 @@ const TODAY_TILES = {
     actions: () => [
       { icon: SVGICONS.search(12, 12), title: _todayNotesSearch ? 'Hide the filter' : 'Filter pages', active: _todayNotesSearch,
         run: () => _todayToggleNotesSearch() },
-      { icon: SVGICONS.expandAll(12, 12),   title: 'Open all', run: () => _todayNotesOpenAll(true) },
+      { icon: SVGICONS.expandAll(12, 12),   title: 'Open next level', run: () => _todayNotesOpenAll(true) },
       { icon: SVGICONS.collapseAll(12, 12), title: 'Collapse all', run: () => _todayNotesOpenAll(false) },
     ],
   },
@@ -1705,7 +1705,7 @@ function _todayQaMore() {
 }
 
 function _todayRenderQuickAccess(body, data, el) {
-  const { items, size, visible } = _todayQaCfg({ widgets: { quickaccess: data } });
+  const { items, size, visible, showTitles } = _todayQaCfg({ widgets: { quickaccess: data } });
   _todaySetCount(el, items.length);
   if (!items.length) {
     body.innerHTML = `<div class="today-qa-empty"><p class="dashboard-empty">No links yet.</p>
@@ -1715,7 +1715,7 @@ function _todayRenderQuickAccess(body, data, el) {
   }
   const { shown, more } = _todayQaSplit(items, visible);
   const open = _todayQaMore();
-  body.innerHTML = `<div class="today-qa today-qa--${size}">${shown.map(_todayQaItemHtml).join('')}${
+  body.innerHTML = `<div class="today-qa today-qa--${size}${showTitles ? '' : ' today-qa--notitles'}">${shown.map(_todayQaItemHtml).join('')}${
       more.length ? `<div class="today-qa-more"${open ? '' : ' hidden'}>${more.map(_todayQaItemHtml).join('')}</div>` : ''}</div>
     ${more.length ? `<button class="today-qa-toggle" type="button" aria-expanded="${open}">${open ? 'Show less' : `Show more … (${more.length})`}</button>` : ''}`;
   _todayQaImgFallback(body, items);
@@ -1754,14 +1754,25 @@ function _todayToggleNotesSearch() {
 }
 
 /** Open or collapse every board and folder of the Notes tile (remembered unless a filter is active). */
+/**
+ * Open: one level per click — the closed boards / folders that are visible (all parents open) at the
+ * shallowest depth; 1st click the boards, 2nd their folders, … Collapse: everything (so it starts over).
+ */
 function _todayNotesOpenAll(open) {
   const body = _todayTileEls.get('notes')?.querySelector('.today-tile-body');
   if (!body) return;
   const details = [...body.querySelectorAll('.today-ntree details')];
-  if (!_todayNotesQuery.trim()) {
-    try { localStorage.setItem('today-notes-open', JSON.stringify(open ? details.map(d => d.dataset.key).slice(-300) : [])); } catch { /* ignore */ }
+  if (open) {
+    const depth = d => { let n = 0; for (let p = d.parentElement.closest('details'); p; p = p.parentElement.closest('details')) n++; return n; };
+    const next = details.filter(d => !d.open && !d.parentElement.closest('details:not([open])'));
+    const min = Math.min(...next.map(depth));
+    for (const d of next) if (depth(d) === min) d.open = true;
+  } else {
+    for (const d of details) d.open = false;
   }
-  for (const d of details) d.open = open;
+  if (!_todayNotesQuery.trim()) {
+    try { localStorage.setItem('today-notes-open', JSON.stringify(details.filter(d => d.open).map(d => d.dataset.key).slice(-300))); } catch { /* ignore */ }
+  }
 }
 
 function _todayNorm(s) {
@@ -2383,6 +2394,7 @@ async function loadTodaySettings() {
   const qa = _todayQaCfg(cfg);
   document.getElementById('todayQaVisible').value = String(qa.visible);
   document.getElementById('todayQaSize').value    = qa.size;
+  document.getElementById('todayQaTitles').checked = qa.showTitles;
   _todayQaRenderList(cfg);
 }
 
@@ -2555,12 +2567,13 @@ function initTodaySettings() {
 let _todayQaEdit    = null;   // open form: { idx (-1 = new), icon, iconFor (URL the fetched icon belongs to) }
 let _todayQaDragIdx = null;
 
-/** Stored Quick access settings with defaults (8 always shown, medium icons). Pure. */
+/** Stored Quick access settings with defaults (8 always shown, medium icons, titles shown). Pure. */
 function _todayQaCfg(cfg) {
   const qa = cfg?.widgets?.quickaccess || {};
   return {
     visible: Number.isInteger(qa.visible) ? qa.visible : 8,
     size:    _TODAY_QA_SIZES.includes(qa.size) ? qa.size : 'm',
+    showTitles: qa.showTitles !== false,
     items:   Array.isArray(qa.items) ? qa.items : [],
   };
 }
@@ -2699,6 +2712,9 @@ function _todayQaWire(report) {
   sizeEl.addEventListener('change', async () => {
     if (_todayQaEdit) _todayQaSyncForm();
     try { await _todayQaSave({ size: sizeEl.value }); } catch (err) { report(err.message, false); }
+  });
+  document.getElementById('todayQaTitles').addEventListener('change', async e => {
+    try { await _todayQaSave({ showTitles: e.target.checked }); } catch (err) { report(err.message, false); }
   });
 
   // Entry list: edit / delete / drag to reorder

@@ -362,6 +362,7 @@ const validateTodayConfig = ajv.compile({
           properties: {
             visible: { type: 'integer', minimum: 0, maximum: 50 },   // 0 = all
             size:    { type: 'string', enum: ['s', 'm', 'l'] },
+            showTitles: { type: 'boolean' },   // default true
             items: {
               type: 'array', maxItems: 100,
               items: {

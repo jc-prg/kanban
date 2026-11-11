@@ -208,8 +208,8 @@ test('QA-8 GET icon: invalid names 400 (traversal, wrong pattern), unknown 404',
   expect(missing.status).toBe(404)
 })
 
-test('QA-9 PUT /today/config: quickaccess schema — valid entries saved; bad URL / icon / size / duplicate ids 400', async () => {
-  const quickaccess = { visible: 4, size: 'l', items: [
+test('QA-9 PUT /today/config: quickaccess schema — valid entries saved; bad URL / icon / size / showTitles / duplicate ids 400', async () => {
+  const quickaccess = { visible: 4, size: 'l', showTitles: false, items: [
     { id: 'qa-a1', url: 'https://grafana.local/', title: 'Grafana', icon: { type: 'image', file: 'qa-0123456789abcdef.png', invertDark: true } },
     { id: 'qa-b2', url: 'http://nas:5000', icon: { type: 'emoji', value: '💾' } },
   ] }
@@ -221,6 +221,7 @@ test('QA-9 PUT /today/config: quickaccess schema — valid entries saved; bad UR
   const bad = [
     { ...quickaccess, size: 'xl' },
     { ...quickaccess, visible: 51 },
+    { ...quickaccess, showTitles: 'no' },
     { items: [{ ...item, url: 'javascript:alert(1)' }] },
     { items: [{ ...item, icon: { type: 'image', file: '../config.js' } }] },
     { items: [{ ...item, icon: { type: 'emoji', value: '' } }] },
