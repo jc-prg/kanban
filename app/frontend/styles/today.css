@@ -581,7 +581,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 /* ---- Phones ---- */
 
 @media (max-width: 767px) {
-  #today { padding: 8px 14px 32px; gap: 10px; --today-gap: 22px; }   /* 20 px extra at the end of the page */
+  #today { padding: 8px 14px calc(32px + var(--safe-bottom)); gap: 10px; --today-gap: 22px; }   /* 20 px extra at the end of the page */
   .today-bar { padding: 2px 0 10px; gap: 8px 14px; }
   /* Line between the date and the buttons */
   .today-bar-actions {
@@ -757,7 +757,7 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
 }
 @media (max-width: 639px), (max-height: 500px) {
   :is(.calview, .mailview) {
-    inset: calc(var(--app-header-h, 0px) + 8px) 14px calc(12px - var(--vp-gap, 0px));   /* --vp-gap: viewport.js */
+    inset: calc(var(--app-header-h, 0px) + 8px) 14px calc(max(12px, var(--safe-bottom)) - var(--vp-gap, 0px));   /* clear of the home indicator; --vp-gap: viewport.js */
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);

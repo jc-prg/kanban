@@ -89,7 +89,7 @@ body {
   background: var(--bg);
   color: var(--text);
   height: 100vh;
-  height: calc(100dvh + var(--vp-gap, 0px)); /* iOS Safari: excludes address bar; --vp-gap: viewport.js */
+  height: calc(100dvh + var(--vp-dvh-gap, 0px)); /* iOS Safari: excludes address bar; --vp-dvh-gap: viewport.js */
   display: flex;
   flex-direction: column;
   overflow: hidden;

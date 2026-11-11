@@ -994,7 +994,24 @@ test.describe('Today page — phone', () => {
     await page.evaluate(() => document.documentElement.style.setProperty('--vp-gap', '62px'));
     const g = await page.locator('#dashboardDetail').boundingBox();
     expect(Math.round(g.y + g.height)).toBe(vh + 62);
-    expect(await page.evaluate(() => Math.round(document.body.getBoundingClientRect().height))).toBe(vh + 62);
+    // the page height follows only its own gap (100dvh may already be full height — no overshoot)
+    const bodyH = () => page.evaluate(() => Math.round(document.body.getBoundingClientRect().height));
+    expect(await bodyH()).toBe(vh);
+    await page.evaluate(() => document.documentElement.style.setProperty('--vp-dvh-gap', '62px'));
+    expect(await bodyH()).toBe(vh + 62);
+  });
+
+  test('E-T-27 phone calendar view and Today page end above the home indicator', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    await page.addInitScript(() => localStorage.removeItem('view-fullscreen'));
+    await page.goto('/today');
+    await page.addStyleTag({ content: ':root { --safe-top: 47px; --safe-bottom: 34px; }' });
+    expect(await page.evaluate(() => getComputedStyle(document.getElementById('today')).paddingBottom)).toBe('66px');
+    await page.goto('/today?cal=week');
+    await page.addStyleTag({ content: ':root { --safe-top: 47px; --safe-bottom: 34px; }' });
+    const r = await page.locator('#calView').boundingBox();
+    expect(Math.round(r.y + r.height)).toBe(page.viewportSize().height - 34);
   });
 
   test('E-T-20 note detail on a phone: table and attachments are not fixed, the whole panel scrolls', async ({ page }) => {

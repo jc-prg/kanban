@@ -62,7 +62,7 @@ header h1 span { color: var(--accent); }
   header h1 { font-size: 1.2rem; }
   header { padding: calc(12px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px)); }
 
-  .board-wrapper { padding: 0 4px; }
+  .board-wrapper { padding: 0 4px var(--safe-bottom); }
   .header-menu-btn--hide-mobile { display: none !important; }
 }
 
