@@ -433,29 +433,65 @@ const _LIST_QUERY = { uid: true, envelope: true, bodyStructure: true, flags: tru
  * With `query`, the folder is searched server-side (subject, from, to, body).
  * Returns { messages, total, page, pageSize }.
  */
+// Date order per folder: { sig, uids } — reused while UIDVALIDITY / UIDNEXT / EXISTS are unchanged
+// (new, removed or moved messages change one of them; flag changes don't matter)
+const _dateOrderCache = new Map();
+const _DATE_ORDER_MAX = 50;
+
+/** UIDs sorted by date / time, latest first (Date header, else the arrival time; ties: higher UID first). Pure. */
+function sortUidsByDate(items) {
+  const time = it => {
+    const t = new Date(it.envelope?.date || it.internalDate || 0).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  };
+  return items.map(it => ({ uid: it.uid, t: time(it) }))
+    .sort((a, b) => b.t - a.t || b.uid - a.uid)
+    .map(it => it.uid);
+}
+
+/** All UIDs of the selected mailbox, latest first. */
+async function _uidsByDate(client, account, folder) {
+  const mb  = client.mailbox || {};
+  const key = `${account.id}\n${folder}`;
+  const sig = mb.uidValidity != null && mb.uidNext != null ? `${mb.uidValidity}:${mb.uidNext}:${mb.exists}` : null;
+  const hit = sig && _dateOrderCache.get(key);
+  if (hit && hit.sig === sig) return hit.uids;
+  const items = [];
+  if (mb.exists) {
+    for await (const msg of client.fetch('1:*', { uid: true, envelope: true, internalDate: true })) {
+      items.push({ uid: msg.uid, envelope: { date: msg.envelope?.date }, internalDate: msg.internalDate });
+    }
+  }
+  const uids = sortUidsByDate(items);
+  if (sig) {
+    _dateOrderCache.delete(key);
+    _dateOrderCache.set(key, { sig, uids });
+    if (_dateOrderCache.size > _DATE_ORDER_MAX) _dateOrderCache.delete(_dateOrderCache.keys().next().value);
+  }
+  return uids;
+}
+
+/**
+ * One page of a folder (or of the search results in it), sorted by date / time, latest first.
+ * Returns { messages, total, page, pageSize }.
+ */
 async function fetchFolderMessages(account, folder, { page = 0, pageSize = 50, query = '' } = {}) {
   return _withMailbox(account, folder, async client => {
-    const msgs = [];
-    let total;
+    let uids = await _uidsByDate(client, account, folder);
     if (query) {
-      const uids = (await client.search({
+      const found = new Set((await client.search({
         or: [{ subject: query }, { from: query }, { to: query }, { body: query }],
-      }, { uid: true })) || [];
-      uids.sort((a, b) => b - a);
-      total = uids.length;
-      const slice = uids.slice(page * pageSize, (page + 1) * pageSize);
-      if (slice.length) {
-        for await (const msg of client.fetch(slice.join(','), _LIST_QUERY, { uid: true })) msgs.push(_summary(msg));
-      }
-    } else {
-      total = client.mailbox?.exists ?? 0;
-      const end   = total - page * pageSize;
-      const start = Math.max(1, end - pageSize + 1);
-      if (end >= 1) {
-        for await (const msg of client.fetch(`${start}:${end}`, _LIST_QUERY)) msgs.push(_summary(msg));
-      }
+      }, { uid: true })) || []);
+      uids = uids.filter(u => found.has(u));
     }
-    msgs.sort((a, b) => Number(b.id) - Number(a.id));
+    const total = uids.length;
+    const slice = uids.slice(page * pageSize, (page + 1) * pageSize);
+    const msgs  = [];
+    if (slice.length) {
+      for await (const msg of client.fetch(slice.join(','), _LIST_QUERY, { uid: true })) msgs.push(_summary(msg));
+    }
+    const pos = new Map(slice.map((u, i) => [String(u), i]));
+    msgs.sort((a, b) => pos.get(a.id) - pos.get(b.id));
     return { messages: msgs, total, page, pageSize };
   });
 }
@@ -472,6 +508,56 @@ async function fetchFolderSize(account, folder) {
       for await (const msg of client.fetch('1:*', { size: true })) size += msg.size || 0;
     }
     return { size, messages };
+  });
+}
+
+// ---- Duplicates ----
+
+/** Lower-case bare addresses of an envelope address list, sorted. */
+function _envAddrs(list) {
+  return (list || []).map(a => (a.address || a.name || '').trim().toLowerCase()).filter(Boolean).sort().join(',');
+}
+
+/**
+ * UIDs of duplicate messages: same sender, recipients (To), subject and exact date / time (Date header, else
+ * the arrival time), plus
+ *   - the same Message-ID when the message has one — size is ignored then: copies of one message often differ
+ *     in size (headers added on delivery / move, attachments stripped by a client or re-encoded);
+ *   - the same size when it has none.
+ * The largest copy of each group is kept (no attachment is lost; ties: lowest UID), the others are returned. Pure.
+ * msgs: [{ uid, envelope: { from, to, subject, date, messageId }, internalDate, size }]
+ */
+function findDuplicateUids(msgs) {
+  const groups = new Map();
+  for (const m of msgs) {
+    const env = m.envelope || {};
+    const date = env.date || m.internalDate;
+    const time = date ? new Date(date).getTime() : NaN;
+    const mid = (env.messageId || '').trim();
+    const key = JSON.stringify([_envAddrs(env.from), _envAddrs(env.to), (env.subject || '').trim(),
+                                Number.isNaN(time) ? '' : time, mid ? `mid:${mid}` : `size:${m.size ?? ''}`]);
+    (groups.get(key) || groups.set(key, []).get(key)).push(m);
+  }
+  const dupes = [];
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    g.sort((a, b) => (b.size || 0) - (a.size || 0) || a.uid - b.uid);
+    dupes.push(...g.slice(1).map(m => m.uid));
+  }
+  return dupes.sort((a, b) => a - b);
+}
+
+/** Scan `folder` for duplicates. Returns { messages, uids } (uids = the copies to delete). */
+async function findDuplicateMessages(account, folder) {
+  return _withMailbox(account, folder, async client => {
+    const messages = client.mailbox?.exists ?? 0;
+    const msgs = [];
+    if (messages) {
+      for await (const msg of client.fetch('1:*', { uid: true, envelope: true, internalDate: true, size: true })) {
+        msgs.push({ uid: msg.uid, envelope: msg.envelope, internalDate: msg.internalDate, size: msg.size });
+      }
+    }
+    return { messages, uids: findDuplicateUids(msgs) };
   });
 }
 
@@ -742,6 +828,9 @@ module.exports = {
   isEmptyableFolder,
   markMailMessage,
   markFolderRead,
+  findDuplicateUids,
+  sortUidsByDate,
+  findDuplicateMessages,
   moveMailMessage,
   deleteMailMessage,
   sendMail,

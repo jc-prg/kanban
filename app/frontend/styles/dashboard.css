@@ -8,6 +8,14 @@
   gap: 12px;
 }
 
+/* Board page: the host covers the board below the header (the board stays rendered underneath) */
+#dashboard.dashboard--board {
+  position: fixed;
+  inset: var(--app-header-h, 0px) 0 0;
+  z-index: 90;
+  background: var(--page-bg);
+}
+
 /* ---- Empty / error / loading states ---- */
 
 .dashboard-loading {

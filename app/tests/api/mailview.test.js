@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view API tests — MVA-1 … MVA-31
+ * Mail view API tests — MVA-1 … MVA-36 (+ MVA-32b)
  *
  * Folder management, paged/searchable message lists, ?folder= on message routes,
  * trash handling and sending via SMTP (nodemailer mocked) with a sent copy.
@@ -21,6 +21,7 @@ const request = require('supertest')
 let _storedConfig = null
 let _mailLinks = {}
 let _trusted = []
+let _hidden = {}
 const _cfg = () => _storedConfig ?? { mailAccounts: [], cardSources: [], calendarAccounts: [], autoRefreshMs: 0 }
 const GLOBAL_DB_MODULE = path.resolve(__dirname, '../../backend/global-db.js')
 require.cache[GLOBAL_DB_MODULE] = {
@@ -40,6 +41,8 @@ require.cache[GLOBAL_DB_MODULE] = {
     },
     getTrustedSenders:   async () => [..._trusted],
     setTrustedSender:    async (addr, on) => { _trusted = _trusted.filter(a => a !== addr); if (on) _trusted.push(addr); return [..._trusted] },
+    getHiddenFolders:    async () => JSON.parse(JSON.stringify(_hidden)),
+    setHiddenFolders:    async (acc, paths) => { if (paths.length) _hidden[acc] = paths; else delete _hidden[acc]; return JSON.parse(JSON.stringify(_hidden)) },
     initGlobalDb:        async () => {},
     getGlobalDb:         () => ({}),
   },
@@ -62,7 +65,7 @@ class MockImapFlow {
   constructor(opts) { this.opts = opts }
   async connect() {}
   async logout() {}
-  get mailbox() { return { exists: imap.messages.length } }
+  get mailbox() { return { exists: imap.messages.length, uidValidity: imap.uidValidity, uidNext: imap.uidNext } }
   async getMailboxLock(folder, opts) { imap.calls.push(['lock', folder, opts]); imap.locked = folder; return { release: () => {} } }
   async list(opts) { imap.calls.push(['list', opts]); return imap.folders }
   async search(query, opts) {
@@ -210,13 +213,15 @@ test('MVA-5 folder routes — unknown account → 404', async () => {
 // Message list
 // ---------------------------------------------------------------------------
 
-test('MVA-6 GET messages — pages from the newest end, sorted newest first', async () => {
+test('MVA-6 GET messages — date order of the whole folder, then one page by UID', async () => {
   imap.messages = Array.from({ length: 120 }, (_, i) => _msg(i + 1, i === 119 ? { flags: ['\\Seen', '\\Answered'] } : {}))
 
   const p0 = await request(app).get(`${API}/messages?folder=Archive`).set(AUTH)
   expect(p0.status).toBe(200)
   expect(calls('lock')[0][1]).toBe('Archive')
-  expect(calls('fetch')[0][1]).toBe('71:120')
+  expect(calls('fetch')[0][1]).toBe('1:*')   // date scan (same date everywhere → higher UID first)
+  expect(calls('fetch')[1][1]).toBe(Array.from({ length: 50 }, (_, i) => 120 - i).join(','))
+  expect(calls('fetch')[1][2]).toEqual({ uid: true })
   expect(p0.body).toMatchObject({ total: 120, page: 0, pageSize: 50 })
   expect(p0.body.messages).toHaveLength(50)
   expect(p0.body.messages[0]).toMatchObject({ id: '120', unread: false, answered: true, subject: 'Subject 120', to: 'me@ex.com' })
@@ -225,7 +230,7 @@ test('MVA-6 GET messages — pages from the newest end, sorted newest first', as
   _resetImap()
   imap.messages = Array.from({ length: 120 }, (_, i) => _msg(i + 1))
   const p2 = await request(app).get(`${API}/messages?page=2`).set(AUTH)
-  expect(calls('fetch')[0][1]).toBe('1:20')
+  expect(calls('fetch')[1][1]).toBe(Array.from({ length: 20 }, (_, i) => 20 - i).join(','))
   expect(calls('lock')[0][1]).toBe('INBOX')
   expect(p2.body.messages).toHaveLength(20)
 
@@ -235,7 +240,7 @@ test('MVA-6 GET messages — pages from the newest end, sorted newest first', as
   expect(calls('fetch')).toHaveLength(0)
 })
 
-test('MVA-7 GET messages?q= — server-side search, UID paging, total = hits', async () => {
+test('MVA-7 GET messages?q= — server-side search, hits in date order, total = hits', async () => {
   imap.messages = [_msg(5), _msg(9), _msg(12)]
   imap.search   = [5, 12, 9]
   const res = await request(app).get(`${API}/messages?q=${encodeURIComponent('invoice')}`).set(AUTH)
@@ -243,8 +248,8 @@ test('MVA-7 GET messages?q= — server-side search, UID paging, total = hits', a
   const [, query, opts] = calls('search')[0]
   expect(query).toEqual({ or: [{ subject: 'invoice' }, { from: 'invoice' }, { to: 'invoice' }, { body: 'invoice' }] })
   expect(opts).toEqual({ uid: true })
-  expect(calls('fetch')[0][1]).toBe('12,9,5')
-  expect(calls('fetch')[0][2]).toEqual({ uid: true })
+  expect(calls('fetch')[1][1]).toBe('12,9,5')
+  expect(calls('fetch')[1][2]).toEqual({ uid: true })
   expect(res.body.total).toBe(3)
   expect(res.body.messages.map(m => m.id)).toEqual(['12', '9', '5'])
 })
@@ -667,4 +672,99 @@ test('MVA-27 GET message/:uid/source — raw source as plain text in the given f
   expect(calls('lock')[0][1]).toBe('Projects')
   expect((await request(app).get(`${API}/message/99/source`).set(AUTH)).status).toBe(404)
   expect((await request(app).get(`${API}/message/abc/source`).set(AUTH)).status).toBe(400)
+})
+
+test('MVA-32 findDuplicateUids — without Message-ID: same sender, To, subject, date / time and size; lowest UID kept', () => {
+  const { findDuplicateUids } = require('../../backend/dashboard/mail')
+  const m = (uid, env = {}, size = 100) => ({
+    uid, size,
+    envelope: { from: [{ address: 'Jane@Ex.com' }], to: [{ address: 'me@ex.com' }], subject: 'Hi',
+                date: new Date('2026-11-01T10:00:00Z'), ...env },
+  })
+  const msgs = [
+    m(7), m(3), m(9),                                            // 3 copies → 7 and 9 go
+    m(10, { from: [{ address: 'jane@ex.com' }] }),               // address case ignored → duplicate
+    m(11, { to: [{ address: 'other@ex.com' }] }),                // other receiver
+    m(12, { subject: 'Re: Hi' }),                                // other subject
+    m(13, { date: new Date('2026-11-01T10:00:01Z') }),           // one second later
+    m(14, {}, 101),                                              // other size
+  ]
+  expect(findDuplicateUids(msgs).sort((a, b) => a - b)).toEqual([7, 9, 10])
+  // No Date header: the arrival time decides
+  const a = { uid: 1, size: 5, envelope: { subject: 'x' }, internalDate: new Date('2026-01-01T00:00:00Z') }
+  expect(findDuplicateUids([a, { ...a, uid: 2 }])).toEqual([2])
+  expect(findDuplicateUids([a, { ...a, uid: 2, internalDate: new Date('2026-01-02T00:00:00Z') }])).toEqual([])
+})
+
+test('MVA-32b findDuplicateUids — with Message-ID: size ignored, the largest copy is kept', () => {
+  const { findDuplicateUids } = require('../../backend/dashboard/mail')
+  const m = (uid, size, env = {}) => ({
+    uid, size,
+    envelope: { from: [{ address: 'jane@ex.com' }], to: [{ address: 'me@ex.com' }], subject: 'Report',
+                date: new Date('2026-11-01T10:00:00Z'), messageId: '<a1@ex.com>', ...env },
+  })
+  // Copies of one mail: headers added on a move (+32 bytes), attachment stripped (-245 KB)
+  expect(findDuplicateUids([m(1, 250_000), m(2, 250_032), m(3, 4_000)])).toEqual([1, 3])
+  expect(findDuplicateUids([m(1, 500), m(2, 500)])).toEqual([2])                                  // tie: lowest UID kept
+  expect(findDuplicateUids([m(1, 500), m(2, 500, { messageId: '<b2@ex.com>' })])).toEqual([])     // other Message-ID
+  expect(findDuplicateUids([m(1, 500), m(2, 500, { subject: 'Re: Report' })])).toEqual([])        // same ID, other subject
+  expect(findDuplicateUids([m(1, 500), m(2, 500, { messageId: '' })])).toEqual([])                // only one has an ID
+})
+
+test('MVA-33 GET duplicates?folder= — scans the folder, returns the copies to delete', async () => {
+  imap.messages = [_msg(1), _msg(2, { envelope: { subject: 'Subject 1' } }), _msg(3)]
+  const res = await request(app).get(`${API}/duplicates?folder=Projects`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body).toEqual({ messages: 3, uids: [2] })
+  expect(calls('lock')[0][1]).toBe('Projects')
+  expect(calls('fetch')[0][1]).toBe('1:*')
+  expect((await request(app).get('/api/dashboard/mail/ma-x/duplicates').set(AUTH)).status).toBe(404)
+})
+
+test('MVA-34 GET messages — sorted by date / time, latest first (not by arrival); paging and search follow it', async () => {
+  const at = (uid, iso) => _msg(uid, { envelope: { date: new Date(iso) } })
+  imap.messages = [
+    at(1, '2026-11-05T08:00:00Z'), at(2, '2026-10-01T12:00:00Z'),   // older mail moved in later
+    at(3, '2026-11-05T09:30:00Z'), at(4, '2026-11-04T23:59:00Z'),
+    { ..._msg(5), envelope: { ..._msg(5).envelope, date: undefined }, internalDate: new Date('2026-11-06T00:00:00Z') },   // no Date header
+  ]
+  const res = await request(app).get(`${API}/messages`).set(AUTH)
+  expect(res.body.messages.map(m => m.id)).toEqual(['5', '3', '1', '4', '2'])
+
+  _resetImap()
+  imap.messages = [at(1, '2026-11-05T08:00:00Z'), at(2, '2026-10-01T12:00:00Z'), at(3, '2026-11-05T09:30:00Z')]
+  imap.search = [1, 2]
+  const q = await request(app).get(`${API}/messages?q=x`).set(AUTH)
+  expect(q.body.messages.map(m => m.id)).toEqual(['1', '2'])
+  expect(q.body.total).toBe(2)
+
+  const { sortUidsByDate } = require('../../backend/dashboard/mail')
+  expect(sortUidsByDate([{ uid: 1, envelope: { date: new Date('2026-01-01') } }, { uid: 2, envelope: { date: new Date('2026-01-01') } }])).toEqual([2, 1])
+})
+
+test('MVA-35 GET messages — date order cached per folder while UIDVALIDITY / UIDNEXT / EXISTS are unchanged', async () => {
+  imap.messages = [_msg(1), _msg(2)]
+  imap.uidValidity = 7; imap.uidNext = 3
+  await request(app).get(`${API}/messages?folder=Cache`).set(AUTH)
+  await request(app).get(`${API}/messages?folder=Cache&page=0`).set(AUTH)
+  expect(calls('fetch').filter(c => c[1] === '1:*')).toHaveLength(1)
+  imap.messages.push(_msg(3)); imap.uidNext = 4                       // new mail → rescan
+  const res = await request(app).get(`${API}/messages?folder=Cache`).set(AUTH)
+  expect(calls('fetch').filter(c => c[1] === '1:*')).toHaveLength(2)
+  expect(res.body.messages.map(m => m.id)).toEqual(['3', '2', '1'])
+})
+
+test('MVA-36 hidden folders — GET / PUT per account (settings), deduplicated, validated', async () => {
+  _hidden = {}
+  const url = '/api/dashboard/mail-hidden-folders'
+  expect((await request(app).get(url).set(AUTH)).body).toEqual({ folders: {} })
+  const put = await request(app).put(url).set(AUTH).send({ accountId: 'ma-1', folders: ['Old', 'Old/2019', 'Old'] })
+  expect(put.status).toBe(200)
+  expect(put.body.folders).toEqual({ 'ma-1': ['Old', 'Old/2019'] })
+  expect((await request(app).get(url).set(AUTH)).body).toEqual({ folders: { 'ma-1': ['Old', 'Old/2019'] } })
+  // empty list removes the account's entry
+  expect((await request(app).put(url).set(AUTH).send({ accountId: 'ma-1', folders: [] })).body.folders).toEqual({})
+  expect((await request(app).put(url).set(AUTH).send({ accountId: 'ma-x', folders: [] })).status).toBe(404)
+  expect((await request(app).put(url).set(AUTH).send({ accountId: 'ma-1', folders: 'Old' })).status).toBe(400)
+  expect((await request(app).put(url).set(AUTH).send({ accountId: 'ma-1', folders: ['a\u0000b'] })).status).toBe(400)
 })

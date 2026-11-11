@@ -161,6 +161,27 @@ async function setTrustedSender(address, trusted) {
   return list;
 }
 
+// Mail folders hidden in the mail view's folder tree: { folders: { [accountId]: [path] } }
+const MAIL_HIDDEN_ID = 'mail-hidden-folders';
+
+async function getHiddenFolders() {
+  try {
+    const doc = await globalDb.get(MAIL_HIDDEN_ID);
+    return doc.folders && typeof doc.folders === 'object' ? doc.folders : {};
+  } catch (err) {
+    if (err.statusCode === 404) return {};
+    throw err;
+  }
+}
+
+/** Replace the hidden folders of one account (empty list = none); returns all accounts' lists. */
+async function setHiddenFolders(accountId, paths) {
+  const folders = await getHiddenFolders();
+  if (paths.length) folders[accountId] = paths; else delete folders[accountId];
+  await upsertDoc(globalDb, MAIL_HIDDEN_ID, { folders });
+  return folders;
+}
+
 const TODAY_CONFIG_ID = 'today-config';
 
 /** "Today" page config (/today); null when none was saved yet (the route falls back to defaults). */
@@ -195,4 +216,4 @@ async function saveAppearance(data) {
   return upsertDoc(globalDb, APPEARANCE_ID, data);
 }
 
-module.exports = { getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender };
+module.exports = { getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender, getHiddenFolders, setHiddenFolders };

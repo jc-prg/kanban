@@ -2,6 +2,7 @@
 // Shares the overlay slot with the calendar view (calview.js): opening one replaces the other.
 
 const _MV_COLLAPSED_KEY = 'mail-view-collapsed';
+const _MV_HIDDEN_KEY    = 'mail-view-hidden';      // legacy per-browser list of hidden folders — moved to the server once
 const _MV_SPECIAL_ORDER = ['\\Inbox', '\\Drafts', '\\Sent', '\\Archive', '\\Junk', '\\Trash'];
 const _MV_NO_ROLLUP     = new Set(['\\Trash', '\\Junk']);   // unread counts not summed into collapsed parents
 const _MV_WIDTHS_KEY    = 'mail-view-widths';
@@ -27,6 +28,8 @@ let _mvChecked     = new Set();   // uids marked in the list (Shift / Ctrl+click
 let _mvAnchor      = null;        // anchor of Shift+click ranges
 let _mvMsg         = null;        // full selected message
 let _mvCollapsed   = _mvLoadCollapsed();
+let _mvHidden      = new Set();   // folders hidden from the tree (`<accountId>\n<path>`), saved server-side
+let _mvShowHidden  = new Set();   // accountIds whose hidden folders are revealed ("Show more …")
 let _mvPushed      = false;       // true when open() pushed a history entry
 let _mvListSeq     = 0;           // discards responses of superseded list loads
 let _mvPlain       = false;       // open message shown as plain text (HTML is the default)
@@ -277,6 +280,73 @@ function _mvLoadCollapsed() {
   try { return new Set(JSON.parse(localStorage.getItem(_MV_COLLAPSED_KEY)) || []); } catch { return new Set(); }
 }
 
+/** Server list { [accountId]: [path] } → Set of `<accountId>\n<path>` keys. Pure. */
+function _mvHiddenKeys(folders) {
+  const keys = new Set();
+  for (const [acc, paths] of Object.entries(folders || {})) for (const p of paths || []) keys.add(`${acc}\n${p}`);
+  return keys;
+}
+
+/** Load the hidden folders (settings, server-side); a list left in this browser's storage is moved there once. */
+async function _mvLoadHidden() {
+  try {
+    const { folders } = await _mvJson('/api/dashboard/mail-hidden-folders');
+    _mvHidden = _mvHiddenKeys(folders);
+  } catch { return; }
+  let legacy = [];
+  try { legacy = JSON.parse(localStorage.getItem(_MV_HIDDEN_KEY)) || []; } catch { /* ignore */ }
+  if (!legacy.length) return;
+  const accounts = new Set();
+  for (const key of legacy) {
+    if (_mvHidden.has(key)) continue;
+    _mvHidden.add(key);
+    accounts.add(key.slice(0, key.indexOf('\n')));
+  }
+  const ok = await Promise.all([...accounts].map(_mvSaveHidden));
+  if (ok.every(Boolean)) try { localStorage.removeItem(_MV_HIDDEN_KEY); } catch { /* ignore */ }
+}
+
+/** Save one account's hidden folders; true on success. */
+async function _mvSaveHidden(accountId) {
+  const prefix = `${accountId}\n`;
+  const folders = [..._mvHidden].filter(k => k.startsWith(prefix)).map(k => k.slice(prefix.length));
+  try {
+    await _mvJson('/api/dashboard/mail-hidden-folders', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId, folders }),
+    });
+    return true;
+  } catch (err) {
+    _mvFlash(`Could not save the hidden folders: ${err.message}`, true);
+    return false;
+  }
+}
+
+/** Hide / show a folder (with its subfolders) in the tree; hidden ones are listed behind "Show more …". */
+function _mvSetFolderHidden(accountId, path, hidden) {
+  const key = `${accountId}\n${path}`;
+  if (hidden) _mvHidden.add(key); else _mvHidden.delete(key);
+  _mvRenderTree();
+  _mvSaveHidden(accountId);
+}
+
+/** Hidden folders that exist in an account's folder list (stale keys of deleted / renamed folders are ignored). Pure. */
+function _mvHiddenFolders(accountId, list, hiddenKeys) {
+  return (list || []).filter(f => hiddenKeys.has(`${accountId}\n${f.path}`));
+}
+
+/** A rename / move keeps the hidden state of the folder and its subfolders. */
+function _mvMoveHidden(accountId, from, to, delim) {
+  const prefix = `${accountId}\n${from}`;
+  let changed = false;
+  for (const key of [..._mvHidden]) {
+    if (key !== prefix && !key.startsWith(prefix + delim)) continue;
+    _mvHidden.delete(key);
+    _mvHidden.add(`${accountId}\n${to}${key.slice(prefix.length)}`);
+    changed = true;
+  }
+  if (changed) _mvSaveHidden(accountId);
+}
+
 function _mvToggleCollapsed(key) {
   if (_mvCollapsed.has(key)) _mvCollapsed.delete(key); else _mvCollapsed.add(key);
   try { localStorage.setItem(_MV_COLLAPSED_KEY, JSON.stringify([..._mvCollapsed])); } catch { /* ignore */ }
@@ -433,6 +503,7 @@ async function _mvReload() {
   _mvRenderTree();
   _mvRenderList();
   _mvRenderReader();
+  const hiddenLoaded = _mvLoadHidden();
   try {
     const cfg = await _mvJson('/api/dashboard/config');
     _mvAccounts = (cfg.mailAccounts || []).map(a => ({
@@ -452,6 +523,7 @@ async function _mvReload() {
     if (_mvAccountId) _mvSetUrl(false);
   }
   _mvRenderToolbar();
+  await hiddenLoaded;
   await Promise.all([
     ..._mvAccounts.map(a => _mvLoadFolders(a.accountId)),
     _mvLoadList(0),
@@ -971,6 +1043,7 @@ async function _mvRenameFolderTo(accountId, from, to) {
   const ok = await _mvFolderOp(accountId, _mvApi(accountId, '/folders/rename'), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to }),
   }, 'Folder updated');
+  if (ok) { _mvMoveHidden(accountId, from, to, _mvDelimiter(accountId, from)); _mvRenderTree(); }
   if (ok && accountId === _mvAccountId && (_mvFolder === from || _mvFolder.startsWith(from + _mvDelimiter(accountId, from)))) {
     _mvSelectFolder(accountId, to + _mvFolder.slice(from.length));
   }
@@ -1046,6 +1119,54 @@ async function _mvEmptyFolder(accountId, path) {
   _mvLoadFolders(accountId);
 }
 
+/**
+ * Folder context menu "Delete duplicates": the server lists duplicate copies (same sender, To, subject,
+ * date / time and Message-ID — size without one; the largest copy of each kept); after confirming they go to the trash (permanently
+ * deleted inside the trash), in UID sets of ≤ 500 per request.
+ */
+async function _mvDeleteDuplicates(accountId, path) {
+  const f = _mvFolderInfo(accountId, path);
+  const label = f ? _mvFolderLabel(f) : path;
+  const ctrl = new AbortController();
+  const dlg  = showProgress(`Checking "${label}" for duplicates…`);
+  dlg.cancelled.then(() => ctrl.abort());
+  let res;
+  try {
+    res = await _mvJson(_mvApi(accountId, `/duplicates?${_mvFolderQs(path)}`), { signal: ctrl.signal });
+  } catch (err) {
+    if (ctrl.signal.aborted) return;
+    dlg.close();
+    _mvFlash(`Could not check for duplicates: ${err.message}`, true);
+    return;
+  }
+  dlg.close();
+  const uids = res.uids || [];
+  const checked = `${res.messages} message${res.messages === 1 ? '' : 's'} checked`;
+  if (!uids.length) { showMessage(`No duplicates found in "${label}" (${checked}).`); return; }
+  const n = `${uids.length} duplicate${uids.length === 1 ? '' : 's'}`;
+  const permanent = f && _mvIsEmptyable(f, _mvAccounts.find(a => a.accountId === accountId)?.trashFolder);
+  const ok = await showConfirm(
+    `Found ${n} in "${label}" (${checked}; the largest copy of each is kept). `
+      + (permanent ? 'Delete them permanently? This cannot be undone.' : 'Move them to the trash?'),
+    { okLabel: permanent ? 'Delete' : 'Move to trash', danger: true });
+  if (!ok) return;
+  const ids = uids.map(String);
+  if (accountId === _mvAccountId && path === _mvFolder) _mvDropFromList(ids.filter(id => _mvMsgs.some(m => m.id === id)));
+  let done = 0;
+  try {
+    for (let i = 0; i < ids.length; i += 500) {
+      const set = ids.slice(i, i + 500);
+      await _mvJson(_mvApi(accountId, `/message/${set.join(',')}?${_mvFolderQs(path)}`), { method: 'DELETE' });
+      done += set.length;
+    }
+    _mvFlash(`${n} ${permanent ? 'deleted permanently' : 'moved to trash'}`);
+  } catch (err) {
+    _mvFlash(`Deleted ${done} of ${uids.length} duplicates: ${err.message}`, true);
+  }
+  if (accountId === _mvAccountId && path === _mvFolder) { _mvLoadList(0); _mvLoadFolderSize(); }
+  _mvLoadFolders(accountId);
+}
+
 async function _mvDeleteFolder(accountId, path) {
   const f = _mvFolderInfo(accountId, path);
   const delim = f?.delimiter || '/';
@@ -1068,10 +1189,17 @@ function _mvFolderMenu(e, accountId, path) {
   if (f && !f.noselect && f.unseen > 0) {
     items.unshift({ labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Mark all as read`, action: () => _mvMarkFolderRead(accountId, path) });
   }
+  if (f && !f.noselect) {
+    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.duplicate()}</span>Delete duplicates`, action: () => _mvDeleteDuplicates(accountId, path) });
+  }
   if (f && !f.noselect && _mvIsEmptyable(f, _mvAccounts.find(a => a.accountId === accountId)?.trashFolder)) {
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.delete()}</span>Empty folder`, danger: true, action: () => _mvEmptyFolder(accountId, path) });
   }
   if (!isInbox) {
+    const hidden = _mvHidden.has(`${accountId}\n${path}`);
+    items.push(hidden
+      ? { labelHtml: `<span class="ctx-icon">${SVGICONS.eye()}</span>Show folder`, action: () => _mvSetFolderHidden(accountId, path, false) }
+      : { labelHtml: `<span class="ctx-icon">${SVGICONS.eyeOff()}</span>Hide folder`, action: () => _mvSetFolderHidden(accountId, path, true) });
     items.push(
       { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Rename`,    action: () => _mvRenameFolder(accountId, path) },
       { labelHtml: `<span class="ctx-icon">${SVGICONS.moveTo()}</span>Move to…`, action: () => _mvMoveFolder(accountId, path, null) },
@@ -1179,6 +1307,8 @@ function _mvRenderToolbar() {
 function _mvTreeNodeHtml(accountId, node, depth) {
   const f = node.folder;
   const key = `${accountId}\n${f.path}`;
+  const hidden = _mvHidden.has(key);
+  if (hidden && !_mvShowHidden.has(accountId)) return '';
   const hasKids = node.children.length > 0 || (_mvInline?.mode === 'new' && _mvInline.accountId === accountId && _mvInline.path === f.path);
   const collapsed = hasKids && _mvCollapsed.has(key);
   const active = accountId === _mvAccountId && f.path === _mvFolder;
@@ -1188,9 +1318,9 @@ function _mvTreeNodeHtml(accountId, node, depth) {
   const label = editing
     ? `<input class="mv-inline-input" value="${escHtml(_mvInline.value)}" maxlength="120" spellcheck="false">`
     : `<span class="mv-folder-name">${escHtml(_mvFolderLabel(f))}</span>`;
-  let html = `<div class="mv-folder${active ? ' active' : ''}${f.noselect ? ' mv-noselect' : ''}${special ? ` mv-special-${escHtml(special)}` : ''}"
+  let html = `<div class="mv-folder${active ? ' active' : ''}${hidden ? ' mv-folder--hidden' : ''}${f.noselect ? ' mv-noselect' : ''}${special ? ` mv-special-${escHtml(special)}` : ''}"
       data-mv-acc="${escHtml(accountId)}" data-mv-folder="${escHtml(f.path)}" style="--mv-depth:${depth}"
-      ${f.path.toUpperCase() !== 'INBOX' && !editing ? 'draggable="true"' : ''} title="${escHtml(f.path)}">
+      ${f.path.toUpperCase() !== 'INBOX' && !editing ? 'draggable="true"' : ''} title="${escHtml(f.path)}${hidden ? ' (hidden)' : ''}">
       <button class="mv-twisty${hasKids ? '' : ' mv-twisty-none'}" data-mv-toggle="${escHtml(key)}" tabindex="-1" aria-label="${collapsed ? 'Expand' : 'Collapse'}">${hasKids ? (collapsed ? '▸' : '▾') : ''}</button>
       <span class="mv-folder-icon">${SVGICONS.folder(12, 12)}</span>${label}
       ${unseen ? `<span class="mv-badge${collapsed && !f.unseen ? ' mv-badge-rollup' : ''}">${unseen}</span>` : ''}
@@ -1231,6 +1361,12 @@ function _mvRenderTree() {
       else if (state.error && !state.list.length) body = `<p class="mv-tree-note mv-tree-error">${escHtml(state.error)}</p>`;
       else body = tree.map(n => _mvTreeNodeHtml(acc.accountId, n, 1)).join('');
       if (_mvInline?.mode === 'new' && _mvInline.accountId === acc.accountId && !_mvInline.path) body += _mvNewInputHtml(1);
+      const nHidden = _mvHiddenFolders(acc.accountId, state?.list, _mvHidden).length;
+      if (nHidden) {
+        const open = _mvShowHidden.has(acc.accountId);
+        body += `<button class="mv-hidden-toggle" data-mv-hidden-toggle="${escHtml(acc.accountId)}" aria-expanded="${open}"
+          title="${open ? 'Hide the hidden folders again' : 'Show hidden folders — right-click one → Show folder to show it again'}">${open ? 'Show less' : `Show more \u2026 (${nHidden})`}</button>`;
+      }
     }
     return `<div class="mv-account" style="${acc.color ? `--card-color:${escHtml(acc.color)}` : ''}">
       <div class="mv-account-head" data-mv-account="${escHtml(acc.accountId)}">
@@ -1242,11 +1378,40 @@ function _mvRenderTree() {
   }).join('');
 }
 
-function _mvListItemHtml(m) {
+/** Lower-case addresses of a formatted address list ("Jane <j@x>, b@y"), sorted. */
+function _mvAddrKey(str) {
+  return (String(str || '').match(/[^\s<>,;"]+@[^\s<>,;"]+/g) || []).map(a => a.toLowerCase()).sort().join(',');
+}
+
+/**
+ * Duplicates among the loaded messages — the rules of the folder menu's "Delete duplicates" (findDuplicateUids
+ * in backend/dashboard/mail.js): same sender, To, subject, exact date / time and Message-ID (size when there is
+ * none). The largest copy of each group is the original (ties: lowest UID); returns the ids of the others. Pure.
+ */
+function _mvDuplicateIds(msgs) {
+  const groups = new Map();
+  for (const m of msgs) {
+    const t = m.date ? new Date(m.date).getTime() : NaN;
+    const mid = (m.messageId || '').trim();
+    const key = JSON.stringify([_mvAddrKey(m.from), _mvAddrKey(m.to), (m.subject || '').trim(), Number.isNaN(t) ? '' : t,
+                                mid ? `mid:${mid}` : `size:${m.size ?? ''}`]);
+    (groups.get(key) || groups.set(key, []).get(key)).push(m);
+  }
+  const dupes = new Set();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    g.sort((a, b) => (b.size || 0) - (a.size || 0) || Number(a.id) - Number(b.id));
+    g.slice(1).forEach(m => dupes.add(m.id));
+  }
+  return dupes;
+}
+
+function _mvListItemHtml(m, dupes) {
   const special = _mvFolderInfo()?.specialUse;
   const who = special === '\\Sent' || special === '\\Drafts' ? `To: ${_mvDisplayName(m.to)}` : _mvDisplayName(m.from);
   // Same markup classes as the dashboard mail panel items (card-text / card-meta)
   const meta = [];
+  if (dupes?.has(m.id)) meta.push('<span class="card-duplicate-badge" title="Same message (Message-ID, sender, recipients, subject, date) as a larger or older loaded copy in this folder">duplicate</span>');
   if (m.answered)       meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Answered">\u21a9</span>');
   if (m.forwarded)      meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Forwarded">\u21aa</span>');
   if (m.hasAttachments) meta.push(`<span class="dashboard-mail-attach" title="Has attachments">${SVGICONS.attachment(11, 11)}</span>`);
@@ -1406,7 +1571,8 @@ function _mvRenderList(error) {
     return;
   }
   _mvSwipe = null;
-  el.innerHTML = _mvMsgs.map(_mvListItemHtml).join('')
+  const dupes = _mvDuplicateIds(_mvMsgs);   // only among the loaded messages
+  el.innerHTML = _mvMsgs.map(m => _mvListItemHtml(m, dupes)).join('')
     + (_mvMsgs.length < _mvTotal ? `<button class="btn mv-load-more" data-mv-more="1">Load more (${_mvTotal - _mvMsgs.length})</button>` : '');
 }
 
@@ -1945,6 +2111,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (toggle && !toggle.classList.contains('mv-twisty-none')) { e.stopPropagation(); _mvToggleCollapsed(toggle.dataset.mvToggle); return; }
     const more = e.target.closest('[data-mv-account-menu]');
     if (more) { e.stopPropagation(); _mvAccountMenu(e, more.dataset.mvAccountMenu); return; }
+    const showHidden = e.target.closest('[data-mv-hidden-toggle]');
+    if (showHidden) {
+      const acc = showHidden.dataset.mvHiddenToggle;
+      if (_mvShowHidden.has(acc)) _mvShowHidden.delete(acc); else _mvShowHidden.add(acc);
+      _mvRenderTree();
+      return;
+    }
     const head = e.target.closest('[data-mv-account]');
     if (head) { _mvToggleCollapsed(`${head.dataset.mvAccount}\n`); return; }
     const row = e.target.closest('.mv-folder[data-mv-folder]');

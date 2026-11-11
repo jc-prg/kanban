@@ -688,6 +688,31 @@ function renderCardMailRef(ref) {
   link.href = mailRefUrl(ref);
 }
 
+/**
+ * Calendar event / mail links of the card dialog: open the view over the current page (board or Today —
+ * overlay host, dashboard.js) instead of navigating to Today; closes the dialog first (asks about unsaved
+ * changes). Modifier / middle clicks keep the href (new tab).
+ */
+async function _openCardRefInPlace(e) {
+  if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  if (typeof _isOverlayHostPage !== 'function' || !_isOverlayHostPage()) return;
+  const params = new URL(e.currentTarget.href, location.href).searchParams;
+  e.preventDefault();
+  if (modalMode !== 'inbox' && hasModalChanges()
+      && !(await showConfirm('Close without saving changes?', { okLabel: 'Close', danger: true }))) return;
+  closeModal();
+  await _initOverlayHost();
+  if (params.has('mail')) {
+    openMailViewMessage(params.get('mail'), params.get('mid'), params.get('folder'));
+  } else {
+    openCalView(params.get('cal'));
+    const day = params.get('date');
+    if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) _cvNavigate(_cvParseYmd(day));
+  }
+}
+document.getElementById('cardCalEventLink')?.addEventListener('click', _openCardRefInPlace);
+document.getElementById('cardMailRefLink')?.addEventListener('click', _openCardRefInPlace);
+
 /** Local calendar day of a Date as YYYY-MM-DD. */
 function _ymdLocal(d) {
   if (!(d instanceof Date) || isNaN(d)) return '';

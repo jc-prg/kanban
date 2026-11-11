@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view unit tests — MV-1 … MV-18
+ * Mail view unit tests — MV-1 … MV-19
  *
  * mailview.js is loaded via vm.runInContext with minimal browser-global stubs.
  * Only the pure helpers are exercised (folder tree, addresses, reply fields, URL state).
@@ -287,4 +287,21 @@ describe('MV-13 _mvOpenByMessageId — hint folder first, then a cancellable sea
     expect(log.messages).toEqual([])
     expect(log.opened).toEqual([])
   })
+})
+
+test('MV-19 _mvDuplicateIds — loaded copies with the same sender, To, subject, date and size; lowest UID is the original', () => {
+  const m = (id, extra = {}) => ({ id, from: 'Jane <Jane@ex.com>', to: 'me@ex.com, "Doe, Bob" <bob@ex.com>', subject: 'Hi',
+                                   date: '2026-11-01T10:00:00.000Z', size: 100, ...extra })
+  const dupes = ctx._mvDuplicateIds([
+    m('9'), m('3'), m('12'),                                  // newest first in the list: 3 is the original
+    m('20', { from: 'jane@ex.com' }),                         // same address without name → duplicate
+    m('21', { to: 'bob@ex.com, me@ex.com' }),                 // same recipients, other order → duplicate
+    m('22', { subject: 'Re: Hi' }), m('23', { size: 101 }), m('24', { date: '2026-11-01T10:00:01.000Z' }),
+    m('25', { to: 'me@ex.com' }),
+  ])
+  expect([...dupes].sort()).toEqual(['12', '20', '21', '9'])
+  expect(ctx._mvDuplicateIds([m('1'), m('2', { subject: 'x' })]).size).toBe(0)
+  // Same Message-ID: size ignored, the largest copy is the original
+  const withId = (id, size) => m(id, { messageId: '<a1@ex.com>', size })
+  expect([...ctx._mvDuplicateIds([withId('5', 4000), withId('6', 250000), withId('7', 250032)])].sort()).toEqual(['5', '6'])
 })

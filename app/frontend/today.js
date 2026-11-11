@@ -471,9 +471,6 @@ async function initToday() {
   document.getElementById('dashboardRefreshBtn').style.display = '';
   document.getElementById('dashboardRefreshBtn').title = 'Refresh';
 
-  // The detail panel lives in #dashboard, which is only shown while a view is open here
-  document.body.appendChild(document.getElementById('dashboardDetail'));
-
   const calBtn = document.getElementById('dashboardCalBtn');
   calBtn.style.display = '';
   calBtn.onclick = () => (_cvIsOpen() ? closeCalView() : _todayOpenCal());

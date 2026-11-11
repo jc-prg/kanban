@@ -103,20 +103,25 @@ function _wireDetailPanel() {
   });
 }
 
-// ---- Overlay host on Today ----
-// The calendar and mail views open directly over Today: #dashboard (which contains them and
-// the detail panel) is shown while one of them is open.
+// ---- Overlay host (Today and board pages) ----
+// The calendar and mail views open directly over the page: #dashboard (which contains them) is shown
+// while one of them is open. Today swaps it for #today; on a board it covers the board below the
+// header (.dashboard--board, the board stays rendered underneath) — the board never loads Today.
 
-/** Paths whose page hosts the calendar / mail overlays (URL state + back button). */
+/** Pages that host the calendar / mail overlays (URL state + back button). */
 function _isOverlayHostPage() {
-  return ROUTE === 'today';
+  return ROUTE === 'today' || ROUTE === 'board';
 }
 
 let _overlayHostReady = null;
-/** Today: prepare the overlays once — detail panel, config the views read from dashboard.js globals. */
+/** Prepare the overlays once — detail panel, config the views read from dashboard.js globals. */
 function _initOverlayHost() {
   if (_overlayHostReady) return _overlayHostReady;
-  document.getElementById('dashboard').classList.add('dashboard--overlay-host');
+  const host = document.getElementById('dashboard');
+  host.classList.add('dashboard--overlay-host');
+  if (ROUTE === 'board') host.classList.add('dashboard--board');
+  // The detail panel lives in #dashboard, which is only shown while a view is open
+  document.body.appendChild(document.getElementById('dashboardDetail'));
   _wireDetailPanel();
   _overlayHostReady = (async () => {
     try {
@@ -136,10 +141,15 @@ function _initOverlayHost() {
   return _overlayHostReady;
 }
 
-/** Today: show the overlay host while the calendar or mail view is open, the page otherwise. */
+/** Show the overlay host while the calendar or mail view is open (Today: instead of the page). */
 function _syncOverlayHost() {
-  if (ROUTE !== 'today') return;
+  if (!_isOverlayHostPage()) return;
   const open = _cvIsOpen() || _mvIsOpen();
+  if (ROUTE === 'board') {
+    if (open) _overlaySyncHeaderOffset();
+    document.getElementById('dashboard').style.display = open ? 'flex' : 'none';
+    return;
+  }
   document.getElementById('dashboard').style.display = open ? 'flex' : 'none';
   document.getElementById('today').style.display     = open ? 'none' : 'flex';
   if (typeof _todaySyncRefreshBtn === 'function') _todaySyncRefreshBtn();

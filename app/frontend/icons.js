@@ -137,6 +137,16 @@ function _svgCollapseAll(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5 6 4.5 9 1.5M3 10.5 6 7.5 9 10.5"/></svg>`;
 }
 
+// Eye — show a hidden item again
+function _svgEye(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M0.8 6S2.8 2.3 6 2.3 11.2 6 11.2 6 9.2 9.7 6 9.7 0.8 6 0.8 6Z"/><circle cx="6" cy="6" r="1.6"/></svg>`;
+}
+
+// Struck-through eye — hide an item
+function _svgEyeOff(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M0.8 6S2.8 2.3 6 2.3 11.2 6 11.2 6 9.2 9.7 6 9.7 0.8 6 0.8 6Z"/><circle cx="6" cy="6" r="1.6"/><line x1="1.5" y1="1.5" x2="10.5" y2="10.5"/></svg>`;
+}
+
 // Landscape rounded rectangle with a single headline — kanban card
 function _svgCard(w = 14, h = 10) {
   return `<svg viewBox="0 0 14 10" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="0.7" y="0.7" width="12.6" height="8.6" rx="1.3"/><line x1="2.5" y1="3.5" x2="9" y2="3.5"/></svg>`;
@@ -373,6 +383,8 @@ const SVGICONS = {
   stats:          _svgStats,
   expandAll:      _svgExpandAll,
   collapseAll:    _svgCollapseAll,
+  eye:            _svgEye,
+  eyeOff:         _svgEyeOff,
   wxSun:          _svgWxSun,
   wxMoon:         _svgWxMoon,
   wxPartly:       _svgWxPartly,
@@ -438,6 +450,8 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgSearch(16, 16),       name: 'Search',           usage: 'Show / hide the filter field of the Today Notes tile' },
   { type: 'svg', svg: _svgExpandAll(16, 16),    name: 'ExpandAll',        usage: 'Open all folders (Today Notes tile)' },
   { type: 'svg', svg: _svgCollapseAll(16, 16),  name: 'CollapseAll',      usage: 'Collapse all folders (Today Notes tile)' },
+  { type: 'svg', svg: _svgEye(16, 16),          name: 'Eye',              usage: 'Show a hidden mail folder again (mail view folder menu)' },
+  { type: 'svg', svg: _svgEyeOff(16, 16),       name: 'EyeOff',           usage: 'Hide a mail folder (mail view folder menu)' },
   { type: 'svg', svg: _svgWxSun(16, 16),        name: 'Weather: clear',   usage: 'Today page weather (clear sky, day)' },
   { type: 'svg', svg: _svgWxMoon(16, 16),       name: 'Weather: night',   usage: 'Today page weather (clear sky, night)' },
   { type: 'svg', svg: _svgWxPartly(16, 16),     name: 'Weather: partly cloudy', usage: 'Today page weather' },

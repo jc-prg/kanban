@@ -914,6 +914,152 @@ test.describe('Today page', () => {
     await page.click('#headerHomeBtn');
     await expect(page.locator('#boardSwitchMenu .board-switch-item')).toHaveText(['alpha', 'e2e-today']);
   });
+
+  test('E-T-28 calendar / mail view open over a board without loading Today; close returns to the board', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    const todayCalls = [];
+    page.on('request', r => { if (r.url().includes('/api/today/')) todayCalls.push(r.url()); });
+    await page.goto('/board/e2e-today');
+    await expect(page.locator('.column .card', { hasText: 'Send offer' })).toBeVisible();
+
+    await page.click('#dashboardCalBtn');
+    await expect(page.locator('#calView')).toBeVisible();
+    await expect(page.locator('#calView')).toContainText('Planning meeting');
+    expect(new URL(page.url()).pathname).toBe('/board/e2e-today');
+    expect(new URL(page.url()).searchParams.get('cal')).toBeTruthy();
+    await expect(page.locator('#today')).toBeHidden();
+    // The view covers the board below the header
+    const hdr = await page.locator('header').boundingBox();
+    expect(Math.round((await page.locator('#dashboard').boundingBox()).y)).toBe(Math.round(hdr.y + hdr.height));
+
+    // Mail view takes over; Escape closes it and returns to the board (history entry popped)
+    await page.click('#dashboardMailBtn');
+    await expect(page.locator('#mailView')).toBeVisible();
+    await expect(page.locator('#calView')).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#mailView')).toBeHidden();
+    await expect(page.locator('#dashboard')).toBeHidden();
+    await expect.poll(() => new URL(page.url()).search).toBe('');
+    await expect(page.locator('.column .card', { hasText: 'Send offer' })).toBeVisible();
+
+    // Reload with ?cal= reopens the view over the board
+    await page.goto('/board/e2e-today?cal=week');
+    await expect(page.locator('#calView')).toBeVisible();
+    expect(todayCalls).toEqual([]);
+  });
+
+  test('E-T-30 mail folders: hide via the folder menu (saved in the settings), "Show more … (N)" reveals them, Show folder brings one back', async ({ page }) => {
+    await mockApis(page, { layouts: LAYOUTS });
+    // A list from the old per-browser storage is moved to the server once
+    await page.addInitScript(() => { if (!sessionStorage.getItem('e2e-hid')) { localStorage.setItem('mail-view-hidden', JSON.stringify(['ma-h\nLists'])); sessionStorage.setItem('e2e-hid', '1'); } });
+    let hidden = {};
+    const puts = [];
+    await page.route('**/api/dashboard/mail-hidden-folders', r => {
+      if (r.request().method() === 'PUT') {
+        const { accountId, folders } = JSON.parse(r.request().postData());
+        puts.push({ accountId, folders });
+        if (folders.length) hidden[accountId] = folders; else delete hidden[accountId];
+        return r.fulfill({ json: { ok: true, folders: hidden } });
+      }
+      return r.fulfill({ json: { folders: hidden } });
+    });
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-h', label: 'Work' }] } }));
+    await page.route('**/api/dashboard/mail/ma-h/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-h', '');
+      if (p === '/folders') return r.fulfill({ json: { folders: [
+        { path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 0, unseen: 0 },
+        { path: 'Old', name: 'Old', delimiter: '/', parent: '', messages: 0, unseen: 0 },
+        { path: 'Old/2019', name: '2019', delimiter: '/', parent: 'Old', messages: 0, unseen: 0 },
+        { path: 'Lists', name: 'Lists', delimiter: '/', parent: '', messages: 0, unseen: 0 },
+      ] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [], total: 0, page: 0, pageSize: 50 } });
+      return r.fulfill({ json: { size: 0, messages: 0 } });
+    });
+    await page.goto('/today?mail=ma-h&folder=INBOX');
+    const row = path => page.locator(`#mailView .mv-folder[data-mv-folder="${path}"]`);
+    await expect(row('Old/2019')).toBeVisible();
+    await expect(row('Lists')).toHaveCount(0);
+    await expect.poll(() => hidden).toEqual({ 'ma-h': ['Lists'] });
+    expect(await page.evaluate(() => localStorage.getItem('mail-view-hidden'))).toBeNull();
+    await row('Old').click({ button: 'right' });
+    await page.locator('.ctx-item:visible', { hasText: 'Hide folder' }).click();
+    await expect(row('Old')).toHaveCount(0);
+    await expect(row('Old/2019')).toHaveCount(0);   // subfolders go with it
+    const more = page.locator('#mailView [data-mv-hidden-toggle="ma-h"]');
+    await expect(more).toHaveText('Show more … (2)');
+    await expect.poll(() => hidden).toEqual({ 'ma-h': ['Lists', 'Old'] });
+
+    // Saved on the server (settings), not in the browser
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await expect(row('INBOX')).toBeVisible();
+    await expect(row('Old')).toHaveCount(0);
+
+    await more.click();
+    await expect(row('Old')).toHaveClass(/mv-folder--hidden/);
+    await expect(more).toHaveText('Show less');
+    await row('Old').click({ button: 'right' });
+    await page.locator('.ctx-item:visible', { hasText: 'Show folder' }).click();
+    await expect(row('Old')).not.toHaveClass(/mv-folder--hidden/);
+    await expect.poll(() => hidden).toEqual({ 'ma-h': ['Lists'] });
+    await expect(more).toHaveText('Show less');
+
+    // Settings → Mail lists them; the eye shows one again (also in the open mail view)
+    await page.evaluate(() => openSettingsDialog('mail-accounts'));
+    const list = page.locator('#mailHiddenList');
+    await page.locator('#mail-hidden-folders > summary').click();
+    await expect(list.locator('.mail-trusted-row')).toHaveCount(1);
+    await expect(list).toContainText('Lists');
+    await expect(list).toContainText('Work');
+    await list.locator('[data-hidden-show="ma-h"]').click();
+    await expect.poll(() => hidden).toEqual({});
+    await expect(list).toContainText('No hidden folders.');
+    expect(await page.evaluate(() => _mvHidden.size)).toBe(0);
+  });
+
+  test('E-T-29 mail folder menu "Delete duplicates": scan, confirm count, move the copies to the trash', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const deletes = [];
+    let dupes = [5, 7];
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-d', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail/ma-d/**', r => {
+      const url = new URL(r.request().url());
+      const p = url.pathname.replace('/api/dashboard/mail/ma-d', '');
+      if (r.request().method() === 'DELETE') { deletes.push(`${p}?${url.searchParams}`); return r.fulfill({ json: { ok: true, permanent: false } }); }
+      if (p === '/folders') return r.fulfill({ json: { folders: [
+        { path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 3, unseen: 0 },
+        { path: 'Projects', name: 'Projects', delimiter: '/', parent: '', messages: 9, unseen: 0 },
+      ] } });
+      if (p === '/messages') {
+        const msg = (id, subject) => ({ id, subject, messageId: `<${subject}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com', date: '2026-11-01T10:00:00.000Z', size: 500, unread: false });
+        return r.fulfill({ json: { messages: [msg('8', 'Offer'), { ...msg('4', 'Offer'), size: 300 }, msg('5', 'Other')], total: 3, page: 0, pageSize: 50 } });
+      }
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p === '/duplicates') return r.fulfill({ json: { messages: 9, uids: dupes } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.goto('/today?mail=ma-d&folder=INBOX');
+    // Loaded duplicates are marked like duplicate cards: same Message-ID, the smaller copy (UID 4) — the largest is kept
+    await expect(page.locator('#mailView .mv-msg[data-mv-msg="4"] .card-duplicate-badge')).toHaveText('duplicate');
+    await expect(page.locator('#mailView .card-duplicate-badge')).toHaveCount(1);
+    const folder = page.locator('#mailView .mv-folder[data-mv-folder="Projects"]');
+    await folder.click({ button: 'right' });
+    await page.locator('.ctx-item:visible', { hasText: 'Delete duplicates' }).click();
+    await expect(page.locator('#dialogMsg')).toContainText('Found 2 duplicates in "Projects" (9 messages checked');
+    await expect(page.locator('#dialogOkBtn')).toHaveText('Move to trash');
+    await page.click('#dialogOkBtn');
+    await expect.poll(() => deletes).toEqual(['/message/5,7?folder=Projects']);
+
+    // Nothing found: just a message, nothing deleted
+    dupes = [];
+    await folder.click({ button: 'right' });
+    await page.locator('.ctx-item:visible', { hasText: 'Delete duplicates' }).click();
+    await expect(page.locator('#dialogMsg')).toContainText('No duplicates found in "Projects"');
+    expect(deletes).toHaveLength(1);
+  });
 });
 
 // Touch swipe via CDP (Chromium): real touch events → pointer events with pointerType 'touch'

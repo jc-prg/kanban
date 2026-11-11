@@ -477,7 +477,7 @@ body.calview-open header { z-index: 96; }
   .calview-nav {
     position: absolute;
     left: 50%;
-    bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(13px + env(safe-area-inset-bottom, 0px));
     transform: translateX(-50%);
     z-index: 10;
     gap: 6px;

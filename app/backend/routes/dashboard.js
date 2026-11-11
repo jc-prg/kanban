@@ -4,7 +4,8 @@ const multer  = require('multer');
 const router  = express.Router();
 const { writeRateLimit, uploadRateLimit }         = require('../auth');
 const { getDashboardConfig, saveDashboardConfig, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder,
-        getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender } = require('../global-db');
+        getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender,
+        getHiddenFolders, setHiddenFolders } = require('../global-db');
 const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
@@ -13,7 +14,7 @@ const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendar
 const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
 const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
-        markMailMessage, markFolderRead, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
+        markMailMessage, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
 
 // ---- Password utilities (also exported for unit tests) ----
 
@@ -473,6 +474,18 @@ router.get('/dashboard/mail/:accountId/messages', withHandler(async (req, res) =
   }
 }));
 
+// GET /api/dashboard/mail/:accountId/duplicates?folder= — { messages, uids }: duplicate copies in the folder
+// (same sender, To, subject, date / time and Message-ID — size without one; the largest copy is kept — findDuplicateUids)
+router.get('/dashboard/mail/:accountId/duplicates', withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
+  try {
+    res.json(await findDuplicateMessages(ctx.account, ctx.folder || 'INBOX'));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
 // GET /api/dashboard/mail/:accountId/folder-size?folder= — { size (bytes), messages }
 router.get('/dashboard/mail/:accountId/folder-size', withHandler(async (req, res) => {
   const ctx = await _mailCtx(req, res);
@@ -482,6 +495,21 @@ router.get('/dashboard/mail/:accountId/folder-size', withHandler(async (req, res
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+}));
+
+// GET /api/dashboard/mail-hidden-folders — folders hidden in the mail view's tree: { folders: { [accountId]: [path] } }
+router.get('/dashboard/mail-hidden-folders', withHandler(async (req, res) => {
+  res.json({ folders: await getHiddenFolders() });
+}));
+
+// PUT /api/dashboard/mail-hidden-folders — body { accountId, folders: [path] } replaces that account's list
+router.put('/dashboard/mail-hidden-folders', writeRateLimit, withHandler(async (req, res) => {
+  const { accountId, folders } = req.body || {};
+  if (typeof accountId !== 'string' || !(await getMailAccount(accountId))) return res.status(404).json({ error: 'Account not found' });
+  if (!Array.isArray(folders) || folders.length > 500 || !folders.every(validMailFolderPath)) {
+    return res.status(400).json({ error: 'folders must be a list of folder paths' });
+  }
+  res.json({ ok: true, folders: await setHiddenFolders(accountId, [...new Set(folders)]) });
 }));
 
 // GET /api/dashboard/mail-trusted-senders — senders whose remote images the mail views load

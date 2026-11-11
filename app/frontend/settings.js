@@ -1005,6 +1005,58 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
   });
   document.getElementById('mailTrustedInput').addEventListener('input', e => e.target.setCustomValidity(''));
 
+  // ---- Hidden folders (mail view tree; shared with mailview.js `_mvHidden`) ----
+
+  function _renderMailHidden(folders, error) {
+    const list = document.getElementById('mailHiddenList');
+    const rows = [];
+    for (const [accId, paths] of Object.entries(folders || {})) {
+      const acc = _mailAccounts.find(a => a.id === accId);
+      for (const p of paths || []) rows.push({ accId, path: p, label: acc ? (acc.label || acc.user || accId) : accId });
+    }
+    document.getElementById('mailHiddenCount').textContent = error ? '' : `(${rows.length})`;
+    if (error) { list.innerHTML = `<p class="settings-item-desc mail-trusted-error">${escHtml(error)}</p>`; return; }
+    if (!rows.length) { list.innerHTML = '<p class="settings-item-desc" style="margin:4px 0 8px">No hidden folders.</p>'; return; }
+    rows.sort((a, b) => a.label.localeCompare(b.label) || a.path.localeCompare(b.path));
+    list.innerHTML = rows.map(r => `
+      <div class="calendar-account-row mail-trusted-row">
+        <div class="calendar-account-info"><span class="mail-trusted-addr">${escHtml(r.path)}</span><span class="settings-item-desc">${escHtml(r.label)}</span></div>
+        <div class="calendar-account-actions">
+          <button class="btn btn--icon" data-hidden-show="${escHtml(r.accId)}" data-hidden-path="${escHtml(r.path)}" title="Show ${escHtml(r.path)} again" aria-label="Show ${escHtml(r.path)} again">${_svgEye()}</button>
+        </div>
+      </div>`).join('');
+  }
+
+  let _mailHiddenFolders = {};
+  async function loadMailHidden() {
+    try {
+      const r = await fetch('/api/dashboard/mail-hidden-folders');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      _mailHiddenFolders = (await r.json()).folders || {};
+      _renderMailHidden(_mailHiddenFolders);
+    } catch (err) {
+      _renderMailHidden({}, `Could not load hidden folders: ${err.message}`);
+    }
+  }
+
+  document.getElementById('mailHiddenList').addEventListener('click', async e => {
+    const btn = e.target.closest('[data-hidden-show]');
+    if (!btn) return;
+    const accountId = btn.dataset.hiddenShow, path = btn.dataset.hiddenPath;
+    try {
+      const r = await fetch('/api/dashboard/mail-hidden-folders', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId, folders: (_mailHiddenFolders[accountId] || []).filter(p => p !== path) }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      _mailHiddenFolders = (await r.json()).folders || {};
+      _renderMailHidden(_mailHiddenFolders);
+      // An open mail view shows the folder right away
+      if (typeof _mvHidden !== 'undefined') { _mvHidden.delete(`${accountId}\n${path}`); _mvRenderTree(); }
+      flashIndicator(`${ICONS.done} saved`);
+    } catch { flashIndicator(' error'); }
+  });
+
   async function loadMailSettings() {
     try {
       const cfg = await fetch('/api/dashboard/config').then(r => r.json());
@@ -1015,6 +1067,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
     _renderMailList();
     _closeMailForm();
     loadMailTrusted();
+    loadMailHidden();
   }
 
   document.getElementById('mailAddBtn').addEventListener('click', () => _openMailForm(-1));
@@ -1679,12 +1732,15 @@ async function afterAuth() {
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('notesToggleBtn').style.display = '';
   document.getElementById('todayBtn').style.display = '';   // dashboard (Today) link, all screen sizes
-  // Mail and calendar: open their views on the dashboard (they only exist there); not on small screens
-  for (const [id, path] of [['dashboardMailBtn', '/today?mail='], ['dashboardCalBtn', () => `/today?cal=${_cvStoredMode() || 'week'}`]]) {
+  // Mail and calendar: their views open over the board (overlay host, dashboard.js); not on small screens
+  for (const [id, isOpen, close, open] of [
+    ['dashboardMailBtn', () => _mvIsOpen(), closeMailView, () => openMailView()],
+    ['dashboardCalBtn',  () => _cvIsOpen(), closeCalView,  () => openCalView()],
+  ]) {
     const btn = document.getElementById(id);
     btn.classList.add('header-menu-btn--hide-mobile');
     btn.style.display = '';
-    btn.onclick = () => { window.location.href = appUrl(typeof path === 'function' ? path() : path); };
+    btn.onclick = async () => { if (isOpen()) close(); else { await _initOverlayHost(); open(); } };
   }
   if (window.matchMedia('(min-width: 640px)').matches) document.getElementById('schedToggleBtn').style.display = '';
   await load();
@@ -1700,6 +1756,12 @@ async function afterAuth() {
   await window._notesModule.loadNotes();
   loadCardAttachSet();
   handleUrlHash();
+  // ?cal= / ?mail= on a board URL (reload, back / forward): reopen the view over the board
+  if (/[?&](cal|mail)=/.test(location.search)) {
+    await _initOverlayHost();
+    _cvInitFromUrl();
+    _mvInitFromUrl();
+  }
 }
 
 /**
