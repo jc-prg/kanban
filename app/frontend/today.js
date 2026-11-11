@@ -1895,7 +1895,7 @@ function _todayWireDelegation() {
     const ev = e.target.closest('.today-ev[data-uid]');
     if (ev) { _openEventDetail(ev.dataset.accountId, ev.dataset.uid, ev.dataset.webUrl || ''); return; }
     const mail = e.target.closest('.today-mail-row[data-msg-id]');
-    if (mail) _openMailDetail(mail.dataset.accountId, mail.dataset.msgId, mail.dataset.webUrl || '');
+    if (mail) _openMailDetail(mail.dataset.accountId, mail.dataset.msgId, mail.dataset.webUrl || '', mail.dataset.folder || undefined);
   });
 
   grid.addEventListener('contextmenu', e => {
@@ -1904,6 +1904,8 @@ function _todayWireDelegation() {
     const ev = !c && e.target.closest('.today-ev[data-uid]');
     const mail = !c && !ev && e.target.closest('.today-mail-row[data-msg-id]');
     if (!c?.entry && !ev && !mail) return;
+    // Search hits from other folders: the mail context menu acts on the account folder only
+    if (mail && mail.dataset.folder) return;
     e.preventDefault();
     e.stopPropagation();
     if (c?.entry) showDashboardContextMenu(e.clientX, e.clientY, c.entry.board, c.entry.card);

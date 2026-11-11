@@ -237,7 +237,8 @@ function _foldAddresses(str) {
   return `${shown}<span class="dash-addr-ellipsis">, \u2026</span><span class="dash-addr-rest" hidden>, ${hidden}</span> <a href="#" class="dash-addr-toggle">more</a>`;
 }
 
-function _openMailDetail(accountId, msgId, webUrl) {
+// folder: where the message is (search results); default = the account folder
+function _openMailDetail(accountId, msgId, webUrl, folder) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
@@ -263,7 +264,8 @@ function _openMailDetail(accountId, msgId, webUrl) {
     modal.style.minHeight = '450px';
     modal.style.maxHeight = maxH + 'px'; }
 
-  fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}`)
+  const folderQs = folder ? `?folder=${encodeURIComponent(folder)}` : '';
+  fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}${folderQs}`)
     .then(r => r.ok ? r.json() : null)
     .then(msg => {
       if (!msg) { body.innerHTML = '<p class="dashboard-empty">Message not found.</p>'; return; }
@@ -276,10 +278,11 @@ function _openMailDetail(accountId, msgId, webUrl) {
       if (msg.date)    rows.push(['Date',    escHtml(new Date(msg.date).toLocaleString())]);
       if (msg.attachments?.length) {
         const base = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
+        const href = a => base + encodeURIComponent(a.part) + folderQs;
         const links = msg.attachments.map(a => {
           const ft = _attachType(a.name);
           const ftAttr = (ft === 'image' || ft === 'pdf') ? ` data-ft="${ft}" data-name="${escHtml(a.name)}"` : '';
-          return `<a href="${escHtml(base + encodeURIComponent(a.part))}" download="${escHtml(a.name)}" class="dash-attachment-link"${ftAttr}>${escHtml(a.name)}</a>`;
+          return `<a href="${escHtml(href(a))}" download="${escHtml(a.name)}" class="dash-attachment-link"${ftAttr}>${escHtml(a.name)}</a>`;
         }).join('');
         rows.push(['Attachments', links]);
       }
@@ -310,8 +313,8 @@ function _openMailDetail(accountId, msgId, webUrl) {
 
       const attBase = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
       _renderMailBody(body, msg, { attachments: {
-        url:  a => attBase + encodeURIComponent(a.part),
-        open: a => openAttachmentViewer(attBase + encodeURIComponent(a.part), a.name, 'image'),
+        url:  a => attBase + encodeURIComponent(a.part) + folderQs,
+        open: a => openAttachmentViewer(attBase + encodeURIComponent(a.part) + folderQs, a.name, 'image'),
       } });
 
     })

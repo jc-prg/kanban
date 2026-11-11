@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page unit tests — TU-1 … TU-22
+ * Today page unit tests — TU-1 … TU-24
  *
  * today.js is loaded via vm.runInContext with minimal browser-global stubs; only the pure
  * helpers are exercised (layout resolution / folding, agenda model, weather mapping, ISO week).
@@ -26,6 +26,7 @@ beforeAll(() => {
     Intl, Date, Math, JSON, Object, Array, String, Number, Map, Set, Promise,
   })
   vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'today.js'), 'utf8'), ctx)
+  vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'today-search.js'), 'utf8'), ctx)
 })
 
 // Plain copies (vm objects have a foreign Object prototype → toEqual is stricter)
@@ -224,7 +225,7 @@ test('TU-13 size "available": one per column — stored, folded and edited layou
 })
 
 test('TU-14 deactivated widgets: _todayKnownTiles skips them; _todayLayoutsWith re-adds a tile where it is missing', () => {
-  expect(plain(ctx._todayKnownTiles({ disabled: ['weather', 'cvapp'] }))).toEqual(['agenda', 'attention', 'progress', 'quickaccess', 'boards', 'notes'])
+  expect(plain(ctx._todayKnownTiles({ disabled: ['weather', 'cvapp'] }))).toEqual(['agenda', 'attention', 'progress', 'quickaccess', 'boards', 'notes', 'search'])
   const layouts = {
     lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: '1/1' }, { id: 'boards', col: 1, order: 0, size: 'container' }] },
     sm: { columns: [{ width: 1 }], tiles: [{ id: 'weather', col: 0, order: 0, size: 'container' }] },
@@ -339,4 +340,43 @@ test('TU-22 Quick access: icon markup — stored image (bare, optional invert), 
   expect(ctx._todayQaIconHtml({ icon: { type: 'image', file: 'qa-0123456789abcdef.png', invertDark: true } })).toContain('today-qa-img--invert')
   expect(ctx._todayQaIconHtml({ icon: { type: 'image', file: 'qa-0123456789abcdef.png' } })).not.toContain('--invert')
   delete ctx.BASE_PATH
+})
+
+test('TU-23 Search tile: registered; prefs (off list, full) with defaults; active types and request slots', () => {
+  expect(vm.runInContext('TODAY_TILES.search.title', ctx)).toBe('Search')
+  expect(plain(ctx._tsPrefs())).toEqual({ off: [], full: false })
+  const saved = {}
+  const orig = ctx.localStorage
+  ctx.localStorage = { getItem: k => saved[k] ?? null, setItem: (k, v) => { saved[k] = v } }
+  try {
+    ctx._tsSavePrefs({ off: ['mail'], full: true })
+    expect(plain(ctx._tsPrefs())).toEqual({ off: ['mail'], full: true })
+    saved['today-search'] = '{broken'
+    expect(plain(ctx._tsPrefs())).toEqual({ off: [], full: false })
+  } finally { ctx.localStorage = orig }
+
+  const sources = { types: ['cards', 'notes', 'mail', 'applications'], mailAccounts: [{ id: 'ma-1' }, { id: 'ma-2' }] }
+  expect(plain(ctx._tsActiveTypes(sources.types, ['notes', 'events']))).toEqual(['cards', 'mail', 'applications'])
+  expect(plain(ctx._tsSlots(sources, ['notes'])).map(s => s.id)).toEqual(['cards', 'mail:ma-1', 'mail:ma-2', 'applications'])
+  expect(plain(ctx._tsSlots(sources, ['cards', 'notes', 'mail', 'applications']))).toEqual([])
+  expect(ctx._tsUrl({ type: 'mail', acc: { id: 'ma 1' } }, 'a&b', true)).toBe('/api/today/search/mail?q=a%26b&full=1&account=ma%201')
+})
+
+test('TU-24 Search tile: _tsGroup merges mail accounts (newest first), sums totals, collects errors, keeps loading', () => {
+  const slots = [{ id: 'mail:a', type: 'mail', acc: { id: 'a', label: 'A' } }, { id: 'mail:b', type: 'mail', acc: { id: 'b', label: 'B' } }, { id: 'cards', type: 'cards' }]
+  const results = {
+    'mail:a': { status: 'done', items: [{ id: '1', date: '2026-11-01' }], total: 3, truncated: true },
+    'mail:b': { status: 'done', items: [{ id: '9', date: '2026-11-05' }], total: 1 },
+  }
+  const g = plain(ctx._tsGroup('mail', slots, results))
+  expect(g.items.map(i => [i.acc.id, i.msg.id])).toEqual([['b', '9'], ['a', '1']])
+  expect(g).toMatchObject({ status: 'done', total: 4, truncated: true, errors: [] })
+
+  results['mail:b'] = { status: 'error', error: 'auth failed' }
+  expect(plain(ctx._tsGroup('mail', slots, results))).toMatchObject({ status: 'done', total: 3, errors: ['B: auth failed'] })
+  results['mail:b'] = { status: 'loading' }
+  expect(ctx._tsGroup('mail', slots, results).status).toBe('loading')
+  expect(ctx._tsGroup('cards', slots, results)).toBe(null)   // not requested yet
+  results.cards = { status: 'error', error: 'HTTP 500' }
+  expect(plain(ctx._tsGroup('cards', slots, results))).toMatchObject({ status: 'error', items: [], errors: ['HTTP 500'] })
 })

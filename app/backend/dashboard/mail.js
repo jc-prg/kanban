@@ -516,6 +516,49 @@ async function findMailByMessageId(account, messageId, folder, { hintOnly = fals
   });
 }
 
+/**
+ * Search every selectable folder of an account (Today search widget). The IMAP search runs on
+ * `word` (subject / from / to / cc, plus body with `full`); `accept(summary)` re-checks the
+ * other words. Newest first, ≤ `perFolder` per folder and `limit` overall; stops after
+ * `budgetMs` and flags the result `truncated`. Returns { messages (with `folder`), total, truncated }.
+ */
+async function searchMailAccount(account, word, { full = false, accept = () => true, perFolder = 20, limit = 50, budgetMs = 20_000 } = {}) {
+  const started = Date.now();
+  return _withClient(account, async client => {
+    const paths = (await client.list())
+      .filter(f => !_mapFolder(f).noselect)
+      .map(f => f.path);
+    // Account folder (INBOX) first, then the rest alphabetically
+    const first = account.folder || 'INBOX';
+    paths.sort((a, b) => (b === first) - (a === first) || a.localeCompare(b));
+    const keys = [{ subject: word }, { from: word }, { to: word }, { cc: word }];
+    if (full) keys.push({ body: word });
+    const messages = [];
+    let total = 0, truncated = false;
+    for (const path of paths) {
+      if (Date.now() - started > budgetMs) { truncated = true; break; }
+      let lock;
+      try { lock = await client.getMailboxLock(path, { readOnly: true }); } catch { continue; }
+      try {
+        const uids = ((await client.search({ or: keys, deleted: false }, { uid: true })) || []).sort((a, b) => b - a);
+        if (!uids.length) continue;
+        const found = [];
+        for await (const msg of client.fetch(uids.slice(0, 200).join(','), _LIST_QUERY, { uid: true })) {
+          const s = { ..._summary(msg), cc: _fmtAddrList(msg.envelope?.cc), folder: path };
+          if (accept(s)) found.push(s);
+        }
+        found.sort((a, b) => Number(b.id) - Number(a.id));
+        total += found.length + Math.max(0, uids.length - 200);
+        messages.push(...found.slice(0, perFolder));
+      } catch { /* folder not searchable — skip */ } finally {
+        lock.release();
+      }
+    }
+    messages.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    return { messages: messages.slice(0, limit), total, truncated };
+  });
+}
+
 // ---- Mutate messages ----
 
 /**
@@ -689,6 +732,7 @@ module.exports = {
   fetchMailAttachments,
   fetchFolderMessages,
   fetchFolderSize,
+  searchMailAccount,
   testMailAccount,
   listMailFolders,
   createMailFolder,

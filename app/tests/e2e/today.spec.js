@@ -483,11 +483,11 @@ test.describe('Today page', () => {
     await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
     await page.click('#todayEditBtn');
 
-    // Every active widget missing from this layout counts (weather, quickaccess, boards, notes)
+    // Every active widget missing from this layout counts (weather, quickaccess, boards, notes, search)
     const addBtn = page.locator('[data-edit="add-tile"]');
-    await expect(addBtn).toHaveText('+ Widget (4)');
-    await page.locator('.today-tile[data-tile="progress"] .today-tile-hide').click();
     await expect(addBtn).toHaveText('+ Widget (5)');
+    await page.locator('.today-tile[data-tile="progress"] .today-tile-hide').click();
+    await expect(addBtn).toHaveText('+ Widget (6)');
     await expect(page.locator('#todayGrid .today-col-add')).toHaveCount(2);   // one per column
     // The add slot is the last element of each column
     expect(await page.locator('#todayGrid .today-col').evaluateAll(cols => cols.map(c => c.lastElementChild.className))).toEqual(['today-col-add', 'today-col-add']);
@@ -496,7 +496,7 @@ test.describe('Today page', () => {
     await page.locator('#_genericCtxMenu .ctx-item', { hasText: 'Achievements' }).click();
     expect((await columnsOf(page))[0]).toEqual(['agenda:1/1', 'progress:container']);
     await expect(page.locator('.today-tile[data-tile="progress"] .today-stat').first()).toBeVisible();   // data loaded
-    await expect(addBtn).toHaveText('+ Widget (4)');
+    await expect(addBtn).toHaveText('+ Widget (5)');
 
     await page.click('[data-edit="save"]');
     await expect(page.locator('#todayEditBar')).toBeHidden();
@@ -609,6 +609,111 @@ test.describe('Today page', () => {
     expect(await open()).toEqual([]);
     await next.click();
     expect(await open()).toEqual(['b-one', 'b-two']);
+  });
+
+  test('E-T-19 Search tile: groups per source, include checkbox per category / All / None, full text, results open in place or a new tab', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 1 }], tiles: [{ id: 'search', col: 0, order: 0, size: '1/1' }] } } };
+    await mockApis(page, state);
+    const calls = [];
+    // One handler for the whole search API (the last registered handler wins — see memory notes)
+    await page.route('**/api/today/search**', r => {
+      const url = new URL(r.request().url());
+      if (url.pathname.endsWith('/api/today/search')) {
+        return r.fulfill({ json: { types: ['cards', 'notes', 'events', 'mail', 'applications'], mailAccounts: [{ id: 'ma-e2e', label: 'Mail', color: '#0a0', webInterfaceUrl: null }] } });
+      }
+      const type = url.pathname.split('/').pop();
+      calls.push(`${type}${url.searchParams.get('full') ? '+full' : ''}:${url.searchParams.get('q')}`);
+      const json = {
+        cards: { items: [item('id-s1', 'ACME | Backend Dev', { created: TODAY })], total: 1 },
+        notes: { items: [], total: 0 },
+        events: { items: [{ uid: 'ev-s1', title: 'Interview ACME', location: 'Köln', start: at(14), end: at(15), accountId: 'ca-e2e', label: 'Work', color: '#7c6af7', webUrl: '' }], total: 1 },
+        mail: { items: [{ id: '42', subject: 'Offer from ACME', from: 'HR <hr@acme.com>', to: 'me@x', date: now.toISOString(), folder: 'Archive', unread: false }], total: 1 },
+        applications: { items: [{ id: 'a9', title: 'Data Engineer', company: 'ACME', location: 'Berlin', status: 'Versendet', url: 'https://cv.example/#/applications?id=a9' }], total: 1 },
+      }[type];
+      return r.fulfill({ json });
+    });
+    await page.route('**/api/dashboard/calendar/ca-e2e/event/**', r => r.fulfill({ json: { uid: 'ev-s1', title: 'Interview ACME', location: 'Köln', start: at(14), end: at(15) } }));
+    let mailUrl = '';
+    await page.route('**/api/dashboard/mail/ma-e2e/message/**', r => {
+      mailUrl = r.request().url();
+      r.fulfill({ json: { id: '42', subject: 'Offer from ACME', from: 'hr@acme.com', to: 'me@x', date: now.toISOString(), text: 'Hello', attachments: [] } });
+    });
+    await page.addInitScript(() => localStorage.removeItem('today-search'));
+    await page.goto('/today');
+
+    const tile  = page.locator('.today-tile[data-tile="search"]');
+    const input = tile.locator('.today-search-input');
+    // Every available category is listed (ticked) before anything is searched
+    await expect(tile.locator('.today-search-group')).toHaveCount(5);
+    await expect(tile.locator('.today-search-check:checked')).toHaveCount(5);
+    await input.fill('acme');
+    await expect.poll(() => calls.length).toBe(5);
+    await expect(tile.locator('.today-search-dots')).toHaveCount(0);   // no category still searching
+    expect(await tile.locator('.today-search-group').evaluateAll(els => els.map(e => e.dataset.type))).toEqual(['cards', 'notes', 'events', 'mail', 'applications']);
+    expect(calls.sort()).toEqual(['applications:acme', 'cards:acme', 'events:acme', 'mail:acme', 'notes:acme']);
+    await expect(tile.locator('.today-tile-count')).toHaveText('4');
+    // A source without hits stays listed: "0", no triangle (not a <details>)
+    const notesRow = tile.locator('.today-search-group[data-type="notes"]');
+    await expect(notesRow).toHaveClass(/today-search-group--empty/);
+    await expect(notesRow.locator('.today-search-n')).toHaveText('0');
+    await expect(notesRow.locator('summary')).toHaveCount(0);
+
+    // Categories start collapsed; the summary shows the hit count; a click opens one
+    await expect(tile.locator('details.today-search-group[open]')).toHaveCount(0);
+    await expect(tile.locator('.today-search-group[data-type="cards"] .today-search-n')).toHaveText('1');
+    await expect(tile.locator('.today-search-group[data-type="cards"] .today-kcard')).toBeHidden();
+    for (const type of ['cards', 'events', 'mail', 'applications']) await tile.locator(`.today-search-group[data-type="${type}"] > summary`).click();
+
+    // Card → detail panel; mail → detail panel with its folder; application → new tab link
+    await tile.locator('.today-search-group[data-type="cards"] .today-kcard .card-text').click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('ACME | Backend Dev');
+    await page.click('#dashboardDetailClose');
+    await tile.locator('.today-search-group[data-type="mail"] .today-mail-row').click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Offer from ACME');
+    expect(mailUrl).toContain('/message/42?folder=Archive');
+    await page.click('#dashboardDetailClose');
+    await tile.locator('.today-search-group[data-type="events"] .today-ev').click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Interview ACME');
+    await page.click('#dashboardDetailClose');
+    const app = tile.locator('.today-search-group[data-type="applications"] a.today-search-app');
+    await expect(app).toHaveAttribute('target', '_blank');
+    await expect(app).toHaveAttribute('href', 'https://cv.example/#/applications?id=a9');
+
+    // Checkbox per category: unticking keeps the row (no count, no triangle) without a new request
+    // and doesn't open the category; "None" unticks all; "All" re-shows the cached results
+    calls.length = 0;
+    const mailRow = tile.locator('.today-search-group[data-type="mail"]');
+    await mailRow.locator('.today-search-check').uncheck();
+    await expect(mailRow).toHaveClass(/today-search-group--off/);
+    await expect(mailRow.locator('summary, .today-search-n')).toHaveCount(0);
+    await expect(tile.locator('.today-tile-count')).toHaveText('3');
+    await tile.locator('[data-ts-all="0"]').click();
+    await expect(tile.locator('.today-search-group--off')).toHaveCount(5);
+    await expect(tile.locator('.today-search-check:checked')).toHaveCount(0);
+    await tile.locator('[data-ts-all="1"]').click();
+    await expect(tile.locator('.today-search-check:checked')).toHaveCount(5);
+    await expect(tile.locator('details.today-search-group[open]')).toHaveCount(4);   // opened ones stay open
+    expect(calls).toEqual([]);
+    // Ticking inside a collapsed category's header doesn't open it
+    await tile.locator('.today-search-group[data-type="cards"] > summary').click();   // close
+    await tile.locator('.today-search-group[data-type="cards"] .today-search-check').uncheck();
+    await tile.locator('.today-search-group[data-type="cards"] .today-search-check').check();
+    await expect(tile.locator('.today-search-group[data-type="cards"]')).not.toHaveAttribute('open', '');
+    expect(calls).toEqual([]);
+
+    // Full text: a new search of every source with full=1, kept per browser
+    await tile.locator('.today-tile-btn', { hasText: 'Full text' }).click();
+    await expect.poll(() => calls.length).toBe(5);
+    expect(calls.every(c => c.includes('+full:acme'))).toBe(true);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('today-search')).full)).toBe(true);
+    await expect(tile.locator('details.today-search-group[open]')).toHaveCount(0);   // new search: collapsed again
+
+    // Auto-refresh keeps query and results without searching again
+    calls.length = 0;
+    await page.evaluate(() => loadToday({ quiet: true }));
+    await expect(input).toHaveValue('acme');
+    await expect(tile.locator('.today-search-group')).toHaveCount(5);
+    expect(calls).toEqual([]);
   });
 });
 

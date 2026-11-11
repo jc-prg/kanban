@@ -5,7 +5,7 @@ const multer  = require('multer');
 const router  = express.Router();
 const { writeRateLimit, uploadRateLimit }  = require('../auth');
 const { withHandler }                      = require('../db');
-const { getTodayConfig, saveTodayConfig } = require('../global-db');
+const { getTodayConfig, saveTodayConfig, getDashboardConfig } = require('../global-db');
 const { validateTodayConfig, QA_ICON_FILE, schemaError } = require('../schemas');
 const { TODAY_ICONS_DIR }                  = require('../config');
 const { defaultTodayConfig, BREAKPOINTS }  = require('../today/defaults');
@@ -14,6 +14,7 @@ const { fetchWeather, geocode }            = require('../today/weather');
 const { fetchApplications }                = require('../today/cvapp');
 const { fetchNoteTrees }                   = require('../today/notes');
 const { fetchIcon, saveIcon, pruneIcons, MAX_ICON } = require('../today/quickaccess');
+const search                               = require('../today/search');
 
 const _ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -140,6 +141,44 @@ router.get('/today/widgets/:id', withHandler(async (req, res) => {
     res.json(await provider.fetch(cfg.widgets?.[req.params.id] || {}, req));
   } catch (e) {
     res.status(e.statusCode || 502).json({ error: e.message || 'Widget failed' });
+  }
+}));
+
+// ---- Search widget: one request per source (mail: per account), so fast sources show first ----
+
+const SEARCH_TYPES = ['cards', 'notes', 'events', 'mail', 'applications'];
+
+/** Sources the search can use: { types, mailAccounts: [{ id, label, color }] }. */
+router.get('/today/search', withHandler(async (req, res) => {
+  const [cfg, dash] = await Promise.all([_loadConfig(), getDashboardConfig()]);
+  const mail = dash.mailAccounts || [];
+  const types = ['cards', 'notes'];
+  if ((dash.calendarAccounts || []).length) types.push('events');
+  if (mail.length) types.push('mail');
+  if (/^https?:\/\//i.test(cfg.widgets?.cvapp?.apiUrl || '')) types.push('applications');
+  res.json({ types, mailAccounts: mail.map(a => ({ id: a.id, label: a.label || a.id, color: a.color || null, webInterfaceUrl: a.webInterfaceUrl || null })) });
+}));
+
+router.get('/today/search/:type', withHandler(async (req, res) => {
+  const { type } = req.params;
+  if (!SEARCH_TYPES.includes(type)) return res.status(404).json({ error: 'Unknown search type' });
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (q.length < 2 || q.length > 200) return res.status(400).json({ error: 'q must be 2–200 characters' });
+  const full = req.query.full === '1' || req.query.full === 'true';
+  try {
+    if (type === 'cards') return res.json(await search.searchCards(q, { full }));
+    if (type === 'notes') return res.json(await search.searchNotes(q, { full }));
+    if (type === 'applications') {
+      const cfg = await _loadConfig();
+      return res.json(await search.searchApplications(q, { full, settings: cfg.widgets?.cvapp || {} }));
+    }
+    const dash = await getDashboardConfig();
+    if (type === 'events') return res.json(await search.searchEvents(q, { full, accounts: dash.calendarAccounts || [] }));
+    const account = (dash.mailAccounts || []).find(a => a.id === req.query.account);
+    if (!account) return res.status(404).json({ error: 'Mail account not found' });
+    res.json(await search.searchMail(account, q, { full }));
+  } catch (e) {
+    res.status(e.statusCode || 502).json({ error: e.message || 'Search failed' });
   }
 }));
 

@@ -66,4 +66,4 @@ async function fetchTodayCards(today) {
   return { ...out, counts, date: today };
 }
 
-module.exports = { fetchTodayCards, classifyBoardCards };
+module.exports = { fetchTodayCards, classifyBoardCards, cardItem: _item };

@@ -624,6 +624,54 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-npage svg { flex-shrink: 0; color: var(--text-muted); }
 .today-nempty { display: block; padding: 2px 4px 2px 20px; color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
 
+/* ---- Search tile ---- */
+.today-search-input {
+  width: 100%; box-sizing: border-box; margin: 2px 0 6px; padding: 6px 10px;
+  font: inherit; font-size: 0.85rem; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+}
+.today-search-input:focus { outline: none; border-color: var(--accent); }
+.today-search-types { display: flex; justify-content: flex-end; margin: -2px 2px 2px; }
+.today-search-all { display: inline-flex; gap: 8px; }
+.today-search-all .today-link-btn { margin: 0; font-size: 0.72rem; }
+.today-search-check { margin: 0 0 0 auto; flex-shrink: 0; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.today-search-group--off .today-search-label { opacity: 0.5; font-weight: 400; }
+.today-search-group { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.today-search-group:first-child { border-top: none; }
+.today-search-group > summary, .today-search-group--empty {
+  display: flex; align-items: center; gap: 8px; padding: 7px 4px; font-size: 0.8rem; list-style: none; border-radius: 5px;
+}
+.today-search-group > summary { cursor: pointer; }
+.today-search-group > summary::-webkit-details-marker { display: none; }
+.today-search-group > summary::before {
+  content: '▸'; flex: 0 0 10px; font-size: 0.7rem; color: var(--text-muted); transition: transform 0.15s;
+}
+.today-search-group[open] > summary::before { transform: rotate(90deg); }
+.today-search-group > summary:hover { background: color-mix(in srgb, var(--surface2) 70%, transparent); }
+.today-search-group--empty { padding-left: 22px; color: var(--text-muted); }   /* no triangle: aligned with the labels */
+.today-search-label { font-weight: 600; }
+.today-search-n { font-family: var(--today-mono); font-size: 0.72rem; color: var(--text-muted); }
+.today-search-dots { display: inline-block; width: 1.6em; font-family: var(--today-mono); font-size: 0.72rem; color: var(--text-muted); }
+.today-search-dots::after { content: ''; animation: today-search-dots 1.2s linear infinite; }
+@keyframes today-search-dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+}
+@media (prefers-reduced-motion: reduce) { .today-search-dots::after { animation: none; content: '...'; } }
+.today-search-warn { color: var(--danger, #e5534b); font-size: 0.75rem; }
+.today-search-group[open] > .today-search-list { padding: 2px 0 8px; }
+.today-search-list { display: flex; flex-direction: column; gap: 4px; }
+.today-search-list > .today-swipe + .today-swipe { margin-top: 0; }
+.today-npage.today-search-note { padding: 5px 8px; margin: 0 -4px; align-items: flex-start; }
+.today-npage.today-search-note > svg { margin-top: 3px; }
+.today-search-ev { cursor: pointer; }
+.today-search-ev .today-ev-time { min-width: 108px; }
+.today-search-app { cursor: pointer; padding-top: 6px; padding-bottom: 6px; }
+.today-search-app > svg { flex-shrink: 0; margin-top: 3px; color: var(--text-muted); }
+.today-search-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14em; opacity: 0.8; }
+
 /* Dark mode: cards and board links in the tiles a shade lighter than the widget (--surface), normal card background on hover */
 @media not (prefers-color-scheme: light) {
   #today .today-tile :is(.card, .today-qa-icon--box) { background: color-mix(in srgb, var(--surface2) 45%, var(--surface)); }
