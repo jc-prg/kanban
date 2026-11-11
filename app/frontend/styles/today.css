@@ -664,6 +664,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-search-group[open] > .today-search-list { padding: 2px 0 8px; }
 .today-search-list { display: flex; flex-direction: column; gap: 4px; }
 .today-search-list > .today-swipe + .today-swipe { margin-top: 0; }
+/* Cards spaced like on the board (7 px apart, full width) */
+.today-search-list .today-kcard { margin: 0; }
+.today-search-group[data-type="cards"] > .today-search-list { gap: 7px; }
 .today-npage.today-search-note { padding: 5px 8px; margin: 0 -4px; align-items: flex-start; }
 .today-npage.today-search-note > svg { margin-top: 3px; }
 .today-search-ev { cursor: pointer; }
