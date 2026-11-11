@@ -783,6 +783,40 @@ test.describe('Today page', () => {
     await expect(tile.locator('.today-search-group')).toHaveCount(5);
     expect(calls).toEqual([]);
   });
+  test('E-T-21 while a search runs, reloads are held back and run once afterwards', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [
+      { id: 'search', col: 0, order: 0, size: '1/1' }, { id: 'attention', col: 1, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    let cardLoads = 0;
+    await page.route('**/api/today/widgets/cards?**', r => { cardLoads++; r.fulfill({ json: {
+      date: TODAY, overdue: [], dueToday: [], startsToday: [], dueTomorrow: [], dueWeek: [], startsWeek: [], unread: [],
+      counts: { overdue: 0, dueToday: 0, startsToday: 0, dueTomorrow: 0, unread: 0 } } }); });
+    let releaseMail;
+    await page.route('**/api/today/search**', async r => {
+      const url = new URL(r.request().url());
+      if (url.pathname.endsWith('/api/today/search')) return r.fulfill({ json: { types: ['cards', 'mail'], mailAccounts: [{ id: 'ma', label: 'M' }] } });
+      if (url.pathname.endsWith('/mail')) await new Promise(res => { releaseMail = res; });
+      return r.fulfill({ json: { items: [], total: 0 } });
+    });
+    await page.goto('/today');
+    await page.waitForLoadState('networkidle');
+    const base = cardLoads;
+    await page.locator('.today-search-input').fill('acme');
+    await expect(page.locator('.today-search-group[data-type="mail"] .today-search-dots')).toBeVisible();
+
+    // Auto-refresh, refresh button and an action refresh during the search: nothing is fetched
+    await page.evaluate(() => { loadToday({ quiet: true }); _todayRefresh('cards'); _todayRefreshAll(); });
+    await page.waitForTimeout(300);
+    expect(cardLoads).toBe(base);
+
+    // Search done → one full reload
+    releaseMail();
+    await expect(page.locator('.today-search-group[data-type="mail"] .today-search-n')).toHaveText('0');
+    await expect.poll(() => cardLoads).toBe(base + 1);
+    await page.waitForTimeout(300);
+    expect(cardLoads).toBe(base + 1);
+    await expect(page.locator('.today-search-input')).toHaveValue('acme');
+  });
 });
 
 // Touch swipe via CDP (Chromium): real touch events → pointer events with pointerType 'touch'

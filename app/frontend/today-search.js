@@ -84,6 +84,16 @@ function _tsToggleFull() {
   _tsSearch();
 }
 
+/** True while a search request is running — today.js holds back its reloads meanwhile. */
+function _tsBusy() {
+  return Object.values(_ts.results).some(r => r.status === 'loading');
+}
+
+/** A search finished (or was dropped): let today.js run the reloads it held back. */
+function _tsSettled() {
+  if (!_tsBusy() && typeof _todayRunDeferred === 'function') _todayRunDeferred();
+}
+
 /** Run the search for the current query: fetch every active slot that has no result for this key yet. */
 function _tsSearch() {
   clearTimeout(_ts.timer);
@@ -113,15 +123,18 @@ function _tsSearch() {
           _ts.results[slot.id] = { status: 'done', items: data.items || [], total: data.total ?? (data.items || []).length,
             truncated: !!data.truncated, errors: data.errors || [] };
           _tsRenderResults();
+          _tsSettled();
         })
         .catch(err => {
           if (err.name === 'AbortError' || _ts.key !== key) return;
           _ts.results[slot.id] = { status: 'error', error: err.message };
           _tsRenderResults();
+          _tsSettled();
         });
     }
   }
   _tsRenderResults();
+  _tsSettled();   // nothing (left) to search, e.g. query cleared — release held-back reloads
 }
 
 // ---- Rows ----

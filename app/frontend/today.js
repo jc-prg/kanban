@@ -751,7 +751,35 @@ function _todayScheduleFit() {
 
 // ---- Loading ----
 
+// While the Search tile is searching (today-search.js#_tsBusy) nothing else reloads: full loads and
+// partial refreshes are collected here and run once when the search is done (_todayRunDeferred).
+let _todayDeferred = null;   // { load: false | { quiet }, kinds: Set }
+
+function _todaySearchBusy() {
+  return typeof _tsBusy === 'function' && _tsBusy();
+}
+
+function _todayDefer(fn) {
+  _todayDeferred ||= { load: false, kinds: new Set() };
+  fn(_todayDeferred);
+}
+
+/** Run what was held back during a search: one full load (covers everything) or the partial refreshes. */
+function _todayRunDeferred() {
+  if (!_todayDeferred || _todaySearchBusy()) return;
+  const d = _todayDeferred;
+  _todayDeferred = null;
+  if (d.load) loadToday(d.load);
+  else for (const kind of d.kinds) _todayRefresh(kind);
+}
+
 async function loadToday({ quiet = false } = {}) {
+  if (_todaySearchBusy()) {
+    // A non-quiet request (refresh button, settings) wins over a quiet one
+    _todayDefer(d => { d.load = { quiet: quiet && (d.load ? d.load.quiet : true) }; });
+    if (!quiet) _todayFlash('Refresh after the search');
+    return;
+  }
   _todayFetchMemo = new Map();
   if (!quiet) _todayWeatherCache = null;   // manual refresh / settings change: fresh weather
   _todayStale = false;
@@ -1954,6 +1982,7 @@ async function _todayMarkDone(rowEl, { board, card }) {
  * Only the changed data is fetched again; the calendar stays cached for this load cycle.
  */
 function _todayRefresh(kind) {
+  if (_todaySearchBusy()) { _todayDefer(d => d.kinds.add(kind || 'cards')); return; }
   const urls  = kind === 'mail'     ? [/^\/api\/dashboard\/mail$/]
               : kind === 'calendar' ? [/^\/api\/dashboard\/calendar/]
               : [/^\/api\/today\/widgets\/cards/, /^\/api\/achievements\//];
