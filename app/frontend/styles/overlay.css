@@ -215,10 +215,21 @@
   line-height: 1;
 }
 
-/* Modal backdrop */
+/* Safe areas (iPhones, viewport-fit=cover): variables so tests can simulate the insets */
+:root {
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+}
+
+/* Modal backdrop. Dialogs are centred inside the safe area — on iPhones the status bar blurs what lies
+   beneath it, and a full-screen dialog stops at the status bar / home indicator instead of running under them */
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  box-sizing: border-box;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   background: rgba(0,0,0,0.7);
   backdrop-filter: blur(4px);
   z-index: 100;
@@ -239,7 +250,7 @@
   width: 440px;
   max-width: calc(100vw - 24px);
   max-height: 90vh;
-  max-height: 90dvh;
+  max-height: min(90dvh, 100%);   /* 100% = the backdrop's safe area */
   overflow-y: auto;
   box-shadow: 0 32px 80px rgba(0,0,0,0.5);
   animation: scaleIn 0.2s ease;

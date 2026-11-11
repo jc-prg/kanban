@@ -835,6 +835,30 @@ async function swipe(page, locator, dx) {
 test.describe('Today page — phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
+  test('E-T-22 detail panel stays inside the safe area (iPhone insets): centred, full screen below the status bar', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'attention', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.goto('/today');
+    await page.addStyleTag({ content: ':root { --safe-top: 47px; --safe-bottom: 34px; }' });
+    await page.evaluate(() => _openCardDetail('e2e-today', { id: 'id-due1', text: 'Send offer' }));
+    const modal = page.locator('#dashboardDetail .modal');
+    await expect(modal).toBeVisible();
+    await page.waitForTimeout(300);   // scale-in animation
+    const vh = page.viewportSize().height;
+    const r = await modal.boundingBox();
+    expect(r.y).toBeGreaterThanOrEqual(47);
+    expect(r.y + r.height).toBeLessThanOrEqual(vh - 34);
+    // centred in the safe area
+    expect(Math.abs((r.y - 47) - (vh - 34 - (r.y + r.height)))).toBeLessThanOrEqual(2);
+
+    await page.click('#dashboardDetailFsBtn');
+    await page.waitForTimeout(100);
+    const f = await modal.boundingBox();
+    expect(Math.round(f.y)).toBe(47);
+    expect(Math.round(f.y + f.height)).toBe(vh - 34);
+  });
+
   test('E-T-20 note detail on a phone: table and attachments are not fixed, the whole panel scrolls', async ({ page }) => {
     const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'notes', col: 0, order: 0, size: 'container' }] } } };
     await mockApis(page, state);

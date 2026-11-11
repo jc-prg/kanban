@@ -228,6 +228,7 @@
 .dashboard-detail-modal {
   width: min(960px, 92vw);
   height: 85dvh;
+  max-height: 100%;   /* inside the backdrop's safe area (iPhones) */
   overflow: hidden;
   display: flex;
   flex-direction: column;
