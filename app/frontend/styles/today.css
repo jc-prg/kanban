@@ -734,35 +734,28 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
   #calView > .calview-bar .calview-nav .calview-navbtn { width: auto; padding: 6px 12px; font-size: 1rem; }
 }
 
-/* Mail view: "<mail icon> Mail" (new message) styled like an active widget header button ("7 days" in the agenda) */
-#mailView > .calview-bar #mailViewCompose {
-  padding: 0 8px; border: none; border-radius: 6px;
-  background: var(--accent-glow); color: var(--accent);
-  font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0; box-shadow: none;
-}
-#mailView > .calview-bar #mailViewCompose:hover { background: var(--accent-glow); color: var(--accent); border: none; box-shadow: none; }
 #mailView, #calView { border: none; }   /* mail and calendar view panels without a frame (all screen sizes) */
 
 /* Refresh icon in the calendar / mail view header: a widget header button (.today-tile-btn) */
 .calview-bar:hover .today-tile-btn { opacity: 1; }
 
-/* Calendar view header: 5 / 7 / 31 and ‹ Today › like inactive widget header text buttons, the selected
-   view and the burger menu while open like the active "7 days" button; Event always in that active style */
+/* Calendar / mail view header text buttons — 5 / 7 / 31, ‹ Today ›, burger menu, "<icon> Event",
+   "<icon> Mail" — like inactive widget header text buttons (muted, brighter while the bar is hovered, surface
+   on hover); the selected view and the open burger menu like the active "7 days" button. The two ids as
+   [id=…]: an id inside :is() would give the whole list id weight (beating .active and the phone rules) */
 #calView > .calview-bar .calview-modes { border: none; border-radius: 0; gap: 2px; overflow: visible; }
-#calView > .calview-bar :is(.calview-mode, .calview-nav .btn, .calview-menu-btn) {
+:is(#calView, #mailView) > .calview-bar :is(.calview-mode, .calview-nav .btn, .calview-menu-btn, [id="calViewNew"], [id="mailViewCompose"]) {
   justify-content: center; min-width: 26px; height: 24px; padding: 0 8px; border: none; border-radius: 6px;
-  background: none; color: var(--text-muted); opacity: 0.6;
-  font-family: 'DM Mono', monospace; font-size: 0.7rem;
-}
-#calView > .calview-bar:hover :is(.calview-mode, .calview-nav .btn, .calview-menu-btn) { opacity: 1; }
-#calView > .calview-bar :is(.calview-mode, .calview-nav .btn, .calview-menu-btn):hover { background: var(--surface2); color: var(--text); border: none; box-shadow: none; transform: none; }
-#calView > .calview-bar :is(.calview-mode.active, .calview-menu-btn.cv-menu-open),
-#calView > .calview-bar #calViewNew {
-  opacity: 1; border: none; background: var(--accent-glow); color: var(--accent); box-shadow: none;
+  background: none; color: var(--text-muted); opacity: 0.6; box-shadow: none;
   font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0;
 }
-#calView > .calview-bar :is(.calview-mode.active, .calview-menu-btn.cv-menu-open):hover,
-#calView > .calview-bar #calViewNew:hover {
+:is(#calView, #mailView) > .calview-bar:hover :is(.calview-mode, .calview-nav .btn, .calview-menu-btn, [id="calViewNew"], [id="mailViewCompose"]) { opacity: 1; }
+:is(#calView, #mailView) > .calview-bar :is(.calview-mode, .calview-nav .btn, .calview-menu-btn, [id="calViewNew"], [id="mailViewCompose"]):hover { background: var(--surface2); color: var(--text); border: none; box-shadow: none; transform: none; }
+#mailView > .calview-bar #mailViewCompose:disabled { opacity: 0.3; background: none; color: var(--text-muted); }
+#calView > .calview-bar :is(.calview-mode.active, .calview-menu-btn.cv-menu-open) {
+  opacity: 1; border: none; background: var(--accent-glow); color: var(--accent); box-shadow: none;
+}
+#calView > .calview-bar :is(.calview-mode.active, .calview-menu-btn.cv-menu-open):hover {
   background: var(--accent-glow); color: var(--accent); border: none; box-shadow: none; transform: none;
 }
 #calView > .calview-bar .calview-nav :is(#calViewPrev, #calViewNext) { font-size: 1rem; }   /* ‹ › (ids: beat the rule above) */

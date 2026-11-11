@@ -2816,8 +2816,11 @@ function _todayQaWire(report) {
     _todayQaToggleEmoji(false);
     _todayQaSyncForm();
   });
+  // Outside click closes. composedPath(), not e.target.closest(): a category tab re-renders the picker
+  // before this runs, so the clicked button is already detached and has no ancestors any more
+  const emojiWrap = pop.closest('.mv-emoji-wrap');
   document.addEventListener('click', e => {
-    if (!pop.hidden && !e.target.closest('#todayQaForm .mv-emoji-wrap')) _todayQaToggleEmoji(false);
+    if (!pop.hidden && !e.composedPath().includes(emojiWrap)) _todayQaToggleEmoji(false);
   });
 
   form.addEventListener('submit', async e => {

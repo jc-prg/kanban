@@ -1794,6 +1794,7 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
 
   errEl.hidden = true; errEl.textContent = '';
   saveBtn.textContent = 'Save event'; saveBtn.disabled = false;
+  const tint = () => _calModalTint(ev?._color || _calAccountsMeta.find(a => a.accountId === (ev ? _calModalAccId : accSel.value))?.color);
   scopeRow.hidden = true;
   recurRow.hidden = true;
   _resetRepeatUi();
@@ -1841,6 +1842,7 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
       if (ev.rruleStr) _parseRRuleToUi(ev.rruleStr);
     }
 
+    tint();
     titleInput.value = ev.title || '';
     allDayCb.checked = !!ev.allDay;
     locInput.value   = ev.location || '';
@@ -1899,6 +1901,8 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
       if (a.accountId === accountId) opt.selected = true;
       accSel.appendChild(opt);
     }
+    tint();
+    accSel.onchange = tint;   // header colour follows the chosen calendar
 
     titleInput.value = '';
     allDayCb.checked = false;
@@ -2208,6 +2212,13 @@ function _resetRepeatUi() {
   document.querySelector('input[name="calEventEnds"][value="never"]').checked = true;
   document.getElementById('calEventCount').value = '10';
   document.getElementById('calEventUntil').value = '';
+}
+
+/** Header of the event dialog tinted with the calendar colour, like the detail panel (--detail-accent). */
+function _calModalTint(color) {
+  const bar = document.getElementById('calEventModalBar');
+  if (color) bar.style.setProperty('--detail-accent', color);
+  else bar.style.removeProperty('--detail-accent');
 }
 
 // ---- Calendar event modal wiring ----

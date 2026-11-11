@@ -351,10 +351,11 @@
   <button class="ctx-item ctx-danger" id="mailCtxDelete"><span data-icon="delete"></span>  Delete (trash)</button>
 </div>
 
-<dialog id="calEventModal" class="modal">
-  <div class="modal-header">
-    <span id="calEventModalTitle">New event</span>
-    <button class="modal-close-btn" id="calEventModalClose"><span data-icon="close"></span></button>
+<dialog id="calEventModal" class="modal panel cal-event-modal">
+  <!-- Detail panel format (.dashboard-detail-titlebar / -title / -close): header tinted with the calendar colour -->
+  <div class="dashboard-detail-titlebar panel-hdr" id="calEventModalBar">
+    <span id="calEventModalTitle" class="dashboard-detail-title panel-hdr-title">New event</span>
+    <button class="dashboard-detail-close" id="calEventModalClose" title="Close"><span data-icon="close"></span></button>
   </div>
   <div class="modal-body">
     <div class="modal-field" id="calEventAccountField">
@@ -456,9 +457,13 @@
 </dialog>
 
 <div id="modal" class="modal-backdrop" style="display:none">
-  <div class="modal">
-    <button class="modal-fs-btn" id="cardFullscreenBtn" title="Enter full screen"><span data-icon="fullscreen"></span></button>
-    <h2 id="modalTitle" style="display:none">Add Card</h2>
+  <div class="modal panel panel-modal edit-modal">
+    <!-- Detail panel format (.panel-modal): header bar tinted with the card colour (renderColorRow), icon buttons -->
+    <div class="dashboard-detail-titlebar panel-hdr panel-modal-bar" id="modalBar">
+      <span id="modalTitle" class="dashboard-detail-title panel-hdr-title">Add Card</span>
+      <button class="modal-fs-btn" id="cardFullscreenBtn" title="Enter full screen"><span data-icon="fullscreen"></span></button>
+      <button class="dashboard-detail-close" id="modalBarClose" data-close-via="modalCloseBtn" title="Close"><span data-icon="close"></span></button>
+    </div>
     <div class="modal-field" id="modalBoardField" style="display:none">
       <label>Board / Column</label>
       <div class="inbox-board-row">
@@ -586,7 +591,7 @@
       </div>
       <a class="btn" id="modalGoBoardBtn" style="display:none">Go to board</a>
       <button class="btn" id="modalPrintBtn" style="display:none"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
-      <button class="btn" id="modalCloseBtn"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="modalCloseBtn" hidden><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-danger" id="modalDeleteBtn" style="display:none"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn" id="modalSaveAsTemplateBtn" style="display:none"><span class="btn-label">→ Template</span></button>
       <button class="btn btn-accent" id="modalSubmitBtn"><span class="btn-label">Add Card</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
@@ -727,23 +732,28 @@
 </div>
 
 <div id="achHistoryBackdrop" class="modal-backdrop" style="display:none">
-  <div class="modal ach-history-modal">
-    <h2>Achievement History</h2>
-    <div class="ach-history-nav">
-      <button id="achHistoryPrev" class="btn">&#8249; 4w</button>
-      <span id="achHistoryRange" class="ach-history-range-label"></span>
-      <button id="achHistoryNext" class="btn" disabled>4w ·</button>
+  <div class="modal ach-history-modal panel panel-modal">
+    <div class="dashboard-detail-titlebar panel-hdr panel-modal-bar">
+      <span class="dashboard-detail-title panel-hdr-title">Achievement History</span>
+      <!-- 4-week navigation as widget header text buttons (.today-tile-btn, today.css) -->
+      <button id="achHistoryPrev" class="today-tile-btn today-tile-btn--text" title="Previous 4 weeks"><span class="ach-nav-arrow">&#8249;</span>4w</button>
+      <button id="achHistoryNext" class="today-tile-btn today-tile-btn--text" title="Next 4 weeks" disabled>4w<span class="ach-nav-arrow">·</span></button>
+      <button class="dashboard-detail-close" data-close-via="achHistoryCloseBtn" title="Close"><span data-icon="close"></span></button>
     </div>
+    <div id="achHistoryRange" class="ach-history-range-label"></div>
     <div id="achHistoryChart" class="ach-history-chart"></div>
-    <div class="modal-actions">
+    <div class="modal-actions" hidden>
       <button class="btn btn-accent" id="achHistoryCloseBtn">Close</button>
     </div>
   </div>
 </div>
 
 <div id="settingsBackdrop" class="modal-backdrop" style="display:none">
-  <div class="modal settings-modal">
-    <h2 id="settingsTitle">Global settings</h2>
+  <div class="modal settings-modal panel panel-modal">
+    <div class="dashboard-detail-titlebar panel-hdr panel-modal-bar">
+      <span id="settingsTitle" class="dashboard-detail-title panel-hdr-title">Global settings</span>
+      <button class="dashboard-detail-close" data-close-via="settingsCloseBtn" title="Close"><span data-icon="close"></span></button>
+    </div>
     <div class="settings-layout">
       <nav class="settings-nav" id="settingsNav">
         <input id="settingsSearch" class="settings-search" type="search" placeholder="Search…" autocomplete="off" spellcheck="false">
@@ -1613,14 +1623,18 @@
     </div><!-- /.settings-layout -->
     <div class="modal-actions">
       <span id="settingsSaveIndicator" class="settings-save-indicator" style="margin-right:auto"></span>
-      <button class="btn btn-accent" id="settingsCloseBtn">Close</button>
+      <button class="btn btn-accent" id="settingsCloseBtn" hidden>Close</button>
     </div>
   </div>
 </div>
 
 <div id="noteModal" class="modal-backdrop" style="display:none">
-  <div class="modal note-modal">
-    <button class="modal-fs-btn" id="noteFullscreenBtn" title="Enter full screen"><span data-icon="fullscreen"></span></button>
+  <div class="modal note-modal panel panel-modal edit-modal">
+    <div class="dashboard-detail-titlebar panel-hdr panel-modal-bar">
+      <span class="dashboard-detail-title panel-hdr-title">Note</span>
+      <button class="modal-fs-btn" id="noteFullscreenBtn" title="Enter full screen"><span data-icon="fullscreen"></span></button>
+      <button class="dashboard-detail-close" id="noteModalBarClose" data-close-via="noteModalCancelBtn" title="Close"><span data-icon="close"></span></button>
+    </div>
     <div id="noteModalLoading" class="note-modal-loading" style="display:none">
       <span class="note-modal-loading-text">Loading…</span>
     </div>
@@ -1716,7 +1730,7 @@
       </div>
       <a class="btn" id="noteModalGoBoardBtn" style="display:none">Go to board</a>
       <button class="btn" id="noteModalPrintBtn"><span class="btn-label">Print</span><span class="btn-icon" data-icon="print" data-icon-w="14" data-icon-h="14"></span></button>
-      <button class="btn" id="noteModalCancelBtn"><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
+      <button class="btn" id="noteModalCancelBtn" hidden><span class="btn-label">Close</span><span class="btn-icon" data-icon="close" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-danger" id="noteModalDeleteBtn"><span class="btn-label">Delete</span><span class="btn-icon" data-icon="delete" data-icon-w="14" data-icon-h="14"></span></button>
       <button class="btn btn-accent" id="noteModalSaveBtn"><span class="btn-label">Save</span><span class="btn-icon" data-icon="save" data-icon-w="14" data-icon-h="14"></span></button>
     </div>

@@ -27,6 +27,9 @@
 
 .panel-hdr-title { color: color-mix(in srgb, var(--hdr-accent) 35%, var(--text-muted)); }
 
+/* Widget header buttons (.today-tile-btn) in any header: full strength while the header is hovered */
+.panel-hdr:hover .today-tile-btn:not(:disabled) { opacity: 1; }
+
 @media (prefers-color-scheme: light) {
   .panel-hdr {
     background: color-mix(in srgb, var(--hdr-accent) 9%, var(--surface2));
@@ -34,3 +37,33 @@
   }
   .panel-hdr-title { color: var(--text-muted); }
 }
+
+/* ---- Menus and popups: one format for context menus (incl. their submenus and the calendar view's burger
+   menu — openContextMenu), the header dropdown and board switcher, the mail sender list, emoji picker and
+   folder pickers, and the linked-card search results. Box tokens (--menu-*) on :root, so skins only change
+   the tokens (skin-glass.css adds frosting). Loaded after the component stylesheets: these win over their
+   copies of the same box. ---- */
+:root {
+  --menu-bg: var(--surface);
+  --menu-border: transparent;   /* no frame (the glass skin draws its edge) */
+  --menu-sep: var(--border);    /* lines between entries */
+  --menu-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --menu-hover: var(--surface2);
+}
+@media (prefers-color-scheme: light) {
+  :root { --menu-shadow: 0 8px 28px rgba(0, 0, 0, 0.14); }
+}
+:is(.context-menu, .ctx-submenu, .header-dropdown, .board-switch-menu, .mv-from-list, .mv-emoji-pop,
+    .mv-picker-box, .note-card-search-results) {
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: 8px;
+  box-shadow: var(--menu-shadow);
+}
+/* Items: one hover look; danger items (Delete, Log out) and the "no boards" line keep their own */
+:is(.ctx-item, .header-dd-item, .board-switch-item):not(.ctx-danger, .header-dd-logout, .board-switch-empty):hover,
+.mv-from-list li:is(:hover, :focus) { background: var(--menu-hover); color: var(--text); }
+/* Lines between entries keep a distance to the menu's edges (12 px incl. the context menu's padding) */
+:is(.ctx-separator, .header-dd-separator) { background: var(--menu-sep); }
+.ctx-separator       { margin: 4px 8px; }
+.header-dd-separator { margin: 4px 12px; }

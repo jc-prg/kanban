@@ -321,7 +321,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
+  background: inherit;   /* the dialog's own background (.panel, skins) */
   border-radius: inherit;
 }
 

@@ -48,7 +48,7 @@
 /* Notes sidebar: docked (notes.css) — glass body, edge only towards the board, shadow cast onto it */
 :root[data-skin="glass"] .notes-sidebar { border-width: 0 1px 0 0; border-radius: 0; box-shadow: 6px 0 20px -8px rgba(0, 0, 0, 0.3); }
 :root[data-skin="glass"] .notes-sidebar:not(.notes-sidebar--open) { border-color: transparent; box-shadow: none; }
-:root[data-skin="glass"] .dashboard-detail-modal { box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5); }   /* keeps the dialog shadow */
+:root[data-skin="glass"] :is(.dashboard-detail-modal, .panel-modal) { box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5); }   /* keep the dialog shadow */
 :root[data-skin="glass"] .calview--multi .calview-legend { background: transparent; }
 :root[data-skin="glass"] .mailview-folders { background: var(--glass-pane); }
 
@@ -81,8 +81,11 @@
   -webkit-backdrop-filter: blur(10px) saturate(160%);
   backdrop-filter: blur(10px) saturate(160%);
 }
+/* Stacked headers: only the page-coloured strip above (it keeps the gap between stacked headers clear). The
+   default's widget-coloured strip below would cover the top of the own body — flat, without the glass
+   body's sheen and edge, it shows as a dark band; the next header's strip covers that gap anyway. */
 :root[data-skin="glass"] #today .today-col--stack > .today-tile > .panel-hdr {
-  box-shadow: var(--glass-hdr-shadow), 0 calc(-1 * var(--today-stack-gap)) 0 var(--today-page-bg), 0 var(--today-stack-gap) 0 var(--glass-body-solid);
+  box-shadow: var(--glass-hdr-shadow), 0 calc(-1 * var(--today-stack-gap)) 0 var(--today-page-bg);
 }
 
 :root[data-skin="glass"] .panel-hdr-title { color: color-mix(in srgb, var(--hdr-accent) 35%, var(--text)); }
@@ -110,4 +113,26 @@
 }
 @media (prefers-color-scheme: light) {
   :root[data-skin="glass"] #today .today-board { box-shadow: inset 0 1px 0 var(--glass-highlight), 0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent); }
+}
+
+/* ---- Menus and popups (panel.css --menu-*): frosted glass — translucent accent-tinted panel colour over a
+   blurred backdrop, glass edge, light top edge. Submenus sit inside their menu, whose filter becomes their
+   backdrop root: they get a nearly opaque fill instead of their own blur. ---- */
+:root[data-skin="glass"] {
+  --menu-bg: linear-gradient(160deg, var(--glass-body-sheen) 0%, transparent 45%),
+             color-mix(in srgb, var(--accent) 8%, color-mix(in srgb, var(--panel-bg) 78%, transparent));
+  --menu-border: var(--glass-edge);
+  --menu-sep: var(--glass-edge);
+  --menu-hover: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+:root[data-skin="glass"] :is(.context-menu, .header-dropdown, .board-switch-menu, .mv-from-list, .mv-emoji-pop,
+    .mv-picker-box, .note-card-search-results) {
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--menu-shadow);
+}
+:root[data-skin="glass"] .ctx-submenu {
+  background: linear-gradient(160deg, var(--glass-body-sheen) 0%, transparent 45%),
+              color-mix(in srgb, var(--accent) 8%, color-mix(in srgb, var(--panel-bg) 96%, transparent));
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--menu-shadow);
 }

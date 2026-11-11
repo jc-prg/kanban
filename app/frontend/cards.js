@@ -962,10 +962,15 @@ async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null
 
   try {
     const boards = await fetch('/api/boards').then(r => r.json());
+    // Active boards first, archived ones below a separator line (a disabled option: <hr> in <select> is not
+    // rendered everywhere)
+    const opt = b => `<option value="${escHtml(b.name)}">${escHtml(b.name)}${b.archived ? ' (archive)' : ''}</option>`;
+    const active   = boards.filter(b => !b.archived);
+    const archived = boards.filter(b => b.archived);
     select.innerHTML = '<option value="" disabled selected hidden>Select board \u2026</option>'
-      + (boards.length
-        ? boards.map(b => `<option value="${escHtml(b.name)}">${escHtml(b.name)}</option>`).join('')
-        : '');
+      + active.map(opt).join('')
+      + (active.length && archived.length ? '<option disabled>\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</option>' : '')
+      + archived.map(opt).join('');
     if (preselectedBoard) select.value = preselectedBoard;
   } catch {
     select.innerHTML = '<option value="">Failed to load boards</option>';
@@ -1113,7 +1118,12 @@ function renderColorRow() {
          style="background:${c}"></div>
   `).join('');
   row.onclick = e => { const c = e.target.dataset.color; if (c) selectColor(c); };
+  // Dialog header tinted with the card colour, like the detail panel (--detail-accent)
+  const bar = document.getElementById('modalBar');
+  if (selectedColor) bar?.style.setProperty('--detail-accent', selectedColor);
+  else bar?.style.removeProperty('--detail-accent');
 }
+
 
 function selectColor(c) {
   selectedColor = c;

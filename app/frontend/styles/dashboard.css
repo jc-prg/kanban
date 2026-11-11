@@ -492,12 +492,14 @@
   color: var(--text-muted);
 }
 
-/* ---- Calendar event modal (#calEventModal) ---- */
+/* ---- Calendar event modal (#calEventModal) ----
+   Same format as the detail panel: .panel box (background, 8 px corners), header .dashboard-detail-titlebar
+   (.panel-hdr, tinted with the calendar colour via --detail-accent — _calModalTint in dashboard.js), widget
+   header close button, widget-like paddings */
+
+.cal-event-modal { border: none; }   /* beats .modal's frame; the glass skin adds its edge */
 
 #calEventModal {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
   color: var(--text);
   padding: 0;
   width: 480px;
@@ -519,42 +521,18 @@
   backdrop-filter: blur(4px);
 }
 
-.modal-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 22px 14px;
-  border-bottom: 1px solid var(--border);
-  font-weight: 600;
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-.modal-close-btn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 1rem;
-  line-height: 1;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.modal-close-btn:hover { background: var(--surface2); color: var(--text); }
-
 .modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 22px;
+  padding: 14px 14px 12px;
 }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 22px 18px;
-  border-top: 1px solid var(--border);
+  padding: 10px 14px 14px;   /* like .dash-detail-footer */
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   flex-shrink: 0;
 }
 
@@ -580,13 +558,15 @@
 .modal-field { margin-bottom: 12px; }
 .modal-field:last-child { margin-bottom: 0; }
 
-.modal-field .cal-event-allday-label {
+.modal-field .cal-event-allday-label {   /* "All day", "Repeat": same size as the other labels (.modal-field label) */
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.88rem;
+  font-size: 0.72rem;
   cursor: pointer;
 }
+/* Field contents in sans-serif (like card text) */
+.cal-event-modal :is(input, select, textarea) { font-family: system-ui, sans-serif; }
 .modal-field .cal-event-allday-label input[type="checkbox"] {
   width: auto;
   margin: 0;

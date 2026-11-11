@@ -1634,6 +1634,24 @@
   align-items: center;
 }
 
+/* ---- Dialogs in the detail panel format (.panel-modal: card / note editors, settings, achievement
+   history) ----
+   .panel box (background, 8 px corners), no frame; header .dashboard-detail-titlebar (.panel-hdr) running
+   along the dialog's top edge (negative margins = the .modal padding) instead of an <h2>, its icons as widget
+   header buttons (dashboard.css); a close icon carries data-close-via="<Close button id>" (init.js).
+   Card / note editors (.edit-modal): fullscreen icon in the bar, card dialog tinted with the card colour,
+   field contents in sans-serif — the card / page title keeps its heading font (#cardText, #notePageTitle). */
+.panel-modal { border: none; }
+.panel-modal-bar { margin: -28px -28px 16px; }
+.panel-modal-bar .modal-fs-btn { position: static; }
+/* The Close buttons stay in the DOM, hidden: the header's close icon clicks them (data-close-via), so their
+   close logic runs unchanged. [hidden] needs the help — .btn / .modal-actions set display. */
+.panel-modal :is(.btn, .modal-actions)[hidden] { display: none !important; }
+.edit-modal .modal-field :is(input, textarea, select) { font-family: system-ui, sans-serif; }
+@media (max-width: 500px) {
+  .panel-modal-bar { margin: -16px -16px 12px; }
+}
+
 @media (min-width: 1200px) {
   #modal .modal {
     width: min(1140px, 92vw);
@@ -1700,15 +1718,12 @@
   flex-direction: column;
 }
 
-.ach-history-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
-}
+/* ‹ 4w / 4w › in the header: a little larger than widget header text buttons, the arrow larger still */
+#achHistoryPrev, #achHistoryNext { gap: 4px; font-size: 0.8rem; }
+.ach-nav-arrow { font-size: 1.15rem; line-height: 1; }
 
-.ach-history-range-label {
-  flex: 1;
+.ach-history-range-label {   /* shown range, centred above the chart (‹ 4w / 4w › sit in the header) */
+  margin-bottom: 14px;
   text-align: center;
   font-size: 0.72rem;
   color: var(--text-muted);

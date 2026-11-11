@@ -1,3 +1,10 @@
+// Header close icons of dialogs in the panel format ([data-close-via="<id>"]) click the dialog's own Close
+// button, so its close logic (unsaved-changes checks, cleanup) runs unchanged
+document.addEventListener('click', e => {
+  const icon = e.target.closest('[data-close-via]');
+  if (icon) document.getElementById(icon.dataset.closeVia)?.click();
+});
+
 if (BOARD_NAME) {
   document.getElementById('appTitle').innerHTML = `jc://<span>${escHtml(BOARD_NAME)}</span>/`;
 }

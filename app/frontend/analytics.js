@@ -1210,8 +1210,9 @@
     const nextBtn = document.getElementById('achHistoryNext');
     prevBtn.disabled = prevDisabled;
     nextBtn.disabled = nextDisabled;
-    prevBtn.textContent = prevDisabled ? '· 4w' : '‹ 4w';
-    nextBtn.textContent = nextDisabled ? '4w ·' : '4w ›';
+    // Arrow in its own span: drawn larger than the label (.ach-nav-arrow)
+    prevBtn.innerHTML = `<span class="ach-nav-arrow">${prevDisabled ? '·' : '‹'}</span>4w`;
+    nextBtn.innerHTML = `4w<span class="ach-nav-arrow">${nextDisabled ? '·' : '›'}</span>`;
   }
 
   async function loadAchievementHistory() {
