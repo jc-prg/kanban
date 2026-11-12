@@ -361,6 +361,7 @@ const validateTodayConfig = ajv.compile({
             lat:   { type: 'number', minimum: -90,  maximum: 90 },
             lon:   { type: 'number', minimum: -180, maximum: 180 },
             label: { type: 'string', maxLength: 120 },
+            days:  { type: 'integer', enum: [1, 7] },   // tile: today (1) or the 7-day forecast
           },
         },
         agenda: {

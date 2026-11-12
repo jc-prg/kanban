@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page API tests — TD-1 … TD-21
+ * Today page API tests — TD-1 … TD-22
  *
  * routes/today.js is mounted on its own with db.js / global-db.js replaced via require.cache;
  * Open-Meteo and the CV-App are mocked with vi.stubGlobal('fetch').
@@ -198,6 +198,7 @@ test('TD-10 weather widget: normalises Open-Meteo and caches per location', asyn
   const hours = Array.from({ length: 48 }, (_, i) => `2026-11-${String(10 + Math.floor(i / 24)).padStart(2, '0')}T${String(i % 24).padStart(2, '0')}:00`)
   const fetchMock = vi.fn(async url => {
     expect(String(url)).toContain('latitude=52.52')
+    expect(String(url)).toContain('forecast_days=7')
     return { ok: true, json: async () => ({
       current: { time: '2026-11-10T10:45', temperature_2m: 8.4, weather_code: 3, is_day: 1 },
       hourly:  { time: hours, temperature_2m: hours.map((_, i) => i), precipitation_probability: hours.map(() => 10), weather_code: hours.map(() => 61) },
@@ -213,6 +214,8 @@ test('TD-10 weather widget: normalises Open-Meteo and caches per location', asyn
   expect(res.body.today).toMatchObject({ date: '2026-11-10', min: 4, max: 11, precipMax: 60 })
   expect(res.body.hours).toHaveLength(12)
   expect(res.body.hours[0].time).toBe('2026-11-10T10:00')   // from the current hour on
+  expect(res.body.days.map(d => d.date)).toEqual(['2026-11-10', '2026-11-11'])   // 7-day view: every forecast day
+  expect(res.body.days[1]).toMatchObject({ min: 2, max: 9, code: 3, precipMax: 10 })
 
   await request(app).get('/api/today/widgets/weather')
   expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -357,4 +360,25 @@ test('TD-21 stickies rhythm: 0 (on request) or 10 min … 1 day only; category f
     expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm } } })).status).toBe(400)
   }
   expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { other: 1 } } })).status).toBe(400)
+})
+
+test('TD-22 collapsed widgets: per breakpoint, only the sent one replaced; invalid input rejected; kept by config PUTs', async () => {
+  let res = await request(app).put('/api/today/collapsed').send({ bp: 'lg', tiles: ['agenda', 'notes', 'agenda'] })
+  expect(res.status).toBe(200)
+  expect(res.body.collapsed.lg).toEqual(['agenda', 'notes'])
+  res = await request(app).put('/api/today/collapsed').send({ bp: 'sm', tiles: ['weather'] })
+  expect(res.body.collapsed).toEqual({ lg: ['agenda', 'notes'], sm: ['weather'] })
+  expect((await request(app).get('/api/today/config')).body.collapsed).toEqual({ lg: ['agenda', 'notes'], sm: ['weather'] })
+  // A config PUT (other keys) keeps them
+  expect((await request(app).put('/api/today/config').send({ showBar: false })).status).toBe(200)
+  expect(store.today.collapsed).toEqual({ lg: ['agenda', 'notes'], sm: ['weather'] })
+  expect((await request(app).put('/api/today/collapsed').send({ bp: 'lg', tiles: [] })).body.collapsed.lg).toEqual([])
+  // Weather range (tile toggle): 1 or 7 days
+  expect((await request(app).put('/api/today/config').send({ widgets: { weather: { lat: 1, lon: 2, days: 7 } } })).status).toBe(200)
+  expect((await request(app).put('/api/today/config').send({ widgets: { weather: { days: 3 } } })).status).toBe(400)
+  for (const body of [{ bp: 'xxl', tiles: [] }, { tiles: [] }, { bp: 'lg' }, { bp: 'lg', tiles: ['Bad id'] }, { bp: 'lg', tiles: [1] }]) {
+    expect((await request(app).put('/api/today/collapsed').send(body)).status).toBe(400)
+  }
+  // collapsed is not part of the general config PUT
+  expect((await request(app).put('/api/today/config').send({ collapsed: { lg: [] } })).status).toBe(400)
 })

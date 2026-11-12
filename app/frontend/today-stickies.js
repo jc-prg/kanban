@@ -20,6 +20,7 @@ let _stkPendingRender = false;
 let _stkEdit = null;            // detail panel: { id, text, source, color, category, created, updated, timer, chain }
 let _stkAngles = null;          // rotation per stack slot: [top, 1st behind, 2nd, 3rd] — shifted on every flip
 let _stkFs = false;             // fullscreen: the tile covers the screen — grid of all stickies (small screens: the stack)
+let _stkGridTilts = [];         // fullscreen grid: random tilt per position (_stkGridAngles), kept for the session
 
 // ---- Pure helpers ----
 
@@ -160,12 +161,34 @@ function _stkPosBetween(prev, next) {
   return (prev + next) / 2;
 }
 
-/** Grid tilt of a sticky: stable per id (no jumping on refresh), ±1.5–5°, both directions. Pure. */
-function _stkGridAngle(id) {
-  let h = 2166136261;
-  for (const ch of String(id)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
-  const mag = 1.5 + (h % 1000) / 1000 * 3.5;
-  return Math.round((h & 1024 ? mag : -mag) * 10) / 10;
+/**
+ * Grid tilts per position: `angles` extended to `n` entries, each new one random (±1.5–6°, either
+ * direction, ≥ 1.5° away from its left neighbour). Existing positions keep theirs, so refreshes don't
+ * make the grid jump. Pure apart from `rnd`; returns a new array.
+ */
+function _stkGridAngles(angles, n, rnd = Math.random) {
+  const out = (angles || []).slice();
+  while (out.length < n) out.push(_stkNewAngle(out.length ? [out.at(-1)] : [], null, rnd));
+  return out;
+}
+
+/**
+ * Sticky text → HTML: escaped, then **bold**, *italic* / _italic_, __underline__, ~~strike~~ (within
+ * one line) and {-} as a hyphenation point (soft hyphen — the word may break there). Pure.
+ */
+function _stkFormat(text) {
+  return escHtml(String(text || ''))
+    .replace(/\{-\}/g, '\u00ad')
+    .replace(/\*\*(?=\S)([^\n]*?\S)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(?=\S)([^\n]*?\S)__/g, '<u>$1</u>')
+    .replace(/~~(?=\S)([^\n]*?\S)~~/g, '<s>$1</s>')
+    .replace(/(^|[^\w*])\*([^\s*](?:[^*\n]*?[^\s*])?)\*(?![\w*])/g, '$1<em>$2</em>')
+    .replace(/(^|[^\w])_([^\s_](?:[^_\n]*?[^\s_])?)_(?!\w)/g, '$1<em>$2</em>');
+}
+
+/** Plain text of a sticky for conversions: markers kept (Markdown), hyphenation points dropped. Pure. */
+function _stkStripHyphens(text) {
+  return String(text || '').replace(/\{-\}/g, '');
 }
 
 function _stkCategoryLabel(id) {
@@ -251,7 +274,7 @@ function _stkRerender() {
 function _stkPaperHtml(s, cls, tilt, extra = '') {
   const src = String(s.source || '').trim();
   return `<div class="today-stk-paper ${cls}" data-stk-id="${escHtml(s.id)}" style="--stk-color:${escHtml(s.color || _STK_COLORS[0])};--stk-tilt:${tilt}deg"${extra}>
-      <div class="today-stk-textbox"><div class="today-stk-text${s.category === 'quote' ? ' today-stk-text--quote' : ''}">${escHtml(s.text)}</div></div>
+      <div class="today-stk-textbox"><div class="today-stk-text${s.category === 'quote' ? ' today-stk-text--quote' : ''}">${_stkFormat(s.text)}</div></div>
       <div class="today-stk-foot"><span class="today-stk-cat">${escHtml(_stkCategoryLabel(s.category))}</span>${
         src ? `<span class="today-stk-src" title="${escHtml(src)}">${_stkLinkify(src)}</span>` : ''}</div>
     </div>`;
@@ -328,11 +351,12 @@ function _stkRender(body, data, el, { random = true } = {}) {
 /** Fullscreen on larger screens shows the grid; small screens keep the stack, just full-screen. */
 function _stkGridMode() { return _stkFs && !_todaySmall(); }
 
-/** All (filtered) stickies as a grid, in their order, each at its own stable angle. */
+/** All (filtered) stickies as a grid, in their order; each position has its own random tilt. */
 function _stkRenderGrid(host, vis) {
-  host.innerHTML = `<div class="today-stk-grid" role="list" aria-label="Stickies — click to open, drag to move">${vis.map(s =>
+  _stkGridTilts = _stkGridAngles(_stkGridTilts, vis.length);
+  host.innerHTML = `<div class="today-stk-grid" role="list" aria-label="Stickies — click to open, drag to move">${vis.map((s, i) =>
     `<div class="today-stk-cell" role="listitem" tabindex="0" data-stk-id="${escHtml(s.id)}" title="Click to open, drag to move">${
-      _stkPaperHtml(s, 'today-stk-paper--grid', _stkGridAngle(s.id))}</div>`).join('')}</div>`;
+      _stkPaperHtml(s, 'today-stk-paper--grid', _stkGridTilts[i])}</div>`).join('')}</div>`;
   host.querySelectorAll('.today-stk-textbox').forEach(_stkFitText);
 }
 
@@ -722,6 +746,12 @@ function _stkSyncDetail() {
   if (del) del.disabled = !ed.id;
 }
 
+/** Save button: save now and close the panel (an empty new sticky is just discarded). */
+async function _stkSaveAndClose(ed) {
+  await _stkFlush();
+  if (_stkEdit === ed) _closeDetail();
+}
+
 /** "Save & add another": the sticky goes out, a blank one in the same category takes the panel. */
 async function _stkSaveAndNew(ed) {
   if (!ed.text.trim()) return;
@@ -735,7 +765,6 @@ function _stkOpenDetail(sticky, { category } = {}) {
   const body    = document.getElementById('dashboardDetailBody');
   detail.querySelector('.dash-detail-footer')?.remove();
   document.getElementById('dashboardDetailEditBtn').style.display = 'none';
-  document.getElementById('dashboardDetailWebUrl').style.display  = 'none';
   // A previous sticky still waiting for its save goes out first
   if (_stkEdit?.timer) _stkFlush();
   _stkEdit = {
@@ -756,6 +785,7 @@ function _stkOpenDetail(sticky, { category } = {}) {
 
   body.innerHTML = `<div class="stk-detail">
       <textarea class="stk-detail-text" maxlength="5000" placeholder="A thought, a quote, an idea …" aria-label="Sticky text"></textarea>
+      <p class="stk-detail-hint">**bold** · *italic* · __underline__ · ~~strike~~ · {-} = hyphenation point</p>
       <div class="stk-detail-row">
         <label class="stk-detail-label" for="stkDetailSource">Source</label>
         <input id="stkDetailSource" class="new-board-input stk-detail-source" type="text" maxlength="500" placeholder="Author, book, URL …" autocomplete="off">
@@ -783,18 +813,22 @@ function _stkOpenDetail(sticky, { category } = {}) {
   });
   srcInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); _closeDetail(); } });
 
+  // Footer buttons are icon-only: the text goes into the tooltip / accessible name
+  const iconBtn = (attr, icon, label, cls = '') =>
+    `<button type="button" class="btn stk-icon-btn${cls ? ` ${cls}` : ''}" ${attr} title="${label}" aria-label="${label}">${icon(14, 14)}</button>`;
   const footer = document.createElement('div');
   footer.className = 'dash-detail-footer stk-detail-footer';
   footer.innerHTML = `<div class="dash-detail-footer-row stk-convert-row">
       <span class="dash-detail-footer-scope-label">Turn into</span>
-      <button type="button" class="btn" data-stk-convert="mail">${SVGICONS.email(12, 12)} Mail</button>
-      <button type="button" class="btn" data-stk-convert="event">${SVGICONS.date(12, 12)} Event</button>
-      <button type="button" class="btn" data-stk-convert="card">${SVGICONS.card(12, 12)} Card</button>
-      <button type="button" class="btn" data-stk-convert="note">${SVGICONS.noteDoc(12, 12)} Note page</button>
+      ${iconBtn('data-stk-convert="mail"', SVGICONS.email, 'Turn into a mail')}
+      ${iconBtn('data-stk-convert="event"', SVGICONS.date, 'Turn into an event')}
+      ${iconBtn('data-stk-convert="card"', SVGICONS.card, 'Turn into a card')}
+      ${iconBtn('data-stk-convert="note"', SVGICONS.noteDoc, 'Turn into a note page')}
     </div>
     <div class="dash-detail-footer-row stk-detail-actions">
-      ${ed.isNew ? `<button type="button" class="btn" data-stk-save-new="1" title="Save and start the next sticky (Ctrl+Shift+Enter)">${SVGICONS.create(12, 12)} Save &amp; add another</button>` : ''}
-      <button type="button" class="btn btn-confirm-danger" data-stk-delete="1">${SVGICONS.delete(12, 12)} Delete</button>
+      ${iconBtn('data-stk-save="1"', SVGICONS.save, 'Save and close (Ctrl+Enter)', 'btn-accent')}
+      ${ed.isNew ? iconBtn('data-stk-save-new="1"', SVGICONS.create, 'Save and add another (Ctrl+Shift+Enter)') : ''}
+      ${iconBtn('data-stk-delete="1"', SVGICONS.delete, 'Delete', 'btn-confirm-danger')}
     </div>`;
   detail.querySelector('.modal').appendChild(footer);
 
@@ -824,6 +858,7 @@ function _stkOpenDetail(sticky, { category } = {}) {
     if (conv) _stkConvert(conv.dataset.stkConvert, ed);
     if (e.target.closest('[data-stk-delete]')) _stkDelete(ed);
     if (e.target.closest('[data-stk-save-new]')) _stkSaveAndNew(ed);
+    if (e.target.closest('[data-stk-save]')) _stkSaveAndClose(ed);
   });
 
   detail.style.display = '';
@@ -872,7 +907,7 @@ async function _stkAfterConvert(id, what) {
 async function _stkConvert(kind, ed) {
   await _stkFlush();
   if (!ed.id) return;
-  const sticky = { id: ed.id, text: ed.text, source: ed.source, category: ed.category };
+  const sticky = { id: ed.id, text: _stkStripHyphens(ed.text), source: ed.source, category: ed.category };
   const { title, body } = _stkSplit(sticky.text);
   const md    = _stkMarkdown(sticky, body);
   const plain = _stkPlain(sticky, body);

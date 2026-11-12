@@ -446,7 +446,7 @@
     el.addEventListener('click', async () => {
       closeSearch();
       await _initOverlayHost();
-      _openMailDetail(acc.id, msg.id, acc.webInterfaceUrl || '', msg.folder || undefined);
+      _openMailDetail(acc.id, msg.id, msg.folder || undefined);
     });
     return el;
   }

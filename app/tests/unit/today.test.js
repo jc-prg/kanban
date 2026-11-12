@@ -491,11 +491,22 @@ test('TU-32 Stickies order: pos wins, else newest first; drop position between n
   expect(ctx._stkPosBetween(null, 5)).toBe(4)
   expect(ctx._stkPosBetween(5, null)).toBe(6)
   expect(ctx._stkPosBetween(null, null)).toBe(0)
-  // Angles: same id → same angle; ±1.5–5°; both directions among a few ids
-  const ids = ['s-000000000001', 's-000000000002', 's-000000000003', 's-00000000000a', 's-0000000000ff', 's-123456789abc']
-  const angles = ids.map(id => ctx._stkGridAngle(id))
-  expect(angles).toEqual(ids.map(id => ctx._stkGridAngle(id)))
-  for (const a of angles) { expect(Math.abs(a)).toBeGreaterThanOrEqual(1.5); expect(Math.abs(a)).toBeLessThanOrEqual(5) }
+  // Grid angles per position: random, ±1.5–6°, both directions; existing positions kept when extended
+  const angles = plain(ctx._stkGridAngles([], 40))
+  expect(angles).toHaveLength(40)
+  for (const a of angles) { expect(Math.abs(a)).toBeGreaterThanOrEqual(1.5); expect(Math.abs(a)).toBeLessThanOrEqual(6) }
   expect(angles.some(a => a > 0) && angles.some(a => a < 0)).toBe(true)
-  expect(new Set(angles).size).toBeGreaterThan(3)
+  for (let i = 1; i < angles.length; i++) expect(Math.abs(angles[i] - angles[i - 1])).toBeGreaterThanOrEqual(1.5)
+  const more = plain(ctx._stkGridAngles(angles.slice(0, 5), 8))
+  expect(more.slice(0, 5)).toEqual(angles.slice(0, 5))
+  expect(more).toHaveLength(8)
+})
+
+test('TU-33 Stickies: _stkFormat — bold, italic, underline, strike, {-} hyphenation, HTML escaped', () => {
+  expect(ctx._stkFormat('**bold** *it* _it2_ __under__ ~~gone~~')).toBe('<strong>bold</strong> <em>it</em> <em>it2</em> <u>under</u> <s>gone</s>')
+  expect(ctx._stkFormat('Donau{-}dampf{-}schiff')).toBe('Donau\u00addampf\u00adschiff')
+  expect(ctx._stkFormat('<b>x</b> & snake_case_name, 2 * 3 * 4')).toBe('&lt;b&gt;x&lt;/b&gt; &amp; snake_case_name, 2 * 3 * 4')
+  expect(ctx._stkFormat('** not bold ** and *a*')).toBe('** not bold ** and <em>a</em>')
+  expect(ctx._stkFormat('line *one\ntwo*')).toBe('line *one\ntwo*')   // markers don't span lines
+  expect(ctx._stkStripHyphens('Silben{-}trennung')).toBe('Silbentrennung')
 })

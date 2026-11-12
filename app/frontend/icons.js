@@ -137,6 +137,11 @@ function _svgExpandAll(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 1.5 9 4.5M3 7.5 6 10.5 9 7.5"/></svg>`;
 }
 
+// One chevron pointing down — open a collapsed widget
+function _svgChevronDown(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>`;
+}
+
 // Two chevrons pointing together — collapse all
 function _svgCollapseAll(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5 6 4.5 9 1.5M3 10.5 6 7.5 9 10.5"/></svg>`;
@@ -409,6 +414,7 @@ const SVGICONS = {
   search:         _svgSearch,
   stats:          _svgStats,
   expandAll:      _svgExpandAll,
+  chevronDown:    _svgChevronDown,
   collapseAll:    _svgCollapseAll,
   accordion:      _svgAccordion,
   eye:            _svgEye,

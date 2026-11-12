@@ -173,7 +173,7 @@ function _tsEventHtml(ev) {
 }
 
 function _tsMailHtml({ acc, msg }) {
-  return `<div class="today-mail-row dashboard-mail-item" data-account-id="${escHtml(acc.id)}" data-msg-id="${escHtml(msg.id)}" data-folder="${escHtml(msg.folder || '')}"${msg.unread ? ' data-unread="1"' : ''} data-web-url="${escHtml(acc.webInterfaceUrl || '')}"${acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : ''}>
+  return `<div class="today-mail-row dashboard-mail-item" data-account-id="${escHtml(acc.id)}" data-msg-id="${escHtml(msg.id)}" data-folder="${escHtml(msg.folder || '')}"${msg.unread ? ' data-unread="1"' : ''}${acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : ''}>
     <span class="today-row-main"><span class="today-row-title card-text">${msg.unread ? '<strong>' : ''}${escHtml(msg.subject || '(no subject)')}${msg.unread ? '</strong>' : ''}</span>
     <span class="today-row-meta"><span>${escHtml(_mailDisplayName(msg.from))}</span><span class="today-search-folder" title="${escHtml(acc.label)} · ${escHtml(msg.folder || '')}">${escHtml(msg.folder || '')}</span><span class="today-row-date">${escHtml(msg.date ? _fmtRecentDate(msg.date) : '')}</span></span></span>
   </div>`;

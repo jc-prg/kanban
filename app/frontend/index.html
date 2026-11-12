@@ -79,7 +79,6 @@
       <div class="dashboard-detail-titlebar panel-hdr">
         <span id="dashboardDetailTitle" class="dashboard-detail-title panel-hdr-title"></span>
         <a class="modal-fs-btn" id="dashboardDetailEditBtn" href="#" title="Edit card" style="position:static;opacity:0.55;display:none"><span data-icon="edit"></span></a>
-        <a class="modal-fs-btn" id="dashboardDetailWebUrl" href="#" target="_blank" rel="noopener noreferrer" title="Open in Webmail" style="position:static;opacity:0.55;display:none">&#x2197;</a>
         <button class="modal-fs-btn" id="dashboardDetailFsBtn" title="Full screen" style="position:static;opacity:0.55"><span data-icon="fullscreen"></span></button>
         <button class="dashboard-detail-close" id="dashboardDetailClose" title="Close"><span data-icon="close"></span></button>
       </div>
@@ -337,7 +336,9 @@
 </div>
 
 <div id="mailContextMenu" class="context-menu" style="display:none">
-  <a class="ctx-item ctx-item--link" id="mailCtxWebmail" href="#" target="_blank" rel="noopener noreferrer" style="display:none"><span data-icon="openLink"></span>  Open webmail</a>
+  <button class="ctx-item" id="mailCtxOpen"><span data-icon="email"></span>  Open</button>
+  <button class="ctx-item" id="mailCtxReply"><span data-icon="reply"></span>  Reply</button>
+  <button class="ctx-item" id="mailCtxForward"><span data-icon="forward"></span>  Forward</button>
   <div class="ctx-submenu-trigger ctx-item" id="mailCtxCreateCardWrap">
     <span data-icon="edit"></span>  Create card…
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>

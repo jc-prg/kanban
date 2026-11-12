@@ -47,6 +47,7 @@ function normaliseForecast(raw, label) {
     current: { time: cur.time || null, temp: cur.temperature_2m ?? null, code: cur.weather_code ?? null, isDay: cur.is_day !== 0 },
     today:    day(0),
     tomorrow: day(1),
+    days:     (daily.time || []).map((_, i) => day(i)),   // today + the next 6 (7-day view)
     hours,
   };
 }
@@ -61,7 +62,7 @@ async function fetchWeather(settings = {}) {
   if (hit && Date.now() - hit.at < CACHE_MS) return { ...hit.data, label: settings.label || '' };
 
   const qs = new URLSearchParams({
-    latitude: String(lat), longitude: String(lon), timezone: 'auto', forecast_days: '2',
+    latitude: String(lat), longitude: String(lon), timezone: 'auto', forecast_days: '7',
     current: 'temperature_2m,weather_code,is_day',
     hourly:  'temperature_2m,precipitation_probability,weather_code',
     daily:   'temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset',

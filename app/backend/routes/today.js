@@ -127,6 +127,20 @@ router.put('/today/config', writeRateLimit, withHandler(async (req, res) => {
   res.json({ ok: true, config: stripSecrets(merged) });
 }));
 
+// Widgets collapsed to their header, per breakpoint (the same on every device of that size).
+// Only the sent breakpoint is replaced, so devices of other sizes don't overwrite each other.
+const _TILE_ID = /^[a-z0-9-]{1,32}$/;
+router.put('/today/collapsed', writeRateLimit, withHandler(async (req, res) => {
+  const { bp, tiles } = req.body || {};
+  if (!BREAKPOINTS.includes(bp)) return res.status(400).json({ error: `bp must be one of ${BREAKPOINTS.join(', ')}` });
+  if (!Array.isArray(tiles) || tiles.length > 50 || !tiles.every(t => typeof t === 'string' && _TILE_ID.test(t)))
+    return res.status(400).json({ error: 'tiles must be a list of up to 50 widget ids' });
+  const stored = await _loadConfig();
+  const collapsed = { ...(stored.collapsed || {}), [bp]: [...new Set(tiles)] };
+  await saveTodayConfig({ ...stored, collapsed });
+  res.json({ ok: true, collapsed });
+}));
+
 router.post('/today/config/reset-layouts', writeRateLimit, withHandler(async (req, res) => {
   const merged = { ...(await _loadConfig()), layouts: defaultTodayConfig().layouts };
   await saveTodayConfig(merged);

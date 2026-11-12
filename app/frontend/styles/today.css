@@ -25,6 +25,9 @@
    fall back to the light default — colour them from the theme tokens instead */
 #today, #today * { scrollbar-color: var(--scrollbar) transparent; }
 #today:hover, #today *:hover { scrollbar-color: var(--scrollbar-active) transparent; }
+/* Column scrollbars: close to the page background while idle, the default colour while the pointer is over the column */
+#today .today-col { scrollbar-color: color-mix(in srgb, var(--scrollbar-active) 15%, var(--page-bg)) transparent; }
+#today .today-col:hover { scrollbar-color: var(--scrollbar-active) transparent; }
 
 .today-muted { color: var(--text-muted); font-weight: normal; }
 
@@ -334,9 +337,15 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   background: var(--surface); color: var(--text);
   font-size: 1rem; line-height: 1; cursor: pointer;
   box-shadow: 0 0 0 6px color-mix(in srgb, var(--bg) 70%, transparent);
+  opacity: 0.5;
+  transition: opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 .today-hscroll-btn[hidden] { display: none; }
-.today-hscroll-btn:hover { border-color: var(--accent); color: var(--accent); }
+/* Hover: fully visible, accent-coloured circle and arrow */
+.today-hscroll-btn:hover, .today-hscroll-btn:focus-visible {
+  opacity: 1; border-color: var(--accent); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
 .today-hscroll-btn--left  { left: 0; }
 .today-hscroll-btn--right { right: 0; }
 .today-wx-hour {
@@ -347,6 +356,12 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 }
 .today-wx-hour svg { color: var(--text-muted); }
 .today-wx-precip { font-size: 0.65rem; color: var(--link); background: linear-gradient(to top, color-mix(in srgb, var(--link) 25%, transparent) var(--p), transparent var(--p)); border-radius: 3px; padding: 0 3px; }
+.today-wx-week { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+.today-wx-wday { display: grid; grid-template-columns: minmax(5.5em, 1fr) 22px auto 3.2em; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; font-size: 0.8rem; }
+.today-wx-wday:nth-child(odd) { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.today-wx-wday svg { color: var(--text-muted); }
+.today-wx-wtemp { text-align: right; font-variant-numeric: tabular-nums; }
+.today-wx-wday .today-wx-precip { justify-self: end; }
 .today-wx-tomorrow { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 0.78rem; }
 
 /* ---- CV-App ---- */
@@ -711,6 +726,10 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 #today:not(.today--editing) .today-tile.today-tile--collapsed { flex: 0 0 auto; min-height: 0; max-height: none; }
 #today:not(.today--editing) .today-tile--collapsed .today-tile-body { display: none; }
 #today:not(.today--editing) .today-tile--collapsed .today-tile-header { border-radius: 8px; border-bottom-color: transparent; }
+/* Collapsed: the header's action icons give way to one icon that opens the widget */
+.today-tile-expand { display: none; margin-left: auto; }
+#today:not(.today--editing) .today-tile--collapsed .today-tile-actions { display: none; }
+#today:not(.today--editing) .today-tile--collapsed .today-tile-expand { display: inline-flex; }
 
 /* Column whose tiles need more than its height (it scrolls anyway — _todayFitColumns): an
    "available" tile shows all its content, like "fit content" */
@@ -926,10 +945,12 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
 .today-stk-text--quote { font-style: italic; }
 .today-stk-text--quote::before { content: '\201C'; }
 .today-stk-text--quote::after  { content: '\201D'; }
+/* Footer font scales with the paper (container query units): 0.68rem at 250 px */
+.today-stk-paper { container-type: inline-size; }
 .today-stk-foot {
   position: absolute; left: 9%; right: 9%; bottom: 5%;
   display: flex; align-items: baseline; gap: 0.5em; min-width: 0;
-  font-size: 0.68rem; letter-spacing: 0.06em;
+  font-size: max(5px, 4.352cqw); letter-spacing: 0.06em;   /* 4.352cqw = 10.88 px (0.68rem) at 250 px */
 }
 .today-stk-cat { flex-shrink: 0; text-transform: uppercase; opacity: 0.55; }
 /* Source after the category, same font (case as typed); cut with … when there is no room */

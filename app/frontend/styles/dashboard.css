@@ -748,6 +748,9 @@
 .stk-cat[aria-checked="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .stk-detail-source { flex: 1; min-width: 0; }
 .stk-detail-meta { margin: 0; font-size: 0.75rem; color: var(--text-muted); }
+.stk-detail-hint { margin: -6px 0 0; font-size: 0.7rem; color: var(--text-muted); opacity: 0.8; }
+/* Footer: icon-only buttons (label in the tooltip) */
+.stk-icon-btn { width: 34px; height: 30px; padding: 0; justify-content: center; }
 .stk-convert-row { flex-wrap: wrap; }
 .stk-convert-row .btn { display: inline-flex; align-items: center; gap: 5px; }
 .stk-detail-actions { justify-content: flex-end; }

@@ -365,10 +365,14 @@ const TODAY_TILES = {
   },
   weather: {
     title: 'Weather',
-    desc: 'Forecast for the rest of the day (Open-Meteo), updated every 15 minutes',
+    desc: 'Forecast for the rest of the day or the next 7 days (Open-Meteo), updated every 15 minutes',
     settings: true,
     load: () => _todayWeather(),
     render: _todayRenderWeather,
+    actions: () => [
+      { label: '7 days', title: _todayWeatherDays(_todayCfg) === 7 ? 'Showing 7 days — click for today' : 'Show the 7-day forecast',
+        active: _todayWeatherDays(_todayCfg) === 7, run: () => _todaySetWeatherDays(_todayWeatherDays(_todayCfg) === 7 ? 1 : 7) },
+    ],
   },
   cvapp: {
     title: 'Applications',
@@ -610,6 +614,7 @@ function _todayRelayout() {
   _todayBp = bp;
   _todayLayout = layout;
   if (changed) {
+    _todayApplyCollapsed();
     const before = new Set([...document.querySelectorAll('#todayGrid .today-tile')].map(el => el.dataset.tile));
     _todayApplyLayout(layout);
     // Tiles that just became visible need data
@@ -628,6 +633,7 @@ function _todayTileEl(id) {
   el.innerHTML = `<div class="today-tile-header panel-hdr">
       <span class="today-tile-title panel-hdr-title">${escHtml(def.title)}</span><span class="today-tile-count"></span>
       <span class="today-tile-actions"></span>
+      <button class="today-tile-btn today-tile-expand" title="Open widget" aria-label="Open widget">${SVGICONS.chevronDown(14, 14)}</button>
       <span class="today-tile-edit">
         <span class="today-tile-handle" title="Drag to move">${SVGICONS.dragHandle(12, 12)}</span>
         <select class="today-tile-size" title="Height relative to the column">${TODAY_SIZES.map(s => `<option value="${s}">${_TODAY_SIZE_LABEL[s] || s}</option>`).join('')}</select>
@@ -646,15 +652,34 @@ function _todayTileEl(id) {
   };
   header.addEventListener('dblclick', toggle);
   header.addEventListener('click', toggle);
+  // Collapsed: the header shows only this icon instead of the tile actions
+  el.querySelector('.today-tile-expand').addEventListener('click', e => { e.stopPropagation(); _todaySetCollapsed(id, false); });
   el.classList.toggle('today-tile--collapsed', _todayCollapsed().has(id));
   _todayTileEls.set(id, el);
   return el;
 }
 
-/** Tiles collapsed to their header (double-click); per browser. */
-function _todayCollapsed() {
+/**
+ * Tiles collapsed to their header (double-click / tap) — per breakpoint in the Today config
+ * (`collapsed: { xl?, lg?, md?, sm? }`), so every device of a size opens in the same state.
+ * The older per-browser list is the fallback for a size that was never saved.
+ */
+function _todayCollapsed(bp = _todayBpFor(window.innerWidth)) {
+  const saved = _todayCfg?.collapsed?.[bp];
+  if (Array.isArray(saved)) return new Set(saved);
   try { return new Set(JSON.parse(localStorage.getItem('today-collapsed') || '[]')); } catch { return new Set(); }
 }
+
+/** Show the collapsed state of the current size (after a size change or a config reload). */
+function _todayApplyCollapsed() {
+  const set = _todayCollapsed();
+  for (const [tid, el] of _todayTileEls) el.classList.toggle('today-tile--collapsed', set.has(tid));
+  _todayScheduleFit();
+}
+
+// Saves run one after another (debounced); a config reload doesn't overwrite a change still being saved
+let _todayCollapseTimer = null, _todayCollapseSave = Promise.resolve(), _todayCollapsePending = 0;
+const _todayCollapseBps = new Set();   // sizes changed since the last save
 
 function _todaySetCollapsed(id, collapsed) {
   const set = _todayCollapsed();
@@ -667,9 +692,38 @@ function _todaySetCollapsed(id, collapsed) {
 }
 
 function _todayStoreCollapsed(set) {
-  try { localStorage.setItem('today-collapsed', JSON.stringify([...set])); } catch { /* ignore */ }
-  for (const [tid, el] of _todayTileEls) el.classList.toggle('today-tile--collapsed', set.has(tid));
-  _todayScheduleFit();
+  const bp = _todayBpFor(window.innerWidth);
+  const tiles = [...set];
+  _todayCfg = { ...(_todayCfg || {}), collapsed: { ...(_todayCfg?.collapsed || {}), [bp]: tiles } };
+  _todayApplyCollapsed();
+  if (_todayCollapseTimer) clearTimeout(_todayCollapseTimer);   // replaced: still one save pending
+  else _todayCollapsePending++;
+  _todayCollapseBps.add(bp);
+  _todayCollapseTimer = setTimeout(() => {
+    _todayCollapseTimer = null;
+    const changes = [..._todayCollapseBps].map(b => ({ bp: b, tiles: _todayCfg.collapsed[b] }));
+    _todayCollapseBps.clear();
+    _todayCollapseSave = _todayCollapseSave.then(async () => {
+      for (const body of changes) {
+        try {
+          const res = await fetch('/api/today/collapsed', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+        } catch (err) {
+          console.warn('Could not save the collapsed widgets:', err.message);
+        }
+      }
+    }).finally(() => { _todayCollapsePending--; });
+  }, 400);
+}
+
+/** Collapsed state saved on other devices: taken over on every Today reload (unless a change is being saved). */
+async function _todaySyncCollapsed() {
+  let cfg;
+  try { cfg = await fetch('/api/today/config').then(r => r.ok ? r.json() : null); } catch { return; }
+  if (!cfg || _todayCollapsePending || _todayEdit) return;
+  if (JSON.stringify(cfg.collapsed || {}) === JSON.stringify(_todayCfg?.collapsed || {})) return;
+  _todayCfg = { ...(_todayCfg || {}), collapsed: cfg.collapsed || {} };
+  _todayApplyCollapsed();
 }
 
 /** Small screens: the widget-mode button is shown and tile headers toggle on a single tap. */
@@ -819,7 +873,9 @@ function _todayFitColumns() {
       return {
         size: el.dataset.size, headerH,
         collapsed: el.classList.contains('today-tile--collapsed'),
-        contentH: el.classList.contains('today-tile--scales') ? 0 : el.querySelector('.today-tile-body')?.scrollHeight || 0,
+        // Scaling content (Stickies) fits any fixed height — but "fit content" still takes its full height
+        contentH: el.classList.contains('today-tile--scales') && !el.classList.contains('today-tile--auto')
+          ? 0 : el.querySelector('.today-tile-body')?.scrollHeight || 0,
       };
     });
     const over = !_todayEdit && els.length > 0 && colH > 0 && _todayColumnNeed(tiles, colH, gap) > colH + 1;
@@ -844,6 +900,7 @@ function _todayScheduleFit() {
 // While the Search tile is searching (today-search.js#_tsBusy) nothing else reloads: full loads and
 // partial refreshes are collected here and run once when the search is done (_todayRunDeferred).
 let _todayDeferred = null;   // { load: false | { quiet }, kinds: Set }
+let _todayLoadedOnce = false;
 
 function _todaySearchBusy() {
   return typeof _tsBusy === 'function' && _tsBusy();
@@ -879,6 +936,8 @@ async function loadToday({ quiet = false } = {}) {
   fetchedAt.textContent = 'Loading…';
   _todayRenderBar();
   const ids = (_todayEdit?.draft || _todayLayout)?.tiles.map(t => t.id) || [];
+  if (_todayLoadedOnce) _todaySyncCollapsed();
+  _todayLoadedOnce = true;
   const results = await Promise.all(ids.map(id => _todayLoadTile(id, { keepState: quiet })));
   fetchedAt.textContent = (results.includes(false) ? 'Partial load — ' : 'Refreshed at ') +
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1280,7 +1339,7 @@ function _todayRenderAttention(body, data, el) {
   const cardsHtml = list => list.slice(0, 15).map(it => sw(_todayKanbanCardHtml(it))).join('');
   const mailHtml = ({ acc, msg }) => {
     const subject = escHtml(msg.subject || '(no subject)');
-    return sw(`<div class="today-mail-row dashboard-mail-item" data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}"${msg.unread ? ' data-unread="1"' : ''}${msg.flagColor ? ` data-flag="${escHtml(msg.flagColor)}"` : ''} data-web-url="${escHtml(acc.webInterfaceUrl || '')}"${acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : ''}>
+    return sw(`<div class="today-mail-row dashboard-mail-item" data-account-id="${escHtml(acc.accountId)}" data-msg-id="${escHtml(msg.id)}"${msg.unread ? ' data-unread="1"' : ''}${msg.flagColor ? ` data-flag="${escHtml(msg.flagColor)}"` : ''}${acc.color ? ` style="--card-color:${escHtml(acc.color)}"` : ''}>
         <span class="today-row-main"><span class="today-row-title card-text">${_mailFlagHtml(msg.flagColor, 11)}${msg.unread ? `<strong>${subject}</strong>` : subject}</span>
         <span class="today-row-meta"><span>${escHtml(_mailDisplayName(msg.from))}</span><span class="today-row-date">${escHtml(msg.date ? _fmtRecentDate(msg.date) : '')}</span></span></span>
       </div>`);
@@ -1535,11 +1594,52 @@ function _todayWireSwipe(body) {
 
 // ---- Weather ----
 
+/** Weather tile range: 1 = today (current state + hours), 7 = the 7-day forecast. */
+function _todayWeatherDays(cfg) {
+  return cfg?.widgets?.weather?.days === 7 ? 7 : 1;
+}
+
+async function _todaySetWeatherDays(days) {
+  const widgets = { ...(_todayCfg.widgets || {}), weather: { ...(_todayCfg.widgets?.weather || {}), days } };
+  _todayCfg = { ..._todayCfg, widgets };
+  _todaySetTileActions('weather');
+  _todayLoadTile('weather');   // the forecast is cached (_todayWeather): no new request
+  try {
+    const res = await fetch('/api/today/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ widgets }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    _todayCfg = data.config;
+  } catch (err) {
+    showMessage(`Could not save the weather range: ${err.message}`);
+  }
+}
+
+/** 7-day view: one row per day — weekday, icon, min / max, rain chance. */
+function _todayWeatherWeekHtml(days, t) {
+  const fmt = d => {
+    const dt = new Date(`${d.date}T12:00:00`);
+    return d.date === _todayToday() ? 'Today' : dt.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'numeric' });
+  };
+  return `<div class="today-wx-week">${days.filter(Boolean).map(d => {
+    const k = _todayWeatherKind(d.code);
+    return `<div class="today-wx-wday" title="${escHtml(k.label)}"><span class="today-wx-wname">${escHtml(fmt(d))}</span>${SVGICONS[k.icon](18, 18)}`
+      + `<span class="today-wx-wtemp">${t(d.min)} / ${t(d.max)}</span>`
+      + `<span class="today-wx-precip" style="--p:${d.precipMax ?? 0}%">${d.precipMax ?? 0}%</span></div>`;
+  }).join('')}</div>`;
+}
+
 function _todayRenderWeather(body, data, el) {
   _todaySetCount(el, 0);
   const kind = _todayWeatherKind(data.current.code, data.current.isDay);
   const t = v => v == null ? '–' : `${Math.round(v)}°`;
   const hm = s => (s || '').slice(11, 16);
+  if (_todayWeatherDays(_todayCfg) === 7 && data.days?.length) {
+    body.innerHTML = `<div class="today-wx">
+        <span class="today-wx-big">${SVGICONS[kind.icon](32, 32)}</span>
+        <div class="today-wx-now"><strong>${t(data.current.temp)}</strong><span class="today-muted">${escHtml(data.label || '')}</span></div>
+      </div>${_todayWeatherWeekHtml(data.days, t)}`;
+    return;
+  }
   const tomorrow = data.tomorrow ? _todayWeatherKind(data.tomorrow.code) : null;
   body.innerHTML = `<div class="today-wx">
       <span class="today-wx-big">${SVGICONS[kind.icon](40, 40)}</span>
@@ -2084,7 +2184,7 @@ function _todayWireDelegation() {
     const ev = e.target.closest('.today-ev[data-uid]');
     if (ev) { _openEventDetail(ev.dataset.accountId, ev.dataset.uid, ev.dataset.webUrl || ''); return; }
     const mail = e.target.closest('.today-mail-row[data-msg-id]');
-    if (mail) _openMailDetail(mail.dataset.accountId, mail.dataset.msgId, mail.dataset.webUrl || '', mail.dataset.folder || undefined);
+    if (mail) _openMailDetail(mail.dataset.accountId, mail.dataset.msgId, mail.dataset.folder || undefined);
   });
 
   grid.addEventListener('contextmenu', e => {
@@ -2099,7 +2199,7 @@ function _todayWireDelegation() {
     e.stopPropagation();
     if (c?.entry) showDashboardContextMenu(e.clientX, e.clientY, c.entry.board, c.entry.card);
     else if (ev) _showCalEventContextMenu(e, ev.dataset.accountId, ev.dataset.uid, ev.dataset.webUrl || '');
-    else _showMailContextMenu(e.clientX, e.clientY, mail.dataset.accountId, mail.dataset.msgId, mail.dataset.unread === '1', mail.dataset.webUrl || '', mail.dataset.flag || null);
+    else _showMailContextMenu(e.clientX, e.clientY, mail.dataset.accountId, mail.dataset.msgId, mail.dataset.unread === '1', mail.dataset.flag || null);
   });
 
   // Tile edit controls (size / hide); drag is pointer-based
@@ -2734,7 +2834,7 @@ function initTodaySettings() {
         const p = data.results[+btn.dataset.i];
         const cfg = _todaySettingsCfg();
         try {
-          await _todaySaveSettings({ widgets: { ...(cfg.widgets || {}), weather: { lat: p.lat, lon: p.lon, label: p.name } } });
+          await _todaySaveSettings({ widgets: { ...(cfg.widgets || {}), weather: { ...(cfg.widgets?.weather?.days ? { days: cfg.widgets.weather.days } : {}), lat: p.lat, lon: p.lon, label: p.name } } });
           results.innerHTML = '';
           loadTodaySettings();
         } catch (err) { report(err.message, false); }

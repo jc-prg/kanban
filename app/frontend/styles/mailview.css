@@ -478,6 +478,12 @@ button.mv-att-name:hover { color: var(--accent); }
   outline: none;
 }
 .mv-editor:focus { border-color: var(--accent); }
+/* Dark mode: the message is written on white — as the recipient will most likely see it */
+@media (prefers-color-scheme: dark) {
+  .mv-editor { background: #fff; color: #1a1a2e; color-scheme: light; caret-color: #1a1a2e; }
+  .mv-editor blockquote { border-left-color: #d0d0de; color: #707088; }
+  .mv-editor a { color: #2563eb; }
+}
 .mv-editor p { margin: 0; }
 .mv-editor blockquote { margin: 6px 0; padding: 0 0 0 12px; border-left: 3px solid var(--border); color: var(--text-muted); }
 .mv-editor ul, .mv-editor ol { margin: 4px 0; padding-left: 24px; }

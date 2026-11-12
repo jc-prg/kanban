@@ -265,25 +265,27 @@ function _foldAddresses(str) {
 }
 
 // folder: where the message is (search results); default = the account folder
-function _openMailDetail(accountId, msgId, webUrl, folder) {
+function _openMailDetail(accountId, msgId, folder) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
-  const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
+  const editBtn   = document.getElementById('dashboardDetailEditBtn');
   detail.querySelector('.dash-detail-footer')?.remove();
   const _mailAccColor = _mailAccountsMeta.find(a => a.accountId === accountId)?.color;
   const _mailTitlebar = detail.querySelector('.dashboard-detail-titlebar');
   if (_mailAccColor) _mailTitlebar.style.setProperty('--detail-accent', _mailAccColor);
   else _mailTitlebar.style.removeProperty('--detail-accent');
-  document.getElementById('dashboardDetailEditBtn').style.display = 'none';
+  // Edit = open the mail in the mail view (href = deep link by Message-ID once loaded, for new tabs)
+  editBtn.href = `${BASE_PATH}/today?mail=${encodeURIComponent(accountId)}`;
+  editBtn.onclick = e => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    _closeDetail();
+    _openMailInView(accountId, msgId, folder);
+  };
+  editBtn.title = 'Open in mail view';
+  editBtn.style.display = '';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   body.innerHTML = '';
-  if (webUrl) {
-    webUrlBtn.href = webUrl;
-    webUrlBtn.title = 'Open in Webmail';
-    webUrlBtn.style.display = '';
-  } else {
-    webUrlBtn.style.display = 'none';
-  }
   detail.style.display = '';
   { const modal = detail.querySelector('.modal');
     const maxH  = modal.offsetHeight;
@@ -297,6 +299,10 @@ function _openMailDetail(accountId, msgId, webUrl, folder) {
     .then(msg => {
       if (!msg) { body.innerHTML = '<p class="dashboard-empty">Message not found.</p>'; return; }
       document.getElementById('dashboardDetailTitle').textContent = msg.subject;
+      if (msg.messageId) {
+        const qs = new URLSearchParams({ mail: accountId, folder: folder || _mailAccountFolder(accountId), mid: msg.messageId });
+        editBtn.href = `${BASE_PATH}/today?${qs}`;
+      }
 
       const rows = [];
       if (msg.from)    rows.push(['From',    _foldAddresses(msg.from) + _mailTrustedBadgeHtml(msg)]);
@@ -346,6 +352,21 @@ function _openMailDetail(accountId, msgId, webUrl, folder) {
 
     })
     .catch(() => { body.innerHTML = '<p class="dashboard-empty">Failed to load message.</p>'; });
+}
+
+function _mailAccountFolder(accountId) {
+  return _mailAccountsMeta.find(a => a.accountId === accountId)?.folder || 'INBOX';
+}
+
+/**
+ * Open a mail in the mail view (folder default: the account folder); `mode` 'reply' | 'replyall' |
+ * 'forward' then opens the compose form for it.
+ */
+async function _openMailInView(accountId, msgId, folder, mode = null) {
+  await _initOverlayHost();
+  openMailView(accountId, folder || _mailAccountFolder(accountId));
+  await _mvOpenMessage(msgId);
+  if (mode && _mvMsg && String(_mvMsg.id) === String(msgId)) _mvOpenCompose(mode);
 }
 
 /**
@@ -871,7 +892,6 @@ async function _openCardDetail(board, card) {
   const detail    = document.getElementById('dashboardDetail');
   const body      = document.getElementById('dashboardDetailBody');
   const editBtn   = document.getElementById('dashboardDetailEditBtn');
-  const webUrlBtn = document.getElementById('dashboardDetailWebUrl');
   detail.querySelector('.dash-detail-footer')?.remove();
   const _cardTitlebar = detail.querySelector('.dashboard-detail-titlebar');
   if (card.color) _cardTitlebar.style.setProperty('--detail-accent', card.color);
@@ -889,7 +909,6 @@ async function _openCardDetail(board, card) {
   };
   editBtn.title = 'Edit card';
   editBtn.style.display = '';
-  webUrlBtn.style.display = 'none';
   body.innerHTML = '';
   detail.style.display = '';
   { const modal = detail.querySelector('.modal');
@@ -1068,7 +1087,6 @@ async function _openNoteDetail(board, pageId) {
   const editBtn   = document.getElementById('dashboardDetailEditBtn');
   detail.querySelector('.dash-detail-footer')?.remove();
   detail.querySelector('.dashboard-detail-titlebar').style.removeProperty('--detail-accent');
-  document.getElementById('dashboardDetailWebUrl').style.display = 'none';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   editBtn.href = `${BASE_PATH}/board/${encodeURIComponent(board)}#note:${encodeURIComponent(pageId)}`;
   editBtn.onclick = e => {
@@ -1438,7 +1456,6 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
   const body      = document.getElementById('dashboardDetailBody');
   const editBtn   = document.getElementById('dashboardDetailEditBtn');
   editBtn.style.display = 'none';
-  document.getElementById('dashboardDetailWebUrl').style.display = 'none';
   document.getElementById('dashboardDetailTitle').textContent = 'Loading\u2026';
   detail.querySelector('.dash-detail-footer')?.remove();
   body.innerHTML = '';
@@ -1639,7 +1656,7 @@ async function _mailFlag(accountId, msgId, color) {
 
 // ---- Mail context menu ----
 
-function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl, flag = null) {
+function _showMailContextMenu(x, y, accountId, msgId, unread, flag = null) {
   _closeAllContextMenus();
   _mailCtxAccountId = accountId;
   _mailCtxMsgId     = msgId;
@@ -1654,9 +1671,6 @@ function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl, flag = nul
     btn.addEventListener('click', e => { e.stopPropagation(); hideMailContextMenu(); item.action(); });
     flagList.appendChild(btn);
   }
-  const webmailEl = document.getElementById('mailCtxWebmail');
-  if (webUrl) { webmailEl.href = webUrl; webmailEl.style.display = ''; }
-  else        { webmailEl.style.display = 'none'; }
   const refs = _mailCardRefs.get(`${accountId}\0${msgId}`) || [];
   const openWrap = document.getElementById('mailCtxOpenCardWrap');
   openWrap.style.display = refs.length ? '' : 'none';
@@ -1904,7 +1918,15 @@ async function _uploadMailAttachmentsToCard(accountId, msgId, attachments, board
   }
 }
 
-document.getElementById('mailCtxWebmail').addEventListener('click', () => hideMailContextMenu());
+// Open / Reply / Forward: the mail in the mail view (account folder — the menu is only offered for it)
+for (const [id, mode] of [['mailCtxOpen', null], ['mailCtxReply', 'reply'], ['mailCtxForward', 'forward']]) {
+  document.getElementById(id).addEventListener('click', () => {
+    const accountId = _mailCtxAccountId;
+    const msgId     = _mailCtxMsgId;
+    hideMailContextMenu();
+    if (accountId && msgId) _openMailInView(accountId, msgId, undefined, mode);
+  });
+}
 
 { // Create card — click opens inbox modal; submenu lets user pick a board directly
   let _boardListCache = null;
