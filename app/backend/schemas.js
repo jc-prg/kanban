@@ -303,8 +303,8 @@ function validMailFolderPath(path) {
 }
 
 // ---- Stickies (Today widget) ----
-const STICKY_CATEGORIES = ['note', 'quote', 'other'];
-const STICKY_RHYTHMS    = [0, 60, 120, 240, 480, 1440];
+const STICKY_CATEGORIES = ['note', 'quote', 'intervention', 'other'];
+const STICKY_RHYTHMS    = [0, 10, 30, 60, 120, 240, 480, 1440];
 const STICKY_ID         = /^s-[0-9a-f]{12}$/;
 const _stickyProps = {
   text:     { type: 'string', minLength: 1, maxLength: 5000, pattern: '\\S' },
@@ -367,8 +367,10 @@ const validateTodayConfig = ajv.compile({
         },
         stickies: {
           type: 'object', additionalProperties: false,
-          // minutes between random stickies brought to the top; 0 = only on request
-          properties: { rhythm: { type: 'integer', enum: STICKY_RHYTHMS } },
+          properties: {
+            rhythm: { type: 'integer', enum: STICKY_RHYTHMS },   // minutes between random stickies brought to the top; 0 = only on request
+            filter: { type: 'string', enum: ['all', ...STICKY_CATEGORIES] },   // last selected category filter (same on all devices)
+          },
         },
         cvapp: {
           type: 'object', additionalProperties: false,

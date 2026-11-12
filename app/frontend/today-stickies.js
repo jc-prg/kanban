@@ -8,6 +8,7 @@ const _STK_COLORS = ['#fde68a', '#fdba74', '#f9a8d4', '#c4b5fd', '#93c5fd', '#86
 const _STK_CATEGORIES = [
   { id: 'note',  label: 'Note' },
   { id: 'quote', label: 'Quote' },
+  { id: 'intervention', label: 'Intervention' },
   { id: 'other', label: 'Other' },
 ];
 const _STK_BEHIND = 3;          // stickies visible behind the top one
@@ -129,7 +130,7 @@ function _stkFilter(items, cat) {
   return cat === 'all' ? items : items.filter(s => (s.category || 'note') === cat);
 }
 
-/** Count per category plus `all`: { all, note, quote, other }. Pure. */
+/** Count per category plus `all`: { all, note, quote, intervention, other }. Pure. */
 function _stkCounts(items) {
   const out = { all: items.length };
   for (const c of _STK_CATEGORIES) out[c.id] = 0;
@@ -163,9 +164,12 @@ function _stkRhythm() {
   return Number.isInteger(r) ? r : 0;
 }
 
-/** Category filter (per browser): 'all' or a category id. */
+/**
+ * Category filter: 'all' or a category id — saved in the Today config (`widgets.stickies.filter`),
+ * so the last selection is the same on all devices; the older per-browser choice is the fallback.
+ */
 function _stkFilterCat() {
-  const v = _stkLs('today-stickies-filter');
+  const v = _todayCfg?.widgets?.stickies?.filter ?? _stkLs('today-stickies-filter');
   return _STK_CATEGORIES.some(c => c.id === v) ? v : 'all';
 }
 
@@ -174,10 +178,27 @@ function _stkVisible() {
   return _stkFilter(_stkItems, _stkFilterCat());
 }
 
+// Filter saves run one after another; only the last response may replace the config
+let _stkFilterSave = Promise.resolve(), _stkFilterSeq = 0;
+
 function _stkSetFilter(cat) {
-  _stkLs('today-stickies-filter', cat);
+  const widgets = { ...(_todayCfg?.widgets || {}) };
+  widgets.stickies = { ...(widgets.stickies || {}), filter: cat };
+  _todayCfg = { ...(_todayCfg || {}), widgets };
   _stkAngles = _stkShiftAngles(_stkAngles, 1, _STK_BEHIND + 1);   // a new stack: fresh angle on top of it
   _stkRerender();
+  const seq = ++_stkFilterSeq;
+  _stkFilterSave = _stkFilterSave.then(async () => {
+    if (seq !== _stkFilterSeq) return;   // a newer choice follows and saves the whole widgets object
+    try {
+      const res  = await fetch('/api/today/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ widgets: _todayCfg.widgets }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (seq === _stkFilterSeq) _todayCfg = data.config;
+    } catch (err) {
+      showMessage(`Could not save the sticky filter: ${err.message}`);
+    }
+  });
 }
 
 /** Index of the current sticky among the visible ones (falls back to the newest). */
@@ -504,11 +525,21 @@ function _stkSyncDetail() {
     : 'Saved as soon as you type.';
   const empty = !ed.text.trim();
   detail.querySelectorAll('[data-stk-convert]').forEach(b => { b.disabled = empty; });
+  const more = detail.querySelector('[data-stk-save-new]');
+  if (more) more.disabled = empty;
   const del = detail.querySelector('[data-stk-delete]');
   if (del) del.disabled = !ed.id;
 }
 
-function _stkOpenDetail(sticky) {
+/** "Save & add another": the sticky goes out, a blank one in the same category takes the panel. */
+async function _stkSaveAndNew(ed) {
+  if (!ed.text.trim()) return;
+  await _stkFlush();
+  // Only once it is saved (a failed save keeps the text in the panel)
+  if (_stkEdit === ed && ed.id && ed.saved?.text === ed.text) _stkOpenDetail(null, { category: ed.category });
+}
+
+function _stkOpenDetail(sticky, { category } = {}) {
   const detail  = document.getElementById('dashboardDetail');
   const body    = document.getElementById('dashboardDetailBody');
   detail.querySelector('.dash-detail-footer')?.remove();
@@ -521,10 +552,11 @@ function _stkOpenDetail(sticky) {
     text: sticky?.text || '',
     source: sticky?.source || '',
     color: sticky?.color || _STK_COLORS[Math.floor(Math.random() * _STK_COLORS.length)],
-    category: sticky?.category || (_stkFilterCat() !== 'all' ? _stkFilterCat() : 'note'),   // new: the filtered category
+    category: sticky?.category || category || (_stkFilterCat() !== 'all' ? _stkFilterCat() : 'note'),   // new: the filtered category
     created: sticky?.created || null,
     updated: sticky?.updated || null,
     saved: sticky ? { text: sticky.text, source: sticky.source || '', color: sticky.color, category: sticky.category } : null,
+    isNew: !sticky,   // opened as a new sticky: offers "Save & add another" (also after its first autosave)
     timer: null,
     chain: _stkEdit?.chain || Promise.resolve(),
   };
@@ -570,6 +602,7 @@ function _stkOpenDetail(sticky) {
       <button type="button" class="btn" data-stk-convert="note">${SVGICONS.noteDoc(12, 12)} Note page</button>
     </div>
     <div class="dash-detail-footer-row stk-detail-actions">
+      ${ed.isNew ? `<button type="button" class="btn" data-stk-save-new="1" title="Save and start the next sticky (Ctrl+Shift+Enter)">${SVGICONS.create(12, 12)} Save &amp; add another</button>` : ''}
       <button type="button" class="btn btn-confirm-danger" data-stk-delete="1">${SVGICONS.delete(12, 12)} Delete</button>
     </div>`;
   detail.querySelector('.modal').appendChild(footer);
@@ -581,7 +614,10 @@ function _stkOpenDetail(sticky) {
     _stkScheduleSave();
   });
   ta.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); _closeDetail(); }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (e.shiftKey && ed.isNew) _stkSaveAndNew(ed); else _closeDetail();
+    }
   });
   body.querySelector('.stk-detail').addEventListener('click', e => {
     const col = e.target.closest('[data-stk-color]');
@@ -596,6 +632,7 @@ function _stkOpenDetail(sticky) {
     const conv = e.target.closest('[data-stk-convert]');
     if (conv) _stkConvert(conv.dataset.stkConvert, ed);
     if (e.target.closest('[data-stk-delete]')) _stkDelete(ed);
+    if (e.target.closest('[data-stk-save-new]')) _stkSaveAndNew(ed);
   });
 
   detail.style.display = '';

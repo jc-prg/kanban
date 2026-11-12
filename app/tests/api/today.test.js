@@ -344,11 +344,16 @@ test('TD-20 notes widget: webdav flag — enabled with an existing account or le
   expect(Object.fromEntries(res.body.boards.map(b => [b.board, b.webdav]))).toEqual({ acc: true, legacy: true, gone: false, off: false })
 })
 
-test('TD-21 stickies rhythm: 0 (on request) or 1 h … 1 day only', async () => {
+test('TD-21 stickies rhythm: 0 (on request) or 10 min … 1 day only; category filter', async () => {
   expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm: 240 } } })).status).toBe(200)
   expect(store.today.widgets.stickies).toEqual({ rhythm: 240 })
   expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm: 0 } } })).status).toBe(200)
-  for (const rhythm of [30, -1, '60']) {
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm: 10 } } })).status).toBe(200)
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm: 30, filter: 'quote' } } })).status).toBe(200)
+  expect(store.today.widgets.stickies).toEqual({ rhythm: 30, filter: 'quote' })
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { filter: 'all' } } })).status).toBe(200)
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { filter: 'todo' } } })).status).toBe(400)
+  for (const rhythm of [45, -1, '60']) {
     expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm } } })).status).toBe(400)
   }
   expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { other: 1 } } })).status).toBe(400)

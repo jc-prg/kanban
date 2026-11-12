@@ -43,7 +43,7 @@ describe('Stickies API', () => {
     const res = await request(app).get('/api/stickies')
     expect(res.status).toBe(200)
     expect(res.body.items.map(i => i.text)).toEqual(['Newer', 'Hello'])
-    expect(res.body.categories).toEqual(['note', 'quote', 'other'])
+    expect(res.body.categories).toEqual(['note', 'quote', 'intervention', 'other'])
   })
 
   it('ST-2: POST creates a sticky with a palette colour and category "note" by default', async () => {

@@ -37,9 +37,10 @@ async function mockApis(page, state) {
     if (r.request().method() === 'PUT') {
       state.put = JSON.parse(r.request().postData());
       state.layouts = { ...state.layouts, ...state.put.layouts };
-      return r.fulfill({ json: { ok: true, config: { showBar: true, widgets: {}, layouts: state.layouts } } });
+      if (state.put.widgets) state.widgets = state.put.widgets;
+      return r.fulfill({ json: { ok: true, config: { showBar: true, widgets: state.widgets || {}, layouts: state.layouts } } });
     }
-    return r.fulfill({ json: { showBar: true, widgets: { cvapp: { apiUrl: 'http://cv', publicUrl: 'https://cv.example/', hasApiKey: true } }, layouts: state.layouts } });
+    return r.fulfill({ json: { showBar: true, widgets: state.widgets || { cvapp: { apiUrl: 'http://cv', publicUrl: 'https://cv.example/', hasApiKey: true } }, layouts: state.layouts } });
   });
   await page.route('**/api/today/widgets/cards?**', r => r.fulfill({ json: {
     date: TODAY,
@@ -107,13 +108,14 @@ async function mockStickies(page, state) {
   state.stickyWrites = [];
   await page.route('**/api/stickies**', r => {
     const req = r.request(), method = req.method();
-    if (method === 'GET') return r.fulfill({ json: { items: state.stickies, categories: ['note', 'quote', 'other'] } });
+    if (method === 'GET') return r.fulfill({ json: { items: state.stickies, categories: ['note', 'quote', 'intervention', 'other'] } });
     const id = new URL(req.url()).pathname.split('/').pop();
     const body = req.postData() ? JSON.parse(req.postData()) : null;
     state.stickyWrites.push({ method, id, body });
     const ts = new Date().toISOString();
     if (method === 'POST') {
-      const item = { id: 's-0000000000ff', color: '#86efac', category: 'note', ...body, created: ts, updated: ts };
+      const n = state.stickyWrites.filter(w => w.method === 'POST').length;
+      const item = { id: n === 1 ? 's-0000000000ff' : `s-00000000a${n.toString(16).padStart(3, '0')}`, color: '#86efac', category: 'note', ...body, created: ts, updated: ts };
       state.stickies.unshift(item);
       return r.fulfill({ status: 201, json: { item } });
     }
@@ -1319,7 +1321,7 @@ test.describe('Today page', () => {
     await expect(top).not.toContainText('Call the plumber');
   });
 
-  test('E-T-42 Stickies: category filter chips with counts limit the stack, are kept per browser, new stickies get the category', async ({ page }) => {
+  test('E-T-42 Stickies: category filter chips with counts limit the stack, are saved in the Today config, new stickies get the category, save & add another', async ({ page }) => {
     const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
     await mockApis(page, state);
     await mockStickies(page, state);
@@ -1328,7 +1330,7 @@ test.describe('Today page', () => {
     const tile = page.locator('.today-tile[data-tile="stickies"]');
     const chip = id => tile.locator(`[data-stk-filter="${id}"]`);
     await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 4');
-    expect(await tile.locator('[data-stk-filter]').evaluateAll(els => els.map(e => e.textContent))).toEqual(['All4', 'Note1', 'Quote2', 'Other1']);
+    expect(await tile.locator('[data-stk-filter]').evaluateAll(els => els.map(e => e.textContent))).toEqual(['All4', 'Note1', 'Quote2', 'Intervention0', 'Other1']);
     await expect(chip('all')).toHaveAttribute('aria-checked', 'true');
 
     // Quote: only the two quotes, flipping stays inside them
@@ -1347,8 +1349,11 @@ test.describe('Today page', () => {
     await expect(tile.locator('.today-stk-paper--top')).toContainText('First idea');
     await expect(tile.locator('.today-stk-nav')).toHaveCount(0);
 
-    // Kept after a reload
+    // Saved in the Today config (same on all devices), kept after a reload
     await chip('quote').click();
+    await expect.poll(() => state.widgets?.stickies?.filter).toBe('quote');
+    expect(state.widgets.cvapp).toMatchObject({ apiUrl: 'http://cv' });   // other widget settings kept
+    expect(await page.evaluate(() => localStorage.getItem('today-stickies-filter'))).toBeNull();
     await page.reload();
     await expect(chip('quote')).toHaveAttribute('aria-checked', 'true');
     await expect(tile.locator('.today-stk-pos')).toHaveText(/ \/ 2$/);
@@ -1363,9 +1368,32 @@ test.describe('Today page', () => {
     await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
     await expect(chip('quote')).toHaveText('Quote3');
 
+    // Save & add another (button, then Ctrl+Shift+Enter): saved, a blank sticky in the same category follows
+    await tile.locator('[title="New sticky"]').click();
+    const detail = page.locator('#dashboardDetail');
+    await expect(detail.locator('[data-stk-save-new]')).toBeDisabled();   // nothing typed yet
+    await detail.locator('.stk-detail-text').fill('First of many');
+    await detail.locator('[data-stk-save-new]').click();
+    await expect.poll(() => state.stickyWrites.filter(w => w.method === 'POST').length).toBe(2);
+    await expect(detail.locator('.stk-detail-text')).toHaveValue('');
+    await expect(detail.locator('.stk-detail-text')).toBeFocused();
+    await expect(detail.locator('[data-stk-cat="quote"]')).toHaveAttribute('aria-checked', 'true');
+    await detail.locator('.stk-detail-text').fill('Second of many');
+    await detail.locator('.stk-detail-text').press('Control+Shift+Enter');
+    await expect.poll(() => state.stickyWrites.filter(w => w.method === 'POST').length).toBe(3);
+    await expect(detail.locator('.stk-detail-text')).toHaveValue('');
+    await page.click('#dashboardDetailClose');
+    expect(state.stickyWrites.filter(w => w.method === 'POST').length).toBe(3);   // the blank one is not saved
+    await expect(chip('quote')).toHaveText('Quote5');
+    // An existing sticky has no "Save & add another"
+    await tile.locator('.today-stk-paper--top').dblclick();
+    await expect(detail.locator('.stk-detail-text')).not.toHaveValue('');
+    await expect(detail.locator('[data-stk-save-new]')).toHaveCount(0);
+    await page.click('#dashboardDetailClose');
+
     // Back to all
     await chip('all').click();
-    await expect(tile.locator('.today-stk-pos')).toHaveText(/ \/ 5$/);
+    await expect(tile.locator('.today-stk-pos')).toHaveText(/ \/ 7$/);
   });
 
   test('E-T-40 Stickies: a due rhythm brings a random sticky to the top, the dice picks one on request', async ({ page }) => {

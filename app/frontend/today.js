@@ -2700,7 +2700,8 @@ function initTodaySettings() {
   });
   document.getElementById('todayStickiesRhythm').addEventListener('change', async e => {
     const cfg = _todaySettingsCfg();
-    try { await _todaySaveSettings({ widgets: { ...(cfg.widgets || {}), stickies: { rhythm: Number(e.target.value) } } }); } catch (err) { report(err.message, false); }
+    const stickies = { ...(cfg.widgets?.stickies || {}), rhythm: Number(e.target.value) };   // keeps the category filter
+    try { await _todaySaveSettings({ widgets: { ...(cfg.widgets || {}), stickies } }); } catch (err) { report(err.message, false); }
   });
   document.getElementById('todayWidgetList').addEventListener('change', async e => {
     const input = e.target.closest('[data-widget-toggle]');

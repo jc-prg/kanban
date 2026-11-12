@@ -469,5 +469,5 @@ test('TU-31 Stickies: _stkFilter keeps the order, missing category = note; _stkC
   expect(plain(ctx._stkFilter(items, 'quote')).map(i => i.id)).toEqual(['a', 'd'])
   expect(plain(ctx._stkFilter(items, 'note')).map(i => i.id)).toEqual(['b', 'c'])
   expect(plain(ctx._stkFilter(items, 'other'))).toEqual([])
-  expect(plain(ctx._stkCounts(items))).toEqual({ all: 4, note: 2, quote: 2, other: 0 })
+  expect(plain(ctx._stkCounts(items))).toEqual({ all: 4, note: 2, quote: 2, intervention: 0, other: 0 })
 })
