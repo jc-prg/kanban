@@ -355,7 +355,8 @@ test('TD-21 stickies rhythm: 0 (on request) or 10 min … 1 day only; category f
   expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm: 30, filter: 'quote' } } })).status).toBe(200)
   expect(store.today.widgets.stickies).toEqual({ rhythm: 30, filter: 'quote' })
   expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { filter: 'all' } } })).status).toBe(200)
-  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { filter: 'todo' } } })).status).toBe(400)
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { filter: 'books' } } })).status).toBe(200)   // any category id
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { filter: 'To Do' } } })).status).toBe(400)
   for (const rhythm of [45, -1, '60']) {
     expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm } } })).status).toBe(400)
   }

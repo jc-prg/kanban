@@ -112,15 +112,31 @@ const STICKY_LAYOUTS = {
 async function mockStickies(page, state) {
   state.stickies = STICKIES();
   state.stickyWrites = [];
+  state.stickyCats = [{ id: 'note', label: 'Note' }, { id: 'quote', label: 'Quote' }, { id: 'intervention', label: 'Intervention' }, { id: 'other', label: 'Other' }];
   await page.route('**/api/stickies**', r => {
     const req = r.request(), method = req.method();
-    if (method === 'GET') return r.fulfill({ json: { items: state.stickies, categories: ['note', 'quote', 'intervention', 'other'] } });
-    const id = new URL(req.url()).pathname.split('/').pop();
+    const url = new URL(req.url());
+    const parts = url.pathname.replace(/^.*\/api\/stickies\/?/, '').split('/').filter(Boolean);
     const body = req.postData() ? JSON.parse(req.postData()) : null;
+    if (parts[0] === 'categories') {   // add / delete a category
+      state.stickyWrites.push({ method, id: parts.join('/'), body });
+      if (method === 'POST') {
+        const category = { id: body.label.toLowerCase().replace(/[^a-z0-9]+/g, '-'), label: body.label };
+        state.stickyCats.push(category);
+        return r.fulfill({ status: 201, json: { category, categories: state.stickyCats } });
+      }
+      state.stickyCats = state.stickyCats.filter(c => c.id !== parts[1]);
+      const to = state.stickyCats[0].id;
+      let moved = 0;
+      state.stickies = state.stickies.map(x => (x.category === parts[1] ? (moved++, { ...x, category: to }) : x));
+      return r.fulfill({ json: { ok: true, moved, to, categories: state.stickyCats } });
+    }
+    if (method === 'GET') return r.fulfill({ json: { items: state.stickies, categories: state.stickyCats } });
+    const id = parts[0];
     state.stickyWrites.push({ method, id, body });
     const ts = new Date().toISOString();
     if (method === 'POST') {
-      const n = state.stickyWrites.filter(w => w.method === 'POST').length;
+      const n = state.stickyWrites.filter(w => w.method === 'POST' && w.id === undefined).length;
       const item = { id: n === 1 ? 's-0000000000ff' : `s-00000000a${n.toString(16).padStart(3, '0')}`, color: '#86efac', category: 'note', ...body, created: ts, updated: ts };
       state.stickies.unshift(item);
       return r.fulfill({ status: 201, json: { item } });
@@ -1333,14 +1349,21 @@ test.describe('Today page', () => {
     await page.waitForLoadState('networkidle');
     const before = calls;
     await toggle.click();
-    await expect(tile.locator('.today-wx-wday')).toHaveCount(7);
-    await expect(tile.locator('.today-wx-wday').first()).toContainText('Today');
-    await expect(tile.locator('.today-wx-wday').nth(3)).toContainText('3° / 13°');
+    await expect(tile.locator('.today-wx-wday')).toHaveCount(6);   // today is the top area, not in the row
+    // Top area as in the today view (condition, today's range); the days in one row, date only
+    await expect(tile.locator('.today-wx-now')).toContainText('Overcast');
+    await expect(tile.locator('.today-wx-day')).toContainText('4° / 11°');
+    const d3 = new Date(now.getTime() + 3 * 86400000);
+    await expect(tile.locator('.today-wx-wday').nth(2)).toContainText(d3.toLocaleDateString('en-US', { day: '2-digit', month: '2-digit' }));
+    await expect(tile.locator('.today-wx-wday').nth(2)).toContainText('13°');
+    expect(await tile.locator('.today-wx-wday').evaluateAll(els => new Set(els.map(e => Math.round(e.getBoundingClientRect().top))).size)).toBe(1);
+    await expect(tile.locator('.today-wx-hour:not(.today-wx-wday)')).toHaveCount(0);   // hourly strip replaced
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
     await expect.poll(() => state.put?.widgets?.weather).toEqual({ lat: 1, lon: 2, label: 'Berlin', days: 7 });
     expect(calls).toBe(before);   // switching reuses the loaded forecast
     await toggle.click();
-    await expect(tile.locator('.today-wx-hours')).toBeVisible();
+    await expect(tile.locator('.today-wx-wday')).toHaveCount(0);
+    await expect(tile.locator('.today-wx-hour')).toHaveCount(1);
     await expect.poll(() => state.put?.widgets?.weather?.days).toBe(1);
   });
 
@@ -1696,6 +1719,118 @@ test.describe('Today page', () => {
     await page.keyboard.press('Escape');
     await expect(tile).not.toHaveClass(/today-tile--fs/);
     await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+  });
+
+  test('E-T-51 Stickies fullscreen: category packs in the lower 280 px — filter, drop a sticky to move it, add / delete categories; keyword filter', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    await tile.locator('[title="Fullscreen — all stickies"]').click();
+    const cells = tile.locator('.today-stk-cell');
+    await expect(cells).toHaveCount(3);
+    const order = () => cells.evaluateAll(els => els.map(e => e.dataset.stkId));
+
+    // Packs: one per category (empty ones too) + "add", in the lower 280 px of the screen
+    const packs = tile.locator('.today-stk-packs');
+    const pb = await packs.boundingBox();
+    expect(Math.round(pb.height)).toBe(280);
+    expect(pb.y + pb.height).toBeGreaterThanOrEqual(796);   // at the bottom (tile border aside)
+    await expect(packs.locator('[data-stk-pack]')).toHaveCount(4);
+    await expect(packs.locator('[data-stk-pack="quote"] .today-stk-pack-n')).toHaveText('1');
+    await expect(packs.locator('[data-stk-pack="intervention"] .today-stk-pack-empty')).toHaveCount(1);
+    // Edge to edge; the + box at the height of the empty stack; no dice in the header, settings in the packs' lower left corner
+    expect(Math.round(pb.x)).toBe(0);
+    expect(Math.round(pb.width)).toBe(1280);
+    const empty = await packs.locator('[data-stk-pack="intervention"] .today-stk-pack-empty').boundingBox();
+    const plus  = await packs.locator('[data-stk-cat-add]').boundingBox();
+    expect(Math.abs(plus.y - empty.y)).toBeLessThan(1.5);
+    expect(Math.abs(plus.height - empty.height)).toBeLessThan(1.5);
+    await expect(tile.locator('.today-tile-actions [title="Random sticky"]')).toHaveCount(0);
+    await expect(tile.locator('.today-tile-actions [title="Random rhythm (settings)"]')).toHaveCount(0);
+    const gear = await packs.locator('[data-stk-settings]').boundingBox();
+    expect(gear.x).toBeLessThan(40);
+    expect(gear.y + gear.height).toBeGreaterThan(pb.y + pb.height - 40);
+
+    // Keyword filter (accent-insensitive, text + source); Escape clears it first
+    const q = tile.locator('.today-stk-q');
+    await q.fill('leonardo');
+    await expect.poll(order).toEqual(['s-000000000001']);
+    await q.press('Escape');
+    await expect(cells).toHaveCount(3);
+    await expect(tile).toHaveClass(/today-tile--fs/);
+
+    // A click on a pack filters by it, a second click shows all again
+    await packs.locator('[data-stk-pack="quote"]').click();
+    await expect.poll(order).toEqual(['s-000000000001']);
+    await expect(packs.locator('[data-stk-pack="quote"]')).toHaveClass(/today-stk-pack--on/);
+    await packs.locator('[data-stk-pack="quote"]').click();
+    await expect(cells).toHaveCount(3);
+
+    // Drag "First idea" (note) onto the Intervention pack: it moves there, `pos` untouched
+    const from = await cells.nth(0).boundingBox();
+    const target = await packs.locator('[data-stk-pack="intervention"]').boundingBox();
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 15 });
+    await expect(packs.locator('[data-stk-pack="intervention"]')).toHaveClass(/today-stk-pack--drop/);
+    await page.mouse.up();
+    await expect.poll(() => state.stickyWrites.find(w => w.method === 'PUT')?.body).toEqual({ category: 'intervention' });
+    expect(state.stickyWrites.find(w => w.method === 'PUT').id).toBe('s-000000000003');
+    await expect(packs.locator('[data-stk-pack="intervention"] .today-stk-pack-n')).toHaveText('1');
+    await expect(packs.locator('[data-stk-pack="intervention"] .today-stk-paper--pack')).toHaveCount(1);
+    await expect(page.locator('#dashboardDetail')).toBeHidden();   // the drop opened nothing
+
+    // Add a category: + → name → Enter
+    await packs.locator('[data-stk-cat-add]').click();
+    await packs.locator('.today-stk-pack-input').fill('Books');
+    await packs.locator('.today-stk-pack-input').press('Enter');
+    await expect(packs.locator('[data-stk-pack="books"] .today-stk-pack-name')).toHaveText('Books');
+    expect(state.stickyWrites.find(w => w.method === 'POST' && w.id === 'categories').body).toEqual({ label: 'Books' });
+    await expect(tile.locator('.today-stk-chip[data-stk-filter="books"]')).toHaveCount(0);   // empty: no chip
+
+    // Delete a category: its stickies move to the first remaining one (confirmed)
+    await packs.locator('[data-stk-pack="intervention"]').hover();
+    await packs.locator('[data-stk-cat-del="intervention"]').click();
+    await expect(page.locator('#dialogMsg')).toContainText('Its 1 sticky moves to "Note"');
+    await page.click('#dialogOkBtn');
+    await expect(packs.locator('[data-stk-pack="intervention"]')).toHaveCount(0);
+    await expect(packs.locator('[data-stk-pack="note"] .today-stk-pack-n')).toHaveText('1');
+    expect(state.stickyWrites.find(w => w.method === 'DELETE').id).toBe('categories/intervention');
+
+    // The detail panel offers the current categories
+    await cells.nth(0).click();
+    await expect(page.locator('#dashboardDetail .stk-cat')).toHaveText(['Note', 'Quote', 'Other', 'Books']);
+  });
+
+  test('E-T-52 Settings → Dashboard → Stickies: export downloads the Markdown file, import reports the counts and reloads the tile', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    let imported = null;
+    await page.route('**/api/stickies/export', r => r.fulfill({ body: '# Stickies\n', headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': 'attachment; filename="stickies-2026-11-12.md"' } }));
+    await page.route('**/api/stickies/import', r => {
+      imported = r.request().postDataJSON();
+      state.stickies.unshift({ id: 's-0000000000ee', text: 'Imported one', color: '#fde68a', category: 'books', created: '2026-11-12T12:00:00.000Z', updated: '2026-11-12T12:00:00.000Z' });
+      state.stickyCats.push({ id: 'books', label: 'Books' });
+      return r.fulfill({ json: { ok: true, added: 1, updated: 2, skipped: 0, categoriesAdded: 1, categories: state.stickyCats } });
+    });
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+    await tile.locator('[title="Random rhythm (settings)"]').click();
+    const exportBtn = page.locator('#todayStickiesExport');
+    await expect(exportBtn).toBeVisible();
+    const [download] = await Promise.all([page.waitForEvent('download'), exportBtn.click()]);
+    expect(download.suggestedFilename()).toBe('stickies-2026-11-12.md');
+    await expect(page.locator('#todaySettingsResult')).toContainText('Exported stickies-2026-11-12.md');
+
+    await page.locator('#todayStickiesImportFile').setInputFiles({ name: 'mine.md', mimeType: 'text/markdown', buffer: Buffer.from('## Books\nImported one\n') });
+    await expect(page.locator('#todaySettingsResult')).toContainText('Imported mine.md: 1 sticky added, 2 updated, 1 new category.');
+    expect(imported).toEqual({ markdown: '## Books\nImported one\n' });
+    await expect(tile.locator('.today-stk-chip[data-stk-filter="books"]')).toHaveCount(1);   // tile reloaded
   });
 });
 

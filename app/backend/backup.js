@@ -2,7 +2,7 @@ const fs   = require('fs');
 const path = require('path');
 const { JSON_BACKUP_DIR, ATTACHMENTS_DIR, COUCHDB_DATA_DIR, DB_PREFIX, NOTES_DOC_ID } = require('./config');
 const { getCouch, getPromptsDb, loadBoardData } = require('./db');
-const { listStickies } = require('./global-db');
+const { listStickies, getStickyCategories } = require('./global-db');
 
 let dbSizeBytes = 0;
 
@@ -62,6 +62,8 @@ async function runStickiesBackup() {
     const items = await listStickies();
     if (!fs.existsSync(JSON_BACKUP_DIR)) fs.mkdirSync(JSON_BACKUP_DIR, { recursive: true });
     fs.writeFileSync(path.join(JSON_BACKUP_DIR, 'stickies.json'), JSON.stringify(items, null, 2), 'utf-8');
+    // Categories (added / deleted in the Stickies fullscreen), null = the defaults
+    fs.writeFileSync(path.join(JSON_BACKUP_DIR, 'stickies-categories.json'), JSON.stringify(await getStickyCategories(), null, 2), 'utf-8');
   } catch (err) { console.error('Stickies backup failed:', err.message); }
 }
 

@@ -356,12 +356,6 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 }
 .today-wx-hour svg { color: var(--text-muted); }
 .today-wx-precip { font-size: 0.65rem; color: var(--link); background: linear-gradient(to top, color-mix(in srgb, var(--link) 25%, transparent) var(--p), transparent var(--p)); border-radius: 3px; padding: 0 3px; }
-.today-wx-week { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
-.today-wx-wday { display: grid; grid-template-columns: minmax(5.5em, 1fr) 22px auto 3.2em; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; font-size: 0.8rem; }
-.today-wx-wday:nth-child(odd) { background: color-mix(in srgb, var(--text) 4%, transparent); }
-.today-wx-wday svg { color: var(--text-muted); }
-.today-wx-wtemp { text-align: right; font-variant-numeric: tabular-nums; }
-.today-wx-wday .today-wx-precip { justify-self: end; }
 .today-wx-tomorrow { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 0.78rem; }
 
 /* ---- CV-App ---- */
@@ -1015,7 +1009,7 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
 #today .today-col > .today-tile.today-tile--fs {
   position: fixed; inset: 0; z-index: 80;
   display: flex; flex-direction: column;
-  min-height: 0; max-height: none; margin: 0; border-radius: 0;
+  min-height: 0; max-height: none; margin: 0; border: none; border-radius: 0;   /* full screen: no frame (the packs run edge to edge) */
   padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
   background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--page-bg);
 }
@@ -1024,8 +1018,68 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
 }
 #today .today-col > .today-tile.today-tile--fs > .today-tile-body {
   display: block; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
-  padding-bottom: calc(8px + var(--safe-bottom)); border-radius: 0; opacity: 1; pointer-events: auto;
+  padding-bottom: calc(8px + var(--safe-bottom)); border: none; border-radius: 0; opacity: 1; pointer-events: auto;
 }
+
+/* Fullscreen grid mode (today-stickies.js _stkRenderGrid): chips + keyword field on top, the grid, and the
+   category packs in the lower 280 px — sticky at the bottom of the scrolling body, always at the screen bottom */
+#today .today-col > .today-tile.today-tile--fs > .today-tile-body.today-stk-body--grid { display: flex; flex-direction: column; padding-top: 0; padding-bottom: 0; }
+/* The sticky bar and the packs need the body's own background (a skin may tint it): inherited down to them */
+.today-stk-body--grid > .today-stk-host, .today-stk-body--grid .today-stk-fs { background: inherit; }
+.today-stk-head { display: flex; align-items: center; gap: 10px; }
+.today-stk-head > .today-hscroll { flex: 1; min-width: 0; }
+.today-stk-q { display: none; }
+.today-stk-body--grid .today-stk-head { position: sticky; top: 0; z-index: 4; margin-top: 0; padding: 12px 28px 8px; background: inherit; }
+.today-stk-body--grid .today-stk-q { display: block; flex: 0 1 260px; min-width: 120px; padding: 5px 10px; font-size: 0.8rem; }
+.today-stk-body--grid > .today-stk-host { flex: 1 0 auto; display: flex; flex-direction: column; }
+.today-stk-fs { flex: 1 0 auto; display: flex; flex-direction: column; }
+.today-stk-gridbox { flex: 1 0 auto; }
+.today-stk-gridbox > .today-stk-empty { padding: 40px 28px; text-align: center; }
+.today-stk-packs {
+  position: sticky; bottom: 0; z-index: 3;
+  height: 280px; flex: none;
+  margin: 0 -10px;   /* from the left to the right screen border (the body's side padding) */
+  background: inherit;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.18);
+}
+.today-stk-packs-row {
+  height: 100%;
+  display: flex; align-items: center; gap: 26px;
+  padding: 14px 38px calc(14px + var(--safe-bottom));
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+}
+/* Settings of the widget: lower left corner of the packs (the header drops it in the fullscreen grid) */
+.today-stk-packs-settings { position: absolute; left: calc(10px + var(--safe-left)); bottom: calc(8px + var(--safe-bottom)); z-index: 1; }
+.today-stk-pack {
+  flex: none; width: 176px; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  border-radius: 12px; cursor: pointer; outline: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.today-stk-pack:hover, .today-stk-pack:focus-visible { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.today-stk-pack--on { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+/* A sticky dragged over the pack */
+.today-stk-pack--drop { background: color-mix(in srgb, var(--accent) 24%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+.today-stk-pack--drop .today-stk-pack-stack { transform: scale(1.06); }
+.today-stk-pack-stack { position: relative; width: 140px; height: 140px; flex: none; transition: transform 0.15s ease; }
+.today-stk-pack-empty { position: absolute; inset: 0; border: 2px dashed var(--border); border-radius: 6px; }
+.today-stk-paper--pack { cursor: inherit; }
+.today-stk-pack-foot { display: flex; align-items: center; gap: 6px; max-width: 100%; min-height: 22px; font-size: 0.8rem; }   /* same height with or without the delete button: the + box lines up */
+.today-stk-pack-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.today-stk-pack-n { color: var(--text-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.today-stk-pack-del { width: 22px; height: 22px; opacity: 0; }
+.today-stk-pack:hover .today-stk-pack-del, .today-stk-pack:focus-within .today-stk-pack-del { opacity: 0.7; }
+.today-stk-pack-del:hover { opacity: 1; color: var(--danger); }
+.today-stk-pack--add { cursor: default; }
+.today-stk-pack-addbtn {
+  width: 140px; height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  border: 2px dashed var(--border); border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem;
+}
+.today-stk-pack-addbtn:hover { border-color: var(--accent); color: var(--accent); }
+.today-stk-pack-input { width: 150px; font-size: 0.85rem; }
+/* The dragged sticky stays above the packs */
+.today-stk-body--grid .today-stk-cell--drag { z-index: 6; }
 
 /* Grid of all stickies (fullscreen on larger screens): order = sort key, drag & drop moves one */
 .today-stk-grid {

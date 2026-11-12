@@ -60,6 +60,9 @@
   border-top: none;
 }
 
+/* Fullscreen tile (Stickies): no frame, also when its column is stacked */
+:root[data-skin="glass"] #today .today-col > .today-tile.today-tile--fs > .today-tile-body { border: none; }
+
 /* Board columns: drag feedback over the glass shadow */
 :root[data-skin="glass"] .column.drag-over { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 32px var(--accent-glow); }
 :root[data-skin="glass"] .column.col-drop-left  { box-shadow: -3px 0 0 var(--accent), var(--glass-drop); }

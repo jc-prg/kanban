@@ -1614,16 +1614,14 @@ async function _todaySetWeatherDays(days) {
   }
 }
 
-/** 7-day view: one row per day — weekday, icon, min / max, rain chance. */
+/** 7-day view: the following days in a row like the hourly strip (today is the top area) — date, icon, max, min, rain chance. */
 function _todayWeatherWeekHtml(days, t) {
-  const fmt = d => {
-    const dt = new Date(`${d.date}T12:00:00`);
-    return d.date === _todayToday() ? 'Today' : dt.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'numeric' });
-  };
-  return `<div class="today-wx-week">${days.filter(Boolean).map(d => {
+  const fmt = d => new Date(`${d.date}T12:00:00`).toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+  return `<div class="today-wx-hours today-wx-week" data-hscroll>${days.filter(d => d && d.date !== _todayToday()).map(d => {
     const k = _todayWeatherKind(d.code);
-    return `<div class="today-wx-wday" title="${escHtml(k.label)}"><span class="today-wx-wname">${escHtml(fmt(d))}</span>${SVGICONS[k.icon](18, 18)}`
-      + `<span class="today-wx-wtemp">${t(d.min)} / ${t(d.max)}</span>`
+    return `<div class="today-wx-hour today-wx-wday" title="${escHtml(k.label)}">`
+      + `<span class="today-muted">${escHtml(fmt(d))}</span>${SVGICONS[k.icon](16, 16)}`
+      + `<span>${t(d.max)}</span><span class="today-muted">${t(d.min)}</span>`
       + `<span class="today-wx-precip" style="--p:${d.precipMax ?? 0}%">${d.precipMax ?? 0}%</span></div>`;
   }).join('')}</div>`;
 }
@@ -1633,15 +1631,8 @@ function _todayRenderWeather(body, data, el) {
   const kind = _todayWeatherKind(data.current.code, data.current.isDay);
   const t = v => v == null ? '–' : `${Math.round(v)}°`;
   const hm = s => (s || '').slice(11, 16);
-  if (_todayWeatherDays(_todayCfg) === 7 && data.days?.length) {
-    body.innerHTML = `<div class="today-wx">
-        <span class="today-wx-big">${SVGICONS[kind.icon](32, 32)}</span>
-        <div class="today-wx-now"><strong>${t(data.current.temp)}</strong><span class="today-muted">${escHtml(data.label || '')}</span></div>
-      </div>${_todayWeatherWeekHtml(data.days, t)}`;
-    return;
-  }
-  const tomorrow = data.tomorrow ? _todayWeatherKind(data.tomorrow.code) : null;
-  body.innerHTML = `<div class="today-wx">
+  // Top: current state + today's range — the same in both views
+  const top = `<div class="today-wx">
       <span class="today-wx-big">${SVGICONS[kind.icon](40, 40)}</span>
       <div class="today-wx-now"><strong>${t(data.current.temp)}</strong><span>${escHtml(kind.label)}</span>
         <span class="today-muted">${escHtml(data.label || '')}</span></div>
@@ -1650,7 +1641,13 @@ function _todayRenderWeather(body, data, el) {
         ${data.today?.precipMax != null ? `<span class="today-muted">rain ${data.today.precipMax} %</span>` : ''}
         ${data.today?.sunrise ? `<span class="today-muted">☀ ${escHtml(hm(data.today.sunrise))}–${escHtml(hm(data.today.sunset))}</span>` : ''}
       </div>
-    </div>
+    </div>`;
+  if (_todayWeatherDays(_todayCfg) === 7 && data.days?.length) {
+    body.innerHTML = top + _todayWeatherWeekHtml(data.days, t);
+    return;
+  }
+  const tomorrow = data.tomorrow ? _todayWeatherKind(data.tomorrow.code) : null;
+  body.innerHTML = `${top}
     <div class="today-wx-hours" data-hscroll>${(data.hours || []).map(h => {
       const k = _todayWeatherKind(h.code);
       return `<div class="today-wx-hour" title="${escHtml(k.label)}"><span class="today-muted">${escHtml(hm(h.time))}</span>${SVGICONS[k.icon](16, 16)}<span>${t(h.temp)}</span><span class="today-wx-precip" style="--p:${h.precip ?? 0}%">${h.precip ?? 0}%</span></div>`;
@@ -2802,6 +2799,22 @@ function initTodaySettings() {
     const cfg = _todaySettingsCfg();
     const stickies = { ...(cfg.widgets?.stickies || {}), rhythm: Number(e.target.value) };   // keeps the category filter
     try { await _todaySaveSettings({ widgets: { ...(cfg.widgets || {}), stickies } }); } catch (err) { report(err.message, false); }
+  });
+  // Stickies ⇄ Markdown file (today-stickies.js)
+  document.getElementById('todayStickiesExport').addEventListener('click', async () => {
+    try { report(`Exported ${await _stkExportMd()}.`, true); } catch (err) { report(`Export failed: ${err.message}`, false); }
+  });
+  const stkFile = document.getElementById('todayStickiesImportFile');
+  document.getElementById('todayStickiesImport').addEventListener('click', () => stkFile.click());
+  stkFile.addEventListener('change', async () => {
+    const file = stkFile.files[0];
+    stkFile.value = '';
+    if (!file) return;
+    try {
+      const r = await _stkImportMd(file);
+      const n = (v, one, many) => `${v} ${v === 1 ? one : many}`;
+      report(`Imported ${file.name}: ${n(r.added, 'sticky', 'stickies')} added, ${r.updated} updated${r.categoriesAdded ? `, ${n(r.categoriesAdded, 'new category', 'new categories')}` : ''}.`, true);
+    } catch (err) { report(`Import failed: ${err.message}`, false); }
   });
   document.getElementById('todayWidgetList').addEventListener('change', async e => {
     const input = e.target.closest('[data-widget-toggle]');

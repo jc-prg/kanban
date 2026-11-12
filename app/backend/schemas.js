@@ -303,14 +303,19 @@ function validMailFolderPath(path) {
 }
 
 // ---- Stickies (Today widget) ----
-const STICKY_CATEGORIES = ['note', 'quote', 'intervention', 'other'];
+// Default categories — the list itself is editable (routes/stickies.js, doc `categories` in jc-config-stickies)
+const STICKY_CATEGORIES = [
+  { id: 'note', label: 'Note' }, { id: 'quote', label: 'Quote' },
+  { id: 'intervention', label: 'Intervention' }, { id: 'other', label: 'Other' },
+];
+const STICKY_CATEGORY_ID = /^[a-z0-9-]{1,32}$/;
 const STICKY_RHYTHMS    = [0, 10, 30, 60, 120, 240, 480, 1440];
 const STICKY_ID         = /^s-[0-9a-f]{12}$/;
 const _stickyProps = {
   text:     { type: 'string', minLength: 1, maxLength: 5000, pattern: '\\S' },
   source:   { type: 'string', maxLength: 500 },   // author, book, URL …; '' = none
   color:    { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
-  category: { type: 'string', enum: STICKY_CATEGORIES },
+  category: { type: 'string', pattern: STICKY_CATEGORY_ID.source },   // must exist: checked by the route
 };
 const validateStickyCreate = ajv.compile({
   type: 'object', required: ['text'], additionalProperties: false, properties: _stickyProps,
@@ -372,7 +377,7 @@ const validateTodayConfig = ajv.compile({
           type: 'object', additionalProperties: false,
           properties: {
             rhythm: { type: 'integer', enum: STICKY_RHYTHMS },   // minutes between random stickies brought to the top; 0 = only on request
-            filter: { type: 'string', enum: ['all', ...STICKY_CATEGORIES] },   // last selected category filter (same on all devices)
+            filter: { type: 'string', pattern: STICKY_CATEGORY_ID.source },   // last selected category filter ('all' or a category id; same on all devices)
           },
         },
         cvapp: {
@@ -426,4 +431,4 @@ function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, QA_ICON_FILE, validateStickyCreate, validateStickyUpdate, STICKY_CATEGORIES, STICKY_RHYTHMS, STICKY_ID, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, QA_ICON_FILE, validateStickyCreate, validateStickyUpdate, STICKY_CATEGORIES, STICKY_CATEGORY_ID, STICKY_RHYTHMS, STICKY_ID, schemaError };

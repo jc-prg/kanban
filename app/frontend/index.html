@@ -1096,6 +1096,13 @@
               </select>
             </div>
             <p class="settings-item-desc">Brings a random sticky to the top of the stack in this rhythm while the Today page is open.</p>
+            <div class="settings-field-row">
+              <span class="settings-field-label">Markdown file</span>
+              <button type="button" class="btn" id="todayStickiesExport"><span data-icon="download"></span> Export</button>
+              <button type="button" class="btn" id="todayStickiesImport"><span data-icon="upload"></span> Import…</button>
+              <input type="file" id="todayStickiesImportFile" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
+            </div>
+            <p class="settings-item-desc">Export: all stickies, grouped by category. Import: merged — stickies of the file that exist (same id) are updated, the rest added, unknown categories created. Hand-written files work too: <code>## Category</code> headings, stickies separated by a line <code>---</code>.</p>
             </div>
 
             <div data-wset="weather">

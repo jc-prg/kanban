@@ -510,3 +510,22 @@ test('TU-33 Stickies: _stkFormat — bold, italic, underline, strike, {-} hyphen
   expect(ctx._stkFormat('line *one\ntwo*')).toBe('line *one\ntwo*')   // markers don't span lines
   expect(ctx._stkStripHyphens('Silben{-}trennung')).toBe('Silbentrennung')
 })
+
+test('TU-34 Stickies: keyword match (all words, text + source, accent-insensitive); categories from the server', () => {
+  const st = { text: 'Über das Glück', source: 'Seneca, Briefe' }
+  expect(ctx._stkMatches(st, 'gluck')).toBe(true)
+  expect(ctx._stkMatches(st, 'ÜBER seneca')).toBe(true)
+  expect(ctx._stkMatches(st, 'gluck plato')).toBe(false)
+  expect(ctx._stkMatches(st, '  ')).toBe(true)
+  ctx._stkSetCats([{ id: 'books', label: 'Books' }, { id: 'note', label: 'Note' }])
+  expect(plain(ctx._stkCounts([{ category: 'books' }, {}]))).toEqual({ all: 2, books: 1, note: 1 })
+  expect(ctx._stkCategoryLabel('books')).toBe('Books')
+  expect(ctx._stkDefaultCat()).toBe('note')
+  ctx._stkSetCats(['quote'])   // older server: ids only
+  expect(ctx._stkCategoryLabel('quote')).toBe('Quote')
+  expect(ctx._stkDefaultCat()).toBe('quote')
+  ctx._stkSetCats([])          // nothing sent: unchanged
+  expect(ctx._stkCategoryLabel('quote')).toBe('Quote')
+  ctx._stkSetCats([{ id: 'note', label: 'Note' }, { id: 'quote', label: 'Quote' }, { id: 'intervention', label: 'Intervention' }, { id: 'other', label: 'Other' }])
+})
+

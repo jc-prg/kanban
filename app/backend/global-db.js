@@ -244,7 +244,7 @@ function stickyOrderKey(s) {
 async function listStickies() {
   const result = await stickiesDb.list({ include_docs: true });
   return result.rows
-    .filter(r => !r.id.startsWith('_') && r.doc)
+    .filter(r => r.id.startsWith('s-') && r.doc)   // not the `categories` doc
     .map(r => _stickyOut(r.doc))
     .sort((a, b) => stickyOrderKey(a) - stickyOrderKey(b) || (b.created || '').localeCompare(a.created || ''));
 }
@@ -264,6 +264,24 @@ async function saveSticky({ id, ...data }) {
   return { id, ...data };
 }
 
+const STICKY_CATEGORIES_ID = 'categories';
+
+/** Sticky categories [{ id, label }] in their order, or null when never saved (= the defaults). */
+async function getStickyCategories() {
+  try {
+    const doc = await stickiesDb.get(STICKY_CATEGORIES_ID);
+    return Array.isArray(doc.list) ? doc.list : null;
+  } catch (err) {
+    if (err.statusCode === 404) return null;
+    throw err;
+  }
+}
+
+async function saveStickyCategories(list) {
+  await upsertDoc(stickiesDb, STICKY_CATEGORIES_ID, { list });
+  return list;
+}
+
 /** false when the sticky did not exist. */
 async function deleteSticky(id) {
   try {
@@ -276,4 +294,4 @@ async function deleteSticky(id) {
   }
 }
 
-module.exports = { stickyOrderKey, listStickies, getSticky, saveSticky, deleteSticky, getStickiesDb, getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender, getHiddenFolders, setHiddenFolders };
+module.exports = { stickyOrderKey, listStickies, getSticky, saveSticky, deleteSticky, getStickyCategories, saveStickyCategories, getStickiesDb, getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender, getHiddenFolders, setHiddenFolders };

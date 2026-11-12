@@ -5,12 +5,14 @@
 
 // Paper colours — same list as STICKY_COLORS in backend/routes/stickies.js
 const _STK_COLORS = ['#fde68a', '#fdba74', '#f9a8d4', '#c4b5fd', '#93c5fd', '#86efac', '#5eead4', '#d1d5db'];
-const _STK_CATEGORIES = [
+// Default categories — the list is editable (fullscreen packs: add / delete) and comes with GET /api/stickies
+const _STK_DEFAULT_CATEGORIES = [
   { id: 'note',  label: 'Note' },
   { id: 'quote', label: 'Quote' },
   { id: 'intervention', label: 'Intervention' },
   { id: 'other', label: 'Other' },
 ];
+let _stkCats = _STK_DEFAULT_CATEGORIES.map(c => ({ ...c }));
 const _STK_BEHIND = 3;          // stickies visible behind the top one
 const _STK_SAVE_MS = 600;
 
@@ -21,6 +23,7 @@ let _stkEdit = null;            // detail panel: { id, text, source, color, cate
 let _stkAngles = null;          // rotation per stack slot: [top, 1st behind, 2nd, 3rd] — shifted on every flip
 let _stkFs = false;             // fullscreen: the tile covers the screen — grid of all stickies (small screens: the stack)
 let _stkGridTilts = [];         // fullscreen grid: random tilt per position (_stkGridAngles), kept for the session
+let _stkQuery = '';             // fullscreen grid: keyword filter (text + source)
 
 // ---- Pure helpers ----
 
@@ -135,7 +138,7 @@ function _stkFilter(items, cat) {
 /** Count per category plus `all`: { all, note, quote, intervention, other }. Pure. */
 function _stkCounts(items) {
   const out = { all: items.length };
-  for (const c of _STK_CATEGORIES) out[c.id] = 0;
+  for (const c of _stkCats) out[c.id] = 0;
   for (const s of items) { const c = s.category || 'note'; if (c in out) out[c]++; }
   return out;
 }
@@ -186,13 +189,20 @@ function _stkFormat(text) {
     .replace(/(^|[^\w])_([^\s_](?:[^_\n]*?[^\s_])?)_(?!\w)/g, '$1<em>$2</em>');
 }
 
+/** Keyword filter: every word in text or source, case- and accent-insensitive. Pure. */
+function _stkMatches(sticky, query) {
+  const fold = v => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const hay = fold(`${sticky.text}\n${sticky.source || ''}`);
+  return fold(query).split(/\s+/).filter(Boolean).every(w => hay.includes(w));
+}
+
 /** Plain text of a sticky for conversions: markers kept (Markdown), hyphenation points dropped. Pure. */
 function _stkStripHyphens(text) {
   return String(text || '').replace(/\{-\}/g, '');
 }
 
 function _stkCategoryLabel(id) {
-  return _STK_CATEGORIES.find(c => c.id === id)?.label || 'Note';
+  return _stkCats.find(c => c.id === id)?.label || id || 'Note';
 }
 
 // ---- Position / random pick (per browser) ----
@@ -223,12 +233,24 @@ function _stkRhythm() {
  */
 function _stkFilterCat() {
   const v = _todayCfg?.widgets?.stickies?.filter ?? _stkLs('today-stickies-filter');
-  return _STK_CATEGORIES.some(c => c.id === v) ? v : 'all';
+  return _stkCats.some(c => c.id === v) ? v : 'all';
 }
 
-/** The stickies the stack shows: those of the filtered category. */
+/** The stickies the stack / grid shows: those of the filtered category; the grid also by keyword. */
 function _stkVisible() {
-  return _stkFilter(_stkItems, _stkFilterCat());
+  const list = _stkFilter(_stkItems, _stkFilterCat());
+  return _stkGridMode() && _stkQuery.trim() ? list.filter(st => _stkMatches(st, _stkQuery)) : list;
+}
+
+/** Categories from the server: [{ id, label }] (older servers: ids only). */
+function _stkSetCats(list) {
+  if (!Array.isArray(list) || !list.length) return;
+  _stkCats = list.map(c => (typeof c === 'string' ? { id: c, label: c.charAt(0).toUpperCase() + c.slice(1) } : { id: c.id, label: c.label || c.id }));
+}
+
+/** Default category of a new sticky: "note" while it exists, else the first one. */
+function _stkDefaultCat() {
+  return _stkCats.some(c => c.id === 'note') ? 'note' : _stkCats[0]?.id || 'note';
 }
 
 // Filter saves run one after another; only the last response may replace the config
@@ -283,6 +305,7 @@ function _stkPaperHtml(s, cls, tilt, extra = '') {
 // render(body, data, el) — `random: false` for re-renders after local changes (no random pick)
 function _stkRender(body, data, el, { random = true } = {}) {
   _stkItems = _stkSort(data?.items || []);
+  _stkSetCats(data?.categories);
   if (el) _todaySetCount(el, _stkItems.length);
   if (_stkDrag) { _stkPendingRender = true; return; }
   _stkPendingRender = false;
@@ -292,31 +315,37 @@ function _stkRender(body, data, el, { random = true } = {}) {
   }
   if (!body._stkWired) { body._stkWired = true; _stkWire(body); }
 
-  if (!_stkItems.length) {
+  body.classList.toggle('today-stk-body--grid', _stkGridMode());
+  if (!_stkItems.length && !_stkGridMode()) {
     body.innerHTML = '<p class="dashboard-empty today-stk-empty">No stickies yet. <a href="#" data-stk-new="1">Add one</a> for a thought that has no home yet.</p>';
     return;
   }
   // Category filter above the stack: All + one chip per category with its count
   if (!body.querySelector('.today-stk-filter')) {
-    body.innerHTML = '<div class="today-stk-filter" role="radiogroup" aria-label="Category" data-hscroll></div><div class="today-stk-host"></div>';
+    // Head: category chips (+ the keyword field in the fullscreen grid), then the stack / grid
+    body.innerHTML = `<div class="today-stk-head today-stk-filter-wrap">
+        <div class="today-stk-filter" role="radiogroup" aria-label="Category" data-hscroll></div>
+        <input type="search" class="today-stk-q new-board-input" placeholder="Filter by keyword" aria-label="Filter stickies by keyword" autocomplete="off">
+      </div><div class="today-stk-host"></div>`;
     // One line: scrolls sideways without a scrollbar, ‹ › only where chips are cut off
     _todayHScroll(body.querySelector('.today-stk-filter'));
-    body.querySelector('.today-stk-filter').parentElement.classList.add('today-stk-filter-wrap');
   }
+  const q = body.querySelector('.today-stk-q');
+  if (q && document.activeElement !== q) q.value = _stkQuery;
   const cat = _stkFilterCat(), counts = _stkCounts(_stkItems);
   // Categories without stickies are left out (the selected one stays, so the filter is visible)
   const filter = body.querySelector('.today-stk-filter');
-  filter.innerHTML = [{ id: 'all', label: 'All' }, ..._STK_CATEGORIES]
+  filter.innerHTML = [{ id: 'all', label: 'All' }, ..._stkCats]
     .filter(c => c.id === 'all' || c.id === cat || counts[c.id]).map(c =>
     `<button type="button" class="today-stk-chip" role="radio" aria-checked="${c.id === cat}" data-stk-filter="${c.id}">${escHtml(c.label)}<span class="today-stk-chip-n">${counts[c.id]}</span></button>`).join('');
   _stkChipIntoView(filter);
   const host = body.querySelector('.today-stk-host');
   const vis  = _stkVisible();
+  if (_stkGridMode()) { _stkRenderGrid(host, vis); return; }
   if (!vis.length) {
     host.innerHTML = `<p class="dashboard-empty today-stk-empty">No ${escHtml(_stkCategoryLabel(cat).toLowerCase())} stickies. <a href="#" data-stk-new="1">Add one</a></p>`;
     return;
   }
-  if (_stkGridMode()) { _stkRenderGrid(host, vis); return; }
   const n = vis.length;
   // The frame (stack + slider) is kept while the count stays the same, so a slider being dragged
   // and the keyboard focus survive flipping and refreshes
@@ -351,13 +380,139 @@ function _stkRender(body, data, el, { random = true } = {}) {
 /** Fullscreen on larger screens shows the grid; small screens keep the stack, just full-screen. */
 function _stkGridMode() { return _stkFs && !_todaySmall(); }
 
-/** All (filtered) stickies as a grid, in their order; each position has its own random tilt. */
+/**
+ * Fullscreen on larger screens: the (filtered) stickies as a grid above — in their order, each position
+ * with its own random tilt — and one pack per category in the lower 280 px (sticky at the bottom of the
+ * scrolling body): click = filter, drop a sticky = move it there, + adds a category, × deletes one.
+ */
 function _stkRenderGrid(host, vis) {
+  let frame = host.querySelector('.today-stk-fs');
+  if (!frame) {
+    host.innerHTML = `<div class="today-stk-fs">
+        <div class="today-stk-gridbox"></div>
+        <div class="today-stk-packs">
+          <div class="today-stk-packs-row" role="list" aria-label="Categories — click to filter, drop a sticky to move it"></div>
+          <button type="button" class="today-tile-btn today-stk-packs-settings" data-stk-settings="1" title="Stickies settings (random rhythm, export / import)" aria-label="Stickies settings">${SVGICONS.settings(14, 14)}</button>
+        </div>
+      </div>`;
+    frame = host.querySelector('.today-stk-fs');
+  }
   _stkGridTilts = _stkGridAngles(_stkGridTilts, vis.length);
-  host.innerHTML = `<div class="today-stk-grid" role="list" aria-label="Stickies — click to open, drag to move">${vis.map((s, i) =>
-    `<div class="today-stk-cell" role="listitem" tabindex="0" data-stk-id="${escHtml(s.id)}" title="Click to open, drag to move">${
-      _stkPaperHtml(s, 'today-stk-paper--grid', _stkGridTilts[i])}</div>`).join('')}</div>`;
+  const cat = _stkFilterCat();
+  frame.querySelector('.today-stk-gridbox').innerHTML = vis.length
+    ? `<div class="today-stk-grid" role="list" aria-label="Stickies — click to open, drag to move or onto a category">${vis.map((s, i) =>
+      `<div class="today-stk-cell" role="listitem" tabindex="0" data-stk-id="${escHtml(s.id)}" title="Click to open, drag to move">${
+        _stkPaperHtml(s, 'today-stk-paper--grid', _stkGridTilts[i])}</div>`).join('')}</div>`
+    : `<p class="dashboard-empty today-stk-empty">${_stkQuery.trim() ? 'No stickies match.' : cat === 'all' ? 'No stickies yet.' : `No ${escHtml(_stkCategoryLabel(cat).toLowerCase())} stickies.`} <a href="#" data-stk-new="1">Add one</a></p>`;
+  // Packs: kept while a new category is being typed
+  const packs = frame.querySelector('.today-stk-packs-row');
+  if (!packs.contains(document.activeElement) || !document.activeElement.classList.contains('today-stk-pack-input')) packs.innerHTML = _stkPacksHtml();
   host.querySelectorAll('.today-stk-textbox').forEach(_stkFitText);
+}
+
+const _STK_PACK_TILTS = [-5, 3.5, -1.5];   // back → top
+
+function _stkPacksHtml() {
+  const cat = _stkFilterCat();
+  const counts = _stkCounts(_stkItems);
+  const one = _stkCats.length <= 1;
+  return _stkCats.map(c => {
+    const list = _stkItems.filter(st => (st.category || 'note') === c.id).slice(0, 3).reverse();
+    const papers = list.map((st, i) => _stkPaperHtml(st, 'today-stk-paper--pack', _STK_PACK_TILTS[i + 3 - list.length], ' aria-hidden="true"')).join('');
+    return `<div class="today-stk-pack${c.id === cat ? ' today-stk-pack--on' : ''}" role="listitem" tabindex="0" data-stk-pack="${escHtml(c.id)}"
+        title="${escHtml(c.label)} — click to show only these, drop a sticky here to move it" aria-pressed="${c.id === cat}">
+        <div class="today-stk-pack-stack">${papers || '<div class="today-stk-pack-empty"></div>'}</div>
+        <div class="today-stk-pack-foot"><span class="today-stk-pack-name">${escHtml(c.label)}</span><span class="today-stk-pack-n">${counts[c.id] || 0}</span>${
+          one ? '' : `<button type="button" class="today-tile-btn today-stk-pack-del" data-stk-cat-del="${escHtml(c.id)}" title="Delete the category ${escHtml(c.label)}" aria-label="Delete the category ${escHtml(c.label)}">${SVGICONS.delete(12, 12)}</button>`}</div>
+      </div>`;
+  }).join('') + `<div class="today-stk-pack today-stk-pack--add">
+      <button type="button" class="today-stk-pack-addbtn" data-stk-cat-add="1" title="Add a category">${SVGICONS.create(22, 22)}<span>Category</span></button>
+      <div class="today-stk-pack-foot" aria-hidden="true">&nbsp;</div>
+    </div>`;
+}
+
+/** Inline name field in the "+" pack; Enter creates the category, Escape / leaving cancels. */
+function _stkStartAddCat(btn) {
+  const box = btn.closest('.today-stk-pack--add');
+  box.innerHTML = '<input type="text" class="new-board-input today-stk-pack-input" maxlength="40" placeholder="New category" aria-label="Name of the new category">';
+  const input = box.querySelector('input');
+  input.focus();
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const label = input.value.trim();
+    if (save && label) {
+      try {
+        const data = await _stkJson(`${_stkApi()}/categories`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) });
+        _stkSetCats(data.categories);
+      } catch (err) { showMessage(`Could not add the category: ${err.message}`); }
+    }
+    input.blur();
+    _stkRerender();
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+/** Delete a category after confirming; its stickies move to the first remaining one. */
+async function _stkDeleteCat(id) {
+  const c = _stkCats.find(x => x.id === id);
+  const rest = _stkCats.filter(x => x.id !== id);
+  if (!c || !rest.length) return;
+  const n = _stkItems.filter(st => (st.category || 'note') === id).length;
+  const msg = `Delete the category "${c.label}"?${n ? ` Its ${n} stick${n === 1 ? 'y moves' : 'ies move'} to "${rest[0].label}".` : ''}`;
+  if (!(await showConfirm(msg, { okLabel: 'Delete', danger: true }))) return;
+  try {
+    const data = await _stkJson(`${_stkApi()}/categories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    _stkSetCats(data.categories);
+    _stkItems = _stkItems.map(st => ((st.category || 'note') === id ? { ...st, category: data.to } : st));
+    if (_stkFilterCat() === 'all' && _todayCfg?.widgets?.stickies?.filter === id) _stkSetFilter('all');
+    else _stkRerender();
+  } catch (err) { showMessage(`Could not delete the category: ${err.message}`); }
+}
+
+/** A sticky dropped on a pack: it moves to that category (keeps its place in the order). */
+function _stkMoveToCategory(id, cat) {
+  const st = _stkItems.find(x => x.id === id);
+  if (!st || (st.category || 'note') === cat) { _stkRerender(); return; }
+  _stkItems = _stkItems.map(x => (x.id === id ? { ...x, category: cat } : x));
+  _stkRerender();
+  _stkJson(_stkApi(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category: cat }) })
+    .then(({ item }) => _stkUpsertLocal(item))
+    .catch(err => { showMessage(`Could not move the sticky: ${err.message}`); _stkReload(); });
+}
+
+/** Reload the tile from the server (the per-refresh fetch cache would hand back the old list). */
+function _stkReload() {
+  _todayFetchMemo?.delete(_stkApi());
+  _todayLoadTile('stickies');
+}
+
+// ---- Markdown export / import (Settings → Dashboard → Stickies) ----
+
+async function _stkExportMd() {
+  const res = await fetch(`${_stkApi()}/export`);
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'stickies.md';
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return name;
+}
+
+/** Import a Markdown file (merged: known ids updated, the rest added) → the server's counts. */
+async function _stkImportMd(file) {
+  const data = await _stkJson(`${_stkApi()}/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markdown: await file.text() }) });
+  _stkSetCats(data.categories);
+  if (typeof _todayLoadTile === 'function' && document.querySelector('.today-tile[data-tile="stickies"]')) _stkReload();
+  return data;
 }
 
 /** Fullscreen on / off: the tile covers the screen (today.css .today-tile--fs); Escape leaves it. */
@@ -376,6 +531,7 @@ function _stkSetFs(on) {
 // Capture phase: runs before a dialog's own Escape handler, so an open dialog / detail panel closes first
 function _stkFsKey(e) {
   if (e.key !== 'Escape' || !_stkFs) return;
+  if (e.target.classList?.contains('today-stk-q') && e.target.value) return;   // the keyword field clears itself first
   if ([...document.querySelectorAll('.modal-backdrop, .mv-picker')].some(el => el.getClientRects().length)) return;
   e.preventDefault();
   _stkSetFs(false);
@@ -384,6 +540,15 @@ function _stkFsKey(e) {
 /** Grid drag: move the cell to the place under the pointer (neighbours slide over), follow the pointer. */
 function _stkGridDragMove(body, g, x, y) {
   const cell = g.cell, grid = cell.parentElement;
+  // Over a category pack (fullscreen, lower part): drop target — no reordering meanwhile
+  const packs = body.querySelector('.today-stk-packs');
+  const packsTop = packs ? packs.getBoundingClientRect().top : Infinity;
+  const pack = y >= packsTop ? [...packs.querySelectorAll('[data-stk-pack]')].find(p => {
+    const r = p.getBoundingClientRect();
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+  }) : null;
+  g.pack = pack?.dataset.stkPack || null;
+  packs?.querySelectorAll('[data-stk-pack]').forEach(p => p.classList.toggle('today-stk-pack--drop', p === pack));
   // Layout boxes (offsets ignore transforms): neighbours still gliding must not be hit at their old place
   const gr = grid.getBoundingClientRect();
   const boxOf = c => ({ left: gr.left + c.offsetLeft - grid.offsetLeft, top: gr.top + c.offsetTop - grid.offsetTop });
@@ -392,7 +557,7 @@ function _stkGridDragMove(body, g, x, y) {
     const b = boxOf(c);
     return x >= b.left && x < b.left + c.offsetWidth && y >= b.top && y < b.top + c.offsetHeight;
   });
-  if (over) {
+  if (over && y < packsTop) {
     const cells = [...grid.children];
     const before = new Map(cells.map(c => [c, c.getBoundingClientRect()]));
     grid.insertBefore(cell, cells.indexOf(over) < cells.indexOf(cell) ? over : over.nextSibling);
@@ -408,9 +573,10 @@ function _stkGridDragMove(body, g, x, y) {
   g.ty = y - g.offY - r.top;
   cell.style.setProperty('--stk-gx', `${g.tx}px`);
   cell.style.setProperty('--stk-gy', `${g.ty}px`);
-  const br = body.getBoundingClientRect();   // near the top / bottom edge: scroll along
+  const br = body.getBoundingClientRect();   // near the top / bottom edge (above the packs): scroll along
+  const bottom = Math.min(br.bottom, packsTop);
   if (y < br.top + 50) body.scrollBy(0, -14);
-  else if (y > br.bottom - 50) body.scrollBy(0, 14);
+  else if (y > bottom - 50 && y < bottom) body.scrollBy(0, 14);
 }
 
 /** Dropped: the sticky gets a sort key between its new neighbours, saved as `pos`. */
@@ -425,7 +591,7 @@ function _stkGridDropped(cell) {
   _stkRerender();
   _stkJson(_stkApi(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pos }) })
     .then(({ item }) => _stkUpsertLocal(item))
-    .catch(err => { showMessage(`Could not move the sticky: ${err.message}`); _todayLoadTile('stickies'); });
+    .catch(err => { showMessage(`Could not move the sticky: ${err.message}`); _stkReload(); });
 }
 
 /** Keeps the selected chip inside the scrolled row and lets _todayHScroll update its ‹ › buttons. */
@@ -455,7 +621,7 @@ const _STK_TILT_ROOM = 1.1;
  * at the tile's right border (`today-stk--wide`). Then fit the texts.
  */
 function _stkLayout(body) {
-  if (body.querySelector('.today-stk-grid')) { body.querySelectorAll('.today-stk-textbox').forEach(_stkFitText); return; }
+  if (body.querySelector('.today-stk-fs')) { body.querySelectorAll('.today-stk-textbox').forEach(_stkFitText); return; }
   const box = body.querySelector('.today-stk');
   if (!box || !body.clientWidth) return;
   const tile  = body.closest('.today-tile');
@@ -539,7 +705,7 @@ function _stkWire(body) {
       if (body.clientWidth === w && body.clientHeight === h) return;
       w = body.clientWidth; h = body.clientHeight;
       // Fullscreen across the small-screen limit (rotation, resize): grid ⇄ stack
-      if (body.querySelector('.today-stk-host') && !!body.querySelector('.today-stk-grid') !== _stkGridMode()) { _stkRerender(); return; }
+      if (body.querySelector('.today-stk-host') && !!body.querySelector('.today-stk-fs') !== _stkGridMode()) { _todaySetTileActions('stickies'); _stkRerender(); return; }
       _stkLayout(body);
     }).observe(body);
   }
@@ -549,6 +715,14 @@ function _stkWire(body) {
     if (e.target.closest('.today-stk-src a')) { tapId = null; return; }   // source link: opens in a new tab
     const chip = e.target.closest('[data-stk-filter]');
     if (chip) { _stkSetFilter(chip.dataset.stkFilter); return; }
+    // Fullscreen packs: × deletes the category, + adds one, a click on a pack filters (again: all)
+    const del = e.target.closest('[data-stk-cat-del]');
+    if (del) { e.stopPropagation(); _stkDeleteCat(del.dataset.stkCatDel); return; }
+    if (e.target.closest('[data-stk-settings]')) { _todayOpenWidgetSettings('stickies'); return; }
+    const add = e.target.closest('[data-stk-cat-add]');
+    if (add) { _stkStartAddCat(add); return; }
+    const pack = e.target.closest('[data-stk-pack]');
+    if (pack && !e.target.closest('input')) { const id = pack.dataset.stkPack; _stkSetFilter(_stkFilterCat() === id ? 'all' : id); return; }
     const cell = e.target.closest('.today-stk-cell');
     if (cell) {   // grid: a click opens it (not the click that ends a drag)
       if (!gridMoved) _stkOpenDetail(_stkItems.find(s => s.id === cell.dataset.stkId) || null);
@@ -563,7 +737,13 @@ function _stkWire(body) {
     }
     tapId = null;
   });
+  let qTimer = null;
   body.addEventListener('input', e => {
+    if (e.target.classList.contains('today-stk-q')) {   // keyword filter of the fullscreen grid
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => { _stkQuery = e.target.value; _stkRerender(); }, 150);
+      return;
+    }
     if (!e.target.classList.contains('today-stk-slider')) return;
     const s = _stkVisible()[Number(e.target.value) - 1];
     if (s) _stkGoTo(s.id);
@@ -574,6 +754,12 @@ function _stkWire(body) {
     if (top) _stkOpenDetail(_stkItems.find(s => s.id === top.dataset.stkId) || null);
   });
   body.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && e.target.classList.contains('today-stk-q') && e.target.value) {
+      e.preventDefault(); e.stopPropagation();   // clears the field first, the next Escape leaves fullscreen
+      e.target.value = ''; _stkQuery = ''; _stkRerender();
+      return;
+    }
+    if (e.key === 'Enter' && e.target.dataset.stkPack) { e.preventDefault(); e.target.click(); return; }
     if (e.key === 'Enter' && e.target.classList.contains('today-stk-cell')) {
       e.preventDefault();
       _stkOpenDetail(_stkItems.find(s => s.id === e.target.dataset.stkId) || null);
@@ -633,9 +819,10 @@ function _stkWire(body) {
   let gg = null, gridMoved = false;
   const gridEnd = (e, cancelled) => {
     if (!gg || e.pointerId !== gg.id) return;
-    const { cell, started } = gg;
+    const { cell, started, pack } = gg;
     clearTimeout(gg.timer);
     gg = null;
+    body.querySelectorAll('.today-stk-pack--drop').forEach(p => p.classList.remove('today-stk-pack--drop'));
     cell.classList.remove('today-stk-cell--armed', 'today-stk-cell--drag');
     cell.style.removeProperty('--stk-gx');
     cell.style.removeProperty('--stk-gy');
@@ -643,7 +830,9 @@ function _stkWire(body) {
     _stkDrag = null;
     gridMoved = true;   // the click that follows the drop opens nothing
     setTimeout(() => { gridMoved = false; }, 0);
-    if (cancelled) _stkRerender(); else _stkGridDropped(cell);
+    if (cancelled) _stkRerender();
+    else if (pack) _stkMoveToCategory(cell.dataset.stkId, pack);
+    else _stkGridDropped(cell);
   };
   body.addEventListener('pointerdown', e => {
     const cell = e.target.closest('.today-stk-cell');
@@ -772,7 +961,7 @@ function _stkOpenDetail(sticky, { category } = {}) {
     text: sticky?.text || '',
     source: sticky?.source || '',
     color: sticky?.color || _STK_COLORS[Math.floor(Math.random() * _STK_COLORS.length)],
-    category: sticky?.category || category || (_stkFilterCat() !== 'all' ? _stkFilterCat() : 'note'),   // new: the filtered category
+    category: sticky?.category || category || (_stkFilterCat() !== 'all' ? _stkFilterCat() : _stkDefaultCat()),   // new: the filtered category
     created: sticky?.created || null,
     updated: sticky?.updated || null,
     saved: sticky ? { text: sticky.text, source: sticky.source || '', color: sticky.color, category: sticky.category } : null,
@@ -797,7 +986,7 @@ function _stkOpenDetail(sticky, { category } = {}) {
       </div>
       <div class="stk-detail-row">
         <span class="stk-detail-label">Category</span>
-        <div class="stk-cats" role="radiogroup" aria-label="Category">${_STK_CATEGORIES.map(c =>
+        <div class="stk-cats" role="radiogroup" aria-label="Category">${_stkCats.map(c =>
           `<button type="button" class="stk-cat" role="radio" data-stk-cat="${c.id}">${escHtml(c.label)}</button>`).join('')}</div>
       </div>
       <p class="stk-detail-meta"></p>
@@ -936,10 +1125,11 @@ TODAY_TILES.stickies = {
   scales: true,
   load: () => _todayFetchJson('/api/stickies'),
   render: _stkRender,
+  // Fullscreen grid: no dice (there is no stack), the settings icon sits in the packs' lower left corner
   actions: () => [
-    { icon: SVGICONS.dice(12, 12), title: 'Random sticky', run: () => _stkShowRandom() },
+    ...(_stkGridMode() ? [] : [{ icon: SVGICONS.dice(12, 12), title: 'Random sticky', run: () => _stkShowRandom() }]),
     { icon: SVGICONS.create(12, 12), title: 'New sticky', run: () => _stkOpenDetail(null) },
-    { icon: SVGICONS.settings(12, 12), title: 'Random rhythm (settings)', run: () => _todayOpenWidgetSettings('stickies') },
+    ...(_stkGridMode() ? [] : [{ icon: SVGICONS.settings(12, 12), title: 'Random rhythm (settings)', run: () => _todayOpenWidgetSettings('stickies') }]),
     { icon: SVGICONS.fullscreen(12, 12), title: _stkFs ? 'Exit fullscreen (Esc)' : 'Fullscreen — all stickies', active: _stkFs, run: () => _stkSetFs(!_stkFs) },
   ],
 };
