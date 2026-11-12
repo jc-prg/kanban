@@ -223,8 +223,8 @@
   --safe-left:   env(safe-area-inset-left, 0px);
 }
 
-/* Modal backdrop. Dialogs are centred inside the safe area — on iPhones the status bar blurs what lies
-   beneath it, and a full-screen dialog stops at the status bar / home indicator instead of running under them */
+/* Modal backdrop. Dialogs are centred inside the safe area — a dialog stops at the status bar / home
+   indicator instead of running under them (full-screen panels run under the status bar: statusbar.css) */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1783,16 +1783,9 @@
   align-items: center;
 }
 
-/* Full-screen dialogs in the panel format cover the whole screen: the header runs under the status bar like
-   the app header (layout.css) — background up to the top edge, title and icons below the band the iOS status
-   bar blurs (safe area + up to 16 px) — and the content keeps clear of the home indicator */
+/* Full-screen dialogs in the panel format cover the whole screen: the header runs under the status bar
+   (statusbar.css), the content keeps clear of the home indicator */
 .modal-backdrop:has(> .modal--fullscreen.panel) { padding: 0; }
-.modal--fullscreen.panel > .dashboard-detail-titlebar,
-.modal--fullscreen.panel .panel-modal-bar {
-  padding-top: calc(6px + var(--safe-top) + min(var(--safe-top), 16px));
-  padding-left: max(12px, var(--safe-left));
-  padding-right: max(8px, var(--safe-right));
-}
 .modal--fullscreen.panel > .dashboard-detail-body { padding-bottom: calc(8px + var(--safe-bottom)); }
 .modal--fullscreen.panel-modal { padding-bottom: calc(28px + var(--safe-bottom)); }
 

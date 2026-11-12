@@ -281,19 +281,29 @@ test('TU-18 _todayBoardCols — as many equal cards as fit, at least 2, at most 
   expect(ctx._todayBoardCols(400, 0, 8, 5)).toBe(2)
 })
 
-test('TU-19 _todayColumnNeed — fixed sizes as set, collapsed = header, fit content / available = header + content', () => {
+test('TU-19 _todayColumnNeed — fixed sizes as set, collapsed = header, fit content = header + content, available = its min-height', () => {
   const H = 600, g = 26
-  // 1/3 + collapsed + "available" with 200 px content: fits
+  // 1/3 + collapsed + "available" with 200 px content: fits; available counts only its min-height (120)
   const fits = [
     { size: '1/3', headerH: 30, contentH: 999, collapsed: false },
     { size: '1/2', headerH: 30, contentH: 999, collapsed: true },
     { size: 'available', headerH: 30, contentH: 200, collapsed: false },
   ]
   const need = ctx._todayColumnNeed(fits, H, g)
-  expect(need).toBeCloseTo((H / 3 - g * 2 / 3) + 30 + (30 + 200) + 2 * g)
+  expect(need).toBeCloseTo((H / 3 - g * 2 / 3) + 30 + 120 + 2 * g)
   expect(need).toBeLessThan(H)
-  // The same column with a long "available" tile overflows → the column scrolls anyway
-  expect(ctx._todayColumnNeed([fits[0], fits[1], { ...fits[2], contentH: 900 }], H, g)).toBeGreaterThan(H)
+  // A short "available" tile counts its real height
+  expect(ctx._todayColumnNeed([{ ...fits[2], contentH: 40 }], H, g)).toBe(70)
+  // A long "available" tile never makes the column overflow — it shrinks and scrolls inside
+  expect(ctx._todayColumnNeed([fits[0], fits[1], { ...fits[2], contentH: 900 }], H, g)).toBeLessThan(H)
+  // "fit content" + long "available": only the fit-content tile counts in full
+  const fitAvail = [
+    { size: 'container', headerH: 30, contentH: 300, collapsed: false },
+    { size: 'available', headerH: 30, contentH: 2000, collapsed: false },
+  ]
+  expect(ctx._todayColumnNeed(fitAvail, H, g)).toBe(330 + 120 + g)
+  // ...unless the fit-content tile alone is too tall: then the column scrolls anyway
+  expect(ctx._todayColumnNeed([{ ...fitAvail[0], contentH: 600 }, fitAvail[1]], H, g)).toBeGreaterThan(H)
   // A single 1/1 tile is exactly the column height
   expect(ctx._todayColumnNeed([{ size: '1/1', headerH: 30, contentH: 5000, collapsed: false }], H, g)).toBeCloseTo(H)
 })

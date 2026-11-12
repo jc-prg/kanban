@@ -1423,6 +1423,27 @@ test.describe('Today page', () => {
     await expect(col.locator('.today-tile[data-tile="stickies"] .today-tile-header')).toHaveCSS('position', 'sticky');
   });
 
+  test('E-T-53 "available" below "fit content": takes the remaining space and scrolls inside, the column does not overflow', async ({ page }) => {
+    const t = (id, col, order, size) => ({ id, col, order, size });
+    const state = { layouts: { lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [
+      t('agenda', 0, 0, '1/1'), t('progress', 1, 0, 'container'), t('notes', 1, 1, 'available') ] } } };
+    await mockApis(page, state);
+    const boards = Array.from({ length: 60 }, (_, i) => ({ board: `board-${i}`, pages: 1, webdav: false,
+      items: [{ type: 'page', id: `n-p${i}`, title: `Page ${i}` }] }));
+    await page.route('**/api/today/widgets/notes', r => r.fulfill({ json: { boards, total: 60 } }));
+    await page.setViewportSize({ width: 1280, height: 640 });
+    await page.goto('/today');
+    const col  = page.locator('.today-col').nth(1);
+    const body = col.locator('.today-tile[data-tile="notes"] .today-tile-body');
+    await expect(body).toContainText('board-59');
+    await page.waitForTimeout(100);   // _todayFitColumns runs once per frame
+    await expect(col).not.toHaveClass(/today-col--over/);
+    expect(await col.evaluate(c => c.scrollHeight <= c.clientHeight + 1)).toBe(true);
+    expect(await body.evaluate(b => b.scrollHeight > b.clientHeight)).toBe(true);
+    const colBox = await col.boundingBox(), tileBox = await col.locator('.today-tile[data-tile="notes"]').boundingBox();
+    expect(tileBox.y + tileBox.height).toBeLessThanOrEqual(colBox.y + colBox.height + 1);
+  });
+
   test('E-T-39 Stickies: rotated stack, slider / keys flip, text fits, double-click edits, new / delete, turn into a card', async ({ page }) => {
     const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
     await mockApis(page, state);
@@ -1907,6 +1928,25 @@ test.describe('Today page — phone', () => {
     expect((await tile.locator('.today-stk-stack').boundingBox()).width).toBeGreaterThanOrEqual(before);
     const body = tile.locator('.today-tile-body');
     expect(await body.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);   // scaled, no scrolling
+    // The stack sits in the middle of the space below the chips (± a few px for the position line)
+    const head = await tile.locator('.today-stk-head').boundingBox();
+    const stack = await tile.locator('.today-stk-stack').boundingBox();
+    const bodyBox = await body.boundingBox();
+    expect(Math.abs((stack.x + stack.width / 2) - vp.width / 2)).toBeLessThan(4);
+    const above = stack.y - (head.y + head.height), below = bodyBox.y + bodyBox.height - (stack.y + stack.height);
+    expect(Math.abs(above - below)).toBeLessThan(60);
+    // No dice / settings in the header: a big dice button in the lower right corner picks a random sticky
+    const actions = tile.locator('.today-tile-actions');
+    await expect(actions.locator('[title="Random sticky"]')).toHaveCount(0);
+    await expect(actions.locator('[title="Random rhythm (settings)"]')).toHaveCount(0);
+    const fab = tile.locator('.today-stk-dice-fab');
+    const fabBox = await fab.boundingBox();
+    expect(fabBox.width).toBeGreaterThanOrEqual(48);
+    expect(vp.width - (fabBox.x + fabBox.width)).toBeLessThan(40);
+    expect(vp.height - (fabBox.y + fabBox.height)).toBeLessThan(40);
+    const topId = await tile.locator('.today-stk-paper--top').getAttribute('data-stk-id');
+    await fab.tap();
+    await expect(tile.locator('.today-stk-paper--top')).not.toHaveAttribute('data-stk-id', topId);
     await tile.locator('.today-tile-title').tap();
     await expect(tile).not.toHaveClass(/today-tile--collapsed/);
     await tile.locator('[title="Exit fullscreen (Esc)"]').tap();
@@ -2009,6 +2049,63 @@ test.describe('Today page — phone', () => {
     expect(await bodyH()).toBe(vh);
     await page.evaluate(() => document.documentElement.style.setProperty('--vp-dvh-gap', '62px'));
     expect(await bodyH()).toBe(vh + 62);
+  });
+
+  test('E-T-54 full-screen top bars under the iOS status bar: flat opaque colour, no filter, content below the band — every surface of statusbar.css, both skins', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.addInitScript(() => localStorage.setItem('view-fullscreen', '1'));
+    const SAFE = ':root { --safe-top: 47px; --safe-bottom: 34px; }';
+    // Safari 26 tints the status bar with the top element's colour only when it is one solid colour
+    const checkBar = async (sel) => {
+      for (const skin of ['default', 'glass']) {
+        const r = await page.evaluate(([sel, skin]) => {
+          document.documentElement.dataset.skin = skin;
+          const bar = document.querySelector(sel), cs = getComputedStyle(bar);
+          const bg = cs.backgroundColor;
+          const alpha = /rgba\(.*,\s*([\d.]+)\)$/.exec(bg)?.[1] ?? /\/\s*([\d.]+)\)$/.exec(bg)?.[1] ?? '1';
+          const kids = [...bar.children].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+          return {
+            top: Math.round(bar.getBoundingClientRect().top), alpha: Number(alpha), image: cs.backgroundImage,
+            filter: cs.backdropFilter, shadow: cs.boxShadow,
+            contentTop: Math.min(...kids.map(el => el.getBoundingClientRect().top)),
+          };
+        }, [sel, skin]);
+        expect({ sel, skin, top: r.top, alpha: r.alpha, image: r.image, filter: r.filter, shadow: r.shadow })
+          .toEqual({ sel, skin, top: 0, alpha: 1, image: 'none', filter: 'none', shadow: 'none' });
+        expect(r.contentTop).toBeGreaterThanOrEqual(47 + 16);   // below the status bar and the blurred edge
+      }
+    };
+
+    // Detail panel in fullscreen
+    await page.goto('/today');
+    await page.addStyleTag({ content: SAFE });
+    await page.evaluate(() => _openCardDetail('e2e-today', { id: 'id-due1', text: 'Send offer' }));
+    await expect(page.locator('#dashboardDetail .modal')).toBeVisible();
+    await page.click('#dashboardDetailFsBtn');
+    await page.waitForTimeout(300);
+    await checkBar('#dashboardDetail .modal > .dashboard-detail-titlebar');
+    await page.evaluate(() => _closeDetail());
+
+    // Fullscreen Stickies tile
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    await tile.locator('[title="Fullscreen — all stickies"]').click();
+    await expect(tile).toHaveClass(/today-tile--fs/);
+    await checkBar('.today-tile[data-tile="stickies"] > .today-tile-header');
+
+    // Attachment viewer
+    await page.evaluate(() => { document.getElementById('attachViewer').style.display = 'flex'; });
+    await checkBar('#attachViewer .attach-viewer-bar');
+
+    // Calendar and mail view in full-screen mode
+    for (const [url, sel] of [['/today?cal=week', '#calView > .calview-bar'], ['/today?mail=ma-x', '#mailView > .calview-bar']]) {
+      await page.goto(url);
+      await page.addStyleTag({ content: SAFE });
+      await expect(page.locator(sel)).toBeVisible();
+      await checkBar(sel);
+    }
   });
 
   test('E-T-27 phone calendar view and Today page end above the home indicator', async ({ page }) => {

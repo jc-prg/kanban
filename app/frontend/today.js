@@ -836,10 +836,13 @@ function _todayMeasure() {
 }
 
 const _TODAY_FRAC = { f1: 1, f23: 2 / 3, f12: 1 / 2, f13: 1 / 3 };
+const _TODAY_FILL_MIN = 120;   // min-height of an "available" tile (.today-tile--fill in today.css)
 
 /**
  * Height a column's tiles need: fixed sizes as set (n × column height minus their share of the
- * gaps), collapsed tiles their header, "fit content" / "available" tiles header + full content.
+ * gaps), collapsed tiles their header, "fit content" tiles header + full content, "available"
+ * tiles only what they can shrink to (header + content, at most their min-height) — their
+ * content scrolls inside the tile, it never makes the column overflow.
  * Pure apart from reading the given measurements.
  */
 function _todayColumnNeed(tiles, colH, gap) {
@@ -848,6 +851,7 @@ function _todayColumnNeed(tiles, colH, gap) {
     const f = _TODAY_FRAC[_TODAY_SIZE_CLS[t.size]];
     if (t.collapsed)  total += t.headerH;
     else if (f)       total += colH * f - gap * (1 - f);
+    else if (t.size === 'available') total += Math.min(t.headerH + t.contentH, _TODAY_FILL_MIN, colH);
     else              total += t.headerH + t.contentH;
   }
   return total + gap * Math.max(0, tiles.length - 1);

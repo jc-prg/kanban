@@ -725,8 +725,8 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 #today:not(.today--editing) .today-tile--collapsed .today-tile-actions { display: none; }
 #today:not(.today--editing) .today-tile--collapsed .today-tile-expand { display: inline-flex; }
 
-/* Column whose tiles need more than its height (it scrolls anyway — _todayFitColumns): an
-   "available" tile shows all its content, like "fit content" */
+/* Column whose tiles need more than its height even with the "available" tile at its min-height
+   (it scrolls anyway — _todayFitColumns): that tile shows all its content, like "fit content" */
 #today .today-col--over > .today-tile--fill { flex: 0 0 auto; min-height: 0; max-height: none; }
 #today .today-col--over > .today-tile--fill > .today-tile-body { flex: 0 0 auto; overflow: visible; }
 
@@ -823,7 +823,7 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
 
 /* Full-screen mode of the calendar / mail view (phones; header icon [data-view-fs], class views-fs on <html>,
    per browser — today.js#_todaySetViewFs): the view covers the screen and the app header; its header runs under
-   the status bar like a full-screen dialog (overlay.css), the content keeps clear of the home indicator */
+   the status bar (statusbar.css), the content keeps clear of the home indicator */
 .view-fs-btn { display: none; }
 @media (max-width: 639px), (max-height: 500px) {
   :is(#calView, #mailView) > .calview-bar .view-fs-btn { display: inline-flex; }
@@ -832,12 +832,7 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
     border-radius: 0;
     padding-bottom: var(--safe-bottom);
   }
-  .views-fs :is(#calView, #mailView) > .calview-bar {
-    padding-top: calc(6px + var(--safe-top) + min(var(--safe-top), 16px));
-    padding-left: max(12px, var(--safe-left));
-    padding-right: max(8px, var(--safe-right));
-    border-radius: 0;
-  }
+  .views-fs :is(#calView, #mailView) > .calview-bar { border-radius: 0; }   /* top bar under the status bar: statusbar.css */
   .views-fs body:is(.calview-open, .mailview-open) header { z-index: 10; }   /* under the view (calview.css lifts it) */
 }
 .view-fs-btn[aria-pressed="true"] { opacity: 1; color: var(--accent); }
@@ -1010,7 +1005,7 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
   position: fixed; inset: 0; z-index: 80;
   display: flex; flex-direction: column;
   min-height: 0; max-height: none; margin: 0; border: none; border-radius: 0;   /* full screen: no frame (the packs run edge to edge) */
-  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  padding: 0 var(--safe-right) 0 var(--safe-left);   /* the header runs under the status bar: statusbar.css */
   background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--page-bg);
 }
 #today .today-col > .today-tile.today-tile--fs > .today-tile-header {
@@ -1020,6 +1015,21 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
   display: block; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
   padding-bottom: calc(8px + var(--safe-bottom)); border: none; border-radius: 0; opacity: 1; pointer-events: auto;
 }
+
+/* Fullscreen on small screens (today-stickies.js _stkSyncDiceFab): the stack centred in the space below
+   the chips, the dice as a big round button in the lower right corner (the tile is the containing block) */
+#today .today-col > .today-tile.today-tile--fs > .today-tile-body.today-stk-body--phonefs { display: flex; flex-direction: column; }
+.today-stk-body--phonefs > .today-stk-host { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+.today-stk-body--phonefs .today-stk { padding-top: 6px; }
+.today-stk-dice-fab {
+  position: absolute; z-index: 5;
+  right: calc(16px + var(--safe-right)); bottom: calc(16px + var(--safe-bottom));
+  width: 56px; height: 56px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); cursor: pointer;
+}
+.today-stk-dice-fab:active { background: color-mix(in srgb, var(--accent) 22%, var(--surface2)); }
 
 /* Fullscreen grid mode (today-stickies.js _stkRenderGrid): chips + keyword field on top, the grid, and the
    category packs in the lower 280 px — sticky at the bottom of the scrolling body, always at the screen bottom */

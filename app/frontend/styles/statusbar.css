@@ -1,0 +1,61 @@
+/* iOS status bar (Home-Screen app: black-translucent, viewport-fit=cover) — every top bar that runs under it.
+   Safari 26 colours the status bar area with the background colour of the fixed element at the top edge. When
+   it cannot read one solid colour there (translucent / gradient background, backdrop-filter — e.g. the glass
+   skin's headers), it lays a blur / shadow over the band and the top of the header beneath it. So a top bar
+   under the status bar is flat and opaque (--hdr-bg: panel.css, the glass skin's flat equivalent in
+   skin-glass.css), without filter or inset highlight, and keeps its title / icons below the band.
+
+   A NEW FULL-SCREEN SURFACE (view, dialog, tile) adds its top bar to the list below — nowhere else. The E2E
+   test E-T-54 (today.spec.js) checks every listed surface with a simulated safe area.
+
+   Loaded last: these rules win over panel.css and the skins. */
+
+:root {
+  --statusbar-band: calc(var(--safe-top) + min(var(--safe-top), 16px));   /* status bar + the edge iOS blurs */
+}
+
+:is(
+  .modal--fullscreen.panel > .dashboard-detail-titlebar,   /* detail panel, card / note editors in fullscreen */
+  .modal--fullscreen.panel .panel-modal-bar,
+  #today .today-col > .today-tile.today-tile--fs > .today-tile-header,   /* fullscreen tile (Stickies) */
+  .attach-viewer-bar                                       /* attachment / mail source viewer */
+) {
+  padding-top: calc(6px + var(--statusbar-band));
+  padding-left: max(12px, var(--safe-left));
+  padding-right: max(8px, var(--safe-right));
+  background: var(--hdr-bg, var(--surface));
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.attach-viewer-bar { padding: calc(10px + var(--statusbar-band)) max(16px, var(--safe-right)) 10px max(16px, var(--safe-left)); }
+
+/* Calendar / mail view in full-screen mode (phones — today.css) */
+@media (max-width: 639px), (max-height: 500px) {
+  :root.views-fs :is(#calView, #mailView) { border: none; }   /* the glass skin's edge would be the top line */
+  .views-fs :is(#calView, #mailView) > .calview-bar {
+    padding-top: calc(6px + var(--statusbar-band));
+    padding-left: max(12px, var(--safe-left));
+    padding-right: max(8px, var(--safe-right));
+    background: var(--hdr-bg, var(--surface));
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Backdrops: nothing to blur behind a full-screen surface. Centred dialogs stop below the status bar — the
+   band above them gets a flat, opaque colour (the dimmed page) instead of the translucent backdrop. */
+.modal-backdrop:has(> .modal--fullscreen.panel), .attach-viewer-backdrop {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.modal-backdrop::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: var(--safe-top);
+  z-index: -1;   /* under the dialog (the backdrop is a stacking context) */
+  background-color: color-mix(in srgb, var(--bg) 30%, #000);
+  pointer-events: none;
+}

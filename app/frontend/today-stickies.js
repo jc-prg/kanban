@@ -303,7 +303,26 @@ function _stkPaperHtml(s, cls, tilt, extra = '') {
 }
 
 // render(body, data, el) — `random: false` for re-renders after local changes (no random pick)
-function _stkRender(body, data, el, { random = true } = {}) {
+function _stkRender(body, data, el, opts) {
+  _stkRenderBody(body, data, el, opts);
+  _stkSyncDiceFab(body);
+}
+
+/**
+ * Fullscreen on small screens: the stack centred on the screen (`today-stk-body--phonefs`) and the dice
+ * as a big round button in the lower right corner (the header drops dice and settings there).
+ */
+function _stkSyncDiceFab(body) {
+  const on = _stkPhoneFs();
+  body.classList.toggle('today-stk-body--phonefs', on);
+  let fab = body.querySelector(':scope > .today-stk-dice-fab');
+  if (!on || _stkVisible().length < 2) { fab?.remove(); return; }
+  if (!fab) {
+    body.insertAdjacentHTML('beforeend', `<button type="button" class="today-stk-dice-fab" data-stk-dice="1" title="Random sticky" aria-label="Random sticky">${SVGICONS.dice(28, 28)}</button>`);
+  }
+}
+
+function _stkRenderBody(body, data, el, { random = true } = {}) {
   _stkItems = _stkSort(data?.items || []);
   _stkSetCats(data?.categories);
   if (el) _todaySetCount(el, _stkItems.length);
@@ -379,6 +398,7 @@ function _stkRender(body, data, el, { random = true } = {}) {
 
 /** Fullscreen on larger screens shows the grid; small screens keep the stack, just full-screen. */
 function _stkGridMode() { return _stkFs && !_todaySmall(); }
+function _stkPhoneFs()  { return _stkFs && _todaySmall(); }
 
 /**
  * Fullscreen on larger screens: the (filtered) stickies as a grid above — in their order, each position
@@ -719,6 +739,7 @@ function _stkWire(body) {
     const del = e.target.closest('[data-stk-cat-del]');
     if (del) { e.stopPropagation(); _stkDeleteCat(del.dataset.stkCatDel); return; }
     if (e.target.closest('[data-stk-settings]')) { _todayOpenWidgetSettings('stickies'); return; }
+    if (e.target.closest('[data-stk-dice]')) { _stkShowRandom(); return; }
     const add = e.target.closest('[data-stk-cat-add]');
     if (add) { _stkStartAddCat(add); return; }
     const pack = e.target.closest('[data-stk-pack]');
@@ -1125,11 +1146,12 @@ TODAY_TILES.stickies = {
   scales: true,
   load: () => _todayFetchJson('/api/stickies'),
   render: _stkRender,
-  // Fullscreen grid: no dice (there is no stack), the settings icon sits in the packs' lower left corner
+  // Fullscreen: no dice / settings in the header — the grid has no stack (settings in the packs' lower
+  // left corner), small screens get the dice as a button in the lower right corner (_stkSyncDiceFab)
   actions: () => [
-    ...(_stkGridMode() ? [] : [{ icon: SVGICONS.dice(12, 12), title: 'Random sticky', run: () => _stkShowRandom() }]),
+    ...(_stkFs ? [] : [{ icon: SVGICONS.dice(12, 12), title: 'Random sticky', run: () => _stkShowRandom() }]),
     { icon: SVGICONS.create(12, 12), title: 'New sticky', run: () => _stkOpenDetail(null) },
-    ...(_stkGridMode() ? [] : [{ icon: SVGICONS.settings(12, 12), title: 'Random rhythm (settings)', run: () => _todayOpenWidgetSettings('stickies') }]),
+    ...(_stkFs ? [] : [{ icon: SVGICONS.settings(12, 12), title: 'Random rhythm (settings)', run: () => _todayOpenWidgetSettings('stickies') }]),
     { icon: SVGICONS.fullscreen(12, 12), title: _stkFs ? 'Exit fullscreen (Esc)' : 'Fullscreen — all stickies', active: _stkFs, run: () => _stkSetFs(!_stkFs) },
   ],
 };

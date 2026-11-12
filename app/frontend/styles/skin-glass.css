@@ -77,6 +77,9 @@
                             color-mix(in srgb, var(--hdr-accent) calc(var(--glass-tint) / 3), transparent));
   border-bottom-color: color-mix(in srgb, var(--hdr-accent) 40%, transparent);
   box-shadow: var(--glass-hdr-shadow);
+  /* flat, opaque equivalent (tint averaged over the gradient, on the glass body) for top bars under the iOS
+     status bar — statusbar.css */
+  --hdr-bg: color-mix(in srgb, var(--hdr-accent) calc(var(--glass-tint) * 2 / 3), var(--glass-body-solid));
 }
 /* Dashboard widgets: frosted — content scrolling under a stacked header (.today-col--stack) shows through
    blurred. Only there: elsewhere nothing passes beneath, and the filter would trap header dropdowns in a
