@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page unit tests — TU-1 … TU-24
+ * Today page unit tests — TU-1 … TU-31
  *
  * today.js is loaded via vm.runInContext with minimal browser-global stubs; only the pure
  * helpers are exercised (layout resolution / folding, agenda model, weather mapping, ISO week).
@@ -23,10 +23,13 @@ beforeAll(() => {
     window:   { addEventListener: noop, location: { href: 'http://x/today', search: '' }, innerWidth: 1400 },
     localStorage: { getItem: () => null, setItem: noop },
     SVGICONS: {}, ICONS: {},
+    escHtml: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    safeLink: u => (/^https?:\/\//i.test(u) ? u : null),
     Intl, Date, Math, JSON, Object, Array, String, Number, Map, Set, Promise,
   })
   vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'today.js'), 'utf8'), ctx)
   vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'today-search.js'), 'utf8'), ctx)
+  vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'today-stickies.js'), 'utf8'), ctx)
 })
 
 // Plain copies (vm objects have a foreign Object prototype → toEqual is stricter)
@@ -225,7 +228,7 @@ test('TU-13 size "available": one per column — stored, folded and edited layou
 })
 
 test('TU-14 deactivated widgets: _todayKnownTiles skips them; _todayLayoutsWith re-adds a tile where it is missing', () => {
-  expect(plain(ctx._todayKnownTiles({ disabled: ['weather', 'cvapp'] }))).toEqual(['agenda', 'attention', 'progress', 'quickaccess', 'boards', 'notes', 'search'])
+  expect(plain(ctx._todayKnownTiles({ disabled: ['weather', 'cvapp'] }))).toEqual(['agenda', 'attention', 'progress', 'quickaccess', 'boards', 'notes', 'search', 'stickies'])
   const layouts = {
     lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: '1/1' }, { id: 'boards', col: 1, order: 0, size: 'container' }] },
     sm: { columns: [{ width: 1 }], tiles: [{ id: 'weather', col: 0, order: 0, size: 'container' }] },
@@ -343,7 +346,7 @@ test('TU-22 Quick access: icon markup — stored image (bare, optional invert), 
 })
 
 test('TU-23 Search tile: registered; prefs (off list, full) with defaults; active types and request slots', () => {
-  expect(vm.runInContext('TODAY_TILES.search.title', ctx)).toBe('Search')
+  expect(vm.runInContext('TODAY_TILES.search.title', ctx)).toBe('Find')
   expect(plain(ctx._tsPrefs())).toEqual({ off: [], full: false })
   const saved = {}
   const orig = ctx.localStorage
@@ -379,4 +382,92 @@ test('TU-24 Search tile: _tsGroup merges mail accounts (newest first), sums tota
   expect(ctx._tsGroup('cards', slots, results)).toBe(null)   // not requested yet
   results.cards = { status: 'error', error: 'HTTP 500' }
   expect(plain(ctx._tsGroup('cards', slots, results))).toMatchObject({ status: 'error', items: [], errors: ['HTTP 500'] })
+})
+
+test('TU-25 widget mode: _todayCollapsedForMode — all collapsed, all open, one at a time keeps the first open tile', () => {
+  const ids = ['agenda', 'attention', 'progress']
+  const set = (...v) => new Set(v)
+  expect([...ctx._todayCollapsedForMode('closed', ids, set())]).toEqual(ids)
+  expect([...ctx._todayCollapsedForMode('open', ids, set('agenda', 'progress'))]).toEqual([])
+  expect([...ctx._todayCollapsedForMode('one', ids, set())]).toEqual(['attention', 'progress'])
+  expect([...ctx._todayCollapsedForMode('one', ids, set('agenda'))]).toEqual(['agenda', 'progress'])
+  expect([...ctx._todayCollapsedForMode('one', ids, set(...ids))]).toEqual(ids)   // none open: all stay collapsed
+})
+
+test('TU-26 Stickies tile: registered; slot angles ±1.5° … ±6°, distinct, shifted on every flip', () => {
+  expect(vm.runInContext('TODAY_TILES.stickies.title', ctx)).toBe('Stickies')
+  const ok = a => Math.abs(a) >= 1.5 && Math.abs(a) <= 6
+  for (let run = 0; run < 50; run++) {
+    const a = plain(ctx._stkShiftAngles(null, 0))
+    expect(a).toHaveLength(4)
+    expect(a.every(ok)).toBe(true)
+    for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) expect(Math.abs(a[i] - a[j])).toBeGreaterThanOrEqual(1.5)
+    for (let i = 1; i < 4; i++) expect(Math.sign(a[i])).not.toBe(Math.sign(a[i - 1]))   // neighbours lean opposite ways
+  }
+  const a = [3, -4, 2, -5.5]
+  // forward: papers move up keeping their angle, a new one at the end
+  const f = plain(ctx._stkShiftAngles(a, 1))
+  expect(f.slice(0, 3)).toEqual([-4, 2, -5.5])
+  expect(ok(f[3]) && f[3] > 0).toBe(true)
+  // backward: a new top, the others move down
+  const b = plain(ctx._stkShiftAngles(a, -1))
+  expect(b.slice(1)).toEqual([3, -4, 2])
+  expect(ok(b[0]) && b[0] < 0).toBe(true)
+  expect(plain(ctx._stkShiftAngles(a, 0))).toEqual(a)
+  expect(ctx._stkShiftAngles(a, 9)).toHaveLength(4)
+})
+
+test('TU-27 Stickies: _stkDue — off for rhythm 0, due without a previous pick or after the rhythm', () => {
+  const now = Date.UTC(2026, 10, 12, 12, 0)
+  expect(ctx._stkDue(0, 0, now)).toBe(false)
+  expect(ctx._stkDue(60, 0, now)).toBe(true)
+  expect(ctx._stkDue(60, now - 59 * 60000, now)).toBe(false)
+  expect(ctx._stkDue(60, now - 60 * 60000, now)).toBe(true)
+  expect(ctx._stkDue(1440, now - 23 * 3600000, now)).toBe(false)
+})
+
+test('TU-28 Stickies: _stkPickRandom never repeats the current one; none / one sticky', () => {
+  const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+  for (const r of [0, 0.34, 0.5, 0.99, 0.999999]) expect(ctx._stkPickRandom(items, 'b', () => r)).not.toBe('b')
+  expect(ctx._stkPickRandom(items, 'b', () => 0)).toBe('a')
+  expect(ctx._stkPickRandom(items, 'b', () => 0.99)).toBe('c')
+  expect(ctx._stkPickRandom([], 'a')).toBeNull()
+  expect(ctx._stkPickRandom([{ id: 'a' }], 'a')).toBe('a')
+})
+
+test('TU-29 Stickies: _stkSplit title / body, _stkMarkdown quotes', () => {
+  expect(plain(ctx._stkSplit('  Buy milk  '))).toEqual({ title: 'Buy milk', body: '' })
+  expect(plain(ctx._stkSplit('Idea\nmore details'))).toEqual({ title: 'Idea', body: 'Idea\nmore details' })
+  const long = 'word '.repeat(40).trim()
+  const { title, body } = ctx._stkSplit(long)
+  expect(title.endsWith('\u2026')).toBe(true)
+  expect(title.length).toBeLessThanOrEqual(121)
+  expect(title).not.toMatch(/wor\u2026$/)   // cut at a word
+  expect(body).toBe(long)
+  expect(ctx._stkMarkdown({ category: 'quote' }, 'To be\nor not')).toBe('> To be\n> or not')
+  expect(ctx._stkMarkdown({ category: 'note' }, 'plain')).toBe('plain')
+  expect(ctx._stkMarkdown({ category: 'quote' }, '')).toBe('')
+  // Source: after the quote / as "Source:", the text included even when the title says it all
+  expect(ctx._stkMarkdown({ category: 'quote', text: 'To be', source: 'Hamlet' }, '')).toBe('> To be\n>\n> \u2014 Hamlet')
+  expect(ctx._stkMarkdown({ category: 'note', text: 'Idea', source: 'https://x.y' }, '')).toBe('Idea\n\nSource: https://x.y')
+  expect(ctx._stkPlain({ text: 'To be', source: ' Hamlet ' }, '')).toBe('To be\n\n\u2014 Hamlet')
+  expect(ctx._stkPlain({ text: 'a\nb', source: '' }, 'a\nb')).toBe('a\nb')
+})
+
+test('TU-30 Stickies: _stkLinkify — URLs as links without the scheme, trailing punctuation outside, rest escaped', () => {
+  expect(ctx._stkLinkify('Seneca <Letters>')).toBe('Seneca &lt;Letters&gt;')
+  const html = ctx._stkLinkify('see https://www.example.com/a?b=1. and http://x.org')
+  expect(html).toBe('see <a href="https://www.example.com/a?b=1" target="_blank" rel="noopener noreferrer" title="https://www.example.com/a?b=1">example.com/a?b=1</a>. and '
+    + '<a href="http://x.org" target="_blank" rel="noopener noreferrer" title="http://x.org">x.org</a>')
+  expect(ctx._stkLinkify('javascript:alert(1)')).toBe('javascript:alert(1)')
+  expect(ctx._stkLinkify('')).toBe('')
+})
+
+test('TU-31 Stickies: _stkFilter keeps the order, missing category = note; _stkCounts per category', () => {
+  const items = [{ id: 'a', category: 'quote' }, { id: 'b' }, { id: 'c', category: 'note' }, { id: 'd', category: 'quote' }]
+  expect(plain(ctx._stkFilter(items, 'all')).map(i => i.id)).toEqual(['a', 'b', 'c', 'd'])
+  expect(plain(ctx._stkFilter(items, 'quote')).map(i => i.id)).toEqual(['a', 'd'])
+  expect(plain(ctx._stkFilter(items, 'note')).map(i => i.id)).toEqual(['b', 'c'])
+  expect(plain(ctx._stkFilter(items, 'other'))).toEqual([])
+  expect(plain(ctx._stkCounts(items))).toEqual({ all: 4, note: 2, quote: 2, other: 0 })
 })

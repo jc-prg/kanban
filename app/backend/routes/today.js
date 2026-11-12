@@ -148,7 +148,7 @@ router.get('/today/widgets/:id', withHandler(async (req, res) => {
 
 const SEARCH_TYPES = ['cards', 'notes', 'events', 'mail', 'applications'];
 
-/** Sources the search can use: { types, mailAccounts: [{ id, label, color }] }. */
+/** Sources the search can use: { types, mailAccounts: [{ id, label, color, webInterfaceUrl }], calendarAccounts: [{ id, label, color }] }. */
 router.get('/today/search', withHandler(async (req, res) => {
   const [cfg, dash] = await Promise.all([_loadConfig(), getDashboardConfig()]);
   const mail = dash.mailAccounts || [];
@@ -156,15 +156,38 @@ router.get('/today/search', withHandler(async (req, res) => {
   if ((dash.calendarAccounts || []).length) types.push('events');
   if (mail.length) types.push('mail');
   if (/^https?:\/\//i.test(cfg.widgets?.cvapp?.apiUrl || '')) types.push('applications');
-  res.json({ types, mailAccounts: mail.map(a => ({ id: a.id, label: a.label || a.id, color: a.color || null, webInterfaceUrl: a.webInterfaceUrl || null })) });
+  res.json({
+    types,
+    mailAccounts: mail.map(a => ({ id: a.id, label: a.label || a.id, color: a.color || null, webInterfaceUrl: a.webInterfaceUrl || null })),
+    calendarAccounts: (dash.calendarAccounts || []).map(a => ({ id: a.id, label: a.label || a.id, color: a.color || null })),
+  });
 }));
+
+/** `from` / `to` query parameters (YYYY-MM-DD, both optional and inclusive) → { from, to } or { error }. */
+function _searchRange(query) {
+  const out = {};
+  for (const k of ['from', 'to']) {
+    const v = query[k];
+    if (v === undefined || v === '') continue;
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || isNaN(Date.parse(`${v}T00:00:00Z`))) return { error: `${k} must be YYYY-MM-DD` };
+    out[k] = v;
+  }
+  if (out.from && out.to && out.from > out.to) return { error: 'from must not be after to' };
+  return out;
+}
 
 router.get('/today/search/:type', withHandler(async (req, res) => {
   const { type } = req.params;
   if (!SEARCH_TYPES.includes(type)) return res.status(404).json({ error: 'Unknown search type' });
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-  if (q.length < 2 || q.length > 200) return res.status(400).json({ error: 'q must be 2–200 characters' });
+  if (q.length < 3 || q.length > 200) return res.status(400).json({ error: 'q must be 3–200 characters' });
   const full = req.query.full === '1' || req.query.full === 'true';
+  // Find dialog: date range (events, mail) and one mail folder
+  const range = _searchRange(req.query);
+  if (range.error) return res.status(400).json({ error: range.error });
+  const { from, to } = range;
+  const folder = typeof req.query.folder === 'string' && req.query.folder ? req.query.folder : undefined;
+  if (folder && (folder.length > 500 || /[\r\n\0]/.test(folder))) return res.status(400).json({ error: 'Invalid folder' });
   try {
     if (type === 'cards') return res.json(await search.searchCards(q, { full }));
     if (type === 'notes') return res.json(await search.searchNotes(q, { full }));
@@ -173,10 +196,18 @@ router.get('/today/search/:type', withHandler(async (req, res) => {
       return res.json(await search.searchApplications(q, { full, settings: cfg.widgets?.cvapp || {} }));
     }
     const dash = await getDashboardConfig();
-    if (type === 'events') return res.json(await search.searchEvents(q, { full, accounts: dash.calendarAccounts || [] }));
+    if (type === 'events') {
+      // Find dialog: one calendar account (`account`), else all
+      let accounts = dash.calendarAccounts || [];
+      if (req.query.account) {
+        accounts = accounts.filter(a => a.id === req.query.account);
+        if (!accounts.length) return res.status(404).json({ error: 'Calendar account not found' });
+      }
+      return res.json(await search.searchEvents(q, { full, accounts, from, to }));
+    }
     const account = (dash.mailAccounts || []).find(a => a.id === req.query.account);
     if (!account) return res.status(404).json({ error: 'Mail account not found' });
-    res.json(await search.searchMail(account, q, { full }));
+    res.json(await search.searchMail(account, q, { full, folder, from, to }));
   } catch (e) {
     res.status(e.statusCode || 502).json({ error: e.message || 'Search failed' });
   }

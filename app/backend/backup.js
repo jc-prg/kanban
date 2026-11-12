@@ -2,6 +2,7 @@ const fs   = require('fs');
 const path = require('path');
 const { JSON_BACKUP_DIR, ATTACHMENTS_DIR, COUCHDB_DATA_DIR, DB_PREFIX, NOTES_DOC_ID } = require('./config');
 const { getCouch, getPromptsDb, loadBoardData } = require('./db');
+const { listStickies } = require('./global-db');
 
 let dbSizeBytes = 0;
 
@@ -54,6 +55,14 @@ async function runPromptsBackup() {
     fs.writeFileSync(path.join(JSON_BACKUP_DIR, 'extension-prompts.json'), JSON.stringify(docs, null, 2), 'utf-8');
     console.log('Prompts backup saved');
   } catch (err) { console.error('Prompts backup failed:', err.message); }
+}
+
+async function runStickiesBackup() {
+  try {
+    const items = await listStickies();
+    if (!fs.existsSync(JSON_BACKUP_DIR)) fs.mkdirSync(JSON_BACKUP_DIR, { recursive: true });
+    fs.writeFileSync(path.join(JSON_BACKUP_DIR, 'stickies.json'), JSON.stringify(items, null, 2), 'utf-8');
+  } catch (err) { console.error('Stickies backup failed:', err.message); }
 }
 
 function checkDataDirectories() {
@@ -115,4 +124,4 @@ async function runOrphanAttachmentCleanup() {
   } catch (err) { console.error('Orphan attachment cleanup failed:', err.message); }
 }
 
-module.exports = { getDbSizeBytes, refreshDbSize, runBackup, runPromptsBackup, checkDataDirectories, runOrphanAttachmentCleanup };
+module.exports = { getDbSizeBytes, refreshDbSize, runBackup, runPromptsBackup, runStickiesBackup, checkDataDirectories, runOrphanAttachmentCleanup };

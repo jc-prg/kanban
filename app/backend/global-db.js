@@ -6,14 +6,17 @@ const DASHBOARD_CONFIG_ID = 'dashboard-config';
 
 const WEBDAV_DB_NAME     = 'jc-config-webdav';
 const TEMPLATES_DB_NAME  = 'jc-config-templates';
+const STICKIES_DB_NAME   = 'jc-config-stickies';   // one doc per sticky (Today Stickies widget)
 
 let globalDb;
 let webdavDb;
 let templatesDb;
+let stickiesDb;
 
 function getGlobalDb()    { return globalDb;    }
 function getWebdavDb()    { return webdavDb;    }
 function getTemplatesDb() { return templatesDb; }
+function getStickiesDb()  { return stickiesDb;  }
 
 async function initGlobalDb() {
   const couch = getCouch();
@@ -44,6 +47,15 @@ async function initGlobalDb() {
     console.log(`Database "${TEMPLATES_DB_NAME}" already exists`);
   }
   templatesDb = couch.use(TEMPLATES_DB_NAME);
+
+  try {
+    await couch.db.create(STICKIES_DB_NAME);
+    console.log(`Database "${STICKIES_DB_NAME}" created`);
+  } catch (err) {
+    if (err.statusCode !== 412) throw err;
+    console.log(`Database "${STICKIES_DB_NAME}" already exists`);
+  }
+  stickiesDb = couch.use(STICKIES_DB_NAME);
 }
 
 async function getDashboardConfig() {
@@ -216,4 +228,44 @@ async function saveAppearance(data) {
   return upsertDoc(globalDb, APPEARANCE_ID, data);
 }
 
-module.exports = { getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender, getHiddenFolders, setHiddenFolders };
+// ---- Stickies (Today widget): { id, text, color, category, created, updated } ----
+
+function _stickyOut({ _id, _rev, ...doc }) { return { id: _id, ...doc }; }
+
+/** All stickies, newest first. */
+async function listStickies() {
+  const result = await stickiesDb.list({ include_docs: true });
+  return result.rows
+    .filter(r => !r.id.startsWith('_') && r.doc)
+    .map(r => _stickyOut(r.doc))
+    .sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+}
+
+/** One sticky or null. */
+async function getSticky(id) {
+  try {
+    return _stickyOut(await stickiesDb.get(id));
+  } catch (err) {
+    if (err.statusCode === 404) return null;
+    throw err;
+  }
+}
+
+async function saveSticky({ id, ...data }) {
+  await upsertDoc(stickiesDb, id, data);
+  return { id, ...data };
+}
+
+/** false when the sticky did not exist. */
+async function deleteSticky(id) {
+  try {
+    const { _rev } = await stickiesDb.get(id);
+    await stickiesDb.destroy(id, _rev);
+    return true;
+  } catch (err) {
+    if (err.statusCode === 404) return false;
+    throw err;
+  }
+}
+
+module.exports = { listStickies, getSticky, saveSticky, deleteSticky, getStickiesDb, getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender, getHiddenFolders, setHiddenFolders };

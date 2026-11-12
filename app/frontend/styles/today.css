@@ -132,6 +132,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 /* "available": content height, shrinks to the space the other tiles leave (only shrinking tile of its column) */
 .today-tile.today-tile--fill { flex: 0 1 auto; min-height: min(120px, var(--today-col-h)); max-height: var(--today-col-h); }
 .today-tile.today-tile--fill .today-tile-body { flex: 0 1 auto; }
+/* Tiles whose content scales to their height (TODAY_TILES[id].scales): "available" = all the remaining space */
+.today-tile.today-tile--fill.today-tile--scales { flex: 1 1 0; }
+.today-tile.today-tile--fill.today-tile--scales .today-tile-body { flex: 1 1 0; }
 
 /* Box, bar and colours: .panel-hdr (panel.css) */
 .today-tile-header {
@@ -299,6 +302,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-att--soon   .today-row-date { color: #eab308; }
 .today-att--mail   .today-att-icon, .today-att--mail   .today-att-count { color: var(--link); }
 .today-att--new    .today-att-icon, .today-att--new    .today-att-count { color: var(--unread); }
+.today-att--flagged .today-att-icon, .today-att--flagged .today-att-count { color: #ff9500; }
 .today-att-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px 4px; }
 /* Cards like the "Last edited" entries (dashboard.css .dashboard-recent-item) with a done circle */
 .today-card-list { display: flex; flex-direction: column; gap: 6px; }
@@ -450,6 +454,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-newboard .btn { font-size: 0.78rem; padding: 4px 12px; }
 .today-newboard-error { margin: 6px 0 0; font-size: 0.75rem; color: var(--danger, #ef4444); }
 .today-recent .dashboard-recent-item { margin-bottom: 6px; }
+/* Card entries sit in swipe wrappers (today.js): the wrapper takes the item's margins */
+.today-recent > .today-swipe { margin: 6px 10px; }
+.today-recent > .today-swipe > .dashboard-recent-item { margin: 0; }
 
 /* Edit mode: "+ Add widget" at the end of each column (widgets missing from the layout) */
 .today-col-add {
@@ -583,6 +590,12 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 @media (max-width: 767px) {
   #today { padding: 8px 14px calc(32px + var(--safe-bottom)); gap: 10px; --today-gap: 22px; }   /* 20 px extra at the end of the page */
   .today-bar { padding: 2px 0 10px; gap: 8px 14px; }
+  /* Date, widget mode and Refresh always share the first line: the date takes the rest and never wraps
+     (too narrow for the long date → the short one, _todayFitBarDate) */
+  .today-bar-date { flex: 1 1 0; min-width: 0; }
+  .today-bar-date strong { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .today-bar-week { flex-shrink: 0; white-space: nowrap; }
+  .today-bar-refresh-sm { flex-shrink: 0; }
   /* Line between the date and the buttons */
   .today-bar-actions {
     margin-left: 0; width: 100%;
@@ -592,8 +605,11 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   .today-bar-actions :is(.today-bar-edit, .today-bar-refresh) { display: none; }   /* phones: "Edit layout" is in the header menu */
   .today-bar-refresh-sm {   /* Refresh: first line, right-aligned (the actions wrap into the second line) */
     display: inline-flex; align-items: center; justify-content: center; margin-left: auto;
-    padding: 4px 8px; background: none; border-color: transparent; color: var(--text-muted);
+    padding: 4px 6px; background: none; border-color: transparent; color: var(--text-muted);
   }
+  /* Widget mode (collapse all / open all / one at a time) directly left of Refresh: no bar gap between them */
+  .today-bar-collapse { margin-right: -14px; }
+  .today-bar-collapse + .today-bar-refresh-sm { margin-left: 0; }
   .today-bar-weather { display: none; }
   .today-wx-hour { flex-basis: 40px; }
 }
@@ -850,16 +866,120 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
 }
 #calView > .calview-bar .calview-navbtn.calview-menu-btn { padding: 0; }   /* icon-only, 26 px */
 
-/* Swipe actions in Needs attention (small screens, today.js _todayWireSwipe; layers styled in mailview.css) */
+/* Swipe actions in Needs attention and Boards → Last edited (small screens, today.js _todayWireSwipe; layers styled in mailview.css) */
 .today-swipe { position: relative; }
-.today-swipe > :is(.today-mail-row, .today-kcard) { position: relative; }
+.today-swipe > :is(.today-mail-row, .today-kcard, .dashboard-recent-item) { position: relative; }
 @media (max-width: 767px), (max-height: 500px) {
-  .today-swipe > :is(.today-mail-row, .today-kcard) { touch-action: pan-y; }   /* horizontal = swipe */
+  .today-swipe > :is(.today-mail-row, .today-kcard, .dashboard-recent-item) { touch-action: pan-y; }   /* horizontal = swipe */
 }
 .today-swipe > .mv-swipe-actions { border-radius: 6px; }
 /* Cards bring their own transform transition (card.css): off while following the finger, only the snap animates */
-.today-swipe > .today-kcard { transition: none; }
-.today-swipe > .today-kcard.mv-swipe-anim { transition: transform 0.2s ease; }
+.today-swipe > :is(.today-kcard, .dashboard-recent-item) { transition: none; }
+.today-swipe > :is(.today-kcard, .dashboard-recent-item).mv-swipe-anim { transition: transform 0.2s ease; }
 /* Picker on Today (mail folders, board columns): over the whole page */
 .mv-picker.today-picker { position: fixed; z-index: 150; }
 .today-pick-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--card-color); }
+
+/* ---- Stickies tile (today-stickies.js): stack of rotated square notes, text scaled to fit (_stkFitText) ---- */
+.today-stk { --stk-size: 260px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 8px 6px; outline: none; }
+.today-stk:focus-visible .today-stk-paper--top { box-shadow: 0 0 0 2px var(--accent), 0 6px 16px rgba(0, 0, 0, 0.35); }
+.today-stk-stack { position: relative; width: var(--stk-size); height: var(--stk-size); flex-shrink: 0; }
+.today-stk-paper {
+  position: absolute; inset: 0;
+  background: var(--stk-color);
+  color: #1f1d16;
+  border-radius: 3px 3px 14px 3px;   /* slightly curled corner */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 6px 16px rgba(0, 0, 0, 0.3);
+  transform: rotate(var(--stk-tilt));
+  filter: brightness(0.86) saturate(0.9);   /* dark mode: paper not glaring */
+  user-select: none; -webkit-user-select: none;
+  overflow: hidden;
+}
+.today-stk-paper--back { filter: brightness(0.7) saturate(0.85); }
+.today-stk-paper--top {
+  cursor: grab;
+  touch-action: pan-y;   /* horizontal = flip */
+  transform: translateX(var(--stk-dx, 0px)) rotate(calc(var(--stk-tilt) + var(--stk-drot, 0deg)));
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.today-stk-paper--drag { transition: none; cursor: grabbing; }
+.today-stk-paper--fly { transform: translateX(calc(var(--stk-fly) * 130%)) rotate(calc(var(--stk-fly) * 18deg)); opacity: 0; transition-duration: 0.18s; }
+.today-stk-paper--pop { animation: today-stk-pop 0.35s ease; }
+@keyframes today-stk-pop {
+  from { transform: scale(0.85) rotate(calc(var(--stk-tilt) * 3)); opacity: 0.4; }
+  to   { transform: rotate(var(--stk-tilt)); opacity: 1; }
+}
+.today-stk-textbox {
+  position: absolute; inset: 9% 9% 15%;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.today-stk-text {
+  width: 100%;
+  text-align: center;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  overflow-wrap: normal; word-break: normal; hyphens: manual;   /* never inside a word: _stkFitText shrinks until the longest one fits */
+  font-family: system-ui, sans-serif;
+  font-weight: 500;
+}
+.today-stk-text--quote { font-style: italic; }
+.today-stk-text--quote::before { content: '\201C'; }
+.today-stk-text--quote::after  { content: '\201D'; }
+.today-stk-foot {
+  position: absolute; left: 9%; right: 9%; bottom: 5%;
+  display: flex; align-items: baseline; gap: 0.5em; min-width: 0;
+  font-size: 0.68rem; letter-spacing: 0.06em;
+}
+.today-stk-cat { flex-shrink: 0; text-transform: uppercase; opacity: 0.55; }
+/* Source after the category, same font (case as typed); cut with … when there is no room */
+.today-stk-src { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.7; }
+.today-stk-src::before { content: '\00b7\00a0'; opacity: 0.8; }
+.today-stk-src a { color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.today-stk-src a:hover { opacity: 1; text-decoration-thickness: 2px; }
+.today-stk-nav { display: flex; align-items: center; gap: 6px; width: min(100%, calc(var(--stk-size) + 40px)); margin-top: 6px; }
+.today-stk-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
+/* Fixed-height tile wider than high (_stkLayout): slider upright along the tile's right border (body padding 6 px) */
+.today-stk--wide { position: relative; }
+.today-stk--wide .today-stk-nav { position: absolute; top: 6px; bottom: 6px; right: -4px; flex-direction: column; align-items: flex-end; gap: 4px; width: auto; margin-top: 0; }
+.today-stk--wide .today-stk-slider { writing-mode: vertical-lr; width: auto; height: auto; flex: 1; min-height: 0; }
+.today-stk--wide .today-stk-pos { min-width: 0; text-align: right; }
+/* Small screens: no slider (swipe flips) — the position stays, centred */
+@media (max-width: 767px), (max-height: 500px) {
+  .today-stk-slider { display: none; }
+  .today-stk-nav { justify-content: center; }
+  .today-stk-pos { min-width: 0; text-align: left; }
+}
+/* Dark mode: black track with a thin brighter outline, accent thumb */
+@media (prefers-color-scheme: dark) {
+  .today-stk-slider { -webkit-appearance: none; appearance: none; background: transparent; height: 16px; cursor: pointer; }
+  .today-stk--wide .today-stk-slider { height: auto; width: 16px; }
+  .today-stk-slider::-webkit-slider-runnable-track { height: 6px; background: #000; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 999px; }
+  .today-stk--wide .today-stk-slider::-webkit-slider-runnable-track { height: auto; width: 6px; }
+  .today-stk-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -5px; border: none; border-radius: 50%; background: var(--accent); }
+  .today-stk--wide .today-stk-slider::-webkit-slider-thumb { margin-top: 0; margin-left: -5px; }
+  .today-stk-slider::-moz-range-track { height: 4px; background: #000; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 999px; }
+  .today-stk--wide .today-stk-slider::-moz-range-track { height: auto; width: 4px; }
+  .today-stk-slider::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 50%; background: var(--accent); }
+}
+.today-stk-pos { font-size: 0.75rem; color: var(--text-muted); min-width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.today-stk-empty a { color: var(--accent); }
+@media (prefers-color-scheme: light) {
+  .today-stk-paper { filter: none; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 6px 14px rgba(0, 0, 0, 0.14); }
+  .today-stk-paper--back { filter: brightness(0.93); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .today-stk-paper--top { transition: none; }
+  .today-stk-paper--pop { animation: none; }
+}
+/* Category filter above the stack (today-stickies.js _stkSetFilter, localStorage today-stickies-filter) */
+.today-stk-filter { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 10px 8px 0; }
+.today-stk-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted);
+  padding: 2px 10px; font-size: 0.75rem; cursor: pointer;
+}
+.today-stk-chip:hover { color: var(--text); }
+.today-stk-chip[aria-checked="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.today-stk-chip--empty:not([aria-checked="true"]) { opacity: 0.5; }
+.today-stk-chip-n { font-size: 0.68rem; opacity: 0.7; font-variant-numeric: tabular-nums; }

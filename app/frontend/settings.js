@@ -740,7 +740,7 @@ document.getElementById('twoFactorForm').addEventListener('submit', async () => 
   function _updateWebhookMenuItem(cfg) {
     const btn = document.getElementById('menuWebhook');
     if (cfg.enabled && cfg.name && cfg.url) {
-      btn.textContent  = cfg.name;
+      btn.querySelector('.header-dd-label').textContent = cfg.name;
       btn.style.display = '';
     } else {
       btn.style.display = 'none';
@@ -1716,15 +1716,19 @@ async function afterAuth() {
   document.getElementById('boardSwitchWrap').style.display = '';
   document.getElementById('notesToggleBtn').style.display = '';
   document.getElementById('todayBtn').style.display = '';   // dashboard (Today) link, all screen sizes
-  // Mail and calendar: their views open over the board (overlay host, dashboard.js); not on small screens
-  for (const [id, isOpen, close, open] of [
-    ['dashboardMailBtn', () => _mvIsOpen(), closeMailView, () => openMailView()],
-    ['dashboardCalBtn',  () => _cvIsOpen(), closeCalView,  () => openCalView()],
+  // Mail and calendar: their views cover the board (overlay host, dashboard.js); on small screens they move
+  // from the header to the menu. The open view's icon is hidden (_syncViewHeader) — close / Escape return to the board
+  for (const [id, menuId, open] of [
+    ['dashboardCalBtn',  'menuCalendar', () => openCalView()],
+    ['dashboardMailBtn', 'menuMail',     () => openMailView()],
   ]) {
     const btn = document.getElementById(id);
     btn.classList.add('header-menu-btn--hide-mobile');
     btn.style.display = '';
-    btn.onclick = async () => { if (isOpen()) close(); else { await _initOverlayHost(); open(); } };
+    btn.onclick = async () => { await _initOverlayHost(); open(); };
+    const item = document.getElementById(menuId);
+    item.classList.add('is-enabled');
+    item.onclick = async () => { window.hideMenu?.(); await _initOverlayHost(); open(); };
   }
   if (window.matchMedia('(min-width: 640px)').matches) document.getElementById('schedToggleBtn').style.display = '';
   await load();

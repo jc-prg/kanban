@@ -872,3 +872,20 @@ test('DB-52 parseEvents — embedded VTIMEZONE from the server wins over the gen
   ].join('\r\n')
   expect(parseEvents(ics)[0].start).toBe('2026-01-20T15:30:00.000Z')
 })
+
+test('DB-53 calendar feeds in a legacy charset: Content-Type charset honoured, invalid UTF-8 read as windows-1252', async () => {
+  _storedConfig = { mailAccounts: [], cardSources: [], autoRefreshMs: 0,
+    calendarAccounts: [_calAccount({ id: 'ca-ical', type: 'ical-url', url: 'https://feed.example.com/cal.ics' })] }
+  const ics = makeIcs('uid-latin@ex', icalTs(TOMORROW), icalTs(IN5DAYS), 'Dank für Ihr Interesse')
+  const latin1 = Buffer.from(ics, 'latin1')   // ü = 0xFC — invalid as UTF-8
+  for (const contentType of ['text/calendar; charset=ISO-8859-1', 'text/calendar']) {
+    vi.stubGlobal('fetch', async () => new Response(latin1, { status: 200, headers: { 'Content-Type': contentType } }))
+    const res = await request(app).get('/api/dashboard/calendar/ca-ical').set(AUTH)
+    expect(res.status).toBe(200)
+    expect(res.body.events[0].title).toBe('Dank für Ihr Interesse')
+  }
+  // UTF-8 stays UTF-8
+  vi.stubGlobal('fetch', async () => new Response(Buffer.from(ics, 'utf8'), { status: 200, headers: { 'Content-Type': 'text/calendar' } }))
+  const res = await request(app).get('/api/dashboard/calendar/ca-ical').set(AUTH)
+  expect(res.body.events[0].title).toBe('Dank für Ihr Interesse')
+})

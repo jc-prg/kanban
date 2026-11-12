@@ -30,6 +30,7 @@ let _calModalHref    = null;
 let _calModalCardRefs = null;   // hidden X-JC-KANBAN-CARD links of the edited event
 let _calModalScope  = null;    // 'occurrence' | 'series' | null
 let _calModalOccDate = null;    // ISO start of the occurrence being edited
+let _calModalOnSaved = null;    // create mode: prefill.onSaved, called after the event was created
 
 async function _dashPatchCard(board, cardId, patchFn) {
   const data = await fetch(`/api/${encodeURIComponent(board)}/board`).then(r => r.json());
@@ -145,6 +146,7 @@ function _initOverlayHost() {
 function _syncOverlayHost() {
   if (!_isOverlayHostPage()) return;
   const open = _cvIsOpen() || _mvIsOpen();
+  _syncViewHeader();
   if (ROUTE === 'board') {
     if (open) _overlaySyncHeaderOffset();
     document.getElementById('dashboard').style.display = open ? 'flex' : 'none';
@@ -157,6 +159,19 @@ function _syncOverlayHost() {
   if (!open && typeof loadToday === 'function' && _todayCfg) {
     setTimeout(() => { if (!_cvIsOpen() && !_mvIsOpen()) loadToday(); }, 0);   // not when switching views
   }
+}
+
+/**
+ * Header icons of the views: the calendar and mail views are views of their own, so the open view's icon
+ * gives way to the dashboard icon (#todayBtn — on Today it closes the view, on a board it links to Today).
+ * On a board the board-only toggles (notes, scheduled column) are hidden while a view covers it.
+ */
+function _syncViewHeader() {
+  const cal = _cvIsOpen(), mail = _mvIsOpen();
+  document.getElementById('dashboardCalBtn').hidden  = cal;
+  document.getElementById('dashboardMailBtn').hidden = mail;
+  document.getElementById('todayBtn').style.display  = (ROUTE === 'board' || cal || mail) ? '' : 'none';
+  document.body.classList.toggle('view-open', cal || mail);
 }
 
 function _fmtRecentDate(at) {
@@ -1552,7 +1567,13 @@ function _detailFullscreen() {
   return !!document.querySelector('#dashboardDetail .modal')?.classList.contains('modal--fullscreen');
 }
 
+// A panel that saves on close (Stickies) registers a flush here; it runs once on the next close
+let _detailCloseHook = null;
+
 function _closeDetail() {
+  const hook = _detailCloseHook;
+  _detailCloseHook = null;
+  hook?.();
   document.getElementById('dashboardDetail').style.display = 'none';
   const modal = document.querySelector('#dashboardDetail .modal');
   if (modal) {
@@ -1561,14 +1582,78 @@ function _closeDetail() {
   }
 }
 
+// ---- Mail flags (shared with the mail view) ----
+// Apple Mail colours: \Flagged + colour index in $MailFlagBit0..2 — the server maps the colour id
+// (backend dashboard/mail.js MAIL_FLAG_COLORS; same order here).
+
+const _MAIL_FLAGS = [
+  { id: 'red',    label: 'Red',    color: '#ff3b30' },
+  { id: 'orange', label: 'Orange', color: '#ff9500' },
+  { id: 'yellow', label: 'Yellow', color: '#ffcc00' },
+  { id: 'green',  label: 'Green',  color: '#34c759' },
+  { id: 'blue',   label: 'Blue',   color: '#007aff' },
+  { id: 'purple', label: 'Purple', color: '#af52de' },
+  { id: 'gray',   label: 'Gray',   color: '#8e8e93' },
+];
+
+function _mailFlagInfo(id) {
+  return _MAIL_FLAGS.find(f => f.id === id) || _MAIL_FLAGS[0];
+}
+
+/** Flag icon in the message's flag colour ('' when not flagged). */
+function _mailFlagHtml(color, size = 12) {
+  if (!color) return '';
+  const f = _mailFlagInfo(color);
+  return `<span class="mail-flag" style="--flag-color:${f.color}" title="Flagged (${f.label})">${SVGICONS.flag(size, size)}</span>`;
+}
+
+/** Context menu entries: one per colour (current one checked), plus Clear flag when flagged (`canClear`). */
+function _mailFlagMenuItems(current, set, canClear = !!current) {
+  const items = _MAIL_FLAGS.map(f => ({
+    labelHtml: `<span class="ctx-icon mail-flag" style="--flag-color:${f.color}">${SVGICONS.flag(12, 12)}</span>${f.label}${f.id === current ? ' ✓' : ''}`,
+    action:    () => set(f.id),
+  }));
+  if (canClear) items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.close(12, 12)}</span>Clear flag`, action: () => set(null) });
+  return items;
+}
+
+/** PATCH the flag of one message / a UID set ("3,7,9"); color null clears it. Throws on failure. */
+async function _mailSetFlag(accountId, msgIds, color, folder = null) {
+  const qs  = folder ? `?folder=${encodeURIComponent(folder)}` : '';
+  const res = await fetch(`/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgIds)}${qs}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flag: color }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+}
+
+/** Flag / unflag a mail from a Today row; an unflagged one leaves "Flagged mails" right away. */
+async function _mailFlag(accountId, msgId, color) {
+  if (!color) _todayDropMail(accountId, msgId, 'flagged');
+  try {
+    await _mailSetFlag(accountId, msgId, color);
+  } catch (err) {
+    showMessage(`Could not ${color ? 'flag' : 'unflag'} the mail: ${err.message}`);
+  }
+  _todayRefresh('mail');
+}
+
 // ---- Mail context menu ----
 
-function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
+function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl, flag = null) {
   _closeAllContextMenus();
   _mailCtxAccountId = accountId;
   _mailCtxMsgId     = msgId;
   _mailCtxUnread    = !!unread;
   document.getElementById('mailCtxToggleReadLabel').textContent = unread ? 'Mark as read' : 'Mark as unread';
+  const flagList = document.getElementById('mailCtxFlagList');
+  flagList.innerHTML = '';
+  for (const item of _mailFlagMenuItems(flag, color => _mailFlag(accountId, msgId, color))) {
+    const btn = document.createElement('button');
+    btn.className = 'ctx-item';
+    btn.innerHTML = item.labelHtml;
+    btn.addEventListener('click', e => { e.stopPropagation(); hideMailContextMenu(); item.action(); });
+    flagList.appendChild(btn);
+  }
   const webmailEl = document.getElementById('mailCtxWebmail');
   if (webUrl) { webmailEl.href = webUrl; webmailEl.style.display = ''; }
   else        { webmailEl.style.display = 'none'; }
@@ -1603,6 +1688,7 @@ function _showMailContextMenu(x, y, accountId, msgId, unread, webUrl) {
   document.getElementById('mailCtxMoveWrap').classList.toggle('ctx-submenu-left', toLeft);
   document.getElementById('mailCtxCreateCardWrap').classList.toggle('ctx-submenu-left', toLeft);
   document.getElementById('mailCtxOpenCardWrap').classList.toggle('ctx-submenu-left', toLeft);
+  document.getElementById('mailCtxFlagWrap').classList.toggle('ctx-submenu-left', toLeft);
 }
 
 function hideMailContextMenu() {
@@ -1667,8 +1753,8 @@ async function _mailToggleRead(accountId, msgId, unread) {
       { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seen }) }
     );
     if (!res.ok) throw new Error('Failed');
-    // Today lists unread mails only: a read one leaves the list, an unread one may join it
-    if (seen) _todayDropMail(accountId, msgId);
+    // "Unread mails" lists unread mails only: a read one leaves it, an unread one may join it
+    if (seen) _todayDropMail(accountId, msgId, 'mail');
     _todayRefresh('mail');
   } catch {
     _reloadMailPanel();
@@ -1956,7 +2042,8 @@ function _calSeriesDates(ev) {
   return { start: ev.seriesStart, end: ev.allDay ? end.slice(0, 10) : end };
 }
 
-// prefill (create mode only): { start: Date, end: Date, allDay } — e.g. a slot picked in the calendar view
+// prefill (create mode only): { start: Date, end: Date, allDay } — e.g. a slot picked in the calendar view —
+// and / or { title, description, onSaved() } (e.g. a sticky turned into an event)
 async function openCalEventModal(accountId, ev, acc, scope, prefill) {
   const modal      = document.getElementById('calEventModal');
   const titleEl    = document.getElementById('calEventModalTitle');
@@ -1982,6 +2069,7 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
 
   errEl.hidden = true; errEl.textContent = '';
   saveBtn.textContent = 'Save event'; saveBtn.disabled = false;
+  _calModalOnSaved = (!ev && prefill?.onSaved) || null;
   const tint = () => _calModalTint(ev?._color || _calAccountsMeta.find(a => a.accountId === (ev ? _calModalAccId : accSel.value))?.color);
   scopeRow.hidden = true;
   recurRow.hidden = true;
@@ -2103,7 +2191,9 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
     const startH = now.getHours() + 1;
     startDate.value = todayDate; startTime.value = `${pad(startH % 24)}:00`;
     endDate.value   = todayDate; endTime.value   = `${pad((startH + 1) % 24)}:00`;
-    if (prefill) {
+    if (prefill?.title)       titleInput.value = prefill.title;
+    if (prefill?.description) descInput.value  = prefill.description;
+    if (prefill?.start) {
       const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
       const hm  = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
       allDayCb.checked = !!prefill.allDay;
@@ -2219,10 +2309,13 @@ async function _submitCalEvent() {
       return;
     }
 
+    const onSaved = _calModalOnSaved;
+    _calModalOnSaved = null;
     document.getElementById('calEventModal').close();
     await _refreshCalendarAccount(accountId);
     _closeDetail();
     if (_cvIsOpen()) _cvLoad();
+    onSaved?.();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;

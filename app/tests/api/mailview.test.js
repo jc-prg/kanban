@@ -768,3 +768,99 @@ test('MVA-36 hidden folders — GET / PUT per account (settings), deduplicated, 
   expect((await request(app).put(url).set(AUTH).send({ accountId: 'ma-1', folders: 'Old' })).status).toBe(400)
   expect((await request(app).put(url).set(AUTH).send({ accountId: 'ma-1', folders: ['a\u0000b'] })).status).toBe(400)
 })
+
+test('MVA-37 GET message — body parts decoded in their charset (QP ISO-8859-1, HTML <meta>, undeclared 8-bit latin1, UTF-8)', async () => {
+  const m = _msg(41)
+  const html = '<html><head><meta charset="windows-1252"></head><body>Dank f\xfcr Ihr Interesse \x80</body></html>'
+  m.bodyStructure = {
+    type: 'multipart/alternative',
+    childNodes: [
+      { part: '1', type: 'text/plain', encoding: 'quoted-printable', parameters: { charset: 'ISO-8859-1' } },
+      { part: '2', type: 'text/html', encoding: 'base64' },
+    ],
+  }
+  m.bodyParts = new Map([
+    ['1', Buffer.from('Dank f=FCr Ihr Interesse, Gr=FC=DFe=\r\n und mehr')],
+    ['2', Buffer.from(Buffer.from(html, 'latin1').toString('base64'))],
+  ])
+  imap.messages = [m]
+  let res = await request(app).get(`${API}/message/41`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.body).toBe('Dank für Ihr Interesse, Grüße und mehr')
+  expect(res.body.bodyHtml).toContain('Dank für Ihr Interesse €')
+
+  // No charset, 8-bit latin1 bytes → windows-1252; valid UTF-8 (QP) stays UTF-8
+  const plain = _msg(42)
+  plain.bodyStructure = { type: 'text/plain', encoding: '8bit' }
+  plain.bodyParts = new Map([['1', Buffer.from('Dank f\xfcr Ihr Interesse', 'latin1')]])
+  const utf8 = _msg(43)
+  utf8.bodyStructure = { type: 'text/plain', encoding: 'quoted-printable', parameters: { charset: 'utf-8' } }
+  utf8.bodyParts = new Map([['1', Buffer.from('Dank f=C3=BCr =E2=9C=85')]])
+  imap.messages = [plain, utf8]
+  res = await request(app).get(`${API}/message/42`).set(AUTH)
+  expect(res.body.body).toBe('Dank für Ihr Interesse')
+  res = await request(app).get(`${API}/message/43`).set(AUTH)
+  expect(res.body.body).toBe('Dank für ✅')
+})
+
+// ---------------------------------------------------------------------------
+// Flags (Apple Mail colours: \Flagged + $MailFlagBit0..2)
+// ---------------------------------------------------------------------------
+
+test('MVA-38 flagColor / flagChanges — Apple Mail bit encoding both ways', () => {
+  const { flagColor, flagChanges, MAIL_FLAG_COLORS } = require('../../backend/dashboard/mail')
+  expect(flagColor(new Set(['\\Seen']))).toBe(null)
+  expect(flagColor(['$MailFlagBit0'])).toBe(null)   // bits without \Flagged = not flagged
+  expect(flagColor(['\\Flagged'])).toBe('red')
+  expect(flagColor(['\\Flagged', '$MailFlagBit0', '$MailFlagBit1'])).toBe('green')
+  expect(flagColor(['\\Flagged', '$MailFlagBit1', '$MailFlagBit2'])).toBe('gray')
+  for (const c of MAIL_FLAG_COLORS) expect(flagColor(flagChanges(c).add)).toBe(c)
+  expect(flagChanges('purple')).toEqual({ add: ['\\Flagged', '$MailFlagBit0', '$MailFlagBit2'], remove: ['$MailFlagBit1'] })
+  expect(flagChanges(null)).toEqual({ add: [], remove: ['\\Flagged', '$MailFlagBit0', '$MailFlagBit1', '$MailFlagBit2'] })
+  expect(() => flagChanges('pink')).toThrow()
+})
+
+test('MVA-39 PATCH { flag } — sets / clears flag keywords on a UID set; validation', async () => {
+  await request(app).patch(`${API}/message/3,7?folder=Projects`).set(AUTH).send({ flag: 'blue' }).expect(200)
+  expect(calls('lock')[0][1]).toBe('Projects')
+  expect(calls('flagsAdd')).toEqual([['flagsAdd', '3,7', ['\\Flagged', '$MailFlagBit2']]])
+  expect(calls('flagsRemove')).toEqual([['flagsRemove', '3,7', ['$MailFlagBit0', '$MailFlagBit1']]])
+
+  imap.calls = []
+  await request(app).patch(`${API}/message/3`).set(AUTH).send({ flag: null }).expect(200)
+  expect(calls('flagsAdd')).toEqual([])
+  expect(calls('flagsRemove')).toEqual([['flagsRemove', '3', ['\\Flagged', '$MailFlagBit0', '$MailFlagBit1', '$MailFlagBit2']]])
+
+  imap.calls = []
+  await request(app).patch(`${API}/message/3`).set(AUTH).send({ seen: true, flag: 'red' }).expect(200)
+  expect(calls('flagsAdd')).toEqual([['flagsAdd', '3', ['\\Seen']], ['flagsAdd', '3', ['\\Flagged']]])
+
+  imap.calls = []
+  for (const body of [{}, { flag: 'pink' }, { flag: 1 }, { seen: 'yes' }]) {
+    await request(app).patch(`${API}/message/3`).set(AUTH).send(body).expect(400)
+  }
+  expect(imap.calls.filter(c => c[0].startsWith('flags'))).toEqual([])
+})
+
+test('MVA-40 GET /dashboard/mail — flagged mails of the account folder (any age, newest first) with flagColor', async () => {
+  imap.messages = [
+    _msg(1, { flags: ['\\Seen', '\\Flagged', '$MailFlagBit0'], envelope: { date: new Date('2025-01-01T10:00:00Z') } }),
+    ...Array.from({ length: 30 }, (_, i) => _msg(i + 2)),
+    _msg(32, { flags: ['\\Flagged'] }),
+  ]
+  imap.search = [1, 32]
+  const res = await request(app).get('/api/dashboard/mail').set(AUTH)
+  expect(res.status).toBe(200)
+  const acc = res.body[0]
+  expect(calls('search')[0][1]).toEqual({ flagged: true })
+  expect(acc).toMatchObject({ accountId: 'ma-1', folder: 'INBOX', flaggedTotal: 2, error: null })
+  expect(acc.messages).toHaveLength(20)
+  expect(acc.messages[0]).toMatchObject({ id: '32', flagged: true, flagColor: 'red' })
+  expect(acc.flagged.map(m => [m.id, m.flagColor, m.unread])).toEqual([['32', 'red', true], ['1', 'orange', false]])
+})
+
+test('MVA-41 GET message — full message carries flagged / flagColor', async () => {
+  imap.messages = [_msg(5, { flags: ['\\Flagged', '$MailFlagBit1'] })]
+  const res = await request(app).get(`${API}/message/5`).set(AUTH)
+  expect(res.body).toMatchObject({ flagged: true, flagColor: 'yellow' })
+})

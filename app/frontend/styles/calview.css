@@ -70,6 +70,7 @@ body.calview-open header { z-index: 96; }
 .calview-body {
   flex: 1;
   min-height: 0;
+  position: relative;   /* .cv-edge-offer */
   display: flex;
   flex-direction: column;
   transition: opacity 0.15s ease;
@@ -140,11 +141,30 @@ body.calview-open header { z-index: 96; }
   line-height: 1.25;
   overflow: hidden;
   cursor: grab;
-  touch-action: none;
+  touch-action: pan-x pan-y;   /* touch: events scroll the grid until they are in edit mode (calview.js) */
   user-select: none;
+  -webkit-touch-callout: none;
 }
 .cv-ev:hover { background: color-mix(in srgb, var(--cv-c) 40%, var(--surface2)); }
 .cv-ev.cv-readonly { cursor: pointer; touch-action: auto; }
+/* Touch edit mode: tapped (pulsing outline), ready after 1 s (solid outline, big resize handle, drags) */
+.cv-ev.cv-ev--touch-edit {
+  outline: 2px dashed var(--cv-c);
+  outline-offset: 1px;
+  z-index: 4;
+  animation: cvTouchArm 0.5s ease-in-out infinite alternate;
+}
+.cv-ev.cv-ev--touch-ready {
+  touch-action: none;
+  outline: 2px solid var(--cv-c);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 30%);
+  background: color-mix(in srgb, var(--cv-c) 45%, var(--surface2));
+  animation: none;
+}
+.cv-ev--touch-ready .cv-resize { height: 18px; }
+.cv-ev--touch-ready .cv-resize::after { opacity: 0.9; width: 24px; height: 4px; margin-left: -12px; bottom: 4px; background: var(--cv-c); }
+@keyframes cvTouchArm { from { outline-color: var(--cv-c); } to { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .cv-ev.cv-ev--touch-edit { animation: none; } }
 .cv-ev--dragging { opacity: 0.85; box-shadow: 0 4px 16px rgb(0 0 0 / 35%); z-index: 5; }
 .cv-ev-time { color: var(--text-muted); font-size: 0.66rem; white-space: nowrap; }
 .cv-ev-title { overflow: hidden; text-overflow: ellipsis; }
@@ -158,6 +178,8 @@ body.calview-open header { z-index: 96; }
   flex-direction: column;
   --cv-gutter: 52px;
 }
+/* Day heads + all-day row; phones: sticky at the top of the scrolling .cv-week */
+.cv-weektop { flex: none; }
 /* Header rows reserve the same scrollbar gutter as .cv-scroll so the day columns line up */
 .cv-weekhead, .cv-allday {
   display: flex;
@@ -497,10 +519,38 @@ body.calview-open header { z-index: 96; }
 }
 
 @media (max-width: 639px) {
-  .cv-week { overflow-x: auto; }
+  /* .cv-week scrolls both ways (calview.js _cvVScroll): day heads sticky at the top, the hours (and the
+     gutter cells above them) sticky at the left — only the days scroll horizontally */
+  .cv-week { overflow: auto; overscroll-behavior: contain; --cv-gutter: 40px; }
+  .cv-scroll { flex: none; overflow: visible; }
+  .cv-weekhead, .cv-allday { overflow: visible; }
   /* Three days fill the width; the rest scrolls horizontally (% = width of .cv-week) */
-  .cv-weekhead, .cv-allday, .cv-scroll { min-width: calc(var(--cv-gutter) + var(--cv-days) * (100% - var(--cv-gutter)) / 3); }
-  .cv-week { --cv-gutter: 40px; }
+  .cv-weektop, .cv-scroll { min-width: calc(var(--cv-gutter) + var(--cv-days) * (100% - var(--cv-gutter)) / 3); }
+  .cv-weektop { position: sticky; top: 0; z-index: 6; background: var(--cv-sticky-bg, var(--surface)); }
+  .cv-weekhead > .cv-gutter, .cv-allday-label, .cv-hours {
+    position: sticky; left: 0; z-index: 5;
+    background: var(--cv-sticky-bg, var(--surface));
+    box-shadow: 1px 0 0 var(--border);   /* on top of the first day's left border: no double line */
+  }
+  /* Swiped past the first / last day: offer the previous / next week (calview.js _cvShowEdgeOffer) */
+  .cv-edge-offer {
+    position: absolute;
+    top: 50%;
+    z-index: 10;
+    transform: translateY(-50%);
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
+    color: var(--text);
+    font-size: 0.8rem;
+    animation: fadeIn 0.15s ease;
+  }
+  .cv-edge-offer--next { right: 10px; }
+  .cv-edge-offer--prev { left: calc(var(--cv-gutter, 40px) + 10px); }
   .cv-month-grid { grid-template-rows: repeat(var(--cv-weeks), minmax(64px, 1fr)); --cv-lane: 9px; }
   .cv-month-week { grid-template-rows: 24px repeat(var(--cv-lanes), var(--cv-lane)) 1fr; }
   .cv-month-more { font-size: 0.55rem; line-height: 1; }

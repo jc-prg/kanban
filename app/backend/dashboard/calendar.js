@@ -1,6 +1,7 @@
 'use strict';
 const ICAL = require('ical.js');
 const { randomUUID } = require('crypto');
+const { responseText } = require('../charset');
 
 const FETCH_TIMEOUT_MS = 10_000;
 const TEST_TIMEOUT_MS  =  8_000;
@@ -695,7 +696,7 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
       const res = await fetch(url, { headers, signal: controller.signal });
       if (res.status === 401) throw new Error('Authentication failed (HTTP 401)');
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-      allEvents = parseEvents(await res.text(), parseOpts);
+      allEvents = parseEvents(await responseText(res), parseOpts);
     } else {
       // Resolve the correct calendar collection URL via CalDAV discovery (cached after first call)
       const { url: calUrl } = await _resolveCalendarUrl(account, headers, controller.signal);
@@ -715,7 +716,7 @@ async function fetchRawEvents(account, timeoutMs = FETCH_TIMEOUT_MS, { lookahead
       if (res.status === 401) throw new Error('Authentication failed (HTTP 401)');
       if (!res.ok) throw new Error(`CalDAV error (HTTP ${res.status})`);
 
-      for (const { ics, etag, href } of _extractIcsItems(await res.text())) {
+      for (const { ics, etag, href } of _extractIcsItems(await responseText(res))) {
         try {
           const parsed = parseEvents(ics, parseOpts);
           for (const ev of parsed) {
@@ -856,7 +857,7 @@ async function testCalendarAccount(account) {
     if (res.status === 401) return { ok: false, error: 'Authentication failed on calendar collection.' };
     if (!res.ok && res.status !== 207) return { ok: false, error: `Calendar returned HTTP ${res.status}.` };
 
-    const eventCount = ((await res.text()).match(/BEGIN:VCALENDAR/g) || []).length;
+    const eventCount = ((await responseText(res)).match(/BEGIN:VCALENDAR/g) || []).length;
     return {
       ok:     true,
       detail: `Calendar "${match.name || name}" found at ${match.url} — ${eventCount} event block${eventCount !== 1 ? 's' : ''} returned.`,
@@ -906,7 +907,7 @@ async function fetchRawIcs(account, uid, href, timeoutMs = 10_000) {
     const res = await fetch(eventUrl, { headers, signal: controller.signal });
     if (res.status === 404) throw new Error('Event not found on CalDAV server');
     if (!res.ok) throw new Error(`CalDAV error (HTTP ${res.status})`);
-    return { ics: await res.text(), url: eventUrl, etag: res.headers?.get?.('etag') || null };
+    return { ics: await responseText(res), url: eventUrl, etag: res.headers?.get?.('etag') || null };
   } catch (err) {
     if (err.name === 'AbortError') throw new Error(`Connection timed out (${timeoutMs / 1000} s)`);
     throw err;

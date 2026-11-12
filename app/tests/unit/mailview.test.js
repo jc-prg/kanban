@@ -137,7 +137,7 @@ test('MV-15 _mvParseSenders / _mvReplySender — comma list, first is default, r
 })
 
 test('MV-16 _mvSwipeSnap — opens past half of an action area, otherwise closes', () => {
-  // Left swipe reveals Move + Delete (128 px), right swipe Mark read (64 px)
+  // e.g. left swipe Move + Delete (128 px), right swipe Mark read (64 px)
   expect(ctx._mvSwipeSnap(-70, 64, 128)).toBe(-128)
   expect(ctx._mvSwipeSnap(-60, 64, 128)).toBe(0)
   expect(ctx._mvSwipeSnap(-300, 64, 128)).toBe(-128)

@@ -87,6 +87,51 @@ async function mockBoard(page, name, data, state) {
 
 const BOARD_TODAY = { board: { columns: [{ id: 'c-todo', title: 'TODO', cards: [{ id: 'id-due1', text: 'Send offer', endDate: TODAY, priority: 1 }] }] } };
 
+
+// Stickies tile: /api/stickies served from `state.stickies`, writes captured in `state.stickyWrites`
+const STICKIES = () => [
+  { id: 's-000000000003', text: 'First idea', color: '#fde68a', category: 'note', created: '2026-11-12T09:00:00.000Z', updated: '2026-11-12T09:00:00.000Z' },
+  { id: 's-000000000002', text: `${'A very long thought that goes on and on. '.repeat(12).trim()} Donaudampfschifffahrtsgesellschaftskapitänsmützenhalterungsersatzteilbeschaffungsantragsformularausfüllhilfe`, color: '#93c5fd', category: 'other', created: '2026-11-11T09:00:00.000Z', updated: '2026-11-11T09:00:00.000Z' },
+  { id: 's-000000000001', text: 'Simplicity is the ultimate sophistication', source: 'Leonardo da Vinci, https://en.wikipedia.org/wiki/Leonardo_da_Vinci_and_a_very_long_path', color: '#f9a8d4', category: 'quote', created: '2026-11-10T09:00:00.000Z', updated: '2026-11-10T09:00:00.000Z' },
+];
+const STICKY_LAYOUTS = {
+  lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [
+    { id: 'agenda',   col: 0, order: 0, size: '1/1' },
+    { id: 'stickies', col: 1, order: 0, size: 'container' },
+  ] },
+  sm: { columns: [{ width: 1 }], tiles: [{ id: 'stickies', col: 0, order: 0, size: 'container' }] },
+};
+
+async function mockStickies(page, state) {
+  state.stickies = STICKIES();
+  state.stickyWrites = [];
+  await page.route('**/api/stickies**', r => {
+    const req = r.request(), method = req.method();
+    if (method === 'GET') return r.fulfill({ json: { items: state.stickies, categories: ['note', 'quote', 'other'] } });
+    const id = new URL(req.url()).pathname.split('/').pop();
+    const body = req.postData() ? JSON.parse(req.postData()) : null;
+    state.stickyWrites.push({ method, id, body });
+    const ts = new Date().toISOString();
+    if (method === 'POST') {
+      const item = { id: 's-0000000000ff', color: '#86efac', category: 'note', ...body, created: ts, updated: ts };
+      state.stickies.unshift(item);
+      return r.fulfill({ status: 201, json: { item } });
+    }
+    if (method === 'PUT') {
+      const item = { ...state.stickies.find(x => x.id === id), ...body, updated: ts };
+      state.stickies = state.stickies.map(x => (x.id === id ? item : x));
+      return r.fulfill({ json: { item } });
+    }
+    state.stickies = state.stickies.filter(x => x.id !== id);
+    return r.fulfill({ json: { ok: true } });
+  });
+}
+
+const setSlider = (page, v) => page.locator('.today-stk-slider').evaluate((el, v) => {
+  el.value = String(v);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}, v);
+
 const columnsOf = page => page.evaluate(() =>
   [...document.querySelectorAll('#todayGrid .today-col')].map(c => [...c.querySelectorAll('.today-tile')].map(t => `${t.dataset.tile}:${t.dataset.size}`)));
 
@@ -284,13 +329,32 @@ test.describe('Today page', () => {
     await mockApis(page, { layouts: LAYOUTS });
     await page.goto('/today');
     await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
+    await expect(page.locator('#todayBtn')).toBeHidden();
     await page.click('#dashboardCalBtn');
     await expect(page.locator('#calView')).toBeVisible();
     await expect(page.locator('#today')).toBeHidden();
     expect(new URL(page.url()).searchParams.get('cal')).toBeTruthy();
+    // A view of its own: its icon gives way to the dashboard icon
+    await expect(page.locator('#dashboardCalBtn')).toBeHidden();
+    await expect(page.locator('#todayBtn')).toBeVisible();
+    await expect(page.locator('#dashboardMailBtn')).toBeVisible();
     await page.goBack();
     await expect(page.locator('#today')).toBeVisible();
     await expect(page.locator('#calView')).toBeHidden();
+    await expect(page.locator('#todayBtn')).toBeHidden();
+    await expect(page.locator('#dashboardCalBtn')).toBeVisible();
+
+    // Mail view: mail icon hidden; the dashboard icon returns to Today
+    await page.click('#dashboardMailBtn');
+    await expect(page.locator('#mailView')).toBeVisible();
+    await expect(page.locator('#dashboardMailBtn')).toBeHidden();
+    await expect(page.locator('#dashboardCalBtn')).toBeVisible();
+    await page.click('#todayBtn');
+    await expect(page.locator('#today')).toBeVisible();
+    await expect(page.locator('#mailView')).toBeHidden();
+    expect(new URL(page.url()).pathname).toBe('/today');
+    await expect.poll(() => new URL(page.url()).searchParams.get('mail')).toBeNull();
+    await expect(page.locator('#dashboardMailBtn')).toBeVisible();
   });
 
   test('E-T-8 card "Edit" from the context menu opens the dialog on Today; Save patches that board', async ({ page }) => {
@@ -442,6 +506,7 @@ test.describe('Today page', () => {
     await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
     await page.click('#headerMenuBtn');
     await page.click('#menuFindCard');
+    await page.click('#searchOverview [data-mode="cards"]');
     await page.fill('#searchText', 'send off');
     const hit = page.locator('#searchResults .search-result-item', { hasText: 'Send offer' });
     await expect(hit).toContainText('e2e-today › TODO');
@@ -514,11 +579,11 @@ test.describe('Today page', () => {
     await page.locator('.today-tile[data-tile="agenda"] .today-ev-row').waitFor();
     await page.click('#todayEditBtn');
 
-    // Every active widget missing from this layout counts (weather, quickaccess, boards, notes, search)
+    // Every active widget missing from this layout counts (weather, quickaccess, boards, notes, search, stickies)
     const addBtn = page.locator('[data-edit="add-tile"]');
-    await expect(addBtn).toHaveText('+ Widget (5)');
-    await page.locator('.today-tile[data-tile="progress"] .today-tile-hide').click();
     await expect(addBtn).toHaveText('+ Widget (6)');
+    await page.locator('.today-tile[data-tile="progress"] .today-tile-hide').click();
+    await expect(addBtn).toHaveText('+ Widget (7)');
     await expect(page.locator('#todayGrid .today-col-add')).toHaveCount(2);   // one per column
     // The add slot is the last element of each column
     expect(await page.locator('#todayGrid .today-col').evaluateAll(cols => cols.map(c => c.lastElementChild.className))).toEqual(['today-col-add', 'today-col-add']);
@@ -527,7 +592,7 @@ test.describe('Today page', () => {
     await page.locator('#_genericCtxMenu .ctx-item', { hasText: 'Achievements' }).click();
     expect((await columnsOf(page))[0]).toEqual(['agenda:1/1', 'progress:container']);
     await expect(page.locator('.today-tile[data-tile="progress"] .today-stat').first()).toBeVisible();   // data loaded
-    await expect(addBtn).toHaveText('+ Widget (5)');
+    await expect(addBtn).toHaveText('+ Widget (6)');
 
     await page.click('[data-edit="save"]');
     await expect(page.locator('#todayEditBar')).toBeHidden();
@@ -685,12 +750,23 @@ test.describe('Today page', () => {
     // Every available category is listed (ticked) before anything is searched
     await expect(tile.locator('.today-search-group')).toHaveCount(5);
     await expect(tile.locator('.today-search-check:checked')).toHaveCount(5);
+    await expect(tile.locator('.today-tile-title')).toHaveText('Find');
+    // Searching starts at 3 characters
+    await input.fill('ac');
+    await page.waitForTimeout(600);   // > debounce
+    expect(calls).toEqual([]);
     await input.fill('acme');
     await expect.poll(() => calls.length).toBe(5);
     await expect(tile.locator('.today-search-dots')).toHaveCount(0);   // no category still searching
     expect(await tile.locator('.today-search-group').evaluateAll(els => els.map(e => e.dataset.type))).toEqual(['cards', 'notes', 'events', 'mail', 'applications']);
     expect(calls.sort()).toEqual(['applications:acme', 'cards:acme', 'events:acme', 'mail:acme', 'notes:acme']);
     await expect(tile.locator('.today-tile-count')).toHaveText('6');
+    // Header magnifier: the detailed Find dialog, overview first, the typed text taken along
+    await tile.locator('.today-tile-btn[aria-label^="Detailed find"]').click();
+    await expect(page.locator('#searchOverview')).toBeVisible();
+    await expect(page.locator('#searchText')).toHaveValue('acme');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#searchBackdrop')).toBeHidden();
     // A source without hits stays listed: "0", no triangle (not a <details>)
     const notesRow = tile.locator('.today-search-group[data-type="notes"]');
     await expect(notesRow).toHaveClass(/today-search-group--empty/);
@@ -923,6 +999,13 @@ test.describe('Today page', () => {
     page.on('request', r => { if (r.url().includes('/api/today/')) todayCalls.push(r.url()); });
     await page.goto('/board/e2e-today');
     await expect(page.locator('.column .card', { hasText: 'Send offer' })).toBeVisible();
+    // Header order: board icons, dashboard, boards, calendar, mail, menu; no menu entries for the views on wide screens
+    const order = await page.$$eval('header .header-menu > .header-menu-btn, header #headerHomeBtn',
+      els => els.filter(e => e.offsetParent).map(e => e.id));
+    expect(order).toEqual(['notesToggleBtn', 'schedToggleBtn', 'todayBtn', 'headerHomeBtn', 'dashboardCalBtn', 'dashboardMailBtn', 'headerMenuBtn']);
+    await page.click('#headerMenuBtn');
+    await expect(page.locator('#menuCalendar')).toBeHidden();
+    await page.click('#headerMenuBtn');
 
     await page.click('#dashboardCalBtn');
     await expect(page.locator('#calView')).toBeVisible();
@@ -935,9 +1018,13 @@ test.describe('Today page', () => {
     expect(Math.round((await page.locator('#dashboard').boundingBox()).y)).toBe(Math.round(hdr.y + hdr.height));
 
     // Mail view takes over; Escape closes it and returns to the board (history entry popped)
+    await expect(page.locator('#dashboardCalBtn')).toBeHidden();
+    await expect(page.locator('#notesToggleBtn')).toBeHidden();
     await page.click('#dashboardMailBtn');
     await expect(page.locator('#mailView')).toBeVisible();
     await expect(page.locator('#calView')).toBeHidden();
+    await expect(page.locator('#dashboardMailBtn')).toBeHidden();
+    await expect(page.locator('#dashboardCalBtn')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('#mailView')).toBeHidden();
     await expect(page.locator('#dashboard')).toBeHidden();
@@ -1060,6 +1147,288 @@ test.describe('Today page', () => {
     await expect(page.locator('#dialogMsg')).toContainText('No duplicates found in "Projects"');
     expect(deletes).toHaveLength(1);
   });
+
+  test('E-T-35 mail flags (Apple colours): set in the mail view list / reader, flagged mails in Needs attention, unflag there', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const patches = [];
+    const msg = (id, subject, extra = {}) => ({ id, subject, messageId: `<${id}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: '2026-11-01T10:00:00.000Z', size: 500, unread: false, flagged: false, flagColor: null, ...extra });
+    const flagged = [msg('2', 'Old contract', { flagged: true, flagColor: 'green', date: '2025-03-01T10:00:00.000Z' })];
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-f', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [{ accountId: 'ma-f', label: 'Work', folder: 'INBOX',
+      messages: [], flagged: flagged.filter(m => m.flagColor), flaggedTotal: flagged.filter(m => m.flagColor).length, error: null }] }));
+    await page.route('**/api/dashboard/mail/ma-f/**', r => {
+      const url = new URL(r.request().url());
+      const p = url.pathname.replace('/api/dashboard/mail/ma-f', '');
+      if (r.request().method() === 'PATCH') {
+        const body = r.request().postDataJSON();
+        patches.push([p, body]);
+        if (p === '/message/2') flagged[0].flagColor = body.flag;
+        return r.fulfill({ json: { ok: true } });
+      }
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 2, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [msg('8', 'Offer'), msg('7', 'Invoice', { flagged: true, flagColor: 'blue' })], total: 2, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p.startsWith('/message/')) return r.fulfill({ json: { ...msg(p.split('/')[2], 'Offer'), body: 'Hello', bodyHtml: '', attachments: [] } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.addInitScript(() => localStorage.setItem('today-att-open', JSON.stringify({ flagged: true })));
+
+    // Needs attention: flagged mails, however old, with the flag colour
+    await page.goto('/today');
+    const att = page.locator('.today-att--flagged');
+    await expect(att.locator('.today-att-count')).toHaveText('1');
+    await expect(att).toContainText('flagged mail');
+    const row = att.locator('.today-mail-row[data-msg-id="2"]');
+    await expect(row).toContainText('Old contract');
+    await expect(row.locator('.mail-flag')).toHaveAttribute('title', 'Flagged (Green)');
+    // Context menu → Flag → Clear flag: leaves the list
+    await row.click({ button: 'right' });
+    await page.hover('#mailCtxFlagWrap');
+    await page.locator('#mailCtxFlagList .ctx-item', { hasText: 'Clear flag' }).click();
+    await expect.poll(() => patches).toEqual([['/message/2', { flag: null }]]);
+    await expect(page.locator('.today-att--flagged')).toHaveCount(0);
+
+    // Mail view: flag shown in the list; context menu → Flag → Orange
+    await page.goto('/today?mail=ma-f&folder=INBOX');
+    await expect(page.locator('#mailView .mv-msg[data-mv-msg="7"] .mail-flag')).toHaveAttribute('title', 'Flagged (Blue)');
+    await expect(page.locator('#mailView .mv-msg[data-mv-msg="8"] .mail-flag')).toHaveCount(0);
+    await page.locator('#mailView .mv-msg[data-mv-msg="8"]').click({ button: 'right' });
+    await page.locator('.ctx-item:visible', { hasText: /^Flag/ }).hover();
+    await page.locator('.ctx-submenu .ctx-item:visible', { hasText: 'Orange' }).click();
+    await expect(page.locator('#mailView .mv-msg[data-mv-msg="8"] .mail-flag')).toHaveAttribute('title', 'Flagged (Orange)');
+    await expect.poll(() => patches.at(-1)).toEqual(['/message/8', { flag: 'orange' }]);
+
+    // Reader: Flag button shows the colour and opens the colour menu; `s` toggles
+    await page.locator('#mailView .mv-msg[data-mv-msg="7"]').click();
+    const flagBtn = page.locator('#mailViewReaderActions [data-mv-act="flag"]');
+    await expect(flagBtn).toHaveAttribute('aria-label', 'Flagged (Blue)');
+    await flagBtn.click();
+    await page.locator('#_genericCtxMenu .ctx-item:visible', { hasText: 'Clear flag' }).click();
+    await expect(flagBtn).toHaveAttribute('aria-label', 'Flag');
+    await expect.poll(() => patches.at(-1)).toEqual(['/message/7', { flag: null }]);
+    await page.locator('#mailView .mv-msg[data-mv-msg="7"]').click();
+    await page.keyboard.press('s');
+    await expect(flagBtn).toHaveAttribute('aria-label', 'Flagged (Red)');
+    await expect.poll(() => patches.at(-1)).toEqual(['/message/7', { flag: 'red' }]);
+  });
+
+  test('E-T-39 Stickies: rotated stack, slider / keys flip, text fits, double-click edits, new / delete, turn into a card', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    const top  = tile.locator('.today-stk-paper--top');
+    await expect(top).toContainText('First idea');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+    await expect(tile.locator('.today-stk-paper--back')).toHaveCount(2);
+    // Every sticky is rotated, each at its own angle
+    const angles = () => tile.locator('.today-stk-paper').evaluateAll(els => els.map(e => parseFloat(e.style.getPropertyValue('--stk-tilt'))));
+    const a0 = await angles();   // [2nd behind, 1st behind, top]
+    expect(new Set(a0).size).toBe(3);
+    for (const a of a0) expect(Math.abs(a)).toBeGreaterThanOrEqual(1.5);
+    // Flipping forward: the paper behind comes up with its angle, the stack gets a fresh one
+    await tile.locator('.today-stk').press('ArrowRight');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('2 / 3');
+    const a1 = await angles();
+    expect(a1[2]).toBe(a0[1]);
+    expect(a1[1]).toBe(a0[0]);
+    await tile.locator('.today-stk').press('ArrowLeft');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+
+    // Slider → the long sticky; its text is scaled down to fit the square
+    await setSlider(page, 2);
+    await expect(top).toContainText('A very long thought');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('2 / 3');
+    const fit = await top.locator('.today-stk-textbox').evaluate(b => ({ h: b.firstElementChild.offsetHeight, H: b.clientHeight, font: parseFloat(b.firstElementChild.style.fontSize) }));
+    expect(fit.h).toBeLessThanOrEqual(fit.H);
+    expect(fit.font).toBeLessThan(20);
+    // Words never break: the long one sits on one line, inside the paper
+    const word = await top.locator('.today-stk-text').evaluate(el => {
+      const node = el.firstChild, w = 'Donaudampfschifffahrtsgesellschaftskapitänsmützenhalterungsersatzteilbeschaffungsantragsformularausfüllhilfe';
+      const range = document.createRange();
+      range.setStart(node, node.data.indexOf(w));
+      range.setEnd(node, node.data.indexOf(w) + w.length);
+      const lines = new Set([...range.getClientRects()].map(r => Math.round(r.top))).size;
+      const box = el.parentElement.getBoundingClientRect(), r = range.getBoundingClientRect();
+      return { lines, inside: r.left >= box.left - 1 && r.right <= box.right + 1 };
+    });
+    expect(word).toEqual({ lines: 1, inside: true });
+    const shortFont = await tile.locator('.today-stk-paper--back[data-stk-id="s-000000000001"] .today-stk-text').evaluate(e => parseFloat(e.style.fontSize));
+    expect(shortFont).toBeGreaterThan(fit.font);
+
+    // Keyboard: → next (wraps), ← back
+    await tile.locator('.today-stk').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('3 / 3');
+    await page.keyboard.press('ArrowRight');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+    await page.keyboard.press('ArrowLeft');
+    await expect(top).toContainText('Simplicity');
+    // Source after the category: the URL is a link (without the scheme), cut with an ellipsis
+    const src = top.locator('.today-stk-src');
+    await expect(src).toContainText('Leonardo da Vinci,');
+    await expect(src.locator('a')).toHaveAttribute('href', 'https://en.wikipedia.org/wiki/Leonardo_da_Vinci_and_a_very_long_path');
+    await expect(src.locator('a')).toHaveText('en.wikipedia.org/wiki/Leonardo_da_Vinci_and_a_very_long_path');
+    expect(await src.evaluate(e => e.scrollWidth > e.clientWidth && getComputedStyle(e).textOverflow)).toBe('ellipsis');
+    // A click on the link opens it in a new tab, not the sticky
+    const [popup] = await Promise.all([page.context().waitForEvent('page'), src.locator('a').click()]);
+    await popup.close();
+    await expect(page.locator('#dashboardDetail')).toBeHidden();
+
+    // Double-click opens the detail panel; typing saves (debounced PUT)
+    await top.dblclick();
+    const detail = page.locator('#dashboardDetail');
+    await expect(detail).toBeVisible();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Sticky · Quote');
+    const ta = detail.locator('.stk-detail-text');
+    await expect(ta).toHaveValue('Simplicity is the ultimate sophistication');
+    await expect(detail.locator('.stk-detail-source')).toHaveValue('Leonardo da Vinci, https://en.wikipedia.org/wiki/Leonardo_da_Vinci_and_a_very_long_path');
+    await ta.press('End');
+    await ta.type('.');
+    await detail.locator('[data-stk-color="#86efac"]').click();
+    await expect.poll(() => state.stickyWrites.filter(w => w.method === 'PUT').length).toBeGreaterThan(0);
+    expect(state.stickyWrites.at(-1)).toMatchObject({ method: 'PUT', id: 's-000000000001', body: { text: 'Simplicity is the ultimate sophistication.', source: 'Leonardo da Vinci, https://en.wikipedia.org/wiki/Leonardo_da_Vinci_and_a_very_long_path', color: '#86efac', category: 'quote' } });
+
+    // Turn into a card: the inbox dialog opens prefilled
+    await detail.locator('[data-stk-convert="card"]').click();
+    await expect(detail).toBeHidden();
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#cardText')).toHaveValue('Simplicity is the ultimate sophistication.');
+    await page.keyboard.press('Escape');   // inbox dialog: closes without asking
+    await expect(page.locator('#modal')).toBeHidden();
+
+    // New sticky: created on the first save, shown on top
+    await tile.locator('[title="New sticky"]').click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('New sticky');
+    await detail.locator('.stk-detail-text').fill('Call the plumber');
+    await expect.poll(() => state.stickyWrites.filter(w => w.method === 'POST').length).toBe(1);
+    expect(state.stickyWrites.find(w => w.method === 'POST').body).toMatchObject({ text: 'Call the plumber', category: 'note' });
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Sticky · Note');
+    await expect(top).toContainText('Call the plumber');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 4');
+
+    // Delete (confirm)
+    await detail.locator('[data-stk-delete]').click();
+    await page.click('#dialogOkBtn');
+    await expect(detail).toBeHidden();
+    expect(state.stickyWrites.at(-1)).toMatchObject({ method: 'DELETE', id: 's-0000000000ff' });
+    await expect(tile.locator('.today-stk-pos')).toHaveText(/ \/ 3$/);
+    await expect(top).not.toContainText('Call the plumber');
+  });
+
+  test('E-T-42 Stickies: category filter chips with counts limit the stack, are kept per browser, new stickies get the category', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    state.stickies.push({ id: 's-000000000000', text: 'Be yourself', color: '#c4b5fd', category: 'quote', created: '2026-11-09T09:00:00.000Z', updated: '2026-11-09T09:00:00.000Z' });
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    const chip = id => tile.locator(`[data-stk-filter="${id}"]`);
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 4');
+    expect(await tile.locator('[data-stk-filter]').evaluateAll(els => els.map(e => e.textContent))).toEqual(['All4', 'Note1', 'Quote2', 'Other1']);
+    await expect(chip('all')).toHaveAttribute('aria-checked', 'true');
+
+    // Quote: only the two quotes, flipping stays inside them
+    await chip('quote').click();
+    await expect(chip('quote')).toHaveAttribute('aria-checked', 'true');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 2');
+    await expect(tile.locator('.today-stk-paper--top')).toContainText('Simplicity');
+    await tile.locator('.today-stk').press('ArrowRight');
+    await expect(tile.locator('.today-stk-paper--top')).toContainText('Be yourself');
+    await tile.locator('.today-stk').press('ArrowRight');
+    await expect(tile.locator('.today-stk-paper--top')).toContainText('Simplicity');
+    await expect(tile.locator('.today-stk-paper')).toHaveCount(2);
+
+    // Note: a single sticky, no slider
+    await chip('note').click();
+    await expect(tile.locator('.today-stk-paper--top')).toContainText('First idea');
+    await expect(tile.locator('.today-stk-nav')).toHaveCount(0);
+
+    // Kept after a reload
+    await chip('quote').click();
+    await page.reload();
+    await expect(chip('quote')).toHaveAttribute('aria-checked', 'true');
+    await expect(tile.locator('.today-stk-pos')).toHaveText(/ \/ 2$/);
+
+    // A new sticky starts in the filtered category and joins the filtered stack
+    await tile.locator('[title="New sticky"]').click();
+    await expect(page.locator('#dashboardDetail [data-stk-cat="quote"]')).toHaveAttribute('aria-checked', 'true');
+    await page.locator('#dashboardDetail .stk-detail-text').fill('Less is more');
+    await expect.poll(() => state.stickyWrites.filter(w => w.method === 'POST').length).toBe(1);
+    expect(state.stickyWrites.find(w => w.method === 'POST').body).toMatchObject({ text: 'Less is more', category: 'quote' });
+    await page.click('#dashboardDetailClose');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+    await expect(chip('quote')).toHaveText('Quote3');
+
+    // Back to all
+    await chip('all').click();
+    await expect(tile.locator('.today-stk-pos')).toHaveText(/ \/ 5$/);
+  });
+
+  test('E-T-40 Stickies: a due rhythm brings a random sticky to the top, the dice picks one on request', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await page.route('**/api/today/config', r => r.fulfill({ json: { showBar: true, widgets: { stickies: { rhythm: 60 } }, layouts: state.layouts } }));
+    await mockStickies(page, state);
+    // Last random pick two hours ago, current = the first sticky
+    await page.addInitScript(() => {
+      localStorage.setItem('today-stickies-pos', 's-000000000003');
+      localStorage.setItem('today-stickies-random', JSON.stringify({ at: Date.now() - 2 * 3600000 }));
+    });
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+    await expect(tile.locator('.today-stk-paper--top')).not.toHaveAttribute('data-stk-id', 's-000000000003');
+    const at = await page.evaluate(() => JSON.parse(localStorage.getItem('today-stickies-random')).at);
+    expect(Date.now() - at).toBeLessThan(60000);
+
+    const before = await tile.locator('.today-stk-paper--top').getAttribute('data-stk-id');
+    await tile.locator('[title="Random sticky"]').click();
+    await expect(tile.locator('.today-stk-paper--top')).not.toHaveAttribute('data-stk-id', before);
+  });
+
+  test('E-T-43 Stickies in a fixed-height tile scale to fit without scrolling; wide tiles get an upright slider', async ({ page }) => {
+    const state = { layouts: { lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [
+      { id: 'stickies', col: 0, order: 0, size: '1/3' },
+      { id: 'agenda',   col: 1, order: 0, size: '1/1' },
+    ] } } };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    const body = tile.locator('.today-tile-body');
+    const noScroll = () => body.evaluate(el => el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1);
+    await expect(tile.locator('.today-stk')).toHaveClass(/today-stk--wide/);
+    await expect.poll(noScroll).toBe(true);
+    const slider = await tile.locator('.today-stk-slider').boundingBox();
+    const stack  = await tile.locator('.today-stk-stack').boundingBox();
+    expect(slider.height).toBeGreaterThan(slider.width);   // upright …
+    expect(slider.x).toBeGreaterThan(stack.x + stack.width);   // … right of the stack
+    const tb = await tile.boundingBox();
+    expect(tb.x + tb.width - (slider.x + slider.width)).toBeLessThan(8);   // … at the tile's right border
+    await expect(tile.locator('.today-stk-navbtn')).toHaveCount(0);   // slider only, no ‹ ›
+
+    // "available" below a 1/3 tile in a narrow column: takes the remaining space, still no scrolling
+    state.layouts = { lg: { columns: [{ width: 1 }, { width: 2 }], tiles: [
+      { id: 'agenda',   col: 0, order: 0, size: '1/3' },
+      { id: 'stickies', col: 0, order: 1, size: 'available' },
+    ] } };
+    await page.reload();
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+    await expect.poll(noScroll).toBe(true);
+    const colH = await page.locator('#todayGrid .today-col').first().evaluate(el => el.clientHeight);
+    const tileH = await tile.evaluate(el => el.offsetHeight);
+    expect(tileH).toBeGreaterThan(colH * 0.6);   // filled the rest of the column
+
+    // "fit content" (container) keeps the natural, width-based size
+    state.layouts.lg.tiles[1].size = 'container';
+    await page.reload();
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+    await expect(tile.locator('.today-stk')).not.toHaveClass(/today-stk--wide/);
+  });
 });
 
 // Touch swipe via CDP (Chromium): real touch events → pointer events with pointerType 'touch'
@@ -1077,6 +1446,59 @@ async function swipe(page, locator, dx) {
 
 test.describe('Today page — phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('E-T-41 Stickies on a phone: swipe flips the stack, a tap opens the sticky without the keyboard', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await page.addInitScript(() => localStorage.setItem('today-stickies-pos', 's-000000000003'));
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    const top  = tile.locator('.today-stk-paper--top');
+    await expect(top).toContainText('First idea');
+    await expect(tile.locator('.today-stk-slider')).toBeHidden();   // swipe instead; the position stays
+    await expect(tile.locator('.today-stk-pos')).toBeVisible();
+    await swipe(page, top, -220);   // left = next
+    await expect(tile.locator('.today-stk-pos')).toHaveText('2 / 3');
+    await swipe(page, top, 220);    // right = previous
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+    await swipe(page, top, 20);     // too short: springs back
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+
+    await top.tap();
+    await expect(page.locator('#dashboardDetail')).toBeVisible();
+    await expect(page.locator('#dashboardDetail .stk-detail-text')).toHaveValue('First idea');
+    expect(await page.evaluate(() => document.activeElement?.classList.contains('stk-detail-text'))).toBe(false);
+  });
+
+  test('E-T-37 board on a phone: calendar and mail move from the header to the menu', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.goto('/board/e2e-today');
+    await expect(page.locator('.column .card', { hasText: 'Send offer' })).toBeVisible();
+    await expect(page.locator('#dashboardCalBtn')).toBeHidden();
+    await expect(page.locator('#dashboardMailBtn')).toBeHidden();
+    await page.click('#headerMenuBtn');
+    await page.click('#menuCalendar');
+    await expect(page.locator('#calView')).toBeVisible();
+    await expect(page.locator('#headerDropdown')).not.toHaveClass(/open/);
+    await page.click('#headerMenuBtn');
+    await page.click('#menuMail');
+    await expect(page.locator('#mailView')).toBeVisible();
+    await expect(page.locator('#calView')).toBeHidden();
+  });
+
+  test('E-T-38 Today on a phone: calendar and mail stay in the header, not in the menu', async ({ page }) => {
+    await mockApis(page, { layouts: LAYOUTS });
+    await page.goto('/today');
+    await expect(page.locator('#dashboardCalBtn')).toBeVisible();
+    await expect(page.locator('#dashboardMailBtn')).toBeVisible();
+    await page.click('#headerMenuBtn');
+    await expect(page.locator('#menuFindCard')).toBeVisible();
+    await expect(page.locator('#menuCalendar')).toBeHidden();
+    await expect(page.locator('#menuMail')).toBeHidden();
+  });
 
   test('E-T-25 calendar / mail view full screen on phones: header icon, covers the screen, kept per browser', async ({ page }) => {
     const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: 'container' }] } } };
@@ -1181,7 +1603,7 @@ test.describe('Today page — phone', () => {
     expect(m).toEqual({ bodyScrolls: true, previewScrolls: false });
   });
 
-  test('E-T-15 swipe actions in "Needs attention": mail read / move, card move to column / edit / delete', async ({ page }) => {
+  test('E-T-15 swipe actions in "Needs attention": mail read / flag / move, card move to column / edit / delete', async ({ page }) => {
     const state = { layouts: LAYOUTS };
     await mockApis(page, state);
     const board = { board: { columns: [
@@ -1202,7 +1624,8 @@ test.describe('Today page — phone', () => {
       const [id, action] = r.request().url().split('/message/')[1].split('?')[0].split('/');
       mailCalls.push({ method: r.request().method(), id, action, body: r.request().postData() });
       const m = mails.find(x => x.id === id);
-      if (r.request().method() === 'PATCH') m.unread = false; else m.gone = true;
+      if (r.request().method() === 'PATCH') { const b = JSON.parse(r.request().postData()); if ('seen' in b) m.unread = !b.seen; if ('flag' in b) m.flagColor = b.flag; }
+      else m.gone = true;
       r.fulfill({ json: { ok: true } });
     });
     await page.route('**/api/dashboard/mail/ma-e2e/recent-folders', r => r.fulfill({ json: { ok: true } }));
@@ -1212,11 +1635,18 @@ test.describe('Today page — phone', () => {
 
     // Mail: right swipe → Mark as read
     const mail = page.locator('details.today-att[data-key="mail"]');
-    await swipe(page, mail.locator('.today-mail-row', { hasText: 'First unread' }), 120);
+    await swipe(page, mail.locator('.today-mail-row', { hasText: 'First unread' }), 200);
     await mail.locator('[data-today-swipe="read"]').click();
     await expect(mail.locator('.today-mail-row', { hasText: 'First unread' })).toHaveCount(0);
     expect(mailCalls.at(-1)).toMatchObject({ method: 'PATCH', id: '11' });
     expect(JSON.parse(mailCalls.at(-1).body)).toEqual({ seen: true });
+
+    // Mail: right swipe → Flag (orange by default) next to Mark as read
+    await swipe(page, mail.locator('.today-mail-row', { hasText: 'Second unread' }), 200);
+    await expect(mail.locator('.mv-swipe-actions--start [data-today-swipe]')).toHaveCount(2);
+    await mail.locator('[data-today-swipe="flag"]').click();
+    await expect.poll(() => mailCalls.at(-1)).toMatchObject({ method: 'PATCH', id: '12' });
+    expect(JSON.parse(mailCalls.at(-1).body)).toEqual({ flag: 'orange' });
 
     // Mail: left swipe → Move → folder picker (current folder INBOX not offered)
     await swipe(page, mail.locator('.today-mail-row', { hasText: 'Second unread' }), -200);
@@ -1255,5 +1685,196 @@ test.describe('Today page — phone', () => {
     await expect(page.locator('#dialogMsg')).toHaveText('Delete card "Send offer"?');
     await page.click('#dialogCancelBtn');
     expect(state.patches['e2e-today']).toHaveLength(1);
+  });
+
+  test('E-T-31 widget mode button: one open at a time (header tap), all collapsed, all open', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [
+      { id: 'agenda', col: 0, order: 0, size: 'container' },
+      { id: 'attention', col: 0, order: 1, size: 'container' },
+      { id: 'progress', col: 0, order: 2, size: 'container' },
+    ] } } };
+    await mockApis(page, state);
+    await page.goto('/today');
+    const btn = page.locator('#todayBar [data-bar="collapse"]');
+    await expect(btn).toBeVisible();
+    const collapsed = () => page.evaluate(() =>
+      [...document.querySelectorAll('#todayGrid .today-tile')].filter(t => t.classList.contains('today-tile--collapsed')).map(t => t.dataset.tile));
+    expect(await collapsed()).toEqual([]);
+
+    await btn.click();   // all open → one at a time: the first open tile stays open
+    expect(await collapsed()).toEqual(['attention', 'progress']);
+    await page.locator('.today-tile[data-tile="attention"] .today-tile-title').click();   // single tap on phones
+    expect(await collapsed()).toEqual(['agenda', 'progress']);
+    await page.locator('.today-tile[data-tile="attention"] .today-tile-title').click();   // closing keeps the others closed
+    expect(await collapsed()).toEqual(['agenda', 'attention', 'progress']);
+
+    await btn.click();   // → all collapsed
+    expect(await collapsed()).toEqual(['agenda', 'attention', 'progress']);
+    await page.locator('.today-tile[data-tile="agenda"] .today-tile-title').click();
+    await page.locator('.today-tile[data-tile="progress"] .today-tile-title').click();
+    expect(await collapsed()).toEqual(['attention']);   // free toggling outside "one at a time"
+
+    await btn.click();   // → all open
+    expect(await collapsed()).toEqual([]);
+    expect(await page.evaluate(() => localStorage.getItem('today-collapse-mode'))).toBe('open');
+  });
+
+  test('E-T-32 phone week view: hours fixed while the days scroll, today centred, swipe past the last day offers the next week', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    await page.goto('/today?cal=week');
+    const week = page.locator('#calViewBody .cv-week');
+    await expect(week.locator('.cv-daycol')).toHaveCount(7);
+    // Today's column is centred in the area right of the hours (as far as the scroll range allows)
+    const pos = () => page.evaluate(ymd => {
+      const w = document.querySelector('#calViewBody .cv-week');
+      const hours = w.querySelector('.cv-hours').getBoundingClientRect();
+      const col = w.querySelector(`.cv-daycol[data-date="${ymd}"]`).getBoundingClientRect();
+      return { left: w.scrollLeft, max: w.scrollWidth - w.clientWidth, hoursX: hours.left - w.getBoundingClientRect().left,
+        colMid: col.left + col.width / 2, areaMid: hours.right + (w.getBoundingClientRect().right - hours.right) / 2 };
+    }, TODAY);
+    const p0 = await pos();
+    expect(p0.max).toBeGreaterThan(0);
+    if (p0.left > 1 && p0.left < p0.max - 1) expect(Math.abs(p0.colMid - p0.areaMid)).toBeLessThan(3);
+    // Scrolled to the end: the hours stay where they are
+    await week.evaluate(w => { w.scrollLeft = w.scrollWidth; });
+    const p1 = await pos();
+    expect(p1.left).toBe(p1.max);
+    expect(Math.round(p1.hoursX)).toBe(0);
+    // Swipe left at the last day → offer the next week; tapping it shows that week from its first day
+    const firstBefore = await week.locator('.cv-daycol').first().getAttribute('data-date');
+    const shift = days => ymd(new Date(new Date(`${firstBefore}T12:00:00`).getTime() + days * 86400000));
+    const edgeSwipe = async dx => {   // touch pull from the middle of the grid; native scroll stops at the edge
+      const box = await week.boundingBox();
+      const cdp = await page.context().newCDPSession(page);
+      const y = box.y + box.height / 2, x0 = box.x + box.width / 2;
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y }] });
+      for (let i = 1; i <= 8; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + dx * i / 8, y }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await cdp.detach();
+    };
+    await edgeSwipe(-80);
+    const offer = page.locator('#calViewBody .cv-edge-offer--next');
+    await expect(offer).toHaveText(/Next week/);
+    await offer.click();
+    await expect(week.locator('.cv-daycol').first()).toHaveAttribute('data-date', shift(7));
+    expect(await week.evaluate(w => w.scrollLeft)).toBe(0);
+
+    // At the first day: a pull right offers the previous week, a second pull jumps there (at its last day)
+    await edgeSwipe(80);
+    await expect(page.locator('#calViewBody .cv-edge-offer--prev')).toHaveText(/Previous week/);
+    await edgeSwipe(80);
+    await expect(week.locator('.cv-daycol').first()).toHaveAttribute('data-date', shift(0));
+    await expect(page.locator('#calViewBody .cv-edge-offer')).toHaveCount(0);
+    await expect.poll(() => week.evaluate(w => w.scrollWidth - w.clientWidth - w.scrollLeft)).toBeLessThan(2);
+
+    // One long pull past the last day: offer, then the jump in the same gesture
+    await edgeSwipe(-200);
+    await expect(week.locator('.cv-daycol').first()).toHaveAttribute('data-date', shift(7));
+  });
+
+  test('E-T-33 swipe actions on the cards of Boards → "Last edited"', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'boards', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    const board = { board: { columns: [
+      { id: 'c-todo', title: 'TODO', cards: [{ id: 'id-due1', text: 'Send offer' }] },
+      { id: 'c-done', title: 'DONE', cards: [] },
+    ] } };
+    await mockBoard(page, 'e2e-today', board, state);
+    await page.route('**/api/boards', r => r.fulfill({ json: [{ name: 'e2e-today', columnBadges: [] }] }));
+    await page.route('**/api/dashboard/recent?**', r => r.fulfill({ json: [
+      { type: 'card', board: 'e2e-today', id: 'id-due1', title: 'Send offer', context: 'TODO', at: new Date().toISOString() },
+      { type: 'note', board: 'e2e-today', id: 'n-abc', title: 'A note', at: new Date().toISOString() },
+    ] }));
+    await page.goto('/today');
+    const recent = page.locator('.today-tile[data-tile="boards"] details.today-recent');
+    await recent.locator('summary').click();
+    // Only cards swipe (notes have no swipe wrapper)
+    await expect(recent.locator('.today-swipe > .dashboard-recent-item')).toHaveCount(1);
+    await swipe(page, recent.locator('.dashboard-recent-item', { hasText: 'Send offer' }), -200);
+    await recent.locator('[data-today-swipe="move"]').click();
+    await expect(page.locator('.today-picker .mv-picker-item')).toHaveText(['DONE']);
+    await page.locator('.today-picker .mv-picker-item', { hasText: 'DONE' }).click();
+    await expect.poll(() => state.patches['e2e-today']?.length).toBe(1);
+    const cols = state.patches['e2e-today'][0].updatedColumns;
+    expect(cols.find(c => c.id === 'c-done').cards.map(c => c.id)).toEqual(['id-due1']);
+    expect(page.url()).toMatch(/\/today$/);   // the swipe did not follow the card's link
+  });
+
+  test('E-T-34 phone calendar: touch edit mode — tap marks the event, moves only after 1 s, stays editable 5 s after the change', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    const puts = [];
+    await page.route('**/api/dashboard/calendar/ca-e2e/event/**', r => {
+      if (r.request().method() === 'PUT') { puts.push(JSON.parse(r.request().postData())); return r.fulfill({ json: { ok: true } }); }
+      return r.fulfill({ status: 404, json: { error: 'not mocked' } });
+    });
+    await page.goto('/today?cal=week');
+    const ev = page.locator('#calViewBody .cv-timed', { hasText: 'Planning meeting' });
+    await expect(ev).toBeVisible();
+    const touch = async (from, dy) => {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+      for (let i = 1; i <= 8; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x, y: from.y + dy * i / 8 }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await cdp.detach();
+    };
+    const centre = async () => { const b = await ev.boundingBox(); return { x: b.x + b.width / 2, y: b.y + 8 }; };
+
+    // Dragging before the tap: no change (the grid may scroll, the event is not moved)
+    await touch(await centre(), 60);
+    expect(puts).toHaveLength(0);
+    await expect(ev).not.toHaveClass(/cv-ev--touch-edit/);
+
+    // Tap → marked; a drag right away does not move it
+    await ev.tap();
+    await expect(ev).toHaveClass(/cv-ev--touch-edit/);
+    await expect(ev).not.toHaveClass(/cv-ev--touch-ready/);
+    await expect(page.locator('#dashboardDetail .modal')).toBeHidden();   // no detail panel
+    await touch(await centre(), 48);
+    expect(puts).toHaveLength(0);
+
+    // 1 s later: ready — a drag moves it one hour later
+    await expect(ev).toHaveClass(/cv-ev--touch-ready/);
+    await page.locator('#calViewBody .cv-week').evaluate(w => { w.scrollTop = 7 * 48 - 10; });
+    await touch(await centre(), 48);
+    await expect.poll(() => puts.length).toBe(1);
+    expect(new Date(puts[0].start).getHours()).toBe(10);
+    // Still in edit mode after the change (also after the reload re-rendered it) …
+    await expect(page.locator('#calViewBody .cv-ev--touch-ready')).toHaveCount(1);
+    // … until 5 s after it
+    await expect(page.locator('#calViewBody .cv-ev--touch-edit')).toHaveCount(0, { timeout: 8000 });
+
+    // A second tap on the marked event opens its details and ends the mode
+    await ev.tap();
+    await expect(ev).toHaveClass(/cv-ev--touch-edit/);
+    await ev.tap();
+    await expect(page.locator('#dashboardDetail .modal')).toBeVisible();
+    await expect(page.locator('#calViewBody .cv-ev--touch-edit')).toHaveCount(0);
+  });
+
+  test('E-T-36 date, widget mode and Refresh share the first line; short date when narrow', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    await page.goto('/today');
+    const date = page.locator('#todayBar .today-bar-date strong');
+    const sameLine = async () => {
+      const [d, c, r] = await Promise.all([date, page.locator('#todayBar [data-bar="collapse"]'),
+        page.locator('#todayBar .today-bar-refresh-sm[data-bar="refresh"]')].map(l => l.boundingBox()));
+      const mid = b => b.y + b.height / 2;
+      expect(Math.abs(mid(c) - mid(d))).toBeLessThan(12);
+      expect(Math.abs(mid(r) - mid(d))).toBeLessThan(12);
+    };
+    await sameLine();
+    const long = await date.getAttribute('data-long');
+    const short = await date.getAttribute('data-short');
+    expect(short).toMatch(/, \d\d\.\d\d\.\d{4}$/);
+
+    await page.setViewportSize({ width: 280, height: 700 });
+    await expect(date).toHaveText(short);
+    await sameLine();
+    await page.setViewportSize({ width: 700, height: 844 });
+    await expect(date).toHaveText(long);
+    await sameLine();
   });
 });

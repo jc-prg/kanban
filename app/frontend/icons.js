@@ -53,6 +53,11 @@ function _svgPriority(w = 11, h = 13) {
   return `<svg viewBox="0 0 11 13" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2" y1="0.7" x2="2" y2="12.3"/><path d="M2 1.5h7.5l-2.2 2.8 2.2 2.7H2"/></svg>`;
 }
 
+// Filled flag — flagged mail (colour via currentColor, Apple Mail flag colours)
+function _svgFlag(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="2.2" y1="0.8" x2="2.2" y2="11.2" fill="none"/><path d="M2.2 1.4c2.4-1 3.8 1 6.6 0.2v5.2c-2.8 0.8-4.2-1.2-6.6-0.2z"/></svg>`;
+}
+
 // Four circles — color palette / color selection
 function _svgColorPalette(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="2.2"/><circle cx="9" cy="3" r="2.2"/><circle cx="3" cy="9" r="2.2"/><circle cx="9" cy="9" r="2.2"/></svg>`;
@@ -135,6 +140,11 @@ function _svgExpandAll(w = 12, h = 12) {
 // Two chevrons pointing together — collapse all
 function _svgCollapseAll(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5 6 4.5 9 1.5M3 10.5 6 7.5 9 10.5"/></svg>`;
+}
+
+// One open section between two closed ones — accordion ("one open at a time")
+function _svgAccordion(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 1.5h9M1.5 10.5h9"/><rect x="1.5" y="3.8" width="9" height="4.4" rx="1"/></svg>`;
 }
 
 // Eye — show a hidden item again
@@ -292,9 +302,24 @@ function _svgShieldCheck(w = 14, h = 14) {
   return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z" stroke-width="1.4"/><polyline points="5.4,8.1 7.3,10 10.7,6.3" stroke-width="1.6"/></svg>`;
 }
 
+// Lightning bolt — board webhook (header menu)
+function _svgWebhook(w = 14, h = 14) {
+  return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.2 1.5 3.5 9h4l-.7 5.5L12.5 7h-4z"/></svg>`;
+}
+
+// Door with an arrow pointing out — log out (header menu)
+function _svgLogout(w = 14, h = 14) {
+  return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1H6"/><polyline points="10,5 13,8 10,11"/><line x1="13" y1="8" x2="6.5" y2="8"/></svg>`;
+}
+
 // Calendar page with a filled day — the "Today" page
 function _svgToday(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><rect x="0.7" y="1.7" width="10.6" height="9.6" rx="1.3"/><line x1="3.5" y1="0.7" x2="3.5" y2="3.3"/><line x1="8.5" y1="0.7" x2="8.5" y2="3.3"/><rect x="3.6" y="5.4" width="4.8" height="3.6" rx="0.6" fill="currentColor" stroke="none"/></svg>`;
+}
+
+// Die showing five — random sticky (Today Stickies tile)
+function _svgDice(w = 14, h = 14) {
+  return `<svg viewBox="0 0 16 16" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2.5"/><g fill="currentColor" stroke="none"><circle cx="5.3" cy="5.3" r="1.05"/><circle cx="10.7" cy="5.3" r="1.05"/><circle cx="8" cy="8" r="1.05"/><circle cx="5.3" cy="10.7" r="1.05"/><circle cx="10.7" cy="10.7" r="1.05"/></g></svg>`;
 }
 
 // ---- Weather (Today page) — 24×24, drawn with currentColor ----
@@ -359,6 +384,7 @@ const SVGICONS = {
   kanban:       _svgKanban,
   date:         _svgDate,
   priority:     _svgPriority,
+  flag:         _svgFlag,
   colorPalette: _svgColorPalette,
   cardInfo:     _svgCardInfo,
   settings:     _svgSettings,
@@ -379,12 +405,16 @@ const SVGICONS = {
   openLink:       _svgOpenLink,
   schedule:       _svgSchedule,
   today:          _svgToday,
+  dice:           _svgDice,
   search:         _svgSearch,
   stats:          _svgStats,
   expandAll:      _svgExpandAll,
   collapseAll:    _svgCollapseAll,
+  accordion:      _svgAccordion,
   eye:            _svgEye,
   eyeOff:         _svgEyeOff,
+  webhook:        _svgWebhook,
+  logout:         _svgLogout,
   wxSun:          _svgWxSun,
   wxMoon:         _svgWxMoon,
   wxPartly:       _svgWxPartly,
@@ -466,6 +496,9 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgForward(16, 16),      name: 'Forward',          usage: 'Forward a mail (mail view)' },
   { type: 'svg', svg: _svgMarkRead(16, 16),     name: 'Mark read',        usage: 'Mark a mail as read (mail view)' },
   { type: 'svg', svg: _svgMarkUnread(16, 16),   name: 'Mark unread',      usage: 'Mark a mail as unread (mail view)' },
+  { type: 'svg', svg: _svgWebhook(16, 16),      name: 'Webhook',          usage: 'Fire the board webhook (header menu)' },
+  { type: 'svg', svg: _svgLogout(16, 16),       name: 'Log out',          usage: 'Log out (header menu)' },
+  { type: 'svg', svg: _svgFlag(16, 16),         name: 'Flag',             usage: 'Flagged mail, in its flag colour (mail view, Needs attention)' },
 ];
 
 // ---- Render icon library grid ----

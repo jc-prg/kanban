@@ -4,12 +4,12 @@ const helmet  = require('helmet');
 const path    = require('path');
 const fs      = require('fs');
 
-const { PORT, HOST, BASE_PATH, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES, ATTACHMENTS_DIR } = require('./config');
+const { PORT, HOST, BASE_PATH, BACKUP_INTERVAL_MS, DB_SIZE_INTERVAL_MS, LOG_API_RESPONSES, ATTACHMENTS_DIR, TEST_INSTANCE } = require('./config');
 const { initDb, getCouch, withBoard, withExistingBoard } = require('./db');
 const { initGlobalDb }                    = require('./global-db');
 const { authenticate, parseCookies, writeRateLimit, uploadRateLimit } = require('./auth');
 const { isTwoFactorEnabled, isIntranet, isDeviceTokenValid, isAutoSend } = require('./twoFactor');
-const { runBackup, runPromptsBackup, checkDataDirectories, refreshDbSize, runOrphanAttachmentCleanup } = require('./backup');
+const { runBackup, runPromptsBackup, runStickiesBackup, checkDataDirectories, refreshDbSize, runOrphanAttachmentCleanup } = require('./backup');
 const { initRecurring } = require('./recurring');
 
 const { createNotesRouter, createAccountsRouter } = require('../notes-webdav/backend');
@@ -66,11 +66,14 @@ const site = express.Router();
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
 // index.html references assets with root-absolute URLs; prefix them with
 // BASE_PATH and expose it to the frontend via <meta name="base-path">.
+// TEST_INSTANCE=1 adds a "Test" label to the header.
 async function sendSpa(req, res, next) {
   try {
-    const html = (await fs.promises.readFile(SPA_HTML, 'utf8'))
+    let html = (await fs.promises.readFile(SPA_HTML, 'utf8'))
       .replace(/(\s(?:href|src))="\/(?!\/)/g, `$1="${BASE_PATH}/`)
       .replace('<head>', `<head>\n<meta name="base-path" content="${BASE_PATH}">`);
+    if (TEST_INSTANCE)
+      html = html.replace('<header>', '<header>\n  <span class="test-instance-label" title="Test instance (TEST_INSTANCE=1)">Test</span>');
     res.type('html').send(html);
   } catch (err) { next(err); }
 }
@@ -132,6 +135,7 @@ site.use('/api', require('./routes/attachments'));
 site.use('/api', require('./routes/dashboard'));
 site.use('/api', require('./routes/appearance'));
 site.use('/api', require('./routes/today'));
+site.use('/api', require('./routes/stickies'));
 site.use('/api', createAccountsRouter({ adapter: notesAdapter, writeRateLimit }));
 site.use('/api', require('./routes/recurring'));
 site.use('/api', require('./routes/templates'));
@@ -152,6 +156,7 @@ initDb()
     app.listen(PORT, () => console.log(`Kanban server running at http://${HOST}:${PORT}${BASE_PATH}/`));
     runBackup();                    setInterval(runBackup,                    BACKUP_INTERVAL_MS);
     runPromptsBackup();             setInterval(runPromptsBackup,             BACKUP_INTERVAL_MS);
+    runStickiesBackup();            setInterval(runStickiesBackup,            BACKUP_INTERVAL_MS);
     refreshDbSize();                setInterval(refreshDbSize,                DB_SIZE_INTERVAL_MS);
     runOrphanAttachmentCleanup();   setInterval(runOrphanAttachmentCleanup,   60 * 60 * 1000);
     initRecurring();

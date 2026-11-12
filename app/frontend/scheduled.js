@@ -61,7 +61,7 @@ window.toggleScheduledColumn = toggleScheduledColumn;
 
 function _updateMenuBtn() {
   const btn = document.getElementById('menuScheduled');
-  if (btn) btn.textContent = _showScheduled ? 'Hide scheduled' : 'Scheduled cards';
+  if (btn) btn.querySelector('.header-dd-label').textContent = _showScheduled ? 'Hide scheduled' : 'Scheduled cards';
   const hdrBtn = document.getElementById('schedToggleBtn');
   if (hdrBtn) hdrBtn.classList.toggle('open', _showScheduled);
 }

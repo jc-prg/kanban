@@ -30,6 +30,9 @@ let _cvZoomPending = null;          // { factor, clientY } batched per animation
 let _cvFocusDay   = null;           // YYYY-MM-DD centred horizontally in week views (phones, after a month double tap)
 let _cvTap        = null;           // pending month tap on phones: { ymd, timer }
 let _cvDayListDay = null;           // day shown in the phone day overview (Date) or null
+let _cvRangeKey   = null;           // `${mode}:${start}` of the last week render — horizontal scroll kept while unchanged
+let _cvEdgeTouch  = null;           // phones, week views: touch that may swipe past the first / last day
+let _cvTouchEdit  = null;           // touch edit mode of one event: { accountId, uid, start (ms), ready, timer }
 
 // Phones: same condition as the phone layout in calview.css
 const _CV_PHONE_MQ   = '(max-width: 639px), (max-height: 500px)';
@@ -302,8 +305,8 @@ function _cvShow() {
   el.style.display = '';
   _syncOverlayHost();
   document.body.classList.add('calview-open');
-  document.getElementById('dashboardCalBtn')?.classList.add('open');
   _cvScrolled = false;
+  _cvRangeKey = null;   // opening: centre today (or the focus day) again
   clearInterval(_cvNowTimer);
   _cvNowTimer = setInterval(_cvUpdateNowLine, 60_000);
   _cvRender();
@@ -316,9 +319,9 @@ function _cvHide() {
   el.style.display = 'none';
   _syncOverlayHost();
   document.body.classList.remove('calview-open');
-  document.getElementById('dashboardCalBtn')?.classList.remove('open');
   clearInterval(_cvNowTimer);
   _cvDrag = null;
+  _cvTouchEditEnd();
   _cvCloseDayList();
 }
 
@@ -493,15 +496,27 @@ function _cvRender() {
   _cvRenderHeader(range);
   const body = document.getElementById('calViewBody');
   const errHtml = _cvErrors.filter(e => !_cvHidden.has(e.accountId)).map(e => `<div class="dashboard-source-error">⚠ ${escHtml(e.label)}: ${escHtml(e.error)}</div>`).join('');
-  const prevScroll = body.querySelector('.cv-scroll')?.scrollTop;
+  const prevScroll = _cvVScroll(body)?.scrollTop;
+  const prevLeft   = body.querySelector('.cv-week')?.scrollLeft;
   body.innerHTML = errHtml + (_cvMode === 'month' ? _cvMonthHtml(range) : _cvWeekHtml(range));
-  const scroll = body.querySelector('.cv-scroll');
+  const scroll = _cvVScroll(body);
   if (scroll) {
     if (!_cvScrolled || prevScroll == null) { scroll.scrollTop = 7 * _cvHourPx - 10; _cvScrolled = true; }   // -10: room so the 07:00 label is not clipped
     else scroll.scrollTop = prevScroll;
   }
-  if (_cvFocusDay && _cvMode !== 'month') _cvCenterDay(_cvFocusDay);
+  // Phones (horizontally scrolling week): a new range centres the focus day, else today when it is
+  // in the range; re-renders of the same range (load, zoom, drag) keep the scroll position
+  if (_cvMode !== 'month') {
+    const key = `${_cvMode}:${_cvYmd(range.start)}`;
+    const today = new Date();
+    if (key !== _cvRangeKey || prevLeft == null) {
+      const focus = _cvFocusDay || (today >= range.start && today < range.end ? _cvYmd(today) : null);
+      if (focus) _cvCenterDay(focus);
+    } else body.querySelector('.cv-week').scrollLeft = prevLeft;
+    _cvRangeKey = key;
+  } else _cvRangeKey = null;
   _cvUpdateNowLine();
+  _cvMarkTouchEdit();
   _cvRenderLegend();
   if (_cvDayListDay) _cvRenderDayList();
   // Month: re-render once if more / fewer entry rows fit than assumed (row height is only known after layout)
@@ -513,13 +528,83 @@ function _cvRender() {
   if (scroll && Math.floor(_cvClampZoom(_cvZoomRaw, scroll)) !== _cvHourPx) _cvApplyZoom(_cvZoomRaw, null);
 }
 
-/** Scroll the (horizontally scrollable, phones) week grid so the day's column is centred if possible. */
+/** Scroll the (horizontally scrollable, phones) week grid so the day's column is centred in the area
+ *  right of the fixed hours column, if possible. */
 function _cvCenterDay(ymd) {
   const week = document.querySelector('#calViewBody .cv-week');
   const col  = week?.querySelector(`.cv-daycol[data-date="${ymd}"]`);
   if (!col || week.scrollWidth <= week.clientWidth) return;
   const w = week.getBoundingClientRect(), c = col.getBoundingClientRect();
-  week.scrollLeft += (c.left + c.width / 2) - (w.left + w.width / 2);
+  const gutter = week.querySelector('.cv-hours')?.offsetWidth || 0;
+  week.scrollLeft += (c.left + c.width / 2) - (w.left + gutter + (w.width - gutter) / 2);
+}
+
+/** Vertical scroller of the time grid: .cv-scroll — on phones the whole .cv-week, which scrolls both ways
+ *  with the day heads sticky at the top and the hours sticky at the left (calview.css). */
+function _cvVScroll(root = document.getElementById('calViewBody')) {
+  const s = root?.querySelector('.cv-scroll');
+  if (!s) return null;
+  return getComputedStyle(s).overflowY === 'visible' ? s.closest('.cv-week') : s;
+}
+
+// ---- Phones, week views: swiping past the first / last day offers the previous / next week ----
+// Pulling further in the same gesture, or once more while the offer is shown, jumps to that week.
+
+const _CV_EDGE_PX      = 40;    // horizontal swipe distance beyond the edge that shows the offer
+const _CV_EDGE_JUMP_PX = 110;   // … that jumps right away while the offer for that direction is shown
+
+function _cvEdgeStart(e) {
+  _cvEdgeTouch = null;
+  if (_cvMode === 'month' || e.touches.length !== 1) return;
+  // A pull may also start on the offer button, which floats over the grid
+  const week = e.target.closest?.('.cv-week') || (e.target.closest?.('.cv-edge-offer') && document.querySelector('#calViewBody .cv-week'));
+  if (!week || week.scrollWidth <= week.clientWidth + 1) return;
+  const max = week.scrollWidth - week.clientWidth;
+  const t = e.touches[0];
+  _cvEdgeTouch = { week, x0: t.clientX, y0: t.clientY, atStart: week.scrollLeft <= 1, atEnd: week.scrollLeft >= max - 1 };
+}
+
+function _cvEdgeMove(e) {
+  const g = _cvEdgeTouch;
+  if (!g || _cvDrag?.moved) return;
+  const t = e.touches[0];
+  const dx = t.clientX - g.x0, dy = t.clientY - g.y0;
+  if (Math.abs(dx) < _CV_EDGE_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+  const dir = dx < 0 && g.atEnd ? 1 : dx > 0 && g.atStart ? -1 : 0;
+  if (!dir) return;   // pulling away from the edge (or jitter): keep watching the gesture
+  const shown = !!document.querySelector(`#calViewBody .cv-edge-offer--${dir > 0 ? 'next' : 'prev'}`);
+  if (!shown) { _cvShowEdgeOffer(dir); g.offered = true; return; }
+  // Offer already there: a second pull (new gesture) or pulling on (same gesture, further) jumps
+  if (!g.offered || Math.abs(dx) >= _CV_EDGE_JUMP_PX) { _cvEdgeTouch = null; _cvEdgeJump(dir); }
+}
+
+/** Previous (-1) / next (1) week, continuing where the swipe was heading: next → its first day, previous → its last day. */
+function _cvEdgeJump(dir) {
+  document.querySelector('#calViewBody .cv-edge-offer')?.remove();
+  const anchor = _cvStep(_cvMode, _cvAnchor, dir);
+  const range  = _cvRange(_cvMode, anchor);
+  _cvNavigate(anchor, null, _cvYmd(dir > 0 ? range.start : _cvAddDays(range.end, -1)));
+}
+
+/** Floating button at the edge the user swiped against: previous (-1) / next (1) week. */
+function _cvShowEdgeOffer(dir) {
+  const body = document.getElementById('calViewBody');
+  const week = body.querySelector('.cv-week');
+  if (!week) return;
+  body.querySelector('.cv-edge-offer')?.remove();
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `btn cv-edge-offer cv-edge-offer--${dir > 0 ? 'next' : 'prev'}`;
+  const label = _cvMode === 'workweek' ? 'work week' : 'week';
+  btn.innerHTML = dir > 0 ? `Next ${label} <span aria-hidden="true">›</span>` : `<span aria-hidden="true">‹</span> Previous ${label}`;
+  btn.addEventListener('click', e => { e.stopPropagation(); _cvEdgeJump(dir); });
+  body.appendChild(btn);
+  // Gone after a while or once the days are scrolled away from the edge
+  const left0 = week.scrollLeft;
+  const hide = () => { btn.remove(); week.removeEventListener('scroll', onScroll); };
+  const onScroll = () => { if (Math.abs(week.scrollLeft - left0) > 20) hide(); };
+  week.addEventListener('scroll', onScroll, { passive: true });
+  setTimeout(hide, 5000);
 }
 
 // ---- Phones: month taps → day overview (single) / week (double) ----
@@ -596,24 +681,27 @@ function _cvLoadZoom() {
 
 // Zoomed out: the whole day (00:00–24:00) fills the grid; zoomed in: _CV_MIN_HOURS hours fill it
 function _cvClampZoom(px, scroll) {
-  const h = scroll.clientHeight;
+  // Phones: the scroller includes the sticky day heads (.cv-weektop) — only the grid below them counts
+  const h = scroll.clientHeight - (scroll.querySelector?.(':scope > .cv-weektop')?.offsetHeight || 0);
   if (!h) return px;
   return Math.min(h / _CV_MIN_HOURS, Math.max(h / 24, px));
 }
 
 // Re-renders with a new hour height, keeping the time under clientY (or the grid centre) in place
 function _cvApplyZoom(px, clientY) {
-  const scroll = document.querySelector('#calViewBody .cv-scroll');
-  if (!scroll) return;
+  const scroll = _cvVScroll();
+  const grid   = document.querySelector('#calViewBody .cv-grid');
+  if (!scroll || !grid) return;
   const rect = scroll.getBoundingClientRect();
-  const offset = clientY == null ? scroll.clientHeight / 2 : Math.min(Math.max(clientY - rect.top, 0), scroll.clientHeight);
-  const minute = (scroll.scrollTop + offset) / _cvHourPx * 60;
+  const y = clientY == null ? rect.top + scroll.clientHeight / 2 : Math.min(Math.max(clientY, rect.top), rect.top + scroll.clientHeight);
+  const minute = (y - grid.getBoundingClientRect().top) / _cvHourPx * 60;
   _cvZoomRaw = _cvClampZoom(px, scroll);
   _cvHourPx  = Math.max(1, Math.floor(_cvZoomRaw));
   try { localStorage.setItem(_CV_ZOOM_KEY, String(_cvZoomRaw)); } catch { /* ignore */ }
   _cvRender();
-  const next = document.querySelector('#calViewBody .cv-scroll');
-  if (next) next.scrollTop = minute / 60 * _cvHourPx - offset;
+  const next = _cvVScroll();
+  const nextGrid = document.querySelector('#calViewBody .cv-grid');
+  if (next && nextGrid) next.scrollTop += nextGrid.getBoundingClientRect().top + minute / 60 * _cvHourPx - y;   // keep that time under y
 }
 
 // Batches rapid wheel / trackpad-pinch events into one re-render per frame
@@ -724,9 +812,11 @@ function _cvWeekHtml(range) {
   const hours = Array.from({ length: 24 }, (_, h) => `<div class="cv-hour"><span>${h ? `${_cvPad(h)}:00` : ''}</span></div>`).join('');
 
   return `<div class="cv-week" style="--cv-days:${range.days};--cv-hour:${_cvHourPx}px">
-    <div class="cv-weekhead"><div class="cv-gutter"></div><div class="cv-dayheads">${head}</div></div>
-    <div class="cv-allday"><div class="cv-gutter cv-allday-label">all-day</div>
-      <div class="cv-allday-grid" style="grid-template-rows:repeat(${Math.max(lanes, 1)}, 22px)">${allDayCells}${barsHtml}</div></div>
+    <div class="cv-weektop">
+      <div class="cv-weekhead"><div class="cv-gutter"></div><div class="cv-dayheads">${head}</div></div>
+      <div class="cv-allday"><div class="cv-gutter cv-allday-label">all-day</div>
+        <div class="cv-allday-grid" style="grid-template-rows:repeat(${Math.max(lanes, 1)}, 22px)">${allDayCells}${barsHtml}</div></div>
+    </div>
     <div class="cv-scroll"><div class="cv-grid">
       <div class="cv-hours">${hours}</div>
       <div class="cv-daycols">${cols}</div>
@@ -877,6 +967,71 @@ async function _cvSaveMove(ev, newStart, newEnd) {
   _refreshCalendarAccount(accountId);
 }
 
+// ---- Touch edit mode ----
+// Touch never moves an event right away: a tap marks it (.cv-ev--touch-edit), 1 s later it can be moved /
+// resized (.cv-ev--touch-ready), and it stays so until 5 s after the last change, a tap elsewhere or a
+// second tap on it (which opens the details). Matched by account + UID + start: keys change on every load.
+
+const _CV_TOUCH_ARM_MS  = 1000;
+const _CV_TOUCH_KEEP_MS = 5000;
+
+function _cvIsTouchEdit(ev) {
+  return !!ev && !!_cvTouchEdit && ev._accountId === _cvTouchEdit.accountId && ev.uid === _cvTouchEdit.uid
+    && _cvTouchEditEvent()?._key === ev._key;
+}
+
+/** The occurrence in edit mode: same account + UID, the one starting closest to the stored start. */
+function _cvTouchEditEvent() {
+  const t = _cvTouchEdit;
+  if (!t) return null;
+  let best = null;
+  for (const ev of _cvEvents.values()) {
+    if (ev._accountId !== t.accountId || ev.uid !== t.uid) continue;
+    if (!best || Math.abs(ev._s - t.start) < Math.abs(best._s - t.start)) best = ev;
+  }
+  return best;
+}
+
+function _cvTouchEditStart(ev) {
+  _cvTouchEditEnd();
+  const t = _cvTouchEdit = { accountId: ev._accountId, uid: ev.uid, start: +ev._s, ready: false };
+  t.timer = setTimeout(() => {
+    if (_cvTouchEdit !== t) return;
+    t.ready = true;
+    _cvMarkTouchEdit();
+    _cvTouchEditKeep();
+  }, _CV_TOUCH_ARM_MS);
+  _cvMarkTouchEdit();
+}
+
+/** (Re)start the 5 s after which the edit mode ends. */
+function _cvTouchEditKeep() {
+  const t = _cvTouchEdit;
+  if (!t?.ready) return;
+  clearTimeout(t.timer);
+  t.timer = setTimeout(() => { if (_cvTouchEdit === t && _cvDrag?.ev?.uid !== t.uid) _cvTouchEditEnd(); }, _CV_TOUCH_KEEP_MS);
+}
+
+function _cvTouchEditEnd() {
+  if (!_cvTouchEdit) return;
+  clearTimeout(_cvTouchEdit.timer);
+  _cvTouchEdit = null;
+  _cvMarkTouchEdit();
+}
+
+/** Classes on the rendered segments of the event in edit mode (called after every render). */
+function _cvMarkTouchEdit() {
+  const body = document.getElementById('calViewBody');
+  if (!body) return;
+  body.querySelectorAll('.cv-ev--touch-edit').forEach(el => el.classList.remove('cv-ev--touch-edit', 'cv-ev--touch-ready'));
+  const ev = _cvTouchEditEvent();
+  if (!ev) return;
+  body.querySelectorAll(`.cv-ev[data-cv-key="${ev._key}"]`).forEach(el => {
+    el.classList.add('cv-ev--touch-edit');
+    el.classList.toggle('cv-ev--touch-ready', _cvTouchEdit.ready);
+  });
+}
+
 // ---- Pointer interactions ----
 
 /** Time-grid position under the pointer → { col, date (local midnight), minutes } or null. */
@@ -917,9 +1072,21 @@ function _cvPointerDown(e) {
   // Phones, month: taps open the day overview instead of single entries (see _cvMonthTap)
   if (_cvMode === 'month' && _cvIsPhone() && e.target.closest('.cv-month-grid')) return;
   const evEl = e.target.closest('.cv-ev');
+  // Touch: a touch outside the event in edit mode ends that mode and does nothing else (no new event)
+  if (e.pointerType === 'touch' && _cvTouchEdit && !(evEl && _cvIsTouchEdit(_cvEvents.get(evEl.dataset.cvKey)))) {
+    _cvTouchEditEnd();
+    if (!evEl) return;
+  }
   if (evEl) {
     const ev = _cvEvents.get(evEl.dataset.cvKey);
     if (!ev) return;
+    // Touch: events only move / resize in edit mode, once it is ready (tap → marked → 1 s);
+    // otherwise a tap is handled on pointerup and a drag scrolls the grid (touch-action, calview.css)
+    if (e.pointerType === 'touch' && !(_cvIsTouchEdit(ev) && _cvTouchEdit.ready)) {
+      _cvDrag = { kind: 'tap', ev, el: evEl, x0: e.clientX, y0: e.clientY, moved: false, pointerId: e.pointerId, pointerType: e.pointerType };
+      return;
+    }
+    if (e.pointerType === 'touch') clearTimeout(_cvTouchEdit.timer);   // no expiry while it is being dragged
     const resize = !!e.target.closest('[data-cv-resize]');
     const kind   = resize ? 'resize' : (evEl.classList.contains('cv-timed') ? 'move-timed' : 'move-day');
     _cvDrag = { kind, ev, el: evEl, x0: e.clientX, y0: e.clientY, moved: false, pointerId: e.pointerId, pointerType: e.pointerType };
@@ -945,6 +1112,7 @@ function _cvPointerMove(e) {
   if (!d || e.pointerId !== d.pointerId) return;
   if (!d.moved) {
     if (Math.abs(e.clientX - d.x0) + Math.abs(e.clientY - d.y0) < 5) return;
+    if (d.kind === 'tap') { _cvDrag = null; return; }   // touch on an event outside edit mode: scrolling
     // Touch: dragging on empty grid scrolls instead of creating
     if (d.kind === 'create' && d.pointerType === 'touch') { _cvDrag = null; return; }
     if (d.kind !== 'create' && !_cvEditable(d.ev)) { _cvDrag = null; return; }
@@ -1006,7 +1174,22 @@ function _cvPointerUp(e) {
   document.getElementById('calView').classList.remove('cv-dragging');
   document.querySelectorAll('#calViewBody .cv-drop-target').forEach(n => n.classList.remove('cv-drop-target'));
 
-  if (e.type === 'pointercancel') { if (d.moved) _cvRender(); return; }
+  const touchEdit = d.pointerType === 'touch' && d.kind !== 'tap' && d.kind !== 'create';
+  if (e.type === 'pointercancel') { if (d.moved) _cvRender(); if (touchEdit) _cvTouchEditKeep(); return; }
+
+  if (d.kind === 'tap') {
+    // Editable event: first tap → edit mode; a tap on the event in edit mode (or a read-only one) → details
+    if (_cvEditable(d.ev) && !_cvIsTouchEdit(d.ev)) { _cvTouchEditStart(d.ev); return; }
+    _cvTouchEditEnd();
+    _openEventDetail(d.ev._accountId, d.ev.uid, d.ev._webUrl, d.ev);
+    return;
+  }
+  if (touchEdit) {
+    // Edit mode stays 5 s after the change (or the touch without one); a move changes the start it is matched by
+    if (d.moved && d.newStart) _cvTouchEdit.start = +d.newStart;
+    _cvTouchEditKeep();
+    if (!d.moved) return;   // a tap on the ready event keeps it in edit mode
+  }
 
   if (!d.moved) {
     if (d.kind === 'create') {
@@ -1060,6 +1243,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   body.addEventListener('pointerdown', _cvPointerDown);
+  body.addEventListener('touchstart', _cvEdgeStart, { passive: true });
+  body.addEventListener('touchmove', _cvEdgeMove, { passive: true });
+  body.addEventListener('touchend', () => { _cvEdgeTouch = null; }, { passive: true });
   window.addEventListener('pointermove', _cvPointerMove, { passive: false });
   window.addEventListener('pointerup', _cvPointerUp);
   window.addEventListener('pointercancel', _cvPointerUp);

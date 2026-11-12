@@ -4,6 +4,7 @@ const { ImapFlow } = require('imapflow');
 const nodemailer   = require('nodemailer');
 const MailComposer = require('nodemailer/lib/mail-composer');
 const addressparser = require('nodemailer/lib/addressparser');
+const { decodeText } = require('../charset');
 
 const TIMEOUT_MS = 10_000;
 
@@ -23,7 +24,7 @@ function _fmtAddrList(list) {
 
 function _preview(buf) {
   if (!buf) return '';
-  return buf.toString('utf8').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return decodeText(buf).replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
 function _fmtDate(d) {
@@ -71,6 +72,31 @@ async function _withClient(account, fn) {
   }
 }
 
+// ---- Flag colours (Apple Mail convention) ----
+// \Flagged marks the message; the colour is a 3-bit index in the keywords $MailFlagBit0..2
+// (no bit = red). Clients without colours see a plain flag.
+
+const MAIL_FLAG_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'];
+const _FLAG_BITS = ['$MailFlagBit0', '$MailFlagBit1', '$MailFlagBit2'];
+
+/** Flag colour of a message (Set or array of IMAP flags), null when not flagged. */
+function flagColor(flags) {
+  const set = flags instanceof Set ? flags : new Set(flags || []);
+  if (!set.has('\\Flagged')) return null;
+  const n = _FLAG_BITS.reduce((v, bit, i) => v | (set.has(bit) ? 1 << i : 0), 0);
+  return MAIL_FLAG_COLORS[n] || 'red';   // 7 (all bits) is unused by Apple
+}
+
+/** { add, remove } IMAP flags that set `color` (null = clear the flag). */
+function flagChanges(color) {
+  if (!color) return { add: [], remove: ['\\Flagged', ..._FLAG_BITS] };
+  const n = MAIL_FLAG_COLORS.indexOf(color);
+  if (n < 0) throw new Error(`Unknown flag colour: ${color}`);
+  const add = ['\\Flagged'], remove = [];
+  _FLAG_BITS.forEach((bit, i) => (n & (1 << i) ? add : remove).push(bit));
+  return { add, remove };
+}
+
 function _summary(msg, withPreview) {
   const { attachments } = _findBodyParts(msg.bodyStructure);
   const flags = msg.flags;
@@ -84,7 +110,8 @@ function _summary(msg, withPreview) {
     ...(withPreview ? { preview: _preview(msg.bodyParts?.get('text')) } : {}),
     unread:         !flags?.has('\\Seen'),
     flagged:        !!flags?.has('\\Flagged'),
-    answered:       !!flags?.has('\\Answered'),
+    flagColor:      flagColor(flags),
+    answered:      !!flags?.has('\\Answered'),
     forwarded:      !!flags?.has('$Forwarded'),
     hasAttachments: attachments.length > 0,
     size:           msg.size || 0,
@@ -93,11 +120,15 @@ function _summary(msg, withPreview) {
 
 // ---- Fetch message summaries ----
 
+const FLAGGED_LIMIT = 50;   // flagged messages per account in the Today overview
+
 /**
- * Fetch the most-recent N message summaries from a mail account.
+ * Fetch the most-recent N message summaries from a mail account's folder, plus
+ * (`withFlagged`) every flagged message of that folder — newest first, ≤ FLAGGED_LIMIT,
+ * however old. Returns { messages, flagged, flaggedTotal }.
  * Throws on connection/auth errors (caller decides how to surface them).
  */
-async function fetchMailAccount(account) {
+async function fetchMailAccount(account, { withFlagged = false } = {}) {
   const { folder = 'INBOX', maxMessages = 20 } = account;
   const client = _makeClient(account);
 
@@ -105,7 +136,7 @@ async function fetchMailAccount(account) {
   const lock = await client.getMailboxLock(folder);
   try {
     const total = client.mailbox?.exists ?? 0;
-    if (total === 0) return [];
+    if (total === 0) return { messages: [], flagged: [], flaggedTotal: 0 };
 
     const start = Math.max(1, total - maxMessages + 1);
     const msgs  = [];
@@ -117,11 +148,26 @@ async function fetchMailAccount(account) {
       bodyStructure: true,
       flags:         true,
     })) {
-      const { to, flagged, answered, forwarded, size, ...summary } = _summary(msg, true);
+      const { to, answered, forwarded, size, ...summary } = _summary(msg, true);
       msgs.push(summary);
     }
 
-    return msgs.reverse();   // newest first
+    let flagged = [], flaggedTotal = 0;
+    if (withFlagged) {
+      const uids = (await client.search({ flagged: true }, { uid: true })) || [];
+      flaggedTotal = uids.length;
+      // Highest UIDs = most recently arrived; the shown ones are then sorted by date
+      const pick = [...uids].sort((a, b) => b - a).slice(0, FLAGGED_LIMIT);
+      if (pick.length) {
+        for await (const msg of client.fetch(pick.join(','), _LIST_QUERY, { uid: true })) {
+          const { to, answered, forwarded, size, ...summary } = _summary(msg, false);
+          flagged.push(summary);
+        }
+        flagged.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      }
+    }
+
+    return { messages: msgs.reverse(), flagged, flaggedTotal };   // newest first
   } finally {
     lock.release();
     await client.logout();
@@ -143,8 +189,9 @@ function _findBodyParts(struct) {
     if (!node) return;
     // Root single-part messages have no .part set; IMAP section '1' covers them.
     const part = node.part || (isRoot && !node.childNodes ? '1' : null);
-    if (node.type === 'text/plain' && !text && part) text = { part, encoding: (node.encoding || '7bit').toLowerCase() };
-    if (node.type === 'text/html'  && !html && part) html = { part, encoding: (node.encoding || '7bit').toLowerCase() };
+    const charset = (node.parameters?.charset || '').toLowerCase();
+    if (node.type === 'text/plain' && !text && part) text = { part, encoding: (node.encoding || '7bit').toLowerCase(), charset };
+    if (node.type === 'text/html'  && !html && part) html = { part, encoding: (node.encoding || '7bit').toLowerCase(), charset };
     const name = node.dispositionParameters?.filename || node.parameters?.name;
     if (part && name) {
       const encoding = (node.encoding || 'base64').toLowerCase();
@@ -159,17 +206,14 @@ function _findBodyParts(struct) {
   return { textPart: text, htmlPart: html, attachments: attachments.filter(a => !bodyParts.has(a.part)) };
 }
 
-function _decodePart(buf, encoding) {
-  if (!buf) return '';
-  if (encoding === 'base64') {
-    return Buffer.from(buf.toString('ascii').replace(/\s+/g, ''), 'base64').toString('utf8');
-  }
+/** Transfer-decoded bytes of a body part (base64 / quoted-printable / 7bit / 8bit / binary). */
+function _partBytes(buf, encoding) {
+  const raw = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  if (encoding === 'base64') return Buffer.from(raw.toString('ascii').replace(/\s+/g, ''), 'base64');
   if (encoding === 'quoted-printable') {
-    // Remove soft line breaks first, then collect raw bytes so that
-    // multibyte UTF-8 sequences (e.g. =C3=BC → ü, =E2=9C=85 → ✅)
-    // are decoded correctly via Buffer.toString('utf8') rather than
-    // String.fromCharCode which treats each byte as a separate code point.
-    const qp = buf.toString('utf8').replace(/=\r?\n/g, '');
+    // Byte-wise (latin1 keeps every byte as one char): soft line breaks out, =XX → byte; the charset is
+    // applied to the resulting bytes, so multi-byte sequences (=C3=BC → ü) and 8-bit charsets both work
+    const qp = raw.toString('latin1').replace(/=\r?\n/g, '');
     const bytes = [];
     for (let i = 0; i < qp.length; ) {
       if (qp[i] === '=' && /^[0-9A-Fa-f]{2}/.test(qp.slice(i + 1, i + 3))) {
@@ -180,9 +224,23 @@ function _decodePart(buf, encoding) {
         i++;
       }
     }
-    return Buffer.from(bytes).toString('utf8');
+    return Buffer.from(bytes);
   }
-  return buf.toString('utf8');
+  return raw;
+}
+
+/** HTML parts without a charset parameter may name it in a <meta> tag. */
+function _htmlMetaCharset(bytes) {
+  const head = bytes.subarray(0, 2048).toString('latin1');
+  const m = /<meta[^>]+charset\s*=\s*["']?\s*([\w.:-]+)/i.exec(head);
+  return m ? m[1].toLowerCase() : '';
+}
+
+/** Body part → string in its charset (Content-Type parameter; HTML: else <meta>; else UTF-8 / windows-1252). */
+function _decodePart(buf, encoding, charset = '', html = false) {
+  if (!buf) return '';
+  const bytes = _partBytes(buf, encoding);
+  return decodeText(bytes, charset || (html ? _htmlMetaCharset(bytes) : ''));
 }
 
 /**
@@ -222,19 +280,19 @@ async function fetchMailMessage(account, uid, folder) {
       try {
         const bodyMsg = await client.fetchOne(String(meta.uid), { bodyParts: partKeys }, { uid: true });
         const parts = bodyMsg?.bodyParts;
-        if (textPart) body     = _decodePart(parts?.get(textPart.part), textPart.encoding);
-        if (htmlPart) bodyHtml = _decodePart(parts?.get(htmlPart.part), htmlPart.encoding);
+        if (textPart) body     = _decodePart(parts?.get(textPart.part), textPart.encoding, textPart.charset);
+        if (htmlPart) bodyHtml = _decodePart(parts?.get(htmlPart.part), htmlPart.encoding, htmlPart.charset, true);
       } catch {
         try {
           const fb = await client.fetchOne(String(meta.uid), { bodyParts: ['text'] }, { uid: true });
-          body = fb?.bodyParts?.get('text')?.toString('utf8') || '';
+          body = decodeText(fb?.bodyParts?.get('text'));
         } catch { /* ignore — return envelope only */ }
       }
     } else {
       // No recognised MIME part found — try the whole body as plain text
       try {
         const fb = await client.fetchOne(String(meta.uid), { bodyParts: ['text'] }, { uid: true });
-        body = fb?.bodyParts?.get('text')?.toString('utf8') || '';
+        body = decodeText(fb?.bodyParts?.get('text'));
       } catch { /* ignore */ }
     }
 
@@ -251,6 +309,8 @@ async function fetchMailMessage(account, uid, folder) {
       inReplyTo:   env.inReplyTo || '',
       references:  _parseReferences(meta.headers),
       unread:      meta.flags ? !meta.flags.has('\\Seen') : false,
+      flagged:     !!meta.flags?.has('\\Flagged'),
+      flagColor:   flagColor(meta.flags),
       bodyHtml,
       body,
       attachments: attachments.map(a => ({ name: a.name, part: a.part, type: a.type, size: a.size })),
@@ -603,15 +663,18 @@ async function findMailByMessageId(account, messageId, folder, { hintOnly = fals
 }
 
 /**
- * Search every selectable folder of an account (Today search widget). The IMAP search runs on
+ * Search every selectable folder of an account — or only `folders` — (Today Find widget / Find dialog;
+ * `since` / `before` = Date header range, `before` exclusive). The IMAP search runs on
  * `word` (subject / from / to / cc, plus body with `full`); `accept(summary)` re-checks the
  * other words. Newest first, ≤ `perFolder` per folder and `limit` overall; stops after
  * `budgetMs` and flags the result `truncated`. Returns { messages (with `folder`), total, truncated }.
  */
-async function searchMailAccount(account, word, { full = false, accept = () => true, perFolder = 20, limit = 50, budgetMs = 20_000 } = {}) {
+async function searchMailAccount(account, word, { full = false, accept = () => true, perFolder = 20, limit = 50, budgetMs = 20_000,
+  folders = null, since = null, before = null } = {}) {
   const started = Date.now();
   return _withClient(account, async client => {
-    const paths = (await client.list())
+    // `folders`: only these (the Find dialog's folder filter), else every selectable folder
+    const paths = folders ? [...folders] : (await client.list())
       .filter(f => !_mapFolder(f).noselect)
       .map(f => f.path);
     // Account folder (INBOX) first, then the rest alphabetically
@@ -619,6 +682,8 @@ async function searchMailAccount(account, word, { full = false, accept = () => t
     paths.sort((a, b) => (b === first) - (a === first) || a.localeCompare(b));
     const keys = [{ subject: word }, { from: word }, { to: word }, { cc: word }];
     if (full) keys.push({ body: word });
+    // Date range on the Date header (SENTSINCE / SENTBEFORE — `before` is exclusive)
+    const dates = { ...(since ? { sentSince: since } : {}), ...(before ? { sentBefore: before } : {}) };
     const messages = [];
     let total = 0, truncated = false;
     for (const path of paths) {
@@ -626,7 +691,7 @@ async function searchMailAccount(account, word, { full = false, accept = () => t
       let lock;
       try { lock = await client.getMailboxLock(path, { readOnly: true }); } catch { continue; }
       try {
-        const uids = ((await client.search({ or: keys, deleted: false }, { uid: true })) || []).sort((a, b) => b - a);
+        const uids = ((await client.search({ or: keys, deleted: false, ...dates }, { uid: true })) || []).sort((a, b) => b - a);
         if (!uids.length) continue;
         const found = [];
         for await (const msg of client.fetch(uids.slice(0, 200).join(','), _LIST_QUERY, { uid: true })) {
@@ -657,6 +722,18 @@ async function markMailMessage(account, uid, seen, folder) {
     } else {
       await client.messageFlagsRemove(String(uid), ['\\Seen'], { uid: true });
     }
+  });
+}
+
+/**
+ * Flag messages by UID (set) with an Apple Mail colour (MAIL_FLAG_COLORS), or clear the flag (null).
+ * Servers without custom keywords keep just \Flagged (imapflow drops flags the mailbox doesn't allow).
+ */
+async function flagMailMessage(account, uid, color, folder) {
+  const { add, remove } = flagChanges(color);
+  return _withMailbox(account, folder, async client => {
+    if (add.length)    await client.messageFlagsAdd(String(uid), add, { uid: true });
+    if (remove.length) await client.messageFlagsRemove(String(uid), remove, { uid: true });
   });
 }
 
@@ -808,6 +885,10 @@ async function sendMail(account, mail) {
 }
 
 module.exports = {
+  MAIL_FLAG_COLORS,
+  flagColor,
+  flagChanges,
+  flagMailMessage,
   senderAddresses,
   fetchMailAccount,
   fetchMailMessage,

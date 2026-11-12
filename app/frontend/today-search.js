@@ -1,4 +1,4 @@
-// ---- Today: Search tile ----
+// ---- Today: Find tile (TODAY_TILES.search) ----
 // Finds cards, notes, calendar events, mail and CV-App applications. Title mode matches title +
 // subtitle (card text / column, note title / folders, event title / location, mail subject /
 // addresses, job title / company); "Full text" adds all text fields (never attachments).
@@ -16,6 +16,7 @@ const _TS_TYPES = [
   { id: 'applications', label: 'Applications' },
 ];
 const _TS_DEBOUNCE_MS = 350;
+const _TS_MIN_CHARS   = 3;    // a search starts at 3 characters (the API rejects shorter queries)
 
 const _ts = {
   q: '',
@@ -107,7 +108,7 @@ function _tsSearch() {
     _ts.results = {};
     _ts.open = new Set();
   }
-  if (q.length >= 2) {
+  if (q.length >= _TS_MIN_CHARS) {
     const { signal } = _ts.ctrl;
     for (const slot of _tsSlots(_ts.sources, off)) {
       if (_ts.results[slot.id]) continue;
@@ -242,7 +243,7 @@ function _tsRenderResults() {
     const check = _tsCheckHtml(id, label, on);
     const plain = (cls, extra = '') => `<div class="today-search-group today-search-group--empty${cls}" data-type="${id}"><span class="today-search-label">${label}</span>${extra}${check}</div>`;
     if (!on) return plain(' today-search-group--off');
-    if (q.length < 2) return plain('');
+    if (q.length < _TS_MIN_CHARS) return plain('');
     const g = _tsGroup(id, slots, _ts.results) || { status: 'loading', items: [], total: 0, errors: [] };
     count += g.items.length;
     // Still searching: dots cycling " " → "." → ".." → "..." (CSS animation, today.css)
@@ -274,7 +275,7 @@ function _tsRenderChips() {
 
 function _tsBuild(body) {
   body.innerHTML = `<div class="today-search">
-    <input type="search" class="today-search-input" placeholder="Search cards, notes, events, mail…" aria-label="Search" autocomplete="off" spellcheck="false">
+    <input type="search" class="today-search-input" placeholder="Find cards, notes, events, mail… (min. 3 characters)" aria-label="Find" autocomplete="off" spellcheck="false">
     <div class="today-search-types"></div>
     <div class="today-search-results"></div>
   </div>`;
@@ -283,7 +284,7 @@ function _tsBuild(body) {
   input.addEventListener('input', () => {
     _ts.q = input.value;
     clearTimeout(_ts.timer);
-    if (_ts.q.trim().length < 2) { _tsSearch(); return; }
+    if (_ts.q.trim().length < _TS_MIN_CHARS) { _tsSearch(); return; }
     _ts.timer = setTimeout(_tsSearch, _TS_DEBOUNCE_MS);
   });
   input.addEventListener('keydown', e => {
@@ -318,12 +319,12 @@ function _todayRenderSearch(body, sources, el) {
   }
   _tsRenderChips();
   // New sources (e.g. a mail account added) are searched for the current query
-  if (_ts.q.trim().length >= 2) _tsSearch();
+  if (_ts.q.trim().length >= _TS_MIN_CHARS) _tsSearch();
   else _tsRenderResults();
 }
 
 TODAY_TILES.search = {
-  title: 'Search',
+  title: 'Find',
   desc: 'Find cards, notes, calendar events, mail and applications — titles or full text',
   load: () => _todayFetchJson('/api/today/search'),
   render: _todayRenderSearch,
@@ -332,6 +333,9 @@ TODAY_TILES.search = {
     return [{ label: 'Full text', active: full,
       title: full ? 'Searching all text (descriptions, bodies, notes) — click to search titles only'
         : 'Search titles only (title, location, company, subject, addresses) — click for full text',
-      run: () => _tsToggleFull() }];
+      run: () => _tsToggleFull() },
+    // The Find dialog: filters by priority / dates / account / folder / date range; takes the typed text along
+    { icon: SVGICONS.search(13, 13), title: 'Detailed find (filters by account, folder, date range…)',
+      run: () => openSearch({ text: _ts.q.trim() }) }];
   },
 };

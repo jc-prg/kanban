@@ -264,6 +264,7 @@ body.mailview-open header { z-index: 96; }
 }
 .mv-swipe-btn--read    { background: var(--accent); }
 .mv-swipe-btn--move    { background: #3b82f6; }
+.mv-swipe-btn--flag    { background: #ff9500; }   /* Apple orange — default swipe flag colour */
 .mv-swipe-btn--delete  { background: var(--danger); }
 
 /* ---- Reader ---- */
@@ -290,6 +291,7 @@ body.mailview-open header { z-index: 96; }
 }
 .mv-reader-actions .btn { padding: 5px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 5px; }
 .mv-reader-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mv-flag-icon { display: inline-flex; }
 .btn-danger-soft:hover { border-color: var(--danger); color: var(--danger); }
 .mv-reader-actions .mv-source-btn { padding: 5px 7px; }
 .mv-reader-actions .mv-format-btn { font-family: 'DM Mono', monospace; min-width: 3.2em; justify-content: center; }

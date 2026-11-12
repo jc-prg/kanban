@@ -45,24 +45,28 @@
     </div>
     <button class="header-menu-btn" id="notesToggleBtn" title="Toggle notes" style="display:none"><span data-icon="noteDoc" data-icon-w="11" data-icon-h="14"></span></button>
     <button class="header-menu-btn header-menu-btn--hide-mobile" id="schedToggleBtn" title="Toggle scheduled column" style="display:none"><span data-icon="schedule" data-icon-w="14" data-icon-h="14"></span></button>
-    <a class="header-menu-btn" id="todayBtn" href="/today" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <button class="header-menu-btn" id="dashboardRefreshBtn" title="Refresh" style="display:none"><span data-icon="sync"></span></button>
-    <button class="header-menu-btn" id="dashboardMailBtn" title="Show / hide mail" style="display:none"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span></button>
-    <button class="header-menu-btn" id="dashboardCalBtn" title="Show / hide calendar" style="display:none"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span></button>
+    <!-- page-specific icons first, then: dashboard, boards, calendar, mail, menu -->
+    <a class="header-menu-btn" id="todayBtn" href="/today" title="Dashboard" style="display:none"><span data-icon="dashboard" data-icon-w="12" data-icon-h="12"></span></a>
     <div class="board-switch-wrap" id="boardSwitchWrap" style="display:none">
       <a class="header-menu-btn" id="headerHomeBtn" href="/today" title="Kanban" aria-label="Kanban"><span data-icon="kanban" data-icon-w="12" data-icon-h="12"></span></a>
       <div class="board-switch-menu" id="boardSwitchMenu"></div>
     </div>
+    <button class="header-menu-btn" id="dashboardCalBtn" title="Calendar" style="display:none"><span data-icon="date" data-icon-w="12" data-icon-h="12"></span></button>
+    <button class="header-menu-btn" id="dashboardMailBtn" title="Mail" style="display:none"><span data-icon="email" data-icon-w="12" data-icon-h="12"></span></button>
     <button class="header-menu-btn" id="headerMenuBtn" title="Menu"><span data-icon="menu"></span></button>
     <div class="header-dropdown" id="headerDropdown">
-<button class="header-dd-item" id="menuFindCard">Find</button>
-      <button class="header-dd-item" id="menuTodayEdit" style="display:none">Edit layout</button>
-      <button class="header-dd-item" id="menuAnalytics">Statistics</button>
-      <button class="header-dd-item" id="menuWebhook" style="display:none"></button>
-      <button class="header-dd-item" id="menuScheduled" style="display:none">Scheduled cards</button>
-      <button class="header-dd-item" id="menuSettings">Settings</button>
+      <!-- board pages on small screens: calendar / mail move here from the header (layout.css) -->
+      <button class="header-dd-item header-dd-item--mobile-only" id="menuCalendar"><span class="header-dd-icon" data-icon="date" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Calendar</span></button>
+      <button class="header-dd-item header-dd-item--mobile-only" id="menuMail"><span class="header-dd-icon" data-icon="email" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Mail</span></button>
+      <button class="header-dd-item" id="menuFindCard"><span class="header-dd-icon" data-icon="search" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Find</span></button>
+      <button class="header-dd-item" id="menuTodayEdit" style="display:none"><span class="header-dd-icon" data-icon="edit" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Edit layout</span></button>
+      <button class="header-dd-item" id="menuAnalytics"><span class="header-dd-icon" data-icon="stats" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Statistics</span></button>
+      <button class="header-dd-item" id="menuWebhook" style="display:none"><span class="header-dd-icon" data-icon="webhook" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label"></span></button>
+      <button class="header-dd-item" id="menuScheduled" style="display:none"><span class="header-dd-icon" data-icon="schedule" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Scheduled cards</span></button>
+      <button class="header-dd-item" id="menuSettings"><span class="header-dd-icon" data-icon="settings" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Settings</span></button>
       <div class="header-dd-separator"></div>
-      <button class="header-dd-item header-dd-logout" id="menuLogout">Log out</button>
+      <button class="header-dd-item header-dd-logout" id="menuLogout"><span class="header-dd-icon" data-icon="logout" data-icon-w="14" data-icon-h="14"></span><span class="header-dd-label">Log out</span></button>
     </div>
   </div>
   </div>
@@ -345,6 +349,11 @@
     <div class="ctx-submenu" id="mailCtxOpenCardList"></div>
   </div>
   <button class="ctx-item" id="mailCtxToggleRead"><span data-icon="done"></span>  <span id="mailCtxToggleReadLabel">Mark as read</span></button>
+  <div class="ctx-submenu-trigger ctx-item" id="mailCtxFlagWrap">
+    <span data-icon="flag"></span>  Flag
+    <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
+    <div class="ctx-submenu" id="mailCtxFlagList"></div>
+  </div>
   <div class="ctx-submenu-trigger ctx-item" id="mailCtxMoveWrap">
     <span data-icon="moveTo"></span>  Move to folder
     <span class="ctx-arrow"><span data-icon="submenuArrow"></span></span>
@@ -648,46 +657,91 @@
 
 
 <div id="searchBackdrop" class="modal-backdrop" style="display:none">
-  <div class="modal search-modal">
-    <div class="search-modal-header">
-      <h2>Find</h2>
-      <div class="search-type-toggle">
-        <button class="search-type-btn search-type-btn--active" id="searchToggleCards">Cards</button>
-        <button class="search-type-btn" id="searchTogglePages">Pages</button>
+  <div class="modal search-modal panel panel-modal">
+    <!-- Detail panel format (.panel-modal). Opens with an overview of the categories (#searchOverview); once one
+         is picked, its search (#searchMain) with an icon switch in the header bar (search.js#setSearchMode).
+         Events / Mail only when calendar / mail accounts exist (GET /api/today/search) -->
+    <div class="dashboard-detail-titlebar panel-hdr panel-modal-bar">
+      <span class="dashboard-detail-title panel-hdr-title">Find</span>
+      <div class="settings-scope search-scope" role="tablist" aria-label="Find in" hidden>
+        <button type="button" id="searchToggleCards" data-mode="cards" role="tab" title="Cards" aria-label="Cards"><span data-icon="card" data-icon-w="16" data-icon-h="11"></span></button>
+        <button type="button" id="searchTogglePages" data-mode="pages" role="tab" title="Pages" aria-label="Pages"><span data-icon="notePages" data-icon-w="13" data-icon-h="13"></span></button>
+        <button type="button" id="searchToggleEvents" data-mode="events" role="tab" title="Events" aria-label="Events" hidden><span data-icon="date" data-icon-w="13" data-icon-h="13"></span></button>
+        <button type="button" id="searchToggleMail" data-mode="mail" role="tab" title="Mail" aria-label="Mail" hidden><span data-icon="email" data-icon-w="14" data-icon-h="14"></span></button>
+      </div>
+      <button class="dashboard-detail-close" data-close-via="searchCloseBtn" title="Close (Esc)"><span data-icon="close"></span></button>
+    </div>
+    <div id="searchOverview" class="search-overview" role="list">
+      <button type="button" class="search-ov-btn" data-mode="cards" role="listitem"><span class="search-ov-icon" data-icon="card" data-icon-w="40" data-icon-h="27"></span><span class="search-ov-label">Cards</span><span class="search-ov-desc">Text, priority, dates, columns</span></button>
+      <button type="button" class="search-ov-btn" data-mode="pages" role="listitem"><span class="search-ov-icon" data-icon="notePages" data-icon-w="34" data-icon-h="34"></span><span class="search-ov-label">Pages</span><span class="search-ov-desc">Note titles and text</span></button>
+      <button type="button" class="search-ov-btn" data-mode="events" role="listitem" hidden><span class="search-ov-icon" data-icon="date" data-icon-w="34" data-icon-h="34"></span><span class="search-ov-label">Events</span><span class="search-ov-desc">Account, date range</span></button>
+      <button type="button" class="search-ov-btn" data-mode="mail" role="listitem" hidden><span class="search-ov-icon" data-icon="email" data-icon-w="36" data-icon-h="36"></span><span class="search-ov-label">Mail</span><span class="search-ov-desc">Account, folder, date range</span></button>
+    </div>
+    <div id="searchMain" class="search-main" hidden>
+      <div class="modal-field">
+        <label for="searchText">Text</label>
+        <input id="searchText" type="text" placeholder="Contains all words…" autocomplete="off" spellcheck="false">
+      </div>
+      <!-- Events / mail: account (+ for mail folder — all, or one of the chosen account — and message text), date range -->
+      <div id="searchAccountFilters" class="search-filter-strip" hidden>
+        <div class="search-filter-group search-account-group">
+          <label class="search-filter-label" for="searchAccount">Account</label>
+          <select id="searchAccount"><option value="">All accounts</option></select>
+        </div>
+        <div class="search-filter-group search-folder-group" id="searchFolderGroup">
+          <label class="search-filter-label" for="searchMailFolder">Folder</label>
+          <select id="searchMailFolder"><option value="">All folders</option></select>
+        </div>
+        <label class="search-check-label" id="searchMailFullLabel" title="Also search the message text (slower)">
+          <input type="checkbox" id="searchMailFull"><span class="search-wide-only">Message text</span><span class="search-narrow-only">Body</span>
+        </label>
+        <!-- Date range (both ends optional and inclusive): same row as the account for events, own line for mail -->
+        <div id="searchRangeFilters" class="search-range" hidden>
+          <span class="search-range-break" id="searchRangeBreak" aria-hidden="true"></span>
+          <div class="search-filter-group search-from-group">
+            <label class="search-filter-label" for="searchFrom">From</label>
+            <input id="searchFrom" type="date">
+          </div>
+          <div class="search-filter-group search-to-group">
+            <label class="search-filter-label" for="searchTo">To</label>
+            <input id="searchTo" type="date">
+          </div>
+        </div>
+      </div>
+      <div id="searchCardFilters">
+        <div class="search-filter-strip">
+          <div class="search-filter-group">
+            <span class="search-filter-label">Priority</span>
+            <div id="searchPriorityRow" class="priority-row"></div>
+          </div>
+          <div class="search-filter-group">
+            <span class="search-filter-label">Start date ≥</span>
+            <input id="searchDateStart" type="date">
+          </div>
+          <div class="search-filter-group">
+            <span class="search-filter-label">End date ≤</span>
+            <input id="searchDateEnd" type="date">
+          </div>
+          <!-- Small screens (board page): the column list opens as a popup from this button -->
+          <div class="search-filter-group search-col-btn-group" id="searchColBtnGroup">
+            <span class="search-filter-label">Columns</span>
+            <button type="button" id="searchColBtn" class="search-col-btn" aria-expanded="false">All</button>
+          </div>
+        </div>
+        <div class="search-filter-group search-col-group">
+          <div class="search-col-header">
+            <span class="search-filter-label">Columns</span>
+            <button id="searchColToggleAll" class="search-col-toggle-all">deselect all</button>
+          </div>
+          <div id="searchColumnList" class="search-column-list"></div>
+        </div>
+      </div>
+      <div id="searchResults" class="search-results"></div>
+      <div class="modal-actions">
+        <span id="searchCount" class="search-count"></span>
       </div>
     </div>
-    <div class="modal-field">
-      <label>Text</label>
-      <input id="searchText" type="text" placeholder="Contains all words…" autocomplete="off" spellcheck="false">
-    </div>
-    <div id="searchCardFilters">
-      <div class="search-filter-strip">
-        <div class="search-filter-group">
-          <span class="search-filter-label">Priority</span>
-          <div id="searchPriorityRow" class="priority-row"></div>
-        </div>
-        <div class="search-filter-group">
-          <span class="search-filter-label">Start date ≥</span>
-          <input id="searchDateStart" type="date">
-        </div>
-        <div class="search-filter-group">
-          <span class="search-filter-label">End date ≤</span>
-          <input id="searchDateEnd" type="date">
-        </div>
-      </div>
-      <div class="search-filter-group search-col-group">
-        <div class="search-col-header">
-          <span class="search-filter-label">Columns</span>
-          <button id="searchColToggleAll" class="search-col-toggle-all">deselect all</button>
-        </div>
-        <div id="searchColumnList" class="search-column-list"></div>
-      </div>
-    </div>
-    <div id="searchResults" class="search-results"></div>
-    <div class="modal-actions">
-      <span id="searchCount" class="search-count"></span>
-      <button class="btn btn-accent" id="searchCloseBtn">Close</button>
-    </div>
+    <button class="btn btn-accent" id="searchCloseBtn" hidden>Close</button>
   </div>
 </div>
 
@@ -1024,6 +1078,21 @@
                 <option value="7">upcoming week (7 days)</option>
               </select>
             </div>
+            </div>
+
+            <div data-wset="stickies">
+            <div class="settings-field-row">
+              <label class="settings-field-label" for="todayStickiesRhythm">Random sticky</label>
+              <select id="todayStickiesRhythm" class="new-board-input" style="width:auto;flex:none">
+                <option value="0">only on request (dice)</option>
+                <option value="60">every hour</option>
+                <option value="120">every 2 hours</option>
+                <option value="240">every 4 hours</option>
+                <option value="480">every 8 hours</option>
+                <option value="1440">once a day</option>
+              </select>
+            </div>
+            <p class="settings-item-desc">Brings a random sticky to the top of the stack in this rhythm while the Today page is open.</p>
             </div>
 
             <div data-wset="weather">
@@ -1778,6 +1847,7 @@
 <script src="/mailview.js"></script>
 <script src="/today.js"></script>
 <script src="/today-search.js"></script>
+<script src="/today-stickies.js"></script>
 <script src="/recurring.js"></script>
 <script src="/templates.js"></script>
 <script src="/scheduled.js"></script>

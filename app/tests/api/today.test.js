@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page API tests — TD-1 … TD-20
+ * Today page API tests — TD-1 … TD-21
  *
  * routes/today.js is mounted on its own with db.js / global-db.js replaced via require.cache;
  * Open-Meteo and the CV-App are mocked with vi.stubGlobal('fetch').
@@ -342,4 +342,14 @@ test('TD-20 notes widget: webdav flag — enabled with an existing account or le
   webdav.off    = { enabled: false, accountId: 'wa-1' }
   const res = await request(app).get('/api/today/widgets/notes')
   expect(Object.fromEntries(res.body.boards.map(b => [b.board, b.webdav]))).toEqual({ acc: true, legacy: true, gone: false, off: false })
+})
+
+test('TD-21 stickies rhythm: 0 (on request) or 1 h … 1 day only', async () => {
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm: 240 } } })).status).toBe(200)
+  expect(store.today.widgets.stickies).toEqual({ rhythm: 240 })
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm: 0 } } })).status).toBe(200)
+  for (const rhythm of [30, -1, '60']) {
+    expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { rhythm } } })).status).toBe(400)
+  }
+  expect((await request(app).put('/api/today/config').send({ widgets: { stickies: { other: 1 } } })).status).toBe(400)
 })

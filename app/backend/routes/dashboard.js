@@ -14,7 +14,7 @@ const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendar
 const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
 const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
-        markMailMessage, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
+        markMailMessage, flagMailMessage, MAIL_FLAG_COLORS, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
 
 // ---- Password utilities (also exported for unit tests) ----
 
@@ -237,16 +237,15 @@ router.get('/dashboard/mail', withHandler(async (req, res) => {
   const config   = await getDashboardConfig();
   const accounts = config.mailAccounts || [];
 
-  const settled = await Promise.allSettled(accounts.map(acc => fetchMailAccount(acc)));
+  const settled = await Promise.allSettled(accounts.map(acc => fetchMailAccount(acc, { withFlagged: true })));
 
   const result = accounts.map((acc, i) => {
     const r = settled[i];
-    if (r.status === 'fulfilled') {
-      return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: r.value, error: null };
-    }
-    return { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, messages: [], error: r.reason?.message || 'Unknown error' };
+    const base = { accountId: acc.id, label: acc.label, color: acc.color || null, webInterfaceUrl: acc.webInterfaceUrl || null, folder: acc.folder || 'INBOX' };
+    if (r.status === 'fulfilled') return { ...base, ...r.value, error: null };
+    return { ...base, messages: [], flagged: [], flaggedTotal: 0, error: r.reason?.message || 'Unknown error' };
   });
-  await Promise.all(result.map(acc => _withCardRefs(acc.accountId, acc.messages)));
+  await Promise.all(result.flatMap(acc => [_withCardRefs(acc.accountId, acc.messages), _withCardRefs(acc.accountId, acc.flagged)]));
 
   res.json(result);
 }));
@@ -257,7 +256,7 @@ router.get('/dashboard/mail/:accountId', withHandler(async (req, res) => {
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
   try {
-    const messages = await fetchMailAccount(account);
+    const { messages } = await fetchMailAccount(account);
     res.json({ messages: await _withCardRefs(account.id, messages), error: null });
   } catch (err) {
     res.json({ messages: [], error: err.message });
@@ -575,16 +574,23 @@ router.post('/dashboard/mail/:accountId/send', uploadRateLimit, withHandler(asyn
   }
 }));
 
-// PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread (:uid may be a set "3,7,9")
+// PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread and / or flag (:uid may be a set "3,7,9")
+// body: { seen?: bool, flag?: colour (Apple Mail: red … gray) | null (clear) }
 router.patch('/dashboard/mail/:accountId/message/:uid', writeRateLimit, withHandler(async (req, res) => {
   const ctx = await _mailCtx(req, res, { multi: true });
   if (!ctx) return;
 
-  const { seen } = req.body;
-  if (typeof seen !== 'boolean') return res.status(400).json({ error: 'seen must be boolean' });
+  const { seen, flag } = req.body || {};
+  const hasSeen = seen !== undefined, hasFlag = flag !== undefined;
+  if (!hasSeen && !hasFlag) return res.status(400).json({ error: 'seen or flag is required' });
+  if (hasSeen && typeof seen !== 'boolean') return res.status(400).json({ error: 'seen must be boolean' });
+  if (hasFlag && flag !== null && !MAIL_FLAG_COLORS.includes(flag)) {
+    return res.status(400).json({ error: `flag must be null or one of ${MAIL_FLAG_COLORS.join(', ')}` });
+  }
 
   try {
-    await markMailMessage(ctx.account, req.params.uid, seen, ctx.folder);
+    if (hasSeen) await markMailMessage(ctx.account, req.params.uid, seen, ctx.folder);
+    if (hasFlag) await flagMailMessage(ctx.account, req.params.uid, flag, ctx.folder);
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: err.message });

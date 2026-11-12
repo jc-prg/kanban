@@ -50,6 +50,7 @@
 :root[data-skin="glass"] .notes-sidebar:not(.notes-sidebar--open) { border-color: transparent; box-shadow: none; }
 :root[data-skin="glass"] :is(.dashboard-detail-modal, .panel-modal) { box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5); }   /* keep the dialog shadow */
 :root[data-skin="glass"] .calview--multi .calview-legend { background: transparent; }
+:root[data-skin="glass"] .calview { --cv-sticky-bg: var(--glass-body-solid); }   /* phones: sticky day heads / hours (calview.css) */
 :root[data-skin="glass"] .mailview-folders { background: var(--glass-pane); }
 
 /* Stacked widget headers: the tile boxes dissolve (display: contents), so the bodies carry background and edge */
@@ -113,6 +114,33 @@
 }
 @media (prefers-color-scheme: light) {
   :root[data-skin="glass"] #today .today-board { box-shadow: inset 0 1px 0 var(--glass-highlight), 0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent); }
+}
+
+/* ---- Label cards (card text starting with "#", .card--label — card.css): a glass bar in the card colour like
+   the headers — translucent colour instead of the default's faded solid fill (so full opacity), gloss on the
+   upper half, light top edge, coloured edge; text in the card colour mixed with --text. ---- */
+:root[data-skin="glass"] .card--label {
+  --glass-label-tint: 38%;
+  opacity: 1;
+  background:
+    linear-gradient(180deg, var(--glass-sheen) 0%, transparent 55%),
+    linear-gradient(135deg, color-mix(in srgb, var(--card-color) var(--glass-label-tint), transparent),
+                            color-mix(in srgb, var(--card-color) calc(var(--glass-label-tint) / 3), transparent));
+  border-color: color-mix(in srgb, var(--card-color) 40%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+:root[data-skin="glass"] .card--label:hover {
+  --glass-label-tint: 50%;
+  border-color: color-mix(in srgb, var(--card-color) 65%, transparent);
+}
+:root[data-skin="glass"] .card--label .card-label-text {
+  color: color-mix(in srgb, var(--card-color) 35%, var(--text));
+  text-shadow: none;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-skin="glass"] .card--label { --glass-label-tint: 30%; box-shadow: inset 0 1px 0 var(--glass-highlight), 0 2px 8px color-mix(in srgb, var(--card-color) 12%, transparent); }
+  :root[data-skin="glass"] .card--label:hover { --glass-label-tint: 40%; }
+  :root[data-skin="glass"] .card--label .card-label-text { color: color-mix(in srgb, var(--card-color) 60%, var(--text)); }
 }
 
 /* ---- Menus and popups (panel.css --menu-*): frosted glass — translucent accent-tinted panel colour over a

@@ -13,6 +13,7 @@ const { searchMailAccount }               = require('../dashboard/mail');
 const LIMIT       = 50;
 const CAL_DAYS    = 365;              // events today − 1 year … today + 1 year
 const CAL_CACHE_MS = 5 * 60 * 1000;
+const CAL_MAX_DAYS = 3 * 366;          // longest window a date range may ask for (recurrences are expanded)
 const MAX_DEPTH   = 8;
 
 /** Lower-case, accents removed (same rule as frontend/search.js). */
@@ -99,20 +100,40 @@ async function searchNotes(q, { full = false } = {}) {
 
 // ---- Calendar events ----
 
-const _calCache = new Map();   // accountId → { key, at, events }
+const _calCache = new Map();   // "<accountId>|<range>" → { key, at, events }
+const DAY_MS = 86_400_000;
 
 function _clearCalCache() { _calCache.clear(); }
 
-async function _accountEvents(acc, now) {
+/** UTC midnight of a YYYY-MM-DD day. */
+function _utcDay(ymd) { return new Date(`${ymd}T00:00:00Z`); }
+
+/**
+ * Search window: today ± CAL_DAYS by default; `from` / `to` (YYYY-MM-DD, both inclusive) replace
+ * either end — an open end lies CAL_DAYS beyond today or the given end (whichever is further out),
+ * at most CAL_MAX_DAYS from the given end. Pure — exported for tests.
+ */
+function eventRange({ from, to } = {}, now = Date.now()) {
+  const d = new Date(now);
+  const today = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  let start = from ? _utcDay(from).getTime() : null;
+  let end   = to ? _utcDay(to).getTime() + DAY_MS : null;
+  if (start === null) start = end === null ? today - CAL_DAYS * DAY_MS
+    : Math.max(Math.min(today, end - DAY_MS) - CAL_DAYS * DAY_MS, end - CAL_MAX_DAYS * DAY_MS);
+  if (end === null) end = from ? Math.min(Math.max(today, start) + (CAL_DAYS + 1) * DAY_MS, start + CAL_MAX_DAYS * DAY_MS)
+    : today + (CAL_DAYS + 1) * DAY_MS;
+  return { rangeStart: new Date(start), rangeEnd: new Date(end) };
+}
+
+async function _accountEvents(acc, now, range) {
   const key = `${acc.url}\0${acc.user || ''}\0${acc.calendarName || ''}`;
-  const hit = _calCache.get(acc.id);
+  const { rangeStart, rangeEnd } = range;
+  const slot = `${acc.id}|${range.custom ? `${rangeStart.toISOString()}|${rangeEnd.toISOString()}` : 'default'}`;
+  const hit = _calCache.get(slot);
   if (hit && hit.key === key && now - hit.at < CAL_CACHE_MS) return hit.events;
-  const day = new Date(Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate()));
-  const rangeStart = new Date(day.getTime() - CAL_DAYS * 86_400_000);
-  const rangeEnd   = new Date(day.getTime() + (CAL_DAYS + 1) * 86_400_000);
   const { events } = await fetchRawEvents(acc, undefined, { rangeStart, rangeEnd });
   const inRange = filterRange(events, rangeStart, rangeEnd);
-  _calCache.set(acc.id, { key, at: now, events: inRange });
+  _calCache.set(slot, { key, at: now, events: inRange });
   return inRange;
 }
 
@@ -134,24 +155,34 @@ function pickOccurrences(events, now = Date.now()) {
   return [...byUid.values()];
 }
 
-/** `accounts` = calendar accounts of the dashboard config (credentials included). */
-async function searchEvents(q, { full = false, accounts = [], now = Date.now() } = {}) {
+/**
+ * `accounts` = calendar accounts of the dashboard config (credentials included). Without a date
+ * range one hit per event (pickOccurrences); with `from` / `to` every occurrence in the range,
+ * earliest first.
+ */
+async function searchEvents(q, { full = false, accounts = [], now = Date.now(), from, to } = {}) {
   const words = queryWords(q);
+  const custom = !!(from || to);
+  const range = { ...eventRange({ from, to }, now), custom };
+  if ((range.rangeEnd - range.rangeStart) / DAY_MS > CAL_MAX_DAYS) {
+    throw Object.assign(new Error('Date range too long for events (max. 3 years)'), { statusCode: 400 });
+  }
   const errors = [];
   const out = [];
   await Promise.all(accounts.map(async acc => {
     let events;
-    try { events = await _accountEvents(acc, now); }
+    try { events = await _accountEvents(acc, now, range); }
     catch (e) { errors.push(`${acc.label || acc.id}: ${e.message}`); return; }
     const hits = events.filter(ev => matchesAll(full ? [ev.title, ev.location, ev.description] : [ev.title, ev.location], words));
-    for (const ev of pickOccurrences(hits, now)) {
+    for (const ev of custom ? hits : pickOccurrences(hits, now)) {
       out.push({ ...ev, accountId: acc.id, label: acc.label || '', color: acc.color || null,
         webUrl: acc.webInterfaceUrl || '', accountType: acc.type || 'caldav' });
     }
   }));
   // Upcoming first (soonest first), then past ones (most recent first)
   const end = ev => new Date(ev.end || ev.start).getTime();
-  out.sort((a, b) => {
+  if (custom) out.sort((a, b) => new Date(a.start) - new Date(b.start));
+  else out.sort((a, b) => {
     const ua = end(a) >= now, ub = end(b) >= now;
     if (ua !== ub) return ua ? -1 : 1;
     return ua ? String(a.start).localeCompare(String(b.start)) : String(b.start).localeCompare(String(a.start));
@@ -167,11 +198,14 @@ async function searchEvents(q, { full = false, accounts = [], now = Date.now() }
  * summary (subject, from, to, cc); in full text a hit may be in the body, which the summary
  * doesn't contain, so the IMAP result is kept as is.
  */
-async function searchMail(account, q, { full = false } = {}) {
+async function searchMail(account, q, { full = false, folder, from, to } = {}) {
   const words = queryWords(q);
   const word  = q.trim().split(/\s+/).filter(Boolean).sort((a, b) => b.length - a.length)[0] || '';
   const res = await searchMailAccount(account, word, {
     full, limit: LIMIT,
+    ...(folder ? { folders: [folder], perFolder: LIMIT } : {}),
+    ...(from ? { since: _utcDay(from) } : {}),
+    ...(to ? { before: new Date(_utcDay(to).getTime() + DAY_MS) } : {}),
     accept: full ? () => true : s => matchesAll([s.subject, s.from, s.to, s.cc], words),
   });
   return { items: res.messages, total: res.total, ...(res.truncated ? { truncated: true } : {}) };
@@ -199,5 +233,5 @@ async function searchApplications(q, { full = false, settings = {} } = {}) {
 
 module.exports = {
   searchCards, searchNotes, searchEvents, searchMail, searchApplications,
-  fold, queryWords, matchesAll, pickOccurrences, _clearCalCache, LIMIT,
+  fold, queryWords, matchesAll, pickOccurrences, eventRange, _clearCalCache, LIMIT,
 };

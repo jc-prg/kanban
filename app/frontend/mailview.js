@@ -451,7 +451,6 @@ function _mvShow() {
   view.dataset.pane = 'list';
   _mvApplyWidths();
   document.body.classList.add('mailview-open');
-  document.getElementById('dashboardMailBtn')?.classList.add('open');
   _mvReload();
 }
 
@@ -461,7 +460,6 @@ function _mvHide() {
   view.style.display = 'none';
   _syncOverlayHost();
   document.body.classList.remove('mailview-open');
-  document.getElementById('dashboardMailBtn')?.classList.remove('open');
   _mvCompose = null;
   _mvClosePicker(null);
 }
@@ -725,6 +723,38 @@ async function _mvSetUnread(ids, unread) {
   }
 }
 
+/** Flag messages with an Apple Mail colour (`_MAIL_FLAGS` in dashboard.js) or clear the flag (null). */
+async function _mvSetFlag(ids, color) {
+  const changed = ids.map(id => _mvMsgs.find(x => x.id === id)).filter(m => m && (m.flagColor || null) !== color);
+  if (!changed.length) return;
+  changed.forEach(m => { m.flagColor = color; m.flagged = !!color; });
+  if (_mvMsg && ids.includes(_mvMsg.id)) { _mvMsg.flagColor = color; _mvMsg.flagged = !!color; }
+  _mvRenderList();
+  if (_mvMsg && ids.includes(_mvMsg.id)) _mvRenderReaderActions();
+  try {
+    await _mvJson(_mvMessagesUrl(changed.map(m => m.id), ''), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flag: color }),
+    });
+  } catch (err) {
+    _mvFlash(`Could not ${color ? 'flag' : 'unflag'} ${changed.length === 1 ? 'message' : 'messages'}: ${err.message}`, true);
+    _mvLoadList(0);
+  }
+}
+
+/** `s`: flag the selection red, or clear it when the first one is flagged. */
+function _mvToggleFlag(ids) {
+  _mvSetFlag(ids, _mvMsgs.find(m => m.id === ids[0])?.flagColor ? null : 'red');
+}
+
+/** Flag colour menu below a button (reader toolbar). */
+function _mvFlagMenuAt(btn, ids) {
+  const r = btn.getBoundingClientRect();
+  const msgs = ids.map(id => _mvMsgs.find(m => m.id === id)).filter(Boolean);
+  const colors = new Set(msgs.map(m => m.flagColor || null));
+  openContextMenu({ clientX: r.left, clientY: r.bottom + 4, stopPropagation() {} },
+    _mailFlagMenuItems(colors.size === 1 ? [...colors][0] : null, c => _mvSetFlag(ids, c), msgs.some(m => m.flagColor)));
+}
+
 /**
  * Remove messages from the list; if the open one goes, open its neighbour
  * (`stay`: just close it and keep showing the list — swipe actions on phones).
@@ -883,6 +913,11 @@ async function _mvMessageMenu(e, id) {
   if (msgs.some(x => !x.unread)) {
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.markUnread()}</span>Mark as unread${count}`, action: () => _mvSetUnread(ids, true) });
   }
+  const flagColors = new Set(msgs.map(x => x.flagColor || null));
+  items.push({
+    labelHtml: `<span class="ctx-icon">${SVGICONS.flag()}</span>Flag${count}`,
+    children:  _mailFlagMenuItems(flagColors.size === 1 ? [...flagColors][0] : null, c => _mvSetFlag(ids, c), msgs.some(x => x.flagColor)),
+  });
   items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.moveTo()}</span>Move to…${count}`, action: () => _mvPickAndMoveMessages(ids) });
   const recents = _getRecentFolders(_mvAccountId).filter(p => p !== _mvFolder && _mvFolderInfo(_mvAccountId, p));
   if (recents.length) {
@@ -1411,6 +1446,7 @@ function _mvListItemHtml(m, dupes) {
   const who = special === '\\Sent' || special === '\\Drafts' ? `To: ${_mvDisplayName(m.to)}` : _mvDisplayName(m.from);
   // Same markup classes as the dashboard mail panel items (card-text / card-meta)
   const meta = [];
+  if (m.flagColor)      meta.push(_mailFlagHtml(m.flagColor, 11));
   if (dupes?.has(m.id)) meta.push('<span class="card-duplicate-badge" title="Same message (Message-ID, sender, recipients, subject, date) as a larger or older loaded copy in this folder">duplicate</span>');
   if (m.answered)       meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Answered">\u21a9</span>');
   if (m.forwarded)      meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Forwarded">\u21aa</span>');
@@ -1427,9 +1463,10 @@ function _mvListItemHtml(m, dupes) {
     </div></div>`;
 }
 
-// ---- Swipe actions on phones: left → Move + Delete, right → Mark read / unread ----
+// ---- Swipe actions on phones: left → Move + Delete, right → Mark read / unread + Flag / Clear flag ----
 
 const _MV_SWIPE_BTN = 64;   // px per action button
+const _MV_SWIPE_FLAG = 'orange';   // colour the Flag swipe action sets (also on Today, today.js)
 let _mvSwipe = null;        // { row, offset } of the row that is currently swiped open
 
 /**
@@ -1454,13 +1491,15 @@ function _mvSwipeLayers(row) {
     wrap.insertAdjacentHTML('afterbegin',
       `<div class="mv-swipe-actions mv-swipe-actions--start">${m?.unread
         ? btn('read', SVGICONS.markRead(20, 20), 'Mark as read', 'read')
-        : btn('unread', SVGICONS.markUnread(20, 20), 'Mark as unread', 'read')}</div>`
+        : btn('unread', SVGICONS.markUnread(20, 20), 'Mark as unread', 'read')}${m?.flagColor
+        ? btn('unflag', SVGICONS.flag(20, 20), 'Clear flag', 'flag')
+        : btn('flag', SVGICONS.flag(20, 20), 'Flag', 'flag')}</div>`
       + `<div class="mv-swipe-actions mv-swipe-actions--end">${btn('move', SVGICONS.moveTo(20, 20), 'Move', 'move')}`
       + `${btn('delete', SVGICONS.delete(20, 20), 'Delete', 'delete')}</div>`);
     end   = wrap.querySelector('.mv-swipe-actions--end');
     start = wrap.querySelector('.mv-swipe-actions--start');
   }
-  return { start, end, startW: _MV_SWIPE_BTN, endW: end.children.length * _MV_SWIPE_BTN };
+  return { start, end, startW: start.children.length * _MV_SWIPE_BTN, endW: end.children.length * _MV_SWIPE_BTN };
 }
 
 /** Move a row to `offset` px; each action layer fills exactly the space the row frees. */
@@ -1488,6 +1527,7 @@ function _mvSwipeAction(act, id) {
   const m = _mvMsgs.find(x => x.id === id);
   if (!m) return;
   if (act === 'read' || act === 'unread') _mvSetUnread([id], act === 'unread');
+  else if (act === 'flag' || act === 'unflag') _mvSetFlag([id], act === 'flag' ? _MV_SWIPE_FLAG : null);
   // Swipe actions keep the list in view (no jump to the next message)
   else if (act === 'delete') _mvDeleteMessages([id], { stay: true });
   else if (act === 'move') _mvPickAndMoveMessages([id], { stay: true });
@@ -1596,7 +1636,9 @@ function _mvRenderReaderActions() {
   const bar = document.getElementById('mailViewReaderActions');
   if (!bar || !_mvMsg) return;
   const acc = _mvAccounts.find(a => a.accountId === _mvAccountId);
-  const unread = _mvMsgs.find(m => m.id === _mvMsg.id)?.unread;
+  const listed = _mvMsgs.find(m => m.id === _mvMsg.id);
+  const unread = listed?.unread;
+  const flag   = listed ? listed.flagColor : _mvMsg.flagColor;
   // Icon + label; below 670 px toolbar width only the icon (CSS container query; label stays as tooltip / aria-label)
   const btn = (act, icon, label, { key = '', disabled = '', cls = '' } = {}) => {
     const tip = disabled || (key ? `${label} (${key})` : label);
@@ -1610,6 +1652,8 @@ function _mvRenderReaderActions() {
     btn('replyall', SVGICONS.replyAll, 'Reply all', { key: 'a', disabled: noSmtp }),
     btn('forward',  SVGICONS.forward,  'Forward',   { key: 'f', disabled: noFwd }),
     unread ? btn('unread', SVGICONS.markRead, 'Mark read', { key: 'u' }) : btn('unread', SVGICONS.markUnread, 'Mark unread', { key: 'u' }),
+    btn('flag',     flag ? (w, h) => `<span class="mv-flag-icon" style="color:${_mailFlagInfo(flag).color}">${SVGICONS.flag(w, h)}</span>` : SVGICONS.flag,
+        flag ? `Flagged (${_mailFlagInfo(flag).label})` : 'Flag', { key: 's' }),
     btn('move',     SVGICONS.moveTo,   'Move'),
     btn('delete',   SVGICONS.delete,   'Delete',    { key: 'Del', cls: ' btn-danger-soft' }),
     `<button class="btn btn--icon mv-source-btn" data-mv-act="source" title="Show source" aria-label="Show source">${SVGICONS.cardInfo(12, 12)}</button>`,
@@ -1661,7 +1705,10 @@ function _mvRenderReader(mode, error) {
 
 // ---- Compose ----
 
-/** `prefill` ({ to, subject }) fills a new message, e.g. from an event's organiser. */
+/**
+ * `prefill` ({ to, subject, body?, onSent? }) fills a new message, e.g. from an event's organiser;
+ * `body` = plain text (one paragraph per line), `onSent()` runs after a successful send.
+ */
 function _mvOpenCompose(mode, prefill = null) {
   const sendable = _mvAccounts.filter(a => a.canSend);
   if (!sendable.length) { _mvFlash('Configure an SMTP server in the mail settings first', true); return; }
@@ -1683,7 +1730,11 @@ function _mvOpenCompose(mode, prefill = null) {
     forward: forward ? { uid: forward.id, folder: _mvFolder, accountId: _mvAccountId, atts: [...(forward.attachments || [])] } : null,
     inReplyTo:  fields?.inReplyTo || '',
     references: fields?.references || [],
+    onSent:     (!reply && !forward && prefill?.onSent) || null,
   };
+  const bodyHtml = !reply && !forward && prefill?.body
+    ? prefill.body.split('\n').map(l => `<p>${l.trim() ? escHtml(l) : '<br>'}</p>`).join('')
+    : '<p><br></p>';
   _mvSetPane('reader');
   const el = document.getElementById('mailViewReader');
   el.innerHTML = `
@@ -1721,7 +1772,7 @@ function _mvOpenCompose(mode, prefill = null) {
           <div class="mv-emoji-pop" role="dialog" aria-label="Emoji" hidden></div>
         </span>
       </div>
-      <div class="mv-editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true">${reply ? _mvQuoteHtml(reply) : forward ? _mvForwardHtml(forward) : '<p><br></p>'}</div>
+      <div class="mv-editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true">${reply ? _mvQuoteHtml(reply) : forward ? _mvForwardHtml(forward) : bodyHtml}</div>
       <div class="mv-compose-files"></div>
       <div class="mv-compose-foot">
         <button type="submit" class="btn btn-accent mv-send">Send</button>
@@ -2011,6 +2062,7 @@ async function _mvSend(form) {
   _mvRenderReader();
   _mvSetPane(_mvMsg ? 'reader' : 'list');
   _mvRefreshFoldersSoon(accountId);
+  c.onSent?.();
 }
 
 // ---- Status line ----
@@ -2216,6 +2268,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (act.dataset.mvAct === 'replyall') _mvOpenCompose('replyall');
       if (act.dataset.mvAct === 'forward')  _mvOpenCompose('forward');
       if (act.dataset.mvAct === 'unread')   _mvSetUnread([id], !_mvMsgs.find(m => m.id === id)?.unread);
+      if (act.dataset.mvAct === 'flag')     _mvFlagMenuAt(act, [id]);
       if (act.dataset.mvAct === 'move')     _mvPickAndMoveMessages([id]);
       if (act.dataset.mvAct === 'delete')   _mvDeleteMessages([id]);
       if (act.dataset.mvAct === 'source')   _mvOpenSource();
@@ -2329,6 +2382,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const ids = _mvSelectedIds();
       _mvSetUnread(ids, !_mvMsgs.find(m => m.id === ids[0])?.unread);
     }
+    else if (e.key === 's' && _mvSelectedIds().length) _mvToggleFlag(_mvSelectedIds());
     else if (e.key === '/') { e.preventDefault(); _mvSetPane('list'); search.focus(); }
   }, true);
 

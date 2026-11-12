@@ -456,15 +456,19 @@ function initNotes(cfg) {
     return prefix + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  async function addNotePage(parentId = null) {
+  // prefill (e.g. a sticky turned into a page): { title, description, onCreated(pageId) } — onCreated
+  // runs once the new page was saved for the first time
+  async function addNotePage(parentId = null, prefill = null) {
     const page = {
       type: 'page',
       id: _noteUid('n-'),
-      title: 'New Page', description: '', link: '', linkedCards: [],
+      title: prefill?.title || 'New Page', description: prefill?.description || '', link: '', linkedCards: [],
       lastModified: new Date().toISOString(),
     };
-    _pendingNewPage = { page, parentId };
-    openNoteModal(page.id, true);
+    _pendingNewPage = { page, parentId, onCreated: prefill?.onCreated || null };
+    await openNoteModal(page.id, true);
+    // Prefilled content counts as unsaved: closing asks instead of dropping the page silently
+    if (prefill) noteModalOrig = { title: 'New Page', desc: '', link: '' };
   }
 
   async function addNoteFolder(parentId = null) {
@@ -1380,13 +1384,15 @@ function initNotes(cfg) {
   async function _submitNote(newTitle, newDesc, newLink, page) {
     let _handledByPost = false;
 
+    let onCreated = null;
     if (_pendingNewPage && _pendingNewPage.page.id === page.id) {
       const { parentId } = _pendingNewPage;
+      onCreated = _pendingNewPage.onCreated;
       if (_webdavActive()) {
         page.title = newTitle; page.description = newDesc; page.link = newLink;
         page.lastModified = new Date().toISOString();
         _pendingNewPage = null;
-        history.replaceState(null, '', '#note:' + page.id);
+        if (!_headless) history.replaceState(null, '', '#note:' + page.id);
         try {
           const data = await _notesOp('POST', NOTES_PAGES_API, { page, parentId });
           _applyNotesResult(data);
@@ -1394,7 +1400,7 @@ function initNotes(cfg) {
           if (savedPage) _pageLoadedAt.set(noteModalPageId, savedPage.lastModified || null);
           _handledByPost = true;
         } catch (e) {
-          _pendingNewPage = { page, parentId };
+          _pendingNewPage = { page, parentId, onCreated };
           await _showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
           return;
         }
@@ -1412,7 +1418,7 @@ function initNotes(cfg) {
         }
         _pendingNewPage = null;
         renderNotesTree();
-        history.replaceState(null, '', '#note:' + page.id);
+        if (!_headless) history.replaceState(null, '', '#note:' + page.id);
       }
     }
 
@@ -1469,6 +1475,7 @@ function initNotes(cfg) {
       msg.classList.add('modal-saved-msg--visible');
       setTimeout(() => msg.classList.remove('modal-saved-msg--visible'), 1500);
     }
+    onCreated?.(page.id);
   }
 
   function noteModalHasChanges() {
@@ -2535,6 +2542,7 @@ function initNotes(cfg) {
     toggleNotesSidebar,
     restoreNotesSidebar,
     openNoteModal,
+    addNotePage,
     closeNoteModal,
     setNoteFullscreen,
     linkCardToPage,

@@ -1366,36 +1366,53 @@
   background: rgba(240,79,106,0.12);
 }
 
-/* Search dialog */
-.search-modal-header {
+/* Find dialog — panel format (.panel-modal); Cards | Pages | Events | Mail switch in the header bar styled
+   like the settings' Board | Global switch (.settings-scope) */
+.search-modal [hidden] { display: none !important; }
+.search-scope { margin-left: auto; }
+.search-scope button { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; }
+
+/* Start: overview of the categories with big icons (#searchOverview); a pick shows #searchMain */
+.search-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.search-overview {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 210px));
+  gap: 14px;
+  justify-content: center;
+  align-content: center;
+}
+.search-ov-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 26px 14px 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.search-ov-btn:hover, .search-ov-btn:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  outline: none;
+}
+.search-ov-icon {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
+  justify-content: center;
+  height: 44px;
+  color: var(--accent);
 }
-
-.search-modal-header h2 { margin-bottom: 0; }
-
-.search-type-toggle {
-  display: flex;
-  gap: 3px;
+.search-ov-label { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem; }
+.search-ov-desc { font-size: 0.72rem; color: var(--text-muted); text-align: center; }
+@media (max-width: 500px) {
+  .search-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .search-ov-btn { padding: 18px 8px 16px; }
 }
-
-.search-type-btn {
-  font-family: 'DM Mono', monospace;
-  font-size: 0.72rem;
-  padding: 5px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface2);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.search-type-btn:hover { border-color: var(--accent); color: var(--text); }
-.search-type-btn--active { background: var(--accent); border-color: var(--accent); color: #fff; }
-.search-type-btn--active:hover { background: #6b58e8; border-color: #6b58e8; color: #fff; }
 
 .search-modal {
   width: min(720px, 95vw);
@@ -1407,7 +1424,7 @@
 
 .search-filter-strip {
   display: flex;
-  gap: 20px;
+  gap: 12px 20px;   /* wrapped rows: same distance as between the text field and the filters */
   flex-wrap: wrap;
   align-items: flex-start;
   margin-bottom: 14px;
@@ -1441,6 +1458,102 @@
 }
 
 .search-filter-group input[type="date"]:focus { border-color: var(--accent); }
+
+/* Date range inside the account row: its groups are items of that row; mail puts them on their own line */
+.search-range { display: contents; }
+.search-range-break { flex-basis: 100%; height: 0; }
+/* The break is a row of its own (two row gaps): pull the date row up by one */
+.search-range-break:not([hidden]) ~ .search-filter-group { margin-top: -12px; }
+.search-narrow-only { display: none; }
+.search-col-btn-group { display: none; }
+
+/* Small screens: the filters below the text field take at most two rows (grid). Mail: account | folder,
+   then from | to | "Body"; events: account, then from | to; cards: priority, then start | end | columns
+   (the column list opens as a popup from that button) */
+@media (max-width: 500px) {
+  .search-wide-only { display: none; }
+  .search-narrow-only { display: inline; }
+  #searchAccountFilters,
+  #searchCardFilters > .search-filter-strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 12px 8px;
+    align-items: end;
+  }
+  #searchAccountFilters .search-range-break { display: none; }
+  #searchAccountFilters .search-filter-group { margin-top: 0; }
+  #searchAccountFilters .search-account-group { grid-row: 1; grid-column: 1 / -1; }
+  #searchAccountFilters[data-mode="mail"] .search-account-group { grid-column: 1; }
+  #searchFolderGroup { grid-row: 1; grid-column: 2 / -1; }
+  #searchAccountFilters .search-from-group { grid-row: 2; grid-column: 1; }
+  #searchAccountFilters .search-to-group { grid-row: 2; grid-column: 2; }
+  #searchMailFullLabel { grid-row: 2; grid-column: 3; padding-bottom: 9px; }
+  #searchCardFilters > .search-filter-strip > .search-filter-group:first-child { grid-column: 1 / -1; }
+  .search-col-btn-group { display: flex; }
+  .search-filter-group { min-width: 0; }
+  .search-filter-group :is(input[type="date"], select) { width: 100%; min-width: 0; padding-left: 8px; padding-right: 6px; font-size: 0.8rem; }
+  .search-modal .priority-row { flex-wrap: nowrap; }
+  /* Column list: popup below the card filters */
+  #searchCardFilters { position: relative; }
+  #searchCardFilters .search-col-group { display: none; }
+  #searchCardFilters .search-col-group.search-col-group--open {
+    display: block;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    padding: 10px 12px;
+    background: var(--menu-bg, var(--surface));
+    border: 1px solid var(--menu-border, var(--border));
+    border-radius: 8px;
+    box-shadow: var(--menu-shadow, 0 8px 24px rgba(0, 0, 0, 0.35));
+  }
+  #searchCardFilters .search-col-group--open .search-column-list { max-height: 50vh; }
+}
+.search-col-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.8rem;
+  padding: 8px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.search-col-btn[aria-expanded="true"] { border-color: var(--accent); }
+
+/* Account / mail folder filter */
+.search-account-group { flex: 0 1 200px; min-width: 0; }
+.search-folder-group { flex: 1 1 200px; min-width: 0; }
+:is(.search-account-group, .search-folder-group) select:disabled { opacity: 0.6; cursor: default; }
+:is(.search-account-group, .search-folder-group) select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  outline: none;
+  max-width: 100%;
+  cursor: pointer;
+}
+:is(.search-account-group, .search-folder-group) select:focus { border-color: var(--accent); }
+
+.search-check-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  padding-bottom: 9px;
+  font-size: 0.8rem;
+  color: var(--text);
+  cursor: pointer;
+  margin-bottom: 0;
+}
+.search-check-label input { width: auto; margin: 0; accent-color: var(--accent); }
 
 .search-col-group { margin-bottom: 10px; }
 
@@ -1550,6 +1663,9 @@
 .search-result-page {
   --card-color: var(--accent);
 }
+
+.search-result--past { opacity: 0.6; }
+.search-result--unread .search-result-text { font-weight: 600; }
 
 .search-result-preview {
   font-size: 0.72rem;

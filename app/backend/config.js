@@ -37,6 +37,7 @@ const TODAY_ICONS_DIR  = path.join(BACKUP_DIR, 'today-icons');   // Quick access
 const COUCHDB_DATA_DIR = path.join(BACKUP_DIR, 'couchdb');
 const LOG_API_RESPONSES   = process.env.LOG_API_RESPONSES === 'true';
 const DB_SIZE_INTERVAL_MS = 15 * 60 * 1000;
+const TEST_INSTANCE       = process.env.TEST_INSTANCE === '1';   // shows a "Test" label in the app header
 
 module.exports = {
   PORT, HOST, BASE_PATH,
@@ -44,5 +45,5 @@ module.exports = {
   COUCHDB_HOST, COUCHDB_PORT, COUCHDB_USER, COUCHDB_PASSWORD,
   DB_PREFIX, DOC_ID, NOTES_DOC_ID, PROMPTS_DB_NAME,
   BACKUP_DIR, BACKUP_INTERVAL_MS, REVOCATION_FILE, ATTACHMENTS_DIR, JSON_BACKUP_DIR, COUCHDB_DATA_DIR, TODAY_ICONS_DIR,
-  LOG_API_RESPONSES, DB_SIZE_INTERVAL_MS,
+  LOG_API_RESPONSES, DB_SIZE_INTERVAL_MS, TEST_INSTANCE,
 };

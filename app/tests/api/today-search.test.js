@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today search widget API — TS-1 … TS-10
+ * Today search widget / Find dialog API — TS-1 … TS-13
  *
  * routes/today.js mounted on its own; db.js / global-db.js and imapflow replaced via require.cache.
  * The calendar (iCal URL) and the CV-App are served by a stubbed global fetch.
@@ -225,19 +225,73 @@ test('TS-8 applications: job title + company; all text fields and drafts in full
 })
 
 test('TS-9 GET /today/search lists the available sources', async () => {
-  expect((await request(app).get('/api/today/search')).body).toEqual({ types: ['cards', 'notes'], mailAccounts: [] })
-  store.dash = { calendarAccounts: [{ id: 'ca-1' }], mailAccounts: [{ id: 'ma-1', label: 'Work', color: '#0f0', password: 'secret' }] }
+  expect((await request(app).get('/api/today/search')).body).toEqual({ types: ['cards', 'notes'], mailAccounts: [], calendarAccounts: [] })
+  store.dash = { calendarAccounts: [{ id: 'ca-1', label: 'Team', password: 'calsecret' }], mailAccounts: [{ id: 'ma-1', label: 'Work', color: '#0f0', password: 'secret' }] }
   store.today = { widgets: { cvapp: { apiUrl: 'http://cv:8000' } } }
   const res = await request(app).get('/api/today/search')
   expect(res.body.types).toEqual(['cards', 'notes', 'events', 'mail', 'applications'])
   expect(res.body.mailAccounts).toEqual([{ id: 'ma-1', label: 'Work', color: '#0f0', webInterfaceUrl: null }])
+  expect(res.body.calendarAccounts).toEqual([{ id: 'ca-1', label: 'Team', color: null }])
   expect(JSON.stringify(res.body)).not.toContain('secret')
 })
 
 test('TS-10 validation: short / long query 400, unknown type / mail account 404, CV-App not configured 400', async () => {
   expect((await get('cards', 'a')).status).toBe(400)
+  expect((await get('cards', 'ab')).status).toBe(400)   // at least 3 characters
   expect((await get('cards', 'x'.repeat(201))).status).toBe(400)
   expect((await get('photos', 'abc')).status).toBe(404)
   expect((await get('mail', 'abc', '&account=nope')).status).toBe(404)
   expect((await get('applications', 'abc')).status).toBe(400)
+})
+
+test('TS-11 date range / folder validation: YYYY-MM-DD, from ≤ to, events at most 3 years', async () => {
+  store.dash = { calendarAccounts: [{ id: 'ca-1', type: 'ical-url', url: 'https://cal.example/x.ics' }] }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n', { status: 200 })))
+  expect((await get('events', 'abc', '&from=2026-13-01')).status).toBe(400)
+  expect((await get('events', 'abc', '&from=11.11.2026')).status).toBe(400)
+  expect((await get('events', 'abc', '&from=2026-11-12&to=2026-11-11')).status).toBe(400)
+  expect((await get('events', 'abc', '&from=2020-01-01&to=2026-01-01')).status).toBe(400)
+  expect((await get('events', 'abc', '&from=2026-11-01&to=2026-11-30')).status).toBe(200)
+  expect((await get('mail', 'abc', '&account=ma-1&folder=a%0Ab')).status).toBe(400)
+  // One open end never fails: it is kept within the 3-year window
+  const now = Date.parse('2026-11-12T10:00:00Z')
+  const r = search.eventRange({ from: '2015-01-01' }, now)
+  expect(r.rangeStart.toISOString()).toBe('2015-01-01T00:00:00.000Z')
+  expect((r.rangeEnd - r.rangeStart) / 86_400_000).toBe(3 * 366)
+  const t = search.eventRange({ to: '2026-12-31' }, now)
+  expect(t.rangeEnd.toISOString()).toBe('2027-01-01T00:00:00.000Z')
+  expect(t.rangeStart.toISOString()).toBe('2025-11-12T00:00:00.000Z')   // today − 365 days
+})
+
+test('TS-12 events with a date range: every occurrence inside it, earliest first; outside the default window too', async () => {
+  const ics = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n'
+    + 'BEGIN:VEVENT\r\nUID:w1\r\nDTSTAMP:20200101T000000Z\r\nDTSTART:20200106T090000Z\r\nDTEND:20200106T100000Z\r\nRRULE:FREQ=WEEKLY;COUNT=10\r\nSUMMARY:ACME weekly\r\nEND:VEVENT\r\n'
+    + 'BEGIN:VEVENT\r\nUID:o1\r\nDTSTAMP:20200101T000000Z\r\nDTSTART:20200115T090000Z\r\nDTEND:20200115T100000Z\r\nSUMMARY:ACME review\r\nEND:VEVENT\r\n'
+    + 'END:VCALENDAR\r\n'
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(ics, { status: 200 })))
+  store.dash = { calendarAccounts: [{ id: 'ca-1', type: 'ical-url', url: 'https://cal.example/x.ics', label: 'Work' }] }
+  expect((await get('events', 'acme')).body.total).toBe(0)   // 2020 lies outside today ± 1 year
+  expect((await get('events', 'acme', '&account=nope')).status).toBe(404)
+  expect((await get('events', 'acme', '&account=ca-1&from=2020-01-10&to=2020-01-12')).body.total).toBe(0)
+  const res = await get('events', 'acme', '&from=2020-01-10&to=2020-01-27')
+  expect(res.status).toBe(200)
+  expect(res.body.items.map(e => [e.uid, e.start.slice(0, 10)])).toEqual([
+    ['w1', '2020-01-13'], ['o1', '2020-01-15'], ['w1', '2020-01-20'], ['w1', '2020-01-27'],
+  ])
+})
+
+test('TS-13 mail with a folder and a date range: only that folder, SENTSINCE / SENTBEFORE (to inclusive)', async () => {
+  store.dash = { mailAccounts: [{ id: 'ma-1', host: 'imap.x', user: 'u', password: 'p', folder: 'INBOX' }] }
+  mailbox.INBOX   = [{ uid: 1, subject: 'ACME one', from: 'a@x', to: 'me@x', date: '2026-11-10T10:00:00Z' }]
+  mailbox.Archive = [{ uid: 7, subject: 'ACME two', from: 'b@y', to: 'me@x', date: '2026-10-09T10:00:00Z' }]
+  const res = await get('mail', 'acme', '&account=ma-1&folder=Archive&from=2026-10-01&to=2026-10-31')
+  expect(res.status).toBe(200)
+  expect(res.body.items.map(m => [m.id, m.folder])).toEqual([['7', 'Archive']])
+  expect(imapLog.map(l => l.folder)).toEqual(['Archive'])
+  expect(imapLog[0].query.sentSince.toISOString()).toBe('2026-10-01T00:00:00.000Z')
+  expect(imapLog[0].query.sentBefore.toISOString()).toBe('2026-11-01T00:00:00.000Z')
+  imapLog.length = 0
+  await get('mail', 'acme', '&account=ma-1')
+  expect(imapLog.map(l => l.folder)).toEqual(['INBOX', 'Archive'])
+  expect('sentSince' in imapLog[0].query).toBe(false)
 })

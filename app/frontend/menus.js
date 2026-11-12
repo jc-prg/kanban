@@ -909,9 +909,10 @@ document.addEventListener('keydown', e => {
   document.getElementById('menuWebhook').addEventListener('click', async () => {
     closeMenu();
     const btn = document.getElementById('menuWebhook');
-    const origText = btn.textContent;
-    btn.disabled    = true;
-    btn.textContent = 'Sending…';
+    const label = btn.querySelector('.header-dd-label');
+    const origText = label.textContent;
+    btn.disabled      = true;
+    label.textContent = 'Sending…';
     let msg;
     try {
       const r    = await fetch(`/api/${BOARD_NAME}/webhook/trigger`, { method: 'POST' });
@@ -922,9 +923,8 @@ document.addEventListener('keydown', e => {
     } catch (err) {
       msg = `✗ Request error:\n${err.message}`;
     }
-    btn.textContent = '';
-    btn.disabled    = false;
-    btn.textContent = origText;
+    btn.disabled      = false;
+    label.textContent = origText;
     await showMessage(msg);
   });
 

@@ -302,6 +302,23 @@ function validMailFolderPath(path) {
   return typeof path === 'string' && path.length >= 1 && path.length <= 255 && !/[\x00-\x1f\x7f]/.test(path);
 }
 
+// ---- Stickies (Today widget) ----
+const STICKY_CATEGORIES = ['note', 'quote', 'other'];
+const STICKY_RHYTHMS    = [0, 60, 120, 240, 480, 1440];
+const STICKY_ID         = /^s-[0-9a-f]{12}$/;
+const _stickyProps = {
+  text:     { type: 'string', minLength: 1, maxLength: 5000, pattern: '\\S' },
+  source:   { type: 'string', maxLength: 500 },   // author, book, URL …; '' = none
+  color:    { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
+  category: { type: 'string', enum: STICKY_CATEGORIES },
+};
+const validateStickyCreate = ajv.compile({
+  type: 'object', required: ['text'], additionalProperties: false, properties: _stickyProps,
+});
+const validateStickyUpdate = ajv.compile({
+  type: 'object', minProperties: 1, additionalProperties: false, properties: _stickyProps,
+});
+
 // ---- Today page config (/today) ----
 // Stored Quick access icon: content-addressed name (today/quickaccess.js)
 const QA_ICON_FILE = /^qa-[a-f0-9]{16}\.(png|ico|svg|jpg|webp|gif)$/;
@@ -347,6 +364,11 @@ const validateTodayConfig = ajv.compile({
         agenda: {
           type: 'object', additionalProperties: false,
           properties: { days: { type: 'integer', enum: [2, 7] } },
+        },
+        stickies: {
+          type: 'object', additionalProperties: false,
+          // minutes between random stickies brought to the top; 0 = only on request
+          properties: { rhythm: { type: 'integer', enum: STICKY_RHYTHMS } },
         },
         cvapp: {
           type: 'object', additionalProperties: false,
@@ -399,4 +421,4 @@ function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, QA_ICON_FILE, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, QA_ICON_FILE, validateStickyCreate, validateStickyUpdate, STICKY_CATEGORIES, STICKY_RHYTHMS, STICKY_ID, schemaError };

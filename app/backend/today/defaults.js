@@ -18,6 +18,7 @@ const DEFAULT_LAYOUTS = {
       { id: 'cvapp',     col: 2, order: 1, size: '1/2' },
       { id: 'progress',  col: 2, order: 2, size: 'container' },
       { id: 'boards',    col: 2, order: 3, size: 'container' },
+      { id: 'stickies',  col: 2, order: 4, size: 'container' },
     ],
   },
   lg: {
@@ -31,7 +32,8 @@ const DEFAULT_LAYOUTS = {
       { id: 'cvapp',     col: 1, order: 4, size: '1/3' },
       { id: 'progress',  col: 1, order: 5, size: 'container' },
       { id: 'boards',    col: 1, order: 6, size: 'container' },
-      { id: 'notes',     col: 1, order: 7, size: 'available' },
+      { id: 'stickies',  col: 1, order: 7, size: 'container' },
+      { id: 'notes',     col: 1, order: 8, size: 'available' },
     ],
   },
   sm: {
@@ -46,6 +48,7 @@ const DEFAULT_LAYOUTS = {
       { id: 'progress',  col: 0, order: 6, size: 'container' },
       { id: 'boards',    col: 0, order: 7, size: 'container' },
       { id: 'notes',     col: 0, order: 8, size: 'container' },
+      { id: 'stickies',  col: 0, order: 9, size: 'container' },
     ],
   },
 };

@@ -14,7 +14,10 @@ services:
       retries: 5
 
   kanban:
-    build: ./app
+    build:
+      context: ./app
+      args:
+        FIX_PERMISSIONS: ${FIX_PERMISSIONS:-0}   # 1 = chown /app to node during the build (slow)
     depends_on:
       couchdb:
         condition: service_healthy
