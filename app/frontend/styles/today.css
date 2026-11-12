@@ -973,13 +973,56 @@ body.route-today { --today-page-bg: var(--page-bg); background: var(--today-page
   .today-stk-paper--pop { animation: none; }
 }
 /* Category filter above the stack (today-stickies.js _stkSetFilter, localStorage today-stickies-filter) */
-.today-stk-filter { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 10px 8px 0; }
+.today-stk-filter-wrap { margin-top: 10px; }
+/* One line (wrapped by _todayHScroll): centred while it fits — auto margins, not justify-content, so a cut-off row still scrolls to its start */
+.today-stk-filter { display: flex; flex-wrap: nowrap; gap: 6px; padding: 0 8px; }
+.today-stk-chip:first-child { margin-left: auto; }
+.today-stk-chip:last-child  { margin-right: auto; }
 .today-stk-chip {
+  flex-shrink: 0; white-space: nowrap;
   display: inline-flex; align-items: center; gap: 5px;
   background: none; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted);
   padding: 2px 10px; font-size: 0.75rem; cursor: pointer;
 }
 .today-stk-chip:hover { color: var(--text); }
 .today-stk-chip[aria-checked="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.today-stk-chip--empty:not([aria-checked="true"]) { opacity: 0.5; }
 .today-stk-chip-n { font-size: 0.68rem; opacity: 0.7; font-variant-numeric: tabular-nums; }
+
+/* ---- Fullscreen tile (today-stickies.js _stkSetFs): covers the screen incl. the app header (z-index 10);
+   dialogs and the detail panel (200) stay above. Beats the stacked-column (display: contents, sticky
+   header), collapsed and size rules; opaque even with the glass skin (panel colour over the page colour). ---- */
+#today .today-col > .today-tile.today-tile--fs {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; flex-direction: column;
+  min-height: 0; max-height: none; margin: 0; border-radius: 0;
+  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--page-bg);
+}
+#today .today-col > .today-tile.today-tile--fs > .today-tile-header {
+  position: relative; top: auto; bottom: auto; height: auto; margin-top: 0; box-shadow: none; flex: none;
+}
+#today .today-col > .today-tile.today-tile--fs > .today-tile-body {
+  display: block; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
+  padding-bottom: calc(8px + var(--safe-bottom)); border-radius: 0; opacity: 1; pointer-events: auto;
+}
+
+/* Grid of all stickies (fullscreen on larger screens): order = sort key, drag & drop moves one */
+.today-stk-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr));
+  gap: 34px 30px; padding: 22px 28px 36px;
+}
+.today-stk-cell { position: relative; aspect-ratio: 1; cursor: pointer; outline: none; -webkit-touch-callout: none; }
+.today-stk-cell .today-stk-paper { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.today-stk-cell:hover .today-stk-paper { transform: rotate(var(--stk-tilt)) translateY(-3px); }
+.today-stk-cell:focus-visible .today-stk-paper { box-shadow: 0 0 0 2px var(--accent), 0 6px 16px rgba(0, 0, 0, 0.35); }
+/* Touch: held still long enough — lifted, ready to move */
+.today-stk-cell--armed .today-stk-paper { transform: rotate(var(--stk-tilt)) scale(1.05); }
+.today-stk-cell--drag { z-index: 5; cursor: grabbing; transform: translate(var(--stk-gx, 0), var(--stk-gy, 0)); }
+.today-stk-cell--drag .today-stk-paper {
+  transition: none;
+  transform: rotate(calc(var(--stk-tilt) * 1.8)) scale(1.06);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25), 0 18px 36px rgba(0, 0, 0, 0.4);
+}
+@media (prefers-reduced-motion: reduce) {
+  .today-stk-cell .today-stk-paper { transition: none; }
+}

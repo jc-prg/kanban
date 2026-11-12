@@ -1330,7 +1330,7 @@ test.describe('Today page', () => {
     const tile = page.locator('.today-tile[data-tile="stickies"]');
     const chip = id => tile.locator(`[data-stk-filter="${id}"]`);
     await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 4');
-    expect(await tile.locator('[data-stk-filter]').evaluateAll(els => els.map(e => e.textContent))).toEqual(['All4', 'Note1', 'Quote2', 'Intervention0', 'Other1']);
+    expect(await tile.locator('[data-stk-filter]').evaluateAll(els => els.map(e => e.textContent))).toEqual(['All4', 'Note1', 'Quote2', 'Other1']);   // Intervention: no stickies, hidden
     await expect(chip('all')).toHaveAttribute('aria-checked', 'true');
 
     // Quote: only the two quotes, flipping stays inside them
@@ -1457,6 +1457,62 @@ test.describe('Today page', () => {
     await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
     await expect(tile.locator('.today-stk')).not.toHaveClass(/today-stk--wide/);
   });
+
+  test('E-T-44 Stickies fullscreen: all stickies in a tilted grid, click opens, drag & drop saves the place, Escape leaves', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+    await tile.locator('[title="Fullscreen — all stickies"]').click();
+    await expect(tile).toHaveClass(/today-tile--fs/);
+    const box = await tile.boundingBox();
+    const vp  = page.viewportSize();
+    expect(box.width).toBe(vp.width);
+    expect(box.height).toBe(vp.height);
+
+    const cells = tile.locator('.today-stk-cell');
+    await expect(cells).toHaveCount(3);
+    const order = () => cells.evaluateAll(els => els.map(e => e.dataset.stkId));
+    expect(await order()).toEqual(['s-000000000003', 's-000000000002', 's-000000000001']);   // newest first
+    const tilts = await tile.locator('.today-stk-paper--grid').evaluateAll(els => els.map(e => parseFloat(e.style.getPropertyValue('--stk-tilt'))));
+    expect(new Set(tilts).size).toBe(3);
+    for (const a of tilts) expect(Math.abs(a)).toBeGreaterThanOrEqual(1.5);
+
+    // Click opens the sticky in the detail panel (above the fullscreen tile)
+    await cells.nth(1).click();
+    await expect(page.locator('#dashboardDetail')).toBeVisible();
+    await expect(page.locator('#dashboardDetail .stk-detail-text')).toHaveValue(/^A very long thought/);
+    await page.keyboard.press('Escape');   // the panel is open: fullscreen stays
+    await expect(tile).toHaveClass(/today-tile--fs/);
+    await page.click('#dashboardDetailClose');
+    await expect(page.locator('#dashboardDetail')).toBeHidden();
+
+    // Drag the last sticky onto the first: it moves to the front, its new sort key is saved
+    const from = await cells.nth(2).boundingBox(), to = await cells.nth(0).boundingBox();
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(order).toEqual(['s-000000000001', 's-000000000003', 's-000000000002']);
+    await expect.poll(() => state.stickyWrites.filter(w => w.method === 'PUT').length).toBe(1);
+    const put = state.stickyWrites.find(w => w.method === 'PUT');
+    expect(put.id).toBe('s-000000000001');
+    expect(Object.keys(put.body)).toEqual(['pos']);
+    expect(put.body.pos).toBeLessThan(-Date.parse('2026-11-12T09:00:00.000Z'));
+    await expect(page.locator('#dashboardDetail')).toBeHidden();   // the drop opened nothing
+    // The order holds after a reload (the server keeps pos)
+    await page.reload();
+    await tile.locator('[title="Fullscreen — all stickies"]').click();
+    await expect(cells).toHaveCount(3);
+    expect(await order()).toEqual(['s-000000000001', 's-000000000003', 's-000000000002']);
+
+    // Escape leaves fullscreen
+    await page.keyboard.press('Escape');
+    await expect(tile).not.toHaveClass(/today-tile--fs/);
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+  });
 });
 
 // Touch swipe via CDP (Chromium): real touch events → pointer events with pointerType 'touch'
@@ -1479,24 +1535,63 @@ test.describe('Today page — phone', () => {
     const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
     await mockApis(page, state);
     await mockStickies(page, state);
+    state.stickies.push({ id: 's-000000000009', text: 'Ask why five times', color: '#93c5fd', category: 'intervention', created: '2026-11-01T09:00:00.000Z', updated: '2026-11-01T09:00:00.000Z' });
     await page.addInitScript(() => localStorage.setItem('today-stickies-pos', 's-000000000003'));
     await page.goto('/today');
     const tile = page.locator('.today-tile[data-tile="stickies"]');
     const top  = tile.locator('.today-stk-paper--top');
     await expect(top).toContainText('First idea');
+
+    // All five chips stay in one line; too wide for the phone → scrolls sideways with ‹ › instead of a scrollbar
+    const chips = tile.locator('[data-stk-filter]');
+    await expect(chips).toHaveCount(5);
+    expect(new Set(await chips.evaluateAll(els => els.map(e => e.offsetTop))).size).toBe(1);
+    const row = tile.locator('.today-stk-filter');
+    expect(await row.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+    const wrap = tile.locator('.today-stk-filter-wrap');
+    await expect(wrap.locator('.today-hscroll-btn--left')).toBeHidden();
+    await expect(wrap.locator('.today-hscroll-btn--right')).toBeVisible();
+    await wrap.locator('.today-hscroll-btn--right').click();
+    await expect(wrap.locator('.today-hscroll-btn--left')).toBeVisible();
+    await expect.poll(() => row.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+    await wrap.locator('.today-hscroll-btn--left').click();
+    await expect.poll(() => row.evaluate(el => el.scrollLeft)).toBe(0);
     await expect(tile.locator('.today-stk-slider')).toBeHidden();   // swipe instead; the position stays
     await expect(tile.locator('.today-stk-pos')).toBeVisible();
     await swipe(page, top, -220);   // left = next
-    await expect(tile.locator('.today-stk-pos')).toHaveText('2 / 3');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('2 / 4');
     await swipe(page, top, 220);    // right = previous
-    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 4');
     await swipe(page, top, 20);     // too short: springs back
-    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 3');
+    await expect(tile.locator('.today-stk-pos')).toHaveText('1 / 4');
 
     await top.tap();
     await expect(page.locator('#dashboardDetail')).toBeVisible();
     await expect(page.locator('#dashboardDetail .stk-detail-text')).toHaveValue('First idea');
     expect(await page.evaluate(() => document.activeElement?.classList.contains('stk-detail-text'))).toBe(false);
+  });
+
+  test('E-T-45 Stickies fullscreen on a phone: the stack, just full-screen; a header tap does not collapse it', async ({ page }) => {
+    const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="stickies"]');
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+    const before = (await tile.locator('.today-stk-stack').boundingBox()).width;
+    await tile.locator('[title="Fullscreen — all stickies"]').click();
+    await expect(tile).toHaveClass(/today-tile--fs/);
+    await expect(tile.locator('.today-stk-grid')).toHaveCount(0);
+    await expect(tile.locator('.today-stk-paper--top')).toBeVisible();
+    const vp = page.viewportSize();
+    expect((await tile.boundingBox()).height).toBe(vp.height);
+    expect((await tile.locator('.today-stk-stack').boundingBox()).width).toBeGreaterThanOrEqual(before);
+    const body = tile.locator('.today-tile-body');
+    expect(await body.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);   // scaled, no scrolling
+    await tile.locator('.today-tile-title').tap();
+    await expect(tile).not.toHaveClass(/today-tile--collapsed/);
+    await tile.locator('[title="Exit fullscreen (Esc)"]').tap();
+    await expect(tile).not.toHaveClass(/today-tile--fs/);
   });
 
   test('E-T-37 board on a phone: calendar and mail move from the header to the menu', async ({ page }) => {

@@ -471,3 +471,31 @@ test('TU-31 Stickies: _stkFilter keeps the order, missing category = note; _stkC
   expect(plain(ctx._stkFilter(items, 'other'))).toEqual([])
   expect(plain(ctx._stkCounts(items))).toEqual({ all: 4, note: 2, quote: 2, intervention: 0, other: 0 })
 })
+
+test('TU-32 Stickies order: pos wins, else newest first; drop position between neighbours; stable grid angles', () => {
+  const items = [
+    { id: 'old', created: '2026-11-01T10:00:00.000Z' },
+    { id: 'new', created: '2026-11-05T10:00:00.000Z' },
+    { id: 'mid', created: '2026-11-03T10:00:00.000Z' },
+  ]
+  expect(plain(ctx._stkSort(items)).map(i => i.id)).toEqual(['new', 'mid', 'old'])
+  expect(items.map(i => i.id)).toEqual(['old', 'new', 'mid'])   // input untouched
+  // "old" dropped between "new" and "mid"
+  const k = id => ctx._stkOrderKey(items.find(i => i.id === id))
+  const pos = ctx._stkPosBetween(k('new'), k('mid'))
+  const moved = items.map(i => (i.id === 'old' ? { ...i, pos } : i))
+  expect(plain(ctx._stkSort(moved)).map(i => i.id)).toEqual(['new', 'old', 'mid'])
+  // a sticky created later still comes first
+  moved.push({ id: 'newest', created: '2026-11-06T10:00:00.000Z' })
+  expect(plain(ctx._stkSort(moved))[0].id).toBe('newest')
+  expect(ctx._stkPosBetween(null, 5)).toBe(4)
+  expect(ctx._stkPosBetween(5, null)).toBe(6)
+  expect(ctx._stkPosBetween(null, null)).toBe(0)
+  // Angles: same id → same angle; ±1.5–5°; both directions among a few ids
+  const ids = ['s-000000000001', 's-000000000002', 's-000000000003', 's-00000000000a', 's-0000000000ff', 's-123456789abc']
+  const angles = ids.map(id => ctx._stkGridAngle(id))
+  expect(angles).toEqual(ids.map(id => ctx._stkGridAngle(id)))
+  for (const a of angles) { expect(Math.abs(a)).toBeGreaterThanOrEqual(1.5); expect(Math.abs(a)).toBeLessThanOrEqual(5) }
+  expect(angles.some(a => a > 0) && angles.some(a => a < 0)).toBe(true)
+  expect(new Set(angles).size).toBeGreaterThan(3)
+})

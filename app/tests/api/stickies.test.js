@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Stickies API tests — ST-1 … ST-10
+ * Stickies API tests — ST-1 … ST-11
  *
  * routes/stickies.js is mounted on its own with global-db.js replaced via require.cache.
  */
@@ -116,5 +116,19 @@ describe('Stickies API', () => {
     expect((await request(app).put(`/api/stickies/${id}`).send({ source: '' })).body.item.source).toBe('')
     expect((await request(app).put(`/api/stickies/${id}`).send({ source: 'x'.repeat(501) })).status).toBe(400)
     expect((await request(app).put(`/api/stickies/${id}`).send({ source: 7 })).status).toBe(400)
+  })
+
+  it('ST-11: PUT pos (drag & drop in the grid) stores the sort key without touching `updated`; text changes still do', async () => {
+    seed()
+    const res = await request(app).put('/api/stickies/s-000000000001').send({ pos: -1762000000000.5 })
+    expect(res.status).toBe(200)
+    expect(res.body.item).toMatchObject({ pos: -1762000000000.5, updated: '2026-11-01T10:00:00.000Z' })
+    expect(store.get('s-000000000001').pos).toBe(-1762000000000.5)
+    const res2 = await request(app).put('/api/stickies/s-000000000001').send({ text: 'Changed', pos: 3 })
+    expect(res2.body.item.updated).not.toBe('2026-11-01T10:00:00.000Z')
+    for (const pos of ['1', null, 1e16]) {
+      expect((await request(app).put('/api/stickies/s-000000000001').send({ pos })).status).toBe(400)
+    }
+    expect((await request(app).post('/api/stickies').send({ text: 'x', pos: 1 })).status).toBe(400)   // only by moving
   })
 })

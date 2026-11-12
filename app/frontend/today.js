@@ -640,7 +640,7 @@ function _todayTileEl(id) {
   header.title = 'Double-click to hide / show the content';
   // Small screens (where the widget-mode button lives): a single tap toggles instead
   const toggle = e => {
-    if (_todayEdit || e.target.closest('button, select, a, input, .today-tile-handle')) return;
+    if (_todayEdit || el.classList.contains('today-tile--fs') || e.target.closest('button, select, a, input, .today-tile-handle')) return;
     if ((e.type === 'click') !== _todaySmall()) return;
     _todaySetCollapsed(id, !el.classList.contains('today-tile--collapsed'));
   };

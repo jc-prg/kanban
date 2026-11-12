@@ -316,7 +316,9 @@ const validateStickyCreate = ajv.compile({
   type: 'object', required: ['text'], additionalProperties: false, properties: _stickyProps,
 });
 const validateStickyUpdate = ajv.compile({
-  type: 'object', minProperties: 1, additionalProperties: false, properties: _stickyProps,
+  type: 'object', minProperties: 1, additionalProperties: false,
+  // pos: sort key set by drag & drop in the Stickies grid (global-db.js stickyOrderKey)
+  properties: { ..._stickyProps, pos: { type: 'number', minimum: -1e15, maximum: 1e15 } },
 });
 
 // ---- Today page config (/today) ----

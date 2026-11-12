@@ -19,6 +19,7 @@ let _stkDrag = null;            // swipe in progress: re-renders wait for it
 let _stkPendingRender = false;
 let _stkEdit = null;            // detail panel: { id, text, source, color, category, created, updated, timer, chain }
 let _stkAngles = null;          // rotation per stack slot: [top, 1st behind, 2nd, 3rd] — shifted on every flip
+let _stkFs = false;             // fullscreen: the tile covers the screen — grid of all stickies (small screens: the stack)
 
 // ---- Pure helpers ----
 
@@ -138,6 +139,35 @@ function _stkCounts(items) {
   return out;
 }
 
+/**
+ * Sort key — same rule as stickyOrderKey in backend/global-db.js: `pos` once the sticky was dragged
+ * to a place in the grid, else minus its creation time (newest first). Pure.
+ */
+function _stkOrderKey(s) {
+  return Number.isFinite(s.pos) ? s.pos : -(Date.parse(s.created) || 0);
+}
+
+/** Stickies in their order (ties: newest first). Pure, returns a new array. */
+function _stkSort(items) {
+  return [...items].sort((a, b) => _stkOrderKey(a) - _stkOrderKey(b) || String(b.created || '').localeCompare(String(a.created || '')));
+}
+
+/** Sort key for a sticky dropped between two neighbours (null = no neighbour on that side). Pure. */
+function _stkPosBetween(prev, next) {
+  if (prev == null && next == null) return 0;
+  if (prev == null) return next - 1;
+  if (next == null) return prev + 1;
+  return (prev + next) / 2;
+}
+
+/** Grid tilt of a sticky: stable per id (no jumping on refresh), ±1.5–5°, both directions. Pure. */
+function _stkGridAngle(id) {
+  let h = 2166136261;
+  for (const ch of String(id)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  const mag = 1.5 + (h % 1000) / 1000 * 3.5;
+  return Math.round((h & 1024 ? mag : -mag) * 10) / 10;
+}
+
 function _stkCategoryLabel(id) {
   return _STK_CATEGORIES.find(c => c.id === id)?.label || 'Note';
 }
@@ -229,7 +259,7 @@ function _stkPaperHtml(s, cls, tilt, extra = '') {
 
 // render(body, data, el) — `random: false` for re-renders after local changes (no random pick)
 function _stkRender(body, data, el, { random = true } = {}) {
-  _stkItems = data?.items || [];
+  _stkItems = _stkSort(data?.items || []);
   if (el) _todaySetCount(el, _stkItems.length);
   if (_stkDrag) { _stkPendingRender = true; return; }
   _stkPendingRender = false;
@@ -245,17 +275,25 @@ function _stkRender(body, data, el, { random = true } = {}) {
   }
   // Category filter above the stack: All + one chip per category with its count
   if (!body.querySelector('.today-stk-filter')) {
-    body.innerHTML = '<div class="today-stk-filter" role="radiogroup" aria-label="Category"></div><div class="today-stk-host"></div>';
+    body.innerHTML = '<div class="today-stk-filter" role="radiogroup" aria-label="Category" data-hscroll></div><div class="today-stk-host"></div>';
+    // One line: scrolls sideways without a scrollbar, ‹ › only where chips are cut off
+    _todayHScroll(body.querySelector('.today-stk-filter'));
+    body.querySelector('.today-stk-filter').parentElement.classList.add('today-stk-filter-wrap');
   }
   const cat = _stkFilterCat(), counts = _stkCounts(_stkItems);
-  body.querySelector('.today-stk-filter').innerHTML = [{ id: 'all', label: 'All' }, ..._STK_CATEGORIES].map(c =>
-    `<button type="button" class="today-stk-chip${counts[c.id] ? '' : ' today-stk-chip--empty'}" role="radio" aria-checked="${c.id === cat}" data-stk-filter="${c.id}">${escHtml(c.label)}<span class="today-stk-chip-n">${counts[c.id]}</span></button>`).join('');
+  // Categories without stickies are left out (the selected one stays, so the filter is visible)
+  const filter = body.querySelector('.today-stk-filter');
+  filter.innerHTML = [{ id: 'all', label: 'All' }, ..._STK_CATEGORIES]
+    .filter(c => c.id === 'all' || c.id === cat || counts[c.id]).map(c =>
+    `<button type="button" class="today-stk-chip" role="radio" aria-checked="${c.id === cat}" data-stk-filter="${c.id}">${escHtml(c.label)}<span class="today-stk-chip-n">${counts[c.id]}</span></button>`).join('');
+  _stkChipIntoView(filter);
   const host = body.querySelector('.today-stk-host');
   const vis  = _stkVisible();
   if (!vis.length) {
     host.innerHTML = `<p class="dashboard-empty today-stk-empty">No ${escHtml(_stkCategoryLabel(cat).toLowerCase())} stickies. <a href="#" data-stk-new="1">Add one</a></p>`;
     return;
   }
+  if (_stkGridMode()) { _stkRenderGrid(host, vis); return; }
   const n = vis.length;
   // The frame (stack + slider) is kept while the count stays the same, so a slider being dragged
   // and the keyboard focus survive flipping and refreshes
@@ -287,6 +325,103 @@ function _stkRender(body, data, el, { random = true } = {}) {
   _stkLayout(body);
 }
 
+/** Fullscreen on larger screens shows the grid; small screens keep the stack, just full-screen. */
+function _stkGridMode() { return _stkFs && !_todaySmall(); }
+
+/** All (filtered) stickies as a grid, in their order, each at its own stable angle. */
+function _stkRenderGrid(host, vis) {
+  host.innerHTML = `<div class="today-stk-grid" role="list" aria-label="Stickies — click to open, drag to move">${vis.map(s =>
+    `<div class="today-stk-cell" role="listitem" tabindex="0" data-stk-id="${escHtml(s.id)}" title="Click to open, drag to move">${
+      _stkPaperHtml(s, 'today-stk-paper--grid', _stkGridAngle(s.id))}</div>`).join('')}</div>`;
+  host.querySelectorAll('.today-stk-textbox').forEach(_stkFitText);
+}
+
+/** Fullscreen on / off: the tile covers the screen (today.css .today-tile--fs); Escape leaves it. */
+function _stkSetFs(on) {
+  const tile = document.querySelector('.today-tile[data-tile="stickies"]');
+  if (!tile) return;
+  _stkFs = on;
+  tile.classList.toggle('today-tile--fs', on);
+  if (on) document.addEventListener('keydown', _stkFsKey, true);
+  else document.removeEventListener('keydown', _stkFsKey, true);
+  _todaySetTileActions('stickies');
+  _stkRerender();
+  _todayScheduleFit();
+}
+
+// Capture phase: runs before a dialog's own Escape handler, so an open dialog / detail panel closes first
+function _stkFsKey(e) {
+  if (e.key !== 'Escape' || !_stkFs) return;
+  if ([...document.querySelectorAll('.modal-backdrop, .mv-picker')].some(el => el.getClientRects().length)) return;
+  e.preventDefault();
+  _stkSetFs(false);
+}
+
+/** Grid drag: move the cell to the place under the pointer (neighbours slide over), follow the pointer. */
+function _stkGridDragMove(body, g, x, y) {
+  const cell = g.cell, grid = cell.parentElement;
+  // Layout boxes (offsets ignore transforms): neighbours still gliding must not be hit at their old place
+  const gr = grid.getBoundingClientRect();
+  const boxOf = c => ({ left: gr.left + c.offsetLeft - grid.offsetLeft, top: gr.top + c.offsetTop - grid.offsetTop });
+  const over = [...grid.children].find(c => {
+    if (c === cell) return false;
+    const b = boxOf(c);
+    return x >= b.left && x < b.left + c.offsetWidth && y >= b.top && y < b.top + c.offsetHeight;
+  });
+  if (over) {
+    const cells = [...grid.children];
+    const before = new Map(cells.map(c => [c, c.getBoundingClientRect()]));
+    grid.insertBefore(cell, cells.indexOf(over) < cells.indexOf(cell) ? over : over.nextSibling);
+    for (const c of cells) {   // FLIP: the others glide to their new place
+      if (c === cell) continue;
+      const a = before.get(c), b = c.getBoundingClientRect();
+      if (a.left !== b.left || a.top !== b.top) c.animate?.([{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px)` }, { transform: 'none' }], { duration: 160, easing: 'ease-out' });
+    }
+  }
+  // Layout position (without the own shift) + pointer − grab offset
+  const r = boxOf(cell);
+  g.tx = x - g.offX - r.left;
+  g.ty = y - g.offY - r.top;
+  cell.style.setProperty('--stk-gx', `${g.tx}px`);
+  cell.style.setProperty('--stk-gy', `${g.ty}px`);
+  const br = body.getBoundingClientRect();   // near the top / bottom edge: scroll along
+  if (y < br.top + 50) body.scrollBy(0, -14);
+  else if (y > br.bottom - 50) body.scrollBy(0, 14);
+}
+
+/** Dropped: the sticky gets a sort key between its new neighbours, saved as `pos`. */
+function _stkGridDropped(cell) {
+  const ids = [...cell.parentElement.children].map(c => c.dataset.stkId);
+  const id  = cell.dataset.stkId, i = ids.indexOf(id);
+  if (_stkVisible().map(s => s.id).join() === ids.join()) { _stkRerender(); return; }   // back at its place
+  const byId = new Map(_stkItems.map(s => [s.id, s]));
+  const prev = byId.get(ids[i - 1]), next = byId.get(ids[i + 1]);
+  const pos  = _stkPosBetween(prev ? _stkOrderKey(prev) : null, next ? _stkOrderKey(next) : null);
+  _stkItems = _stkSort(_stkItems.map(s => (s.id === id ? { ...s, pos } : s)));
+  _stkRerender();
+  _stkJson(_stkApi(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pos }) })
+    .then(({ item }) => _stkUpsertLocal(item))
+    .catch(err => { showMessage(`Could not move the sticky: ${err.message}`); _todayLoadTile('stickies'); });
+}
+
+/** Keeps the selected chip inside the scrolled row and lets _todayHScroll update its ‹ › buttons. */
+function _stkChipIntoView(filter) {
+  const on = filter.querySelector('[aria-checked="true"]');
+  if (on && filter.scrollWidth > filter.clientWidth) {
+    const l = on.offsetLeft - filter.offsetLeft, r = l + on.offsetWidth;
+    if (l < filter.scrollLeft) filter.scrollLeft = Math.max(0, l - 24);
+    else if (r > filter.scrollLeft + filter.clientWidth) filter.scrollLeft = r - filter.clientWidth + 24;
+  }
+  filter.dispatchEvent(new Event('scroll'));
+}
+
+/** Height incl. vertical margins (0 without the element). */
+function _stkOuterH(el) {
+  if (!el) return 0;
+  const cs = getComputedStyle(el);
+  return el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+}
+
 // Room the rotated papers need around the square (≤ 6° tilt ≈ 5 % per side)
 const _STK_TILT_ROOM = 1.1;
 
@@ -296,11 +431,13 @@ const _STK_TILT_ROOM = 1.1;
  * at the tile's right border (`today-stk--wide`). Then fit the texts.
  */
 function _stkLayout(body) {
+  if (body.querySelector('.today-stk-grid')) { body.querySelectorAll('.today-stk-textbox').forEach(_stkFitText); return; }
   const box = body.querySelector('.today-stk');
   if (!box || !body.clientWidth) return;
   const tile  = body.closest('.today-tile');
-  const fixed = !!tile && !tile.classList.contains('today-tile--auto') && !tile.classList.contains('today-tile--collapsed')
-    && !(tile.classList.contains('today-tile--fill') && tile.closest('.today-col--over'));
+  const fixed = !!tile && (tile.classList.contains('today-tile--fs')   // fullscreen (small screens: the stack)
+    || (!tile.classList.contains('today-tile--auto') && !tile.classList.contains('today-tile--collapsed')
+        && !(tile.classList.contains('today-tile--fill') && tile.closest('.today-col--over'))));
   const nav  = box.querySelector('.today-stk-nav');
   const wide = fixed && !!nav && body.clientWidth > body.clientHeight;
   box.classList.toggle('today-stk--wide', wide);
@@ -308,7 +445,7 @@ function _stkLayout(body) {
   const bs = getComputedStyle(body), xs = getComputedStyle(box);
   const innerW = body.clientWidth - px(bs.paddingLeft) - px(bs.paddingRight) - px(xs.paddingLeft) - px(xs.paddingRight);
   const innerH = body.clientHeight - px(bs.paddingTop) - px(bs.paddingBottom) - px(xs.paddingTop) - px(xs.paddingBottom)
-    - (body.querySelector('.today-stk-filter')?.offsetHeight || 0);
+    - _stkOuterH(body.querySelector('.today-stk-filter-wrap'));
   let size;
   // wide: the slider sits at the right border, the stack stays centred → keep its width free on both sides
   if (wide) size = Math.min((innerW - 2 * nav.offsetWidth) / _STK_TILT_ROOM, innerH / (_STK_TILT_ROOM - 0.05));
@@ -377,6 +514,8 @@ function _stkWire(body) {
     new ResizeObserver(() => {
       if (body.clientWidth === w && body.clientHeight === h) return;
       w = body.clientWidth; h = body.clientHeight;
+      // Fullscreen across the small-screen limit (rotation, resize): grid ⇄ stack
+      if (body.querySelector('.today-stk-host') && !!body.querySelector('.today-stk-grid') !== _stkGridMode()) { _stkRerender(); return; }
       _stkLayout(body);
     }).observe(body);
   }
@@ -386,6 +525,11 @@ function _stkWire(body) {
     if (e.target.closest('.today-stk-src a')) { tapId = null; return; }   // source link: opens in a new tab
     const chip = e.target.closest('[data-stk-filter]');
     if (chip) { _stkSetFilter(chip.dataset.stkFilter); return; }
+    const cell = e.target.closest('.today-stk-cell');
+    if (cell) {   // grid: a click opens it (not the click that ends a drag)
+      if (!gridMoved) _stkOpenDetail(_stkItems.find(s => s.id === cell.dataset.stkId) || null);
+      return;
+    }
     const top = e.target.closest('.today-stk-paper--top');
     if (top && tapId === top.dataset.stkId) {
       // Opened on the click, not on pointerup: else the click lands in the new panel's text field
@@ -406,6 +550,11 @@ function _stkWire(body) {
     if (top) _stkOpenDetail(_stkItems.find(s => s.id === top.dataset.stkId) || null);
   });
   body.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.classList.contains('today-stk-cell')) {
+      e.preventDefault();
+      _stkOpenDetail(_stkItems.find(s => s.id === e.target.dataset.stkId) || null);
+      return;
+    }
     if (!e.target.classList.contains('today-stk')) return;
     if (e.key === 'ArrowLeft')  { e.preventDefault(); _stkStep(-1); }
     if (e.key === 'ArrowRight') { e.preventDefault(); _stkStep(1); }
@@ -455,6 +604,47 @@ function _stkWire(body) {
   });
   body.addEventListener('pointerup', e => end(e, false));
   body.addEventListener('pointercancel', e => end(e, true));
+
+  // Grid (fullscreen): drag a sticky to another place — mouse / pen at once, touch after holding it still 300 ms
+  let gg = null, gridMoved = false;
+  const gridEnd = (e, cancelled) => {
+    if (!gg || e.pointerId !== gg.id) return;
+    const { cell, started } = gg;
+    clearTimeout(gg.timer);
+    gg = null;
+    cell.classList.remove('today-stk-cell--armed', 'today-stk-cell--drag');
+    cell.style.removeProperty('--stk-gx');
+    cell.style.removeProperty('--stk-gy');
+    if (!started) return;
+    _stkDrag = null;
+    gridMoved = true;   // the click that follows the drop opens nothing
+    setTimeout(() => { gridMoved = false; }, 0);
+    if (cancelled) _stkRerender(); else _stkGridDropped(cell);
+  };
+  body.addEventListener('pointerdown', e => {
+    const cell = e.target.closest('.today-stk-cell');
+    if (!cell || e.button !== 0 || e.target.closest('.today-stk-src a')) return;
+    const touch = e.pointerType === 'touch';
+    gg = { id: e.pointerId, cell, x0: e.clientX, y0: e.clientY, armed: !touch, started: false, timer: null };
+    if (touch) gg.timer = setTimeout(() => { if (gg?.cell === cell) { gg.armed = true; cell.classList.add('today-stk-cell--armed'); } }, 300);
+  });
+  body.addEventListener('pointermove', e => {
+    if (!gg || e.pointerId !== gg.id) return;
+    if (!gg.started) {
+      if (Math.hypot(e.clientX - gg.x0, e.clientY - gg.y0) < 6) return;
+      if (!gg.armed) { clearTimeout(gg.timer); gg = null; return; }   // touch moved before the hold: scrolling
+      const r = gg.cell.getBoundingClientRect();
+      Object.assign(gg, { started: true, offX: gg.x0 - r.left, offY: gg.y0 - r.top, tx: 0, ty: 0 });
+      _stkDrag = gg;   // re-renders wait for the drop
+      gg.cell.classList.add('today-stk-cell--drag');
+      try { gg.cell.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+    _stkGridDragMove(body, gg, e.clientX, e.clientY);
+  });
+  // A held touch must not start scrolling once armed
+  body.addEventListener('touchmove', e => { if (gg?.armed) e.preventDefault(); }, { passive: false });
+  body.addEventListener('pointerup', e => gridEnd(e, false));
+  body.addEventListener('pointercancel', e => gridEnd(e, true));
 }
 
 // ---- Detail panel: view / edit, convert, delete ----
@@ -474,6 +664,7 @@ async function _stkJson(url, opts) {
 function _stkUpsertLocal(item) {
   const i = _stkItems.findIndex(s => s.id === item.id);
   if (i >= 0) _stkItems[i] = item; else _stkItems.unshift(item);
+  _stkItems = _stkSort(_stkItems);
   _stkRerender();
 }
 
@@ -714,5 +905,6 @@ TODAY_TILES.stickies = {
     { icon: SVGICONS.dice(12, 12), title: 'Random sticky', run: () => _stkShowRandom() },
     { icon: SVGICONS.create(12, 12), title: 'New sticky', run: () => _stkOpenDetail(null) },
     { icon: SVGICONS.settings(12, 12), title: 'Random rhythm (settings)', run: () => _todayOpenWidgetSettings('stickies') },
+    { icon: SVGICONS.fullscreen(12, 12), title: _stkFs ? 'Exit fullscreen (Esc)' : 'Fullscreen — all stickies', active: _stkFs, run: () => _stkSetFs(!_stkFs) },
   ],
 };

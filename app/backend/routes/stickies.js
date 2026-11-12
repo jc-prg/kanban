@@ -39,7 +39,9 @@ router.put('/stickies/:id', writeRateLimit, withHandler(async (req, res) => {
   if (!stored) return res.status(404).json({ error: 'Sticky not found' });
   const changes = { ...req.body };
   if ('source' in changes) changes.source = changes.source.trim();
-  const item = await saveSticky({ ...stored, ...changes, updated: new Date().toISOString() });
+  // Moving a sticky (pos only) is no change of its content: `updated` stays
+  const moved = Object.keys(changes).every(k => k === 'pos');
+  const item = await saveSticky({ ...stored, ...changes, updated: moved ? stored.updated : new Date().toISOString() });
   res.json({ item });
 }));
 

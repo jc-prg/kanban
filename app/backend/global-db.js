@@ -232,13 +232,21 @@ async function saveAppearance(data) {
 
 function _stickyOut({ _id, _rev, ...doc }) { return { id: _id, ...doc }; }
 
-/** All stickies, newest first. */
+/**
+ * Sort key: `pos` once the sticky was dragged to a place (Stickies grid), else minus its creation
+ * time — new stickies come first, and a dropped one sits between its neighbours' keys.
+ */
+function stickyOrderKey(s) {
+  return Number.isFinite(s.pos) ? s.pos : -(Date.parse(s.created) || 0);
+}
+
+/** All stickies in their order (newest first unless moved). */
 async function listStickies() {
   const result = await stickiesDb.list({ include_docs: true });
   return result.rows
     .filter(r => !r.id.startsWith('_') && r.doc)
     .map(r => _stickyOut(r.doc))
-    .sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+    .sort((a, b) => stickyOrderKey(a) - stickyOrderKey(b) || (b.created || '').localeCompare(a.created || ''));
 }
 
 /** One sticky or null. */
@@ -268,4 +276,4 @@ async function deleteSticky(id) {
   }
 }
 
-module.exports = { listStickies, getSticky, saveSticky, deleteSticky, getStickiesDb, getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender, getHiddenFolders, setHiddenFolders };
+module.exports = { stickyOrderKey, listStickies, getSticky, saveSticky, deleteSticky, getStickiesDb, getAppearance, saveAppearance, getTodayConfig, saveTodayConfig, getGlobalDb, getWebdavDb, getTemplatesDb, initGlobalDb, getDashboardConfig, saveDashboardConfig, getWebdavAccounts, saveWebdavAccounts, getMailAccount, getCalAccount, getRecentFolders, addRecentFolder, getMailCardLinks, addMailCardLink, getTrustedSenders, setTrustedSender, getHiddenFolders, setHiddenFolders };
