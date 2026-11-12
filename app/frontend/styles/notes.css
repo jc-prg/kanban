@@ -307,7 +307,7 @@
 /* ---- Note Edit Modal ---- */
 .note-modal {
   width: min(860px, 92vw);
-  height: 95dvh;
+  height: min(95dvh, var(--modal-safe-h));
   overflow: hidden;
   display: flex;
   flex-direction: column;

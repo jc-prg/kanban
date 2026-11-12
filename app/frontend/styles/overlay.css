@@ -221,6 +221,10 @@
   --safe-right:  env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left:   env(safe-area-inset-left, 0px);
+  /* Height of the backdrop's safe area — explicit instead of a percentage of the backdrop, which WebKit leaves
+     unresolved for a flex item of a fixed box: an editor then grew to 95dvh and, centred, reached up under the
+     status bar. --vp-dvh-gap: viewport.js */
+  --modal-safe-h: calc(100dvh + var(--vp-dvh-gap, 0px) - var(--safe-top) - var(--safe-bottom));
 }
 
 /* Modal backdrop. Dialogs are centred inside the safe area — a dialog stops at the status bar / home
@@ -236,6 +240,7 @@
   z-index: 100;
   display: flex;
   align-items: center;
+  align-items: safe center;   /* a dialog taller than the safe area overflows downwards, never above the top */
   justify-content: center;
   animation: fadeIn 0.15s ease;
 }
@@ -251,7 +256,7 @@
   width: 440px;
   max-width: calc(100vw - 24px);
   max-height: 90vh;
-  max-height: min(90dvh, 100%);   /* 100% = the backdrop's safe area */
+  max-height: min(90dvh, var(--modal-safe-h));
   overflow-y: auto;
   box-shadow: 0 32px 80px rgba(0,0,0,0.5);
   animation: scaleIn 0.2s ease;
@@ -279,7 +284,7 @@
 
 #modal .modal {
   width: min(960px, 92vw);
-  height: 95dvh;
+  height: min(95dvh, var(--modal-safe-h));
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -993,7 +998,7 @@
 .settings-modal {
   width: min(900px, 94vw);
   max-height: 90vh;
-  max-height: 90dvh;
+  max-height: min(90dvh, var(--modal-safe-h));
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -1730,8 +1735,9 @@
 .modal--fullscreen {
   width: 100% !important;
   max-width: 100% !important;
-  height: 100% !important;
-  max-height: 100% !important;
+  height: auto !important;   /* the backdrop's full height via stretch — no percentage (see --modal-safe-h) */
+  align-self: stretch;
+  max-height: none !important;
   border-radius: 0 !important;
   border: none !important;
 }

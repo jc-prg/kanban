@@ -2108,6 +2108,42 @@ test.describe('Today page — phone', () => {
     }
   });
 
+  test('E-T-55 card / note editors on a phone stay inside the safe area (normal and full screen)', async ({ page }) => {
+    const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'attention', col: 0, order: 0, size: 'container' }] } } };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', { ...BOARD_TODAY, notes: { schemaVersion: 2, items: [{ type: 'page', id: 'n-abc1', title: 'Meeting notes',
+      description: Array.from({ length: 80 }, (_, i) => `line ${i}`).join('\n\n') }] } }, state);
+    await page.goto('/today');
+    await page.addStyleTag({ content: ':root { --safe-top: 47px; --safe-bottom: 34px; }' });
+    const vh = page.viewportSize().height;
+    const box = (sel) => page.evaluate((sel) => {
+      const m = document.querySelector(sel), r = m.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), scrollY: Math.round(scrollY),
+        hdrTop: Math.round(m.querySelector('.panel-modal-bar').getBoundingClientRect().top),
+        titleTop: Math.round(m.querySelector('.panel-modal-bar > *').getBoundingClientRect().top) };
+    }, sel);
+    for (const [open, sel, close] of [
+      [(fs) => _todayEditCard('e2e-today', 'id-due1', { fullscreen: fs }), '#modal .modal', '#modal'],
+      [(fs) => _todayEditNote('e2e-today', 'n-abc1', { fullscreen: fs }), '#noteModal .modal', '#noteModal'],
+    ]) {
+      for (const fs of [false, true]) {
+        await page.evaluate(`(${open})(${fs})`);
+        await expect(page.locator(sel)).toBeVisible();
+        await page.waitForTimeout(400);   // scale-in animation, content loaded
+        const r = await box(sel);
+        if (fs) {   // covers the screen, the bar under the status bar, its content below the band
+          expect([r.top, r.bottom, r.scrollY]).toEqual([0, vh, 0]);
+          expect(r.titleTop).toBeGreaterThanOrEqual(47 + 16);
+        } else {    // inside the safe area
+          expect(r.scrollY).toBe(0);
+          expect(r.top).toBeGreaterThanOrEqual(47);
+          expect(r.bottom).toBeLessThanOrEqual(vh - 34);
+        }
+        await page.evaluate((close) => { document.querySelector(close).style.display = 'none'; }, close);
+      }
+    }
+  });
+
   test('E-T-27 phone calendar view and Today page end above the home indicator', async ({ page }) => {
     const state = { layouts: { sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0, size: 'container' }] } } };
     await mockApis(page, state);
