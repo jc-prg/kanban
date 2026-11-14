@@ -13,6 +13,11 @@
 }
 body.mailview-open { overflow: hidden; }
 
+/* Opened from a mailto: link in a dialog (card, note, detail panel): above it until the view closes
+   (dashboard.js _mailtoClick); confirm dialogs (300) stay on top */
+body.mail-over-dialog #dashboard.dashboard--board,
+body.mail-over-dialog .mailview { z-index: 150; }
+
 /* The header (and its dropdown) stays above the view on every screen size */
 body.mailview-open header { z-index: 96; }
 

@@ -43,6 +43,20 @@
 .ctx-item.ctx-danger:hover { color: var(--danger); background: rgba(240,79,106,0.1); }
 .ctx-item--link { text-decoration: none; }
 
+/* Non-clickable first line of a menu (openContextMenu { header }) */
+.ctx-header {
+  padding: 6px 12px 4px 9px;
+  max-width: 320px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  user-select: text;
+}
+
 .ctx-separator {
   height: 1px;
   background: var(--border);

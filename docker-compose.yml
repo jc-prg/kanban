@@ -16,6 +16,8 @@ services:
   kanban:
     build:
       context: ./app
+      additional_contexts:
+        git: ./.git   # only HEAD is copied — the branch shown in Settings → About (app/Dockerfile)
       args:
         FIX_PERMISSIONS: ${FIX_PERMISSIONS:-0}   # 1 = chown /app to node during the build (slow)
     depends_on:

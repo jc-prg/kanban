@@ -795,6 +795,7 @@ function _renderMailHtml(wrap, msg) {
   iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${_mailCsp(load)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${res.html}</body></html>`;
   const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
   iframe.addEventListener('load', resize);
+  _mailtoWireFrame(iframe);
 }
 
 /** True when a mail has both an HTML and a non-empty plain-text part. */
@@ -1502,6 +1503,7 @@ function _openEventDetail(accountId, uid, webUrl, evOverride) {
       iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
       iframe.setAttribute('referrerpolicy', 'no-referrer');
       body.appendChild(iframe);
+      _mailtoWireFrame(iframe);
       const baseStyle = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#222;background:white;padding:8px;margin:0;word-break:break-word}'
         + ' a{color:#4f46e5} img{max-width:100%;height:auto}'
         + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
@@ -1561,23 +1563,68 @@ function _calOrganizerHtml(organizer) {
   if (!m) return escHtml(organizer);
   const addr = m[1];
   const name = String(organizer).replace(/<?mailto:[^\s<>"]+>?/i, '').replace(/^[\s"]+|[\s":]+$/g, '').replace(/^CN=/i, '');
-  return `<a href="mailto:${escHtml(addr)}" data-compose-to="${escHtml(addr)}" title="Write a mail to ${escHtml(addr)}">${escHtml(name || addr)}</a>`;
+  return `<a href="mailto:${escHtml(addr)}" title="Write a mail to ${escHtml(addr)}">${escHtml(name || addr)}</a>`;
 }
 
-document.getElementById('dashboardDetailBody').addEventListener('click', async e => {
-  const a = e.target.closest('a[data-compose-to]');
-  if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+// ---- mailto: links → the mail view's compose form ----
+// Every mailto: link (cards, notes, mail reader, event details, mail bodies / descriptions in iframes)
+// writes a new message in the mail view when a mail account can send (SMTP), else opens the mail program.
+// A link inside an open dialog (card, note, detail panel) lifts the mail view above it
+// (body.mail-over-dialog, cleared when the view closes) — the dialog is still there afterwards.
+
+/** Prefill of the compose form from a mailto: URL (RFC 6068): { to, cc, bcc, subject, body }; null if none. */
+function _mailtoPrefill(href) {
+  const m = String(href || '').match(/^mailto:([^?#]*)(?:\?([^#]*))?/i);
+  if (!m) return null;
+  const dec = v => { try { return decodeURIComponent(v); } catch { return v; } };
+  const out = { to: dec(m[1]).trim(), cc: '', bcc: '', subject: '', body: '' };
+  for (const pair of (m[2] || '').split('&')) {
+    if (!pair) continue;
+    const i = pair.indexOf('=');
+    const key = dec(i < 0 ? pair : pair.slice(0, i)).toLowerCase();
+    const val = i < 0 ? '' : dec(pair.slice(i + 1));
+    if (key === 'to' || key === 'cc' || key === 'bcc') out[key] = [out[key], val.trim()].filter(Boolean).join(', ');
+    else if (key === 'subject') out.subject = val;
+    else if (key === 'body') out.body = val.replace(/\r\n?/g, '\n');
+  }
+  return out;
+}
+
+/** Whether a mail account can send (SMTP configured) — the mail view's accounts once loaded, else the config. */
+function _mailCanSend() {
+  if (typeof _mvAccounts !== 'undefined' && _mvAccounts?.length) return Promise.resolve(_mvAccounts.some(a => a.canSend));
+  return fetch('/api/dashboard/config')
+    .then(r => (r.ok ? r.json() : {}))
+    .then(cfg => (cfg.mailAccounts || []).some(acc => acc.smtp?.host))
+    .catch(() => false);
+}
+
+/** Click handler for documents with mailto: links (the page, mail / description iframes). */
+function _mailtoClick(e) {
+  if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest?.('a[href]');
+  const href = a?.getAttribute('href') || '';
+  if (!/^mailto:/i.test(href) || a.closest('[contenteditable="true"], .mv-editor')) return;   // links being written
+  const prefill = _mailtoPrefill(href);
+  if (!prefill) return;
   e.preventDefault();
-  const to = a.dataset.composeTo;
-  let canSend = false;
-  try {
-    const cfg = await fetch('/api/dashboard/config').then(r => r.ok ? r.json() : {});
-    canSend = (cfg.mailAccounts || []).some(acc => acc.smtp?.host);
-  } catch { /* fall back to the mail program */ }
-  if (!canSend || typeof _todayCompose !== 'function') { window.location.href = `mailto:${to}`; return; }
-  _closeDetail();
-  _todayCompose({ to });
-});
+  e.stopPropagation();
+  const frame = a.ownerDocument.defaultView?.frameElement;
+  const overDialog = !!(frame || a).closest?.('.modal-backdrop');
+  _mailCanSend().then(canSend => {
+    if (!canSend || typeof _todayCompose !== 'function') { window.location.href = href; return; }
+    document.body.classList.toggle('mail-over-dialog', overDialog);
+    _todayCompose(prefill);
+  });
+}
+window.addEventListener('click', _mailtoClick, true);
+
+/** Wire mailto: links inside an iframe (mail bodies, event descriptions) once it has loaded. */
+function _mailtoWireFrame(iframe) {
+  iframe.addEventListener('load', () => {
+    try { iframe.contentDocument?.addEventListener('click', _mailtoClick, true); } catch { /* cross-origin */ }
+  });
+}
 
 /** Whether the detail panel is in full screen — Edit opens the dialog the same way. */
 function _detailFullscreen() {

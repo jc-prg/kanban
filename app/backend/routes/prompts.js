@@ -1,13 +1,13 @@
 const express      = require('express');
-const { execSync } = require('child_process');
 const router  = express.Router();
 const { writeRateLimit } = require('../auth');
 const { getPromptsDb, upsertDoc } = require('../db');
 const { API_KEY }        = require('../config');
 const { version, repository } = require('../../package.json');
 
-let _branch = 'unknown';
-try { _branch = execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { /* not a git repo */ }
+const { detectBranch } = require('../build-info');
+
+const _branch = detectBranch();
 
 const PROMPTS_DOC_ID  = 'prompts';
 const PROMPTS_DEFAULT = { searchProfile: '', criteriaInclude: '', criteriaExclude: '', searchRadius: '' };

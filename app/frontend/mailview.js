@@ -460,7 +460,7 @@ function _mvHide() {
   if (!view) return;
   view.style.display = 'none';
   _syncOverlayHost();
-  document.body.classList.remove('mailview-open');
+  document.body.classList.remove('mailview-open', 'mail-over-dialog');
   _mvCompose = null;
   _mvClosePicker(null);
 }
@@ -858,7 +858,32 @@ function _mvMailtoAddr(href) {
 }
 
 /** Right-click on an address in the reader header: trust / untrust it (remote images). */
-async function _mvAddressMenu(e, addr) {
+/** Address of a mailto: link as written (no display name, case kept), '' if none. */
+function _mvMailtoDisplay(href) {
+  const m = String(href || '').match(/^mailto:([^?#]+)/i);
+  if (!m) return '';
+  try { return decodeURIComponent(m[1]).trim(); } catch { return m[1].trim(); }
+}
+
+/** Copy text to the clipboard — also without the Clipboard API (plain http on the LAN). */
+async function _mvCopyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall back below */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* ignore */ }
+  ta.remove();
+  return ok;
+}
+
+/** Right-click on an address in the reader: the address (not clickable), Write email, Copy address, trust / untrust. */
+async function _mvAddressMenu(e, addr, shown = addr) {
   await _mailLoadTrusted();
   const trusted = !!_mailTrusted?.has(addr);
   const set = async on => {
@@ -870,9 +895,24 @@ async function _mvAddressMenu(e, addr) {
       _mvFlash(`Could not update trusted senders: ${err.message}`, true);
     }
   };
-  openContextMenu(e, [trusted
-    ? { labelHtml: `<span class="ctx-icon">${SVGICONS.shield()}</span>Remove from trusted senders`, action: () => set(false) }
-    : { labelHtml: `<span class="ctx-icon">${SVGICONS.shieldCheck()}</span>Trust sender and load images`, action: () => set(true) }]);
+  const copy = async () => {
+    const ok = await _mvCopyText(shown);
+    _mvFlash(ok ? `Copied ${shown}` : 'Could not copy to the clipboard', !ok);
+  };
+  // Same as a click on the address (dashboard.js _mailtoClick): compose form, else the mail program
+  const write = async () => {
+    if (await _mailCanSend()) _todayCompose({ to: shown });
+    else window.location.href = `mailto:${shown}`;
+  };
+  openContextMenu(e, [
+    { header: shown },
+    { separator: true },
+    { labelHtml: `<span class="ctx-icon">${SVGICONS.email(13, 13)}</span>Write email`, action: write },
+    { labelHtml: `<span class="ctx-icon">${SVGICONS.duplicate(13, 13)}</span>Copy address`, action: copy },
+    trusted
+      ? { labelHtml: `<span class="ctx-icon">${SVGICONS.shield()}</span>Remove from trusted senders`, action: () => set(false) }
+      : { labelHtml: `<span class="ctx-icon">${SVGICONS.shieldCheck()}</span>Trust sender and load images`, action: () => set(true) },
+  ]);
 }
 
 /** Context menu: acts on the whole selection when the row is part of a multi-selection. */
@@ -1717,7 +1757,7 @@ function _mvOpenCompose(mode, prefill = null) {
   const forward = mode === 'forward' && _mvMsg ? _mvMsg : null;
   const fields  = reply ? _mvReplyFields(reply, mode === 'replyall', _mvAccounts.find(a => a.accountId === _mvAccountId)?.own)
     : forward ? { to: '', cc: '', subject: _mvForwardSubject(forward.subject) }
-    : prefill ? { to: prefill.to || '', cc: '', subject: prefill.subject || '' } : null;
+    : prefill ? { to: prefill.to || '', cc: prefill.cc || '', subject: prefill.subject || '' } : null;
   const fromAcc  = sendable.find(a => a.accountId === _mvAccountId) || sendable[0];
   const fromAddr = reply && fromAcc.accountId === _mvAccountId ? _mvReplySender(reply, fromAcc.senders) : fromAcc.senders[0];
   // One option per (account, sender address): the address with the account's colour swatch
@@ -1807,9 +1847,17 @@ function _mvOpenCompose(mode, prefill = null) {
     _mvAddFiles([...e.dataTransfer.files]);
   });
   form.querySelector('.mv-file-input').addEventListener('change', e => { _mvAddFiles([...e.target.files]); e.target.value = ''; });
+  // Bcc from the prefill (mailto: links): shown at once
+  if (!reply && !forward && prefill?.bcc) {
+    form.querySelectorAll('.mv-bcc').forEach(b => { b.hidden = false; });
+    form.querySelector('[name="bcc"]').value = prefill.bcc;
+    form.querySelector('[data-mv-bcc]').hidden = true;
+  }
   _mvRenderComposeFiles();
   _mvWireComposeFit(form);
   if (reply) { editor.focus(); const r = document.createRange(); r.setStart(editor, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }
+  else if (fields?.to && !fields.subject) form.querySelector('[name="subject"]').focus();
+  else if (fields?.to) { editor.focus(); }
   else form.querySelector('[name="to"]').focus();
 }
 
@@ -2565,7 +2613,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!addr) return;
     e.preventDefault();
     e.stopPropagation();
-    _mvAddressMenu(e, addr);
+    _mvAddressMenu(e, addr, _mvMailtoDisplay(a.getAttribute('href')) || addr);
   });
   // Toolbar buttons must not steal the editor selection
   reader.addEventListener('mousedown', e => { if (e.target.closest('[data-mv-cmd], [data-mv-emoji-toggle], .mv-emoji-pop, [data-mv-fmt-toggle], .mv-fmt-pop')) e.preventDefault(); });

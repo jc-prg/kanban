@@ -583,6 +583,8 @@ async function _todayNewEvent(prefill) {
 }
 
 async function _todayCompose(prefill = null) {
+  // Already open (e.g. an address in the reader): just the form, no new history entry / list reload
+  if (typeof _mvIsOpen === 'function' && _mvIsOpen() && (_mvAccounts || []).length) { _mvOpenCompose('new', prefill); return; }
   await _todayOpenMail();
   // The mail view loads its accounts asynchronously
   for (let i = 0; i < 40 && !(_mvAccounts || []).length; i++) await new Promise(r => setTimeout(r, 100));

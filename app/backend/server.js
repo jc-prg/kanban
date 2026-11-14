@@ -64,9 +64,10 @@ app.use(express.json({ limit: '10mb' }));
 const site = express.Router();
 
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
+const APP_VERSION = require('../package.json').version;
 // index.html references assets with root-absolute URLs; prefix them with
 // BASE_PATH and expose it to the frontend via <meta name="base-path">.
-// TEST_INSTANCE=1 adds a "Test" label to the header and "[TEST] " to the page title
+// TEST_INSTANCE=1 adds a "Test" label (with the app version, hidden on small screens) to the header and "[TEST] " to the page title
 // (<meta name="test-instance"> — state.js keeps the prefix when the frontend changes the title).
 async function sendSpa(req, res, next) {
   try {
@@ -74,7 +75,7 @@ async function sendSpa(req, res, next) {
       .replace(/(\s(?:href|src))="\/(?!\/)/g, `$1="${BASE_PATH}/`)
       .replace('<head>', `<head>\n<meta name="base-path" content="${BASE_PATH}">`);
     if (TEST_INSTANCE)
-      html = html.replace('<header>', '<header>\n  <span class="test-instance-label" title="Test instance (TEST_INSTANCE=1)">Test</span>')
+      html = html.replace('<header>', `<header>\n  <span class="test-instance-label" title="Test instance (TEST_INSTANCE=1), v${APP_VERSION}">Test<span class="test-instance-version"> v${APP_VERSION}</span></span>`)
         .replace('<head>', '<head>\n<meta name="test-instance" content="1">')
         .replace('<title>', '<title>[TEST] ');
     res.type('html').send(html);

@@ -38,6 +38,8 @@ function openContextMenu(e, items) {
   }
   menu.innerHTML = items.map((item, i) => {
     if (item.separator) return `<div class="ctx-separator" data-idx="${i}"></div>`;
+    // Non-clickable first line (e.g. the address a menu acts on)
+    if (item.header != null) return `<div class="ctx-header" data-idx="${i}">${escHtml(item.header)}</div>`;
     if (item.children) {
       const childHtml = item.children.map((c, ci) =>
         `<button class="ctx-item" data-pidx="${i}" data-cidx="${ci}">${c.labelHtml || escHtml(c.label)}</button>`

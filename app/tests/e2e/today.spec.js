@@ -803,8 +803,10 @@ test.describe('Today page', () => {
     await agenda.locator('.today-ev-row', { hasText: 'Planning meeting' }).click();
     await organiser.click();
     await expect(page.locator('#mailView')).toBeVisible();
-    await expect(page.locator('#dashboardDetail')).toBeHidden();
     await expect(page.locator('#mailViewReader input[name="to"]')).toHaveValue('boss@example.org');
+    // The event panel stays underneath and is back once the mail view closes (mailto: links — E-T-64)
+    await page.click('#mailViewClose');
+    await expect(page.locator('#dashboardDetail')).toBeVisible();
   });
 
   test('E-T-18 Notes tile: "Open next level" opens one folder level per click; "Collapse all" starts over', async ({ page }) => {
@@ -1551,6 +1553,7 @@ test.describe('Today page', () => {
     });
     await page.goto('/today?mail=ma-o');
     await expect(page.locator('#mailView')).toBeVisible();
+    await page.waitForFunction(() => _mvAccounts.length > 0);   // accounts load asynchronously
     await page.evaluate(() => _mvOpenCompose('new'));
     const form = page.locator('#mailViewReader .mv-compose');
     await form.locator('[name="to"]').fill('bob@ex.com');
@@ -1605,6 +1608,7 @@ test.describe('Today page', () => {
     await page.route('**/api/dashboard/mail-trusted-senders', r => r.fulfill({ json: { senders: [] } }));
     await page.goto('/today?mail=ma-o');
     await expect(page.locator('#mailView')).toBeVisible();
+    await page.waitForFunction(() => _mvAccounts.length > 0);   // accounts load asynchronously
     await page.evaluate(() => _mvOpenCompose('new'));
     const form = page.locator('#mailViewReader .mv-compose');
     const editor = form.locator('.mv-editor');
@@ -1659,13 +1663,20 @@ test.describe('Today page', () => {
     expect(sent.text).toBe('Hello world big');
   });
 
-  test('E-T-63 test instance: "[TEST] " before every page title, also after the frontend changes it', async ({ page }) => {
+  test('E-T-63 test instance: "[TEST] " before every page title, also after the frontend changes it; version in the label', async ({ page }) => {
     const state = { layouts: LAYOUTS };
     await mockApis(page, state);
     await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
     await page.goto('/today');
     test.skip(!(await page.locator('meta[name="test-instance"]').count()), 'server not started with TEST_INSTANCE=1');
     await expect(page.locator('.test-instance-label')).toBeVisible();
+    // App version in the label, not on small screens
+    const version = require('../../package.json').version;
+    await expect(page.locator('.test-instance-label')).toHaveText(`Test v${version}`);
+    await page.setViewportSize({ width: 390, height: 800 });
+    await expect(page.locator('.test-instance-version')).toBeHidden();
+    expect(await page.locator('.test-instance-label').evaluate(el => el.innerText)).toBe('TEST');
+    await page.setViewportSize({ width: 1300, height: 900 });
     await expect(page).toHaveTitle('[TEST] jc://today/');
     await page.evaluate(() => { document.title = 'Changed'; });
     await expect(page).toHaveTitle('[TEST] Changed');
@@ -1675,6 +1686,111 @@ test.describe('Today page', () => {
     // Card dialog title, then back
     await page.locator('.card', { hasText: 'Send offer' }).click();
     await expect(page).toHaveTitle('[TEST] e2e-today - Send offer (card)');
+  });
+
+  test('E-T-64 mailto: links write a mail in the mail view (card dialog stays underneath, mail body iframe, reader address); without SMTP the mail program', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    let smtp = true;
+    const msg = { id: '9', subject: 'Contact', messageId: '<9@ex.com>', from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: '2026-11-01T10:00:00.000Z', size: 500, unread: true, flagged: false, flagColor: null };
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-o', label: 'Work', color: '#0a0',
+      ...(smtp ? { smtp: { host: 'smtp.example', fromAddress: 'me@ex.com' } } : {}) }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [{ accountId: 'ma-o', label: 'Work', folder: 'INBOX', messages: [msg], flagged: [], flaggedTotal: 0, error: null }] }));
+    await page.route('**/api/dashboard/mail/ma-o/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-o', '');
+      if (r.request().method() !== 'GET') return r.fulfill({ json: { ok: true } });
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: null, messages: 1, unseen: 1 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [msg], total: 1, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p === '/message/9') return r.fulfill({ json: { ...msg, body: '', attachments: [],
+        bodyHtml: '<p>Write to <a href="mailto:sales@ex.com?subject=Offer">sales</a></p>' } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.route('**/api/dashboard/mail-hidden-folders', r => r.fulfill({ json: { folders: {} } }));
+    await page.route('**/api/dashboard/mail-trusted-senders', r => r.fulfill({ json: { senders: [] } }));
+    const board = { board: { columns: [{ id: 'c-todo', title: 'TODO', cards: [{ id: 'id-mt1', text: 'Call Bob',
+      description: 'Contact [Bob](mailto:bob@ex.com?subject=Hi%20there&cc=c@ex.com&bcc=x@ex.com&body=First%0ASecond)' }] }] } };
+    await mockBoard(page, 'e2e-today', board, state);
+    const form = page.locator('#mailViewReader .mv-compose');
+
+    // 1. Card dialog on a board page: the mail view opens above it, prefilled; closing returns to the dialog
+    await page.goto('/board/e2e-today');
+    await page.locator('.card', { hasText: 'Call Bob' }).click();
+    await expect(page.locator('#modal')).toBeVisible();
+    const link = page.locator('#modal a[href^="mailto:bob@ex.com"]');
+    await expect(link).toBeVisible();
+    await link.click();
+    await expect(page.locator('#mailView')).toBeVisible();
+    await expect(form.locator('.mv-subject')).toHaveText('New message');
+    await expect(form.locator('[name="to"]')).toHaveValue('bob@ex.com');
+    await expect(form.locator('[name="cc"]')).toHaveValue('c@ex.com');
+    await expect(form.locator('[name="bcc"]')).toBeVisible();
+    await expect(form.locator('[name="bcc"]')).toHaveValue('x@ex.com');
+    await expect(form.locator('[name="subject"]')).toHaveValue('Hi there');
+    await expect(form.locator('.mv-editor')).toHaveText('FirstSecond');
+    // On top of the card dialog (hit test at the Send button)
+    const send = await form.locator('.mv-send').boundingBox();
+    expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.mv-compose'), { x: send.x + 5, y: send.y + 5 })).toBe(true);
+    await page.click('#mailViewClose');
+    await expect(page.locator('#mailView')).toBeHidden();
+    await expect(page.locator('#modal')).toBeVisible();
+    expect(await page.evaluate(() => document.body.classList.contains('mail-over-dialog'))).toBe(false);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#modal')).toBeHidden();
+
+    // 2. Mail body (iframe) in the detail panel on Today
+    await page.addInitScript(() => localStorage.setItem('today-att-open', JSON.stringify({ mail: true })));
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="attention"] .today-mail-row[data-msg-id="9"]').click();
+    await expect(page.locator('#dashboardDetailTitle')).toHaveText('Contact');
+    await page.frameLocator('#dashboardDetail iframe').locator('a[href^="mailto:sales"]').click();
+    await expect(form.locator('[name="to"]')).toHaveValue('sales@ex.com');
+    await expect(form.locator('[name="subject"]')).toHaveValue('Offer');
+    await expect(form.locator('.mv-editor')).toBeFocused();   // To and subject given: start in the text
+    await page.click('#mailViewClose');
+    await expect(page.locator('#mailView')).toBeHidden();
+
+    // 3. An address in the mail reader's header: compose in the open view
+    await page.locator('#dashboardDetail').evaluate(el => { el.style.display = 'none'; });
+    await page.evaluate(() => openMailView('ma-o'));
+    await page.locator('#mailView .mv-msg', { hasText: 'Contact' }).first().click();
+    const janeLink = page.locator('#mailViewReader .mv-headers a[href^="mailto:jane@ex.com"]');
+    // Right-click: the bare address (not clickable) first, then Copy address and trust
+    await expect(janeLink).toHaveText('Jane');
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await janeLink.click({ button: 'right' });
+    const menu = page.locator('#_genericCtxMenu');
+    await expect(menu).toBeVisible();
+    await expect(menu.locator(':scope > *').first()).toHaveClass('ctx-header');
+    await expect(menu.locator('.ctx-header')).toHaveText('jane@ex.com');
+    await expect(menu.locator('.ctx-item')).toHaveText(['Write email', 'Copy address', 'Trust sender and load images']);
+    await menu.locator('.ctx-header').click();   // not an action: the menu stays
+    await expect(menu).toBeVisible();
+    await menu.locator('.ctx-item', { hasText: 'Copy address' }).click();
+    await expect(menu).toBeHidden();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('jane@ex.com');
+    // Write email from the menu
+    await janeLink.click({ button: 'right' });
+    await menu.locator('.ctx-item', { hasText: 'Write email' }).click();
+    await expect(form.locator('[name="to"]')).toHaveValue('jane@ex.com');
+    await expect(form.locator('[name="subject"]')).toBeFocused();
+    await page.locator('#mailView .mv-msg', { hasText: 'Contact' }).first().click();
+    // A left click does the same
+    await janeLink.click();
+    await expect(form.locator('[name="to"]')).toHaveValue('jane@ex.com');
+    await expect(form.locator('[name="subject"]')).toBeFocused();
+    await page.click('#mailViewClose');
+
+    // 4. No account with SMTP: the link goes to the mail program, the view stays closed
+    smtp = false;
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="attention"] .today-mail-row[data-msg-id="9"]').click();
+    const nav = page.waitForEvent('request', req => req.url().startsWith('mailto:'), { timeout: 3000 }).catch(() => null);
+    await page.frameLocator('#dashboardDetail iframe').locator('a[href^="mailto:sales"]').click();
+    await nav;
+    await page.waitForTimeout(300);
+    await expect(page.locator('#mailView')).toBeHidden();
   });
 
   test('E-T-47 collapsed widgets: saved per screen size, restored from the config; a collapsed header shows only the open icon', async ({ page }) => {
