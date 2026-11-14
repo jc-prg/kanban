@@ -201,7 +201,7 @@ test('MV-10 _mvForwardSubject / _mvForwardHtml — Fwd: once; header block + ori
   expect(html).toContain('From: Bob &lt;bob@ex.com&gt;<br>Subject: Report<br>To: me@ex.com</p>')
   expect(html).not.toContain('Cc:')
   expect(html).not.toContain('Date:')
-  expect(html.endsWith('a &lt; b')).toBe(true)
+  expect(html.endsWith('<div>a &lt; b</div>')).toBe(true)   // original in its own block: keeps its own spacing
 })
 
 test('MV-11 _mvIsEmptyable — special use, configured trash or well-known names only', () => {

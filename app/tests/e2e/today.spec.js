@@ -214,6 +214,117 @@ test.describe('Today page', () => {
     await expect(page.locator('#todayBar')).toContainText('CW');
   });
 
+  test('E-T-56 Needs attention: todo cards before new cards; header button cycles one at a time / all collapsed / all open', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await page.route('**/api/today/widgets/cards?**', r => r.fulfill({ json: {
+      date: TODAY,
+      overdue: [item('id-od1', 'Overdue report', { endDate: '2020-01-01' })],
+      dueToday: [], startsToday: [], dueTomorrow: [], dueWeek: [], startsWeek: [],
+      unread: [item('id-new1', 'Fresh card', { unread: true })],
+      todo: [item('id-td1', 'Write tests'), item('id-td2', 'Fix bug')],
+      counts: { overdue: 1, dueToday: 0, startsToday: 0, dueTomorrow: 0, dueWeek: 0, startsWeek: 0, unread: 1, todo: 2 },
+    } }));
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="attention"]');
+    const keys = () => tile.locator('details.today-att').evaluateAll(els => els.map(e => e.dataset.key));
+    const openKeys = () => tile.locator('details.today-att').evaluateAll(els => els.filter(e => e.open).map(e => e.dataset.key));
+    await expect.poll(keys).toEqual(['overdue', 'todo', 'new']);
+    const todo = tile.locator('details.today-att[data-key="todo"]');
+    await expect(todo.locator('.today-att-count')).toHaveText('2');
+    await expect(todo.locator('summary')).toContainText('todo cards');
+    await expect(tile.locator('.today-tile-count')).toHaveText('4');
+
+    // Default "all open" mode → click: one at a time (none open yet → all stay closed)
+    const modeBtn = tile.locator('.today-tile-actions .today-tile-btn').first();
+    await expect(modeBtn).toHaveAttribute('title', /^All entries open/);
+    await modeBtn.click();
+    await expect(modeBtn).toHaveAttribute('title', /^One entry open at a time/);
+    await tile.locator('details.today-att[data-key="overdue"] summary').click();
+    await expect.poll(openKeys).toEqual(['overdue']);
+    await todo.locator('summary').click();
+    await expect.poll(openKeys).toEqual(['todo']);
+    await expect(todo.locator('.today-kcard .card-text')).toHaveText(['Write tests', 'Fix bug']);
+
+    await modeBtn.click();   // all collapsed
+    await expect(modeBtn).toHaveAttribute('title', /^All entries collapsed/);
+    await expect.poll(openKeys).toEqual([]);
+    await modeBtn.click();   // all open
+    await expect.poll(openKeys).toEqual(['overdue', 'todo', 'new']);
+
+    // Mode and open entries survive a reload
+    await page.reload();
+    await expect.poll(openKeys).toEqual(['overdue', 'todo', 'new']);
+    await expect(tile.locator('.today-tile-actions .today-tile-btn').first()).toHaveAttribute('title', /^All entries open/);
+  });
+
+  test('E-T-57 collapsed widgets skip the automatic refresh; opened after the interval they reload at once', async ({ page }) => {
+    const state = { layouts: LAYOUTS, collapsed: { lg: ['attention'] } };
+    await page.clock.install();
+    await mockApis(page, state);
+    let mailLoads = 0, cardLoads = 0;
+    await page.route('**/api/dashboard/mail', r => { mailLoads++; r.fulfill({ json: [] }); });
+    await page.route('**/api/today/widgets/cards?**', r => { cardLoads++; r.fulfill({ json: {
+      date: TODAY, overdue: [], dueToday: [], startsToday: [], dueTomorrow: [], dueWeek: [], startsWeek: [], unread: [], todo: [],
+      counts: { overdue: 0, dueToday: 0, startsToday: 0, dueTomorrow: 0, dueWeek: 0, startsWeek: 0, unread: 0, todo: 0 },
+    } }); });
+    await page.goto('/today');
+    const tile = page.locator('.today-tile[data-tile="attention"]');
+    await expect(tile).toHaveClass(/today-tile--collapsed/);
+    await expect(page.locator('.today-tile[data-tile="agenda"] .today-ev-row')).toContainText('Planning meeting');
+    await expect.poll(() => mailLoads).toBeGreaterThan(0);   // first load: every tile
+    await page.waitForLoadState('networkidle');
+    const mail0 = mailLoads, cards0 = cardLoads;
+
+    // Automatic refresh (1 min): the open agenda reloads, the collapsed attention tile does not
+    await page.clock.runFor(61_000);
+    await expect.poll(() => cardLoads).toBeGreaterThan(cards0);
+    await page.waitForTimeout(300);
+    expect(mailLoads).toBe(mail0);
+
+    // Opened after more than the interval since its last load → reloaded right away
+    await tile.locator('.today-tile-expand').click();
+    await expect(tile).not.toHaveClass(/today-tile--collapsed/);
+    await expect.poll(() => mailLoads).toBe(mail0 + 1);
+    // Collapsed and opened again within the interval → no reload
+    await tile.locator('.today-tile-header').dblclick();
+    await expect(tile).toHaveClass(/today-tile--collapsed/);
+    await tile.locator('.today-tile-expand').click();
+    await page.waitForTimeout(300);
+    expect(mailLoads).toBe(mail0 + 1);
+  });
+
+  test('E-T-58 a fresh start on the start page reopens the last view, also after a logout; links inside the app do not', async ({ page, context }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.goto('/board/e2e-today');
+    await expect(page.locator('.column')).toHaveCount(1);
+    expect(await page.evaluate(() => localStorage.getItem('last-view'))).toBe('/board/e2e-today');
+    // Same tab (session running): /today stays on Today
+    await page.goto('/today');
+    await expect(page).toHaveURL(/\/today$/);
+    expect(await page.evaluate(() => localStorage.getItem('last-view'))).toBe('/today');
+    await page.goto('/board/e2e-today');
+    await expect(page.locator('.column')).toHaveCount(1);
+    await page.close();
+
+    // Reopened (new tab, no session yet, no referrer) → back on the board
+    const again = await context.newPage();
+    await mockApis(again, state);
+    await mockBoard(again, 'e2e-today', BOARD_TODAY, state);
+    await again.goto('/');
+    await expect(again).toHaveURL(/\/board\/e2e-today$/);
+    await again.close();
+
+    // Logged out: still the last view, with the login dialog on it
+    await context.clearCookies();
+    const loggedOut = await context.newPage();
+    await loggedOut.goto('/today');
+    await expect(loggedOut).toHaveURL(/\/board\/e2e-today$/);
+    await expect(loggedOut.locator('#loginBackdrop')).toBeVisible();
+  });
+
   test('E-T-2 edit mode: move a tile to another column, resize it, save and reload', async ({ page }) => {
     const state = { layouts: JSON.parse(JSON.stringify(LAYOUTS)) };
     await mockApis(page, state);
@@ -1237,6 +1348,46 @@ test.describe('Today page', () => {
     await expect.poll(() => patches.at(-1)).toEqual(['/message/7', { flag: 'red' }]);
   });
 
+  test('E-T-59 card from an HTML mail: the description keeps the mail formatting as Markdown, attached images embedded', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const msg = { id: '7', subject: 'Project kickoff', messageId: '<7@ex.com>', from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: '2026-11-01T10:00:00.000Z', size: 500, unread: true, flagged: false, flagColor: null };
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-o', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [{ accountId: 'ma-o', label: 'Work', folder: 'INBOX', messages: [msg], flagged: [], flaggedTotal: 0, error: null }] }));
+    // 1×1 PNG served for the mail's image attachments (the dialog preview loads them from the mail)
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    const attachmentLoads = [];
+    await page.route('**/api/dashboard/mail/ma-o/**', r => {
+      if (r.request().method() !== 'GET') return r.fulfill({ json: { ok: true } });
+      const m = new URL(r.request().url()).pathname.match(/\/message\/7\/attachment\/(\d+)$/);
+      if (m) { attachmentLoads.push(m[1]); return r.fulfill({ body: png, contentType: 'image/png' }); }
+      if (new URL(r.request().url()).pathname.endsWith('/message/7')) return r.fulfill({ json: { ...msg, body: 'plain fallback',
+        attachments: [{ part: '2', name: 'PastedGraphic-1.png', type: 'image/png', size: 10, cid: 'pg1@ex.com' },
+                      { part: '3', name: 'photo.jpg', type: 'image/jpeg', size: 10 }],
+        bodyHtml: '<html><head><style>p{}</style></head><body><p>Hi <b>team</b>,</p><ul><li>Scope</li><li>Dates</li></ul>' +
+          '<p>Details: <a href="https://ex.com/plan">the plan</a></p><img src="cid:pg1@ex.com"><img src="https://t.ex.com/p.gif" width="1" height="1"></body></html>' } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.route('**/api/dashboard/mail-trusted-senders', r => r.fulfill({ json: { senders: [] } }));
+    await page.addInitScript(() => localStorage.setItem('today-att-open', JSON.stringify({ mail: true })));
+    await page.goto('/today');
+    await page.locator('.today-tile[data-tile="attention"] .today-mail-row[data-msg-id="7"]').click({ button: 'right' });
+    await page.locator('#mailCtxCreateCardWrap').click();
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect.poll(() => page.locator('#cardDesc').inputValue()).toContain('Hi **team**,');
+    const desc = await page.locator('#cardDesc').inputValue();
+    expect(desc).toContain('**From:** Jane <jane@ex.com>');
+    expect(desc).toContain('---\n\nHi **team**,\n\n- Scope\n- Dates\n\nDetails: [the plan](https://ex.com/plan)\n\n' +
+      '![PastedGraphic-1.png](attachment:PastedGraphic-1.png)\n\n![photo.jpg](attachment:photo.jpg)');
+    expect(desc).not.toContain('p.gif');
+    // The preview shows both images right away (no board chosen yet — nothing on the card so far)
+    const imgs = page.locator('#modal img[alt="PastedGraphic-1.png"], #modal img[alt="photo.jpg"]');
+    await expect(imgs).toHaveCount(2);
+    await expect.poll(() => imgs.evaluateAll(els => els.map(e => e.src.startsWith('blob:') && e.naturalWidth > 0))).toEqual([true, true]);
+    expect(attachmentLoads.sort()).toEqual(['2', '3']);
+  });
+
   test('E-T-46 Needs attention mail: detail header icon opens the mail view; context menu Open / Reply / Forward, no webmail', async ({ page }) => {
     const state = { layouts: LAYOUTS };
     await mockApis(page, state);
@@ -1294,6 +1445,236 @@ test.describe('Today page', () => {
     await page.click('#mailCtxForward');
     await expect(page.locator('#mailViewReader .mv-compose .mv-subject')).toHaveText('Forward');
     await expect(page.locator('#mailViewReader [name="subject"]')).toHaveValue(/Budget question/);
+  });
+
+  test('E-T-60 compose: toolbar and Send row always in sight, the editor scrolls; fields fold to one line for long messages', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const long = Array.from({ length: 80 }, (_, i) => `Line ${i + 1} of the original message`).join('\n');
+    const msg = { id: '5', subject: 'Budget question', messageId: '<5@ex.com>', from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: '2026-11-01T10:00:00.000Z', size: 500, unread: true, flagged: false, flagColor: null };
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-o', label: 'Work', color: '#0a0', smtp: { host: 'smtp.example', fromAddress: 'me@ex.com' } }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [{ accountId: 'ma-o', label: 'Work', folder: 'INBOX', messages: [msg], flagged: [], flaggedTotal: 0, error: null }] }));
+    await page.route('**/api/dashboard/mail/ma-o/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-o', '');
+      if (r.request().method() !== 'GET') return r.fulfill({ json: { ok: true } });
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: null, messages: 1, unseen: 1 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [msg], total: 1, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p === '/message/5') return r.fulfill({ json: { ...msg, body: long, bodyHtml: '', attachments: [] } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.route('**/api/dashboard/mail-hidden-folders', r => r.fulfill({ json: { folders: {} } }));
+    await page.route('**/api/dashboard/mail-trusted-senders', r => r.fulfill({ json: { senders: [] } }));
+    await page.addInitScript(() => localStorage.setItem('today-att-open', JSON.stringify({ mail: true })));
+    await page.goto('/today');
+
+    const reader = page.locator('#mailViewReader');
+    const form = reader.locator('.mv-compose');
+    // Toolbar and Send row inside the visible reader pane; the editor is the scroller
+    const inSight = async () => {
+      const r = await reader.boundingBox();
+      for (const sel of ['.mv-toolbar', '.mv-compose-foot']) {
+        const b = await form.locator(sel).boundingBox();
+        expect(b.y, sel).toBeGreaterThanOrEqual(r.y - 1);
+        expect(b.y + b.height, sel).toBeLessThanOrEqual(r.y + r.height + 1);
+      }
+      expect(await reader.evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    };
+
+    // Reply to a long mail: the quote overflows → fields folded to a one-line summary
+    await page.locator('.today-tile[data-tile="attention"] .today-mail-row[data-msg-id="5"]').click({ button: 'right' });
+    await page.click('#mailCtxReply');
+    await expect(form.locator('.mv-subject')).toHaveText('Reply');
+    await expect(form).toHaveClass(/mv-compose--folded/);
+    await expect(form.locator('.mv-compose-fields')).toBeHidden();
+    const summary = form.locator('.mv-compose-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText('To');
+    await expect(summary).toContainText('jane@ex.com');
+    await expect(summary).toContainText('Re: Budget question');
+    expect((await summary.boundingBox()).height).toBeLessThan(40);   // one line
+    await inSight();
+    expect(await form.locator('.mv-editor').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+
+    // Summary click opens the fields (focus in To); back in the message they fold again
+    await summary.click();
+    await expect(form.locator('.mv-compose-fields')).toBeVisible();
+    await expect(form.locator('[name="to"]')).toBeFocused();
+    await inSight();
+    await form.locator('.mv-editor').click();
+    await expect(form).toHaveClass(/mv-compose--folded/);
+
+    // New message: short → fields shown; a long text folds them, the toolbar / Send row stay in sight
+    await page.evaluate(() => _mvOpenCompose('new'));
+    await expect(form.locator('.mv-subject')).toHaveText('New message');
+    await expect(form.locator('.mv-compose-fields')).toBeVisible();
+    await form.locator('.mv-editor').click();
+    await expect(form).not.toHaveClass(/mv-compose--folded/);
+    await page.keyboard.type('Hello\n'.repeat(60));
+    await expect(form).toHaveClass(/mv-compose--folded/);
+    await inSight();
+
+    // Phone: same rules in the full-width reader pane
+    await page.setViewportSize({ width: 390, height: 760 });
+    await expect(form).toHaveClass(/mv-compose--folded/);
+    await inSight();
+  });
+
+  test('E-T-61 a written mail looks the same in the editor and in the reader: line distance, inline styles in the sent HTML', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    let sent = null;
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-o', label: 'Work', color: '#0a0', smtp: { host: 'smtp.example', fromAddress: 'me@ex.com' } }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [{ accountId: 'ma-o', label: 'Work', folder: 'INBOX', messages: [], flagged: [], flaggedTotal: 0, error: null }] }));
+    await page.route('**/api/dashboard/mail/ma-o/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-o', '');
+      if (p === '/send') {
+        sent = JSON.parse(r.request().postDataBuffer().toString('utf8').match(/name="payload"\r\n\r\n([\s\S]*?)\r\n--/)[1]);
+        return r.fulfill({ json: { ok: true, messageId: '<x@ex.com>' } });
+      }
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: null, messages: 0, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [], total: 0, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.route('**/api/dashboard/mail-hidden-folders', r => r.fulfill({ json: { folders: {} } }));
+    await page.route('**/api/dashboard/mail-trusted-senders', r => r.fulfill({ json: { senders: [] } }));
+    // Line metrics of the three typed lines (init script: the app's CSP forbids eval in page.evaluate)
+    await page.addInitScript(() => {
+      window.__lineMetrics = (doc, root) => {
+        const ps = [...root.querySelectorAll('p')].filter(p => /line$/.test(p.textContent.trim()));
+        const a = ps[0].getBoundingClientRect(), c = ps[2].getBoundingClientRect();
+        const cs = doc.defaultView.getComputedStyle(ps[0]);
+        return { count: ps.length, dist: Math.round(c.top - a.top), fontSize: cs.fontSize, lineHeight: cs.lineHeight };
+      };
+    });
+    await page.goto('/today?mail=ma-o');
+    await expect(page.locator('#mailView')).toBeVisible();
+    await page.evaluate(() => _mvOpenCompose('new'));
+    const form = page.locator('#mailViewReader .mv-compose');
+    await form.locator('[name="to"]').fill('bob@ex.com');
+    await form.locator('[name="subject"]').fill('Spacing');
+    await form.locator('.mv-editor').click();
+    await page.keyboard.type('First line');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Second line');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Third line');
+    // Distance first → third line and line height in the editor
+    const inEditor = await form.locator('.mv-editor').evaluate(el => window.__lineMetrics(document, el));
+    expect(inEditor.count).toBe(3);
+
+    await form.locator('.mv-send').click();
+    await expect.poll(() => sent).not.toBeNull();
+    expect(sent.html).toMatch(/^<div style="font-family:[^"]*font-size:14px;line-height:1\.6">/);
+    expect(sent.html).toContain('<p style="margin:0">First line</p>');
+
+    // The sent HTML in the reader's iframe (same renderer as the mail view)
+    const inReader = await page.evaluate(async ({ html }) => {
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;left:0;top:0;width:600px;z-index:99999;background:#fff';
+      document.body.appendChild(box);
+      await _renderMailBody(box, { id: 'x', from: 'me@ex.com', bodyHtml: html, body: '' });
+      for (let i = 0; i < 50 && !box.querySelector('iframe'); i++) await new Promise(r => setTimeout(r, 50));
+      const iframe = box.querySelector('iframe');
+      await new Promise(res => (iframe.contentDocument?.readyState === 'complete' && iframe.contentDocument.body?.childElementCount ? res() : iframe.addEventListener('load', res)));
+      return window.__lineMetrics(iframe.contentDocument, iframe.contentDocument.body);
+    }, { html: sent.html });
+    expect(inReader).toEqual(inEditor);
+  });
+
+  test('E-T-62 compose toolbar: font, size and colour on the selection and at the caret; sent as inline styles', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    let sent = null;
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-o', label: 'Work', color: '#0a0', smtp: { host: 'smtp.example', fromAddress: 'me@ex.com' } }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [{ accountId: 'ma-o', label: 'Work', folder: 'INBOX', messages: [], flagged: [], flaggedTotal: 0, error: null }] }));
+    await page.route('**/api/dashboard/mail/ma-o/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-o', '');
+      if (p === '/send') {
+        sent = JSON.parse(r.request().postDataBuffer().toString('utf8').match(/name="payload"\r\n\r\n([\s\S]*?)\r\n--/)[1]);
+        return r.fulfill({ json: { ok: true, messageId: '<x@ex.com>' } });
+      }
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: null, messages: 0, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [], total: 0, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.route('**/api/dashboard/mail-hidden-folders', r => r.fulfill({ json: { folders: {} } }));
+    await page.route('**/api/dashboard/mail-trusted-senders', r => r.fulfill({ json: { senders: [] } }));
+    await page.goto('/today?mail=ma-o');
+    await expect(page.locator('#mailView')).toBeVisible();
+    await page.evaluate(() => _mvOpenCompose('new'));
+    const form = page.locator('#mailViewReader .mv-compose');
+    const editor = form.locator('.mv-editor');
+    await form.locator('[name="to"]').fill('bob@ex.com');
+    await form.locator('[name="subject"]').fill('Fonts');
+    await editor.click();
+    await page.keyboard.type('Hello world');
+    // Select "world"
+    await page.keyboard.down('Shift');
+    for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowLeft');
+    await page.keyboard.up('Shift');
+    const pick = async (kind, value) => {
+      await form.locator(`[data-mv-fmt-toggle="${kind}"]`).click();
+      const pop = form.locator(`.mv-fmt-pop--${kind}`);
+      await expect(pop).toBeVisible();
+      await pop.locator(`[data-mv-fmt="${kind}"][data-value="${value}"]`).click();
+      await expect(pop).toBeHidden();
+    };
+    const styleOf = text => editor.evaluate((el, t) => {
+      const node = [...el.querySelectorAll('span')].find(sp => sp.textContent.replace(/​/g, '') === t);
+      if (!node) return null;
+      const cs = getComputedStyle(node);
+      return { color: cs.color, size: cs.fontSize, face: cs.fontFamily };
+    }, text);
+    const selected = () => page.evaluate(() => getSelection().toString());
+
+    await pick('color', '#d0021b');
+    expect(await selected()).toBe('world');            // the selection survives
+    await pick('face', 'Georgia,serif');
+    await pick('size', '24px');
+    expect(await selected()).toBe('world');
+    expect(await styleOf('world')).toEqual({ color: 'rgb(208, 2, 27)', size: '24px', face: 'Georgia, serif' });
+    // One span for all three, no <font> left
+    expect(await editor.evaluate(el => el.querySelectorAll('font').length)).toBe(0);
+
+    // Colour back to Default: removed again
+    await pick('color', '');
+    expect(await editor.evaluate(el => [...el.querySelectorAll('span')].some(sp => sp.style.color))).toBe(false);
+
+    // Caret only: the size applies to what is typed next
+    await page.keyboard.press('End');
+    await pick('size', '18px');
+    await page.keyboard.type(' big');
+    expect((await styleOf(' big'))?.size).toBe('18px');
+
+    await form.locator('.mv-send').click();
+    await expect.poll(() => sent).not.toBeNull();
+    // " big" was typed at the end of "world": nested in its span (Georgia inherited), own size
+    expect(sent.html).toContain('Hello <span style="font-family: Georgia, serif; font-size: 24px;">world<span style="font-size: 18px;"> big</span></span>');
+    expect(sent.html).not.toContain('​');
+    expect(sent.html).not.toMatch(/background-color|rgb\(1, 2, 3\)/);
+    expect(sent.text).toBe('Hello world big');
+  });
+
+  test('E-T-63 test instance: "[TEST] " before every page title, also after the frontend changes it', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.goto('/today');
+    test.skip(!(await page.locator('meta[name="test-instance"]').count()), 'server not started with TEST_INSTANCE=1');
+    await expect(page.locator('.test-instance-label')).toBeVisible();
+    await expect(page).toHaveTitle('[TEST] jc://today/');
+    await page.evaluate(() => { document.title = 'Changed'; });
+    await expect(page).toHaveTitle('[TEST] Changed');
+    await page.goto('/board/e2e-today');
+    await expect(page.locator('.column')).toHaveCount(1);
+    await expect(page).toHaveTitle('[TEST] jc://e2e-today/');
+    // Card dialog title, then back
+    await page.locator('.card', { hasText: 'Send offer' }).click();
+    await expect(page).toHaveTitle('[TEST] e2e-today - Send offer (card)');
   });
 
   test('E-T-47 collapsed widgets: saved per screen size, restored from the config; a collapsed header shows only the open icon', async ({ page }) => {

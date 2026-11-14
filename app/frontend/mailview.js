@@ -200,7 +200,8 @@ function _mvForwardHtml(msg) {
     ['From', msg.from], ['Date', msg.date ? new Date(msg.date).toLocaleString() : ''],
     ['Subject', msg.subject], ['To', msg.to], ['Cc', msg.cc],
   ].filter(([, v]) => v).map(([k, v]) => `${k}: ${escHtml(v)}`);
-  return `<p><br></p><p>-------- Forwarded message --------<br>${rows.join('<br>')}</p><br>${_mvOriginalHtml(msg)}`;
+  // The original in its own block: it keeps its own paragraph spacing (only top-level lines are the new text)
+  return `<p><br></p><p>-------- Forwarded message --------<br>${rows.join('<br>')}</p><br><div>${_mvOriginalHtml(msg)}</div>`;
 }
 
 /** Same format as the dashboard mail panel: "hh:mm" today, else "dd.mm. hh:mm" (plus "yy" for other years). */
@@ -1743,6 +1744,8 @@ function _mvOpenCompose(mode, prefill = null) {
         <button type="button" class="btn mv-back" data-mv-back="list" title="Back">‹</button>
         <h2 class="mv-subject">${reply ? 'Reply' : forward ? 'Forward' : 'New message'}</h2>
       </div>
+      <button type="button" class="mv-compose-summary" title="Show sender, recipients and subject">
+        <span class="mv-compose-summary-text"></span><span class="mv-compose-summary-caret" aria-hidden="true">▾</span></button>
       <div class="mv-compose-fields">
         <label>From</label>
         ${_mvFromPickerHtml(fromOpts, fromSel)}
@@ -1760,6 +1763,8 @@ function _mvOpenCompose(mode, prefill = null) {
         <button type="button" data-mv-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
         <button type="button" data-mv-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
         <button type="button" data-mv-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <span class="mv-toolbar-sep"></span>
+        ${_mvFontToolsHtml()}
         <span class="mv-toolbar-sep"></span>
         <button type="button" data-mv-cmd="insertUnorderedList" title="Bulleted list">• List</button>
         <button type="button" data-mv-cmd="insertOrderedList" title="Numbered list">1. List</button>
@@ -1803,8 +1808,65 @@ function _mvOpenCompose(mode, prefill = null) {
   });
   form.querySelector('.mv-file-input').addEventListener('change', e => { _mvAddFiles([...e.target.files]); e.target.value = ''; });
   _mvRenderComposeFiles();
+  _mvWireComposeFit(form);
   if (reply) { editor.focus(); const r = document.createRange(); r.setStart(editor, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }
   else form.querySelector('[name="to"]').focus();
+}
+
+// ---- Compose layout: toolbar and Send row always in sight ----
+// The editor scrolls on its own. While the message needs the room — its text overflows the editor, or
+// the editor would be squeezed below _MV_COMPOSE_MIN_EDITOR — the address fields fold to a one-line
+// summary (`.mv-compose--folded`); a click on it, or focus in a field, opens them again.
+const _MV_COMPOSE_MIN_EDITOR = 160;
+
+/** Fold (pure): fields open while focused / opened by the user; else fold when the message needs the room. */
+function _mvComposeFold({ fieldsActive, overflow, editorHeight }) {
+  if (fieldsActive) return false;
+  return overflow || editorHeight < _MV_COMPOSE_MIN_EDITOR;
+}
+
+function _mvComposeSummaryHtml(form) {
+  const val = n => form.querySelector(`[name="${n}"]`)?.value.trim() || '';
+  const part = (label, v) => v ? `<b>${label}</b>${escHtml(v)}` : '';
+  const from = form.querySelector('.mv-from-btn');
+  return [
+    `<b>From</b>${from?.querySelector('.mv-account-swatch')?.outerHTML || ''}${escHtml(from?.querySelector('.mv-from-addr')?.textContent || '')}`,
+    part('To', val('to')) || '<b>To</b><i>—</i>', part('Cc', val('cc')), part('Bcc', val('bcc')),
+    part('Subject', val('subject')) || '<b>Subject</b><i>—</i>',
+  ].filter(Boolean).join(' · ');
+}
+
+function _mvFitCompose(form) {
+  if (!form.isConnected) return;
+  const fields = form.querySelector('.mv-compose-fields');
+  const editor = form.querySelector('.mv-editor');
+  const fieldsActive = form._mvFieldsOpen || fields.contains(document.activeElement);
+  // Measured with the fields shown — so folding never flips back and forth
+  form.classList.remove('mv-compose--folded');
+  const fold = _mvComposeFold({ fieldsActive, overflow: editor.scrollHeight > editor.clientHeight + 1, editorHeight: editor.clientHeight });
+  if (fold) form.querySelector('.mv-compose-summary-text').innerHTML = _mvComposeSummaryHtml(form);
+  form.classList.toggle('mv-compose--folded', fold);
+}
+
+function _mvWireComposeFit(form) {
+  let raf = 0;
+  const fit = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => _mvFitCompose(form)); };
+  form.querySelector('.mv-compose-summary').addEventListener('click', () => {
+    form._mvFieldsOpen = true;
+    form.classList.remove('mv-compose--folded');
+    form.querySelector('[name="to"]').focus();
+  });
+  // Back in the message (or elsewhere): the fields may fold again
+  form.addEventListener('focusin', e => {
+    if (!e.target.closest('.mv-compose-fields, .mv-compose-summary')) form._mvFieldsOpen = false;
+    fit();
+  });
+  form.addEventListener('focusout', fit);
+  form.addEventListener('input', fit);
+  form.addEventListener('click', e => { if (e.target.closest('[data-mv-bcc], .mv-from-list li')) fit(); });
+  new ResizeObserver(fit).observe(form);
+  new MutationObserver(fit).observe(form.querySelector('.mv-compose-files'), { childList: true });
+  _mvFitCompose(form);
 }
 
 /** Inner HTML of a sender entry: account colour swatch + address (account label as fallback). */
@@ -1981,6 +2043,160 @@ function _mvInsertEmoji(ch) {
   _mvEmojiRemember(ch);
 }
 
+// ---- Font face, size and colour ----
+// Applied as <span style="…"> — inline styles survive sending (_mvComposeHtml) and look the same in the
+// reader and other mail clients. The browser marks the selection with <font face="…marker…"> (execCommand
+// fontName), which is then replaced by spans; a caret without selection gets an empty styled span
+// (zero-width space, removed on sending) to type into.
+const _MV_FONT_DEFAULT_FACE = "system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const _MV_FONT = {
+  face: {
+    prop: 'fontFamily', title: 'Font', fallback: _MV_FONT_DEFAULT_FACE,
+    options: [
+      ['Default', null], ['Arial', 'Arial,Helvetica,sans-serif'], ['Verdana', 'Verdana,Geneva,sans-serif'],
+      ['Trebuchet MS', "'Trebuchet MS',Helvetica,sans-serif"], ['Georgia', 'Georgia,serif'],
+      ['Times New Roman', "'Times New Roman',Times,serif"], ['Courier New', "'Courier New',Courier,monospace"],
+    ],
+  },
+  size: {
+    prop: 'fontSize', title: 'Font size', fallback: '14px',
+    options: [['Small', '11px'], ['Smaller', '12px'], ['Normal', null], ['Larger', '16px'], ['Large', '18px'], ['Huge', '24px'], ['Giant', '32px']],
+  },
+  color: {
+    prop: 'color', title: 'Text colour', fallback: '#222222',
+    options: [['Default', null], ...['#666666', '#999999', '#d0021b', '#e8590c', '#f5a623', '#2b8a3e', '#7ed321',
+      '#0b5cad', '#4a90e2', '#5f3dc4', '#bd10e0', '#c2255c'].map(c => [c, c])],
+  },
+};
+const _MV_FONT_MARK = 'rgb(1, 2, 3)';   // temporary highlight that marks the selection
+
+function _mvFontToolsHtml() {
+  const btn = (kind, label) => `<span class="mv-fmt-wrap">
+      <button type="button" class="mv-fmt-toggle" data-mv-fmt-toggle="${kind}" title="${_MV_FONT[kind].title}" aria-label="${_MV_FONT[kind].title}"
+        aria-haspopup="true" aria-expanded="false">${label}<span class="mv-fmt-caret" aria-hidden="true">▾</span></button>
+      <div class="mv-fmt-pop mv-fmt-pop--${kind}" role="menu" hidden>${_mvFontOptionsHtml(kind)}</div>
+    </span>`;
+  return btn('face', '<span class="mv-fmt-face">Font</span>') + btn('size', '<span class="mv-fmt-size">A<small>A</small></span>')
+    + btn('color', '<span class="mv-fmt-color">A<span class="mv-fmt-color-bar"></span></span>');
+}
+
+function _mvFontOptionsHtml(kind) {
+  return _MV_FONT[kind].options.map(([label, value]) => {
+    const v = escHtml(value ?? '');
+    if (kind === 'color') return value
+      ? `<button type="button" role="menuitem" class="mv-fmt-swatch" data-mv-fmt="color" data-value="${v}" title="${v}" style="--swatch:${v}"></button>`
+      : `<button type="button" role="menuitem" class="mv-fmt-opt mv-fmt-opt--wide" data-mv-fmt="color" data-value="">Default</button>`;
+    const style = kind === 'face' ? `font-family:${value || _MV_FONT_DEFAULT_FACE}` : `font-size:${value || '14px'}`;
+    return `<button type="button" role="menuitem" class="mv-fmt-opt" data-mv-fmt="${kind}" data-value="${v}" style="${escHtml(style)}">${escHtml(label)}${
+      kind === 'size' ? ` <small>${value || '14px'}</small>` : ''}</button>`;
+  }).join('');
+}
+
+function _mvToggleFontPop(kind, show) {
+  const reader = document.getElementById('mailViewReader');
+  for (const pop of reader.querySelectorAll('.mv-fmt-pop')) {
+    const k = pop.closest('.mv-fmt-wrap').querySelector('[data-mv-fmt-toggle]');
+    const open = k.dataset.mvFmtToggle === kind && (show ?? pop.hidden);
+    if (open) _mvSaveEditorRange();
+    pop.hidden = !open;
+    k.setAttribute('aria-expanded', String(open));
+  }
+}
+
+/** The selection inside the editor — the remembered one when the focus went elsewhere. */
+function _mvEditorSelection(editor) {
+  editor.focus();
+  const sel = getSelection();
+  if (sel.rangeCount && editor.contains(sel.getRangeAt(0).commonAncestorContainer)) return sel;
+  const r = _mvCompose?.range && editor.contains(_mvCompose.range.commonAncestorContainer) ? _mvCompose.range : null;
+  if (!r) return null;
+  sel.removeAllRanges();
+  sel.addRange(r);
+  return sel;
+}
+
+/** Nearest element between `node` and the editor that sets `prop` inline. */
+function _mvStyledAncestor(node, editor, prop) {
+  for (let el = node.nodeType === 1 ? node : node.parentElement; el && el !== editor; el = el.parentElement)
+    if (el.style?.[prop]) return el;
+  return null;
+}
+
+function _mvUnwrap(el) {
+  el.replaceWith(...el.childNodes);
+}
+
+/** Apply a font face / size / colour (`value` null = default) to the editor selection. */
+function _mvApplyFont(kind, value) {
+  const editor = document.querySelector('#mailViewReader .mv-editor');
+  const def = _MV_FONT[kind];
+  if (!editor || !def) return;
+  const sel = _mvEditorSelection(editor);
+  if (!sel) return;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed) {
+    // Caret only: a styled span to type into
+    const inherited = _mvStyledAncestor(range.startContainer, editor, def.prop);
+    if (!value && !inherited) return;
+    const span = document.createElement('span');
+    span.style[def.prop] = value || def.fallback;
+    span.textContent = '\u200b';
+    range.insertNode(span);
+    const r = document.createRange();
+    r.setStart(span.firstChild, 1);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  } else {
+    // Mark the selection with a temporary highlight colour (a property these tools never set, so the
+    // browser leaves face / size / colour alone), then turn the marked elements into styled spans
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('hiliteColor', false, _MV_FONT_MARK);
+    document.execCommand('styleWithCSS', false, false);
+    const spans = [];
+    for (const el of [...editor.querySelectorAll('[style]')].filter(x => x.style.backgroundColor === _MV_FONT_MARK)) {
+      el.style.backgroundColor = '';
+      let span = el;
+      if (el.tagName !== 'SPAN') { span = document.createElement('span'); span.append(...el.childNodes); el.append(span); }
+      if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
+      // The new value replaces this property inside the selection
+      for (const inner of span.querySelectorAll('span, font')) {
+        if (inner.tagName === 'FONT') inner.removeAttribute({ fontFamily: 'face', fontSize: 'size', color: 'color' }[def.prop]);
+        else inner.style[def.prop] = '';
+        if ([...inner.attributes].every(at => at.name === 'style' && !at.value.trim())) _mvUnwrap(inner);   // nothing left
+      }
+      // Same text as a span around it (picked one after the other): one span with all the styles
+      const parent = span.parentElement;
+      if (parent?.tagName === 'SPAN' && parent !== editor && parent.childNodes.length === 1) {
+        for (const prop of ['fontFamily', 'fontSize', 'color']) if (span.style[prop] && !parent.style[prop]) parent.style[prop] = span.style[prop];
+        _mvUnwrap(span);
+        span = parent;
+      }
+      span.style[def.prop] = '';
+      if (value) span.style[def.prop] = value;
+      else if (_mvStyledAncestor(span.parentNode, editor, def.prop)) span.style[def.prop] = def.fallback;
+      spans.push(span);
+    }
+    // Keep the text selected (spans without a style are unwrapped afterwards)
+    if (spans.length) {
+      const r = document.createRange();
+      r.setStartBefore(spans[0]);
+      r.setEndAfter(spans[spans.length - 1]);
+      for (const sp of spans) if (!sp.getAttribute('style')) {
+        const first = sp.firstChild, last = sp.lastChild;
+        _mvUnwrap(sp);
+        if (sp === spans[0] && first) r.setStartBefore(first);
+        if (sp === spans[spans.length - 1] && last) r.setEndAfter(last);
+      }
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  }
+  if (kind === 'color') editor.closest('.mv-compose')?.querySelector('.mv-fmt-color-bar')?.style.setProperty('background', value || '');
+  _mvSaveEditorRange();
+  if (_mvCompose) _mvCompose.dirty = true;
+}
+
 function _mvExecCmd(cmd) {
   const editor = document.querySelector('#mailViewReader .mv-editor');
   if (!editor) return;
@@ -2006,15 +2222,41 @@ async function _mvDiscardCompose() {
   _mvSetPane(_mvMsg ? 'reader' : 'list');
 }
 
+// Look of a written message — the same in the editor (mailview.css .mv-editor), the reader (base style of
+// _renderMailHtml in dashboard.js) and other mail clients, which only see the inline styles below.
+const _MV_MAIL_FONT = "font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6";
+const _MV_MAIL_BLOCK = {
+  P:          'margin:0',
+  UL:         'margin:4px 0;padding-left:24px',
+  OL:         'margin:4px 0;padding-left:24px',
+  BLOCKQUOTE: 'margin:8px 0;padding:0 12px;border-left:3px solid #ddd;color:#555',
+};
+
+/** HTML to send: the editor content with inline styles on the top-level blocks the user wrote
+ *  (styles already there win), wrapped in the font / size / line height of the editor. */
+function _mvComposeHtml(editor) {
+  const root = editor.cloneNode(true);
+  // Zero-width spaces of styled carets (_mvApplyFont)
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) if (t.nodeValue.includes('\u200b')) t.nodeValue = t.nodeValue.replace(/\u200b/g, '');
+  for (const el of root.children) {
+    const css = _MV_MAIL_BLOCK[el.tagName];
+    if (!css) continue;
+    const own = el.getAttribute('style');
+    el.setAttribute('style', own ? `${css};${own}` : css);
+  }
+  return `<div style="${_MV_MAIL_FONT}">${DOMPurify.sanitize(root.innerHTML)}</div>`;
+}
+
 async function _mvSend(form) {
   const v = name => form.querySelector(`[name="${name}"]`).value.trim();
   const to = v('to');
-  if (!to) { _mvFlash('Please enter a recipient', true); form.querySelector('[name="to"]').focus(); return; }
+  if (!to) { _mvFlash('Please enter a recipient', true); form._mvFieldsOpen = true; form.classList.remove('mv-compose--folded'); form.querySelector('[name="to"]').focus(); return; }
   if (!v('subject') && !(await showConfirm('Send this message without a subject?', { okLabel: 'Send' }))) return;
   const editor = form.querySelector('.mv-editor');
   const c = _mvCompose;
   const accountId = form.querySelector('[name="from"]').value;
-  const payload = { to, subject: v('subject'), html: DOMPurify.sanitize(editor.innerHTML), text: editor.innerText };
+  const payload = { to, subject: v('subject'), html: _mvComposeHtml(editor), text: editor.innerText.replace(/\u200b/g, '') };
   const fromAddr = form.querySelector('[name="fromAddr"]').value;
   if (fromAddr) payload.from = fromAddr;
   if (v('cc'))  payload.cc  = v('cc');
@@ -2295,6 +2537,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (emTab) { _mvEmojiTab = emTab.dataset.mvEmojiTab; _mvRenderEmojiPop(emTab.closest('.mv-emoji-pop')); return; }
     const em = e.target.closest('[data-mv-emoji]');
     if (em) { _mvInsertEmoji(em.dataset.mvEmoji); _mvToggleEmojiPop(e.shiftKey); return; }   // Shift+click keeps the picker open
+    // Font / size / colour menus: close on any click outside them
+    if (!e.target.closest('.mv-fmt-pop, [data-mv-fmt-toggle]')) _mvToggleFontPop(null);
+    const fmtToggle = e.target.closest('[data-mv-fmt-toggle]');
+    if (fmtToggle) { _mvToggleFontPop(fmtToggle.dataset.mvFmtToggle); return; }
+    const fmt = e.target.closest('[data-mv-fmt]');
+    if (fmt) { _mvApplyFont(fmt.dataset.mvFmt, fmt.dataset.value || null); _mvToggleFontPop(null); return; }
     const cmd = e.target.closest('[data-mv-cmd]');
     if (cmd) { _mvExecCmd(cmd.dataset.mvCmd); return; }
     if (e.target.closest('[data-mv-bcc]')) {
@@ -2320,7 +2568,7 @@ document.addEventListener('DOMContentLoaded', () => {
     _mvAddressMenu(e, addr);
   });
   // Toolbar buttons must not steal the editor selection
-  reader.addEventListener('mousedown', e => { if (e.target.closest('[data-mv-cmd], [data-mv-emoji-toggle], .mv-emoji-pop')) e.preventDefault(); });
+  reader.addEventListener('mousedown', e => { if (e.target.closest('[data-mv-cmd], [data-mv-emoji-toggle], .mv-emoji-pop, [data-mv-fmt-toggle], .mv-fmt-pop')) e.preventDefault(); });
 
   // Folder picker
   const picker = document.getElementById('mailViewPicker');

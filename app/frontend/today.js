@@ -358,10 +358,18 @@ const TODAY_TILES = {
   },
   attention: {
     title: 'Needs attention',
-    desc: 'Unread and flagged mail, overdue cards, cards due today or soon, new cards',
+    desc: 'Unread and flagged mail, overdue cards, cards due today or soon, todo cards, new cards',
     load: _todayLoadAttention,
     render: _todayRenderAttention,
-    actions: () => [{ icon: SVGICONS.email(12, 12), title: 'Mail view', run: () => _todayOpenMail() }],
+    actions: () => {
+      const mode = _todayAttMode();
+      const m = _TODAY_ATT_MODES[mode];
+      return [
+        { icon: m.icon(), title: `${m.title} — click for: ${_TODAY_ATT_MODES[_TODAY_COLLAPSE_NEXT[mode]].title.toLowerCase()}`,
+          run: _todayCycleAttMode },
+        { icon: SVGICONS.email(12, 12), title: 'Mail view', run: () => _todayOpenMail() },
+      ];
+    },
   },
   weather: {
     title: 'Weather',
@@ -673,8 +681,28 @@ function _todayCollapsed(bp = _todayBpFor(window.innerWidth)) {
 /** Show the collapsed state of the current size (after a size change or a config reload). */
 function _todayApplyCollapsed() {
   const set = _todayCollapsed();
-  for (const [tid, el] of _todayTileEls) el.classList.toggle('today-tile--collapsed', set.has(tid));
+  for (const [tid, el] of _todayTileEls) {
+    const was = el.classList.contains('today-tile--collapsed');
+    el.classList.toggle('today-tile--collapsed', set.has(tid));
+    if (was && !set.has(tid)) _todayReloadIfStale(tid);
+  }
   _todayScheduleFit();
+}
+
+// Collapsed tiles skip the automatic refresh (loadToday quiet); opening one whose content is older
+// than the refresh interval reloads it right away.
+const _todayTileLoadedAt = new Map();   // tile id → time of the last successful load
+
+/** Stale (pure): auto-refresh on (`minutes` > 0) and the last load at least that long ago. */
+function _todayTileStale(loadedAt, minutes, now) {
+  return minutes > 0 && now - (loadedAt || 0) >= minutes * 60_000;
+}
+
+function _todayReloadIfStale(id) {
+  const el = _todayTileEls.get(id);
+  if (el?.dataset.loaded !== '1' || !_todayLayout?.tiles.some(t => t.id === id)) return;
+  if (_todayTileStale(_todayTileLoadedAt.get(id), _todayRefreshMinutes(_todayCfg), Date.now()))
+    _todayLoadTile(id, { keepState: true });
 }
 
 // Saves run one after another (debounced); a config reload doesn't overwrite a change still being saved
@@ -939,9 +967,14 @@ async function loadToday({ quiet = false } = {}) {
   fetchedAt.classList.add('show');
   fetchedAt.textContent = 'Loading…';
   _todayRenderBar();
-  const ids = (_todayEdit?.draft || _todayLayout)?.tiles.map(t => t.id) || [];
+  let ids = (_todayEdit?.draft || _todayLayout)?.tiles.map(t => t.id) || [];
   if (_todayLoadedOnce) _todaySyncCollapsed();
   _todayLoadedOnce = true;
+  // Automatic refresh: collapsed tiles (already loaded) wait until they are opened again
+  if (quiet) ids = ids.filter(id => {
+    const el = _todayTileEls.get(id);
+    return !(el?.dataset.loaded === '1' && el.classList.contains('today-tile--collapsed'));
+  });
   const results = await Promise.all(ids.map(id => _todayLoadTile(id, { keepState: quiet })));
   fetchedAt.textContent = (results.includes(false) ? 'Partial load — ' : 'Refreshed at ') +
     new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1000,6 +1033,7 @@ async function _todayLoadTile(id, { keepState = false } = {}) {
     body.querySelectorAll('[data-hscroll]').forEach(_todayHScroll);
     if (st) _todayRestoreState(body, st);
     el.dataset.loaded = '1';
+    _todayTileLoadedAt.set(id, Date.now());
     return true;
   } catch (err) {
     // A failed background refresh keeps what is shown
@@ -1295,6 +1329,53 @@ async function _todaySetAgendaRange(days) {
 
 // ---- Needs attention ----
 
+// Entry mode of the header button (like the Today bar's widget-mode button, cycled in the same
+// order — _TODAY_COLLAPSE_NEXT), per browser in `localStorage` `today-att-mode`: 'closed' / 'open'
+// collapse / expand all entries once, 'one' keeps at most one entry open.
+const _TODAY_ATT_MODES = {
+  closed: { icon: () => SVGICONS.collapseAll(12, 12), title: 'All entries collapsed' },
+  open:   { icon: () => SVGICONS.expandAll(12, 12),   title: 'All entries open' },
+  one:    { icon: () => SVGICONS.accordion(12, 12),   title: 'One entry open at a time' },
+};
+
+function _todayAttMode() {
+  let m = null;
+  try { m = localStorage.getItem('today-att-mode'); } catch { /* ignore */ }
+  return _TODAY_ATT_MODES[m] ? m : 'open';
+}
+
+function _todayAttOpenState() {
+  try { return JSON.parse(localStorage.getItem('today-att-open') || '{}') || {}; } catch { return {}; }
+}
+
+function _todayAttStoreOpen(st) {
+  try { localStorage.setItem('today-att-open', JSON.stringify(st)); } catch { /* ignore */ }
+}
+
+/** Apply the entry mode to the rendered entries (closed = all shut, open = all open, one = only the
+ *  first open entry stays open) and remember the result. */
+function _todayAttApplyMode(body, mode) {
+  const list = [...body.querySelectorAll('details.today-att')];
+  const keep = mode === 'one' ? list.find(d => d.open) : null;
+  const st = _todayAttOpenState();
+  for (const d of list) {
+    const open = mode === 'open' || (mode === 'one' && d === keep);
+    d.open = open;
+    st[d.dataset.key] = open;
+  }
+  if (mode !== 'open') for (const k of Object.keys(st)) if (!list.some(d => d.dataset.key === k)) st[k] = false;
+  _todayAttStoreOpen(st);
+}
+
+function _todayCycleAttMode() {
+  const mode = _TODAY_COLLAPSE_NEXT[_todayAttMode()];
+  try { localStorage.setItem('today-att-mode', mode); } catch { /* ignore */ }
+  const el   = _todayTileEls.get('attention');
+  const body = el?.querySelector('.today-tile-body');
+  if (body) _todayAttApplyMode(body, mode);
+  _todaySetTileActions('attention');
+}
+
 async function _todayLoadAttention() {
   const [cards, mail] = await Promise.all([
     _todayFetchJson(_todayCardsUrl()),
@@ -1328,10 +1409,13 @@ function _todayRenderAttention(body, data, el) {
   const accNote  = list => accCount(list) > 1 ? ` <span class="today-muted">(${accCount(list)} accounts)</span>` : '';
 
   const rows = [];
+  const attMode = _todayAttMode();
+  const attOpen = _todayAttOpenState();
+  let attOneOpen = false;   // 'one' mode: only the first stored open entry
   const row = (key, cls, icon, count, label, listHtml, more = '') => {
     if (!count) return;
-    let open = false;
-    try { open = JSON.parse(localStorage.getItem('today-att-open') || '{}')[key] === true; } catch { /* ignore */ }
+    let open = attOpen[key] === true;
+    if (attMode === 'one') { open = open && !attOneOpen; attOneOpen ||= open; }
     rows.push(`<details class="today-att ${cls}" data-key="${key}"${open ? ' open' : ''}>
       <summary><span class="today-att-icon">${icon}</span><span class="today-att-count">${count}</span><span class="today-att-label">${label}</span>${more}</summary>
       <div class="today-att-list">${listHtml}</div>
@@ -1364,18 +1448,26 @@ function _todayRenderAttention(body, data, el) {
   const dueSoon = (cards.dueWeek || []).filter(it => it.card.endDate <= soonEnd);
   row('soon', 'today-att--soon', '\u25d4', dueSoon.length, `due in the next ${_TODAY_SOON_DAYS === 1 ? 'day' : `${_TODAY_SOON_DAYS} days`}`,
     cardsHtml(dueSoon) + moreNote(Math.min(15, dueSoon.length), dueSoon.length));
+  // Open cards of every TODO column ("TODO", "ToDo", "To Do" …) in all active boards
+  const todoCount = cards.counts.todo || 0;
+  row('todo', 'today-att--todo', '☐', todoCount, todoCount === 1 ? 'todo card' : 'todo cards',
+    cardsHtml(cards.todo || []) + moreNote(Math.min(15, (cards.todo || []).length), todoCount));
   row('new', 'today-att--new', '✱', cards.counts.unread, cards.counts.unread === 1 ? 'new card' : 'new cards',
     cardsHtml(cards.unread) + moreNote(Math.min(15, cards.unread.length), cards.counts.unread));
   const mailErrors = _mailAccountsMeta.filter(a => a.error).map(a => `<div class="dashboard-source-error">⚠ ${escHtml(a.label || a.accountId)}: ${escHtml(a.error)}</div>`).join('');
 
-  _todaySetCount(el, unreadMail.length + flaggedTotal + cards.counts.overdue + cards.counts.dueToday + dueSoon.length + cards.counts.unread);
+  _todaySetCount(el, unreadMail.length + flaggedTotal + cards.counts.overdue + cards.counts.dueToday + dueSoon.length + todoCount + cards.counts.unread);
   body.innerHTML = mailErrors + (rows.length ? rows.join('') : `<p class="today-all-clear">${ICONS.done} All clear</p>`);
   body.querySelectorAll('details.today-att').forEach(d => d.addEventListener('toggle', () => {
-    try {
-      const st = JSON.parse(localStorage.getItem('today-att-open') || '{}');
-      st[d.dataset.key] = d.open;
-      localStorage.setItem('today-att-open', JSON.stringify(st));
-    } catch { /* ignore */ }
+    const st = _todayAttOpenState();
+    st[d.dataset.key] = d.open;
+    // One at a time: opening an entry closes the others
+    if (d.open && _todayAttMode() === 'one') {
+      body.querySelectorAll('details.today-att[open]').forEach(o => {
+        if (o !== d) { o.open = false; st[o.dataset.key] = false; }
+      });
+    }
+    _todayAttStoreOpen(st);
   }));
   body.querySelectorAll('[data-act="mailview"]').forEach(b => b.addEventListener('click', () => _todayOpenMail()));
   _todaySwipeOpen = null;

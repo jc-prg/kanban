@@ -5,6 +5,11 @@ const { DB_PREFIX, DOC_ID } = require('../config');
 
 const MAX_PER_LIST = 50;
 
+/** TODO columns: "TODO", "ToDo", "To Do", "to-do" … (case, spaces and hyphens ignored). */
+function isTodoColumn(title) {
+  return String(title || '').toLowerCase().replace(/[\s_-]+/g, '') === 'todo';
+}
+
 function _addDays(ymd, n) {
   const d = new Date(`${ymd}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
@@ -28,10 +33,12 @@ function classifyBoardCards(board, doc, today, out) {
   const tomorrow = _addDays(today, 1);
   const weekEnd  = _addDays(today, 6);   // 7 days incl. today
   for (const col of doc.columns || []) {
+    const todo = isTodoColumn(col.title);
     for (const card of col.cards || []) {
       if ((card.text || '').startsWith('#')) continue;   // section headers
       if (card.unread) out.unread.push(_item(board, col, card));
       if (card.done) continue;
+      if (todo) out.todo.push(_item(board, col, card));
       if (card.endDate) {
         if (card.endDate < today)          out.overdue.push(_item(board, col, card));
         else if (card.endDate === today)   out.dueToday.push(_item(board, col, card));
@@ -49,7 +56,7 @@ async function fetchTodayCards(today) {
   const dbs    = await couch.db.list();
   const boards = dbs.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
   // dueWeek / startsWeek: tomorrow … today + 6 (agenda in 7-day mode)
-  const out = { overdue: [], dueToday: [], startsToday: [], dueTomorrow: [], dueWeek: [], startsWeek: [], unread: [] };
+  const out = { overdue: [], dueToday: [], startsToday: [], dueTomorrow: [], dueWeek: [], startsWeek: [], unread: [], todo: [] };
   await Promise.allSettled(boards.map(async board => {
     const doc = await couch.use(DB_PREFIX + board).get(DOC_ID);
     if (doc.settings?.archived) return;
@@ -60,10 +67,12 @@ async function fetchTodayCards(today) {
   for (const k of ['dueToday', 'startsToday', 'dueTomorrow']) out[k].sort((a, b) => (a.card.priority || 9) - (b.card.priority || 9));
   out.dueWeek.sort(byDate('endDate'));
   out.startsWeek.sort(byDate('startDate'));
+  // TODO: board by board, column order kept within a board
+  out.todo.sort((a, b) => a.board.localeCompare(b.board));
   out.unread.sort((a, b) => (b.card.created || '').localeCompare(a.card.created || ''));
   const counts = {};
   for (const k of Object.keys(out)) { counts[k] = out[k].length; out[k] = out[k].slice(0, MAX_PER_LIST); }
   return { ...out, counts, date: today };
 }
 
-module.exports = { fetchTodayCards, classifyBoardCards, cardItem: _item };
+module.exports = { fetchTodayCards, classifyBoardCards, isTodoColumn, cardItem: _item };

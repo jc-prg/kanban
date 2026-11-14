@@ -356,7 +356,34 @@ button.mv-att-name:hover { color: var(--accent); }
 
 /* ---- Compose ---- */
 
-.mv-compose { display: flex; flex-direction: column; gap: 10px; min-height: 100%; }
+/* The form fills the reader pane: only the editor scrolls, so the toolbar and the Send row stay in sight */
+.mailview-reader:has(> .mv-compose) { overflow: hidden; }
+.mv-compose { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; }
+.mv-compose > :not(.mv-editor) { flex-shrink: 0; }
+/* Fields folded to one line while the message needs the room (_mvFitCompose); a click opens them */
+.mv-compose--folded .mv-compose-fields { display: none; }
+.mv-compose-summary { display: none; }
+.mv-compose--folded .mv-compose-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.mv-compose-summary:hover { border-color: var(--accent); }
+.mv-compose-summary-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-compose-summary-text b { font-weight: 600; color: var(--text-muted); margin-right: 4px; }
+.mv-compose-summary-text .mv-account-swatch { margin-right: 4px; vertical-align: -1px; }
+.mv-compose-summary-caret { color: var(--text-muted); font-size: 0.7rem; }
 .mv-compose.mv-drop { outline: 2px dashed var(--accent); outline-offset: 4px; border-radius: 6px; }
 .mv-compose-fields {
   display: grid;
@@ -435,6 +462,39 @@ button.mv-att-name:hover { color: var(--accent); }
 .mv-toolbar button:hover { border-color: var(--border); background: var(--surface); }
 .mv-toolbar-sep { width: 1px; background: var(--border); margin: 2px 4px; }
 .mv-emoji-wrap { position: relative; display: inline-flex; }
+/* Font / size / colour menus (_mvFontToolsHtml) — same popup look as the emoji picker */
+.mv-fmt-wrap { position: relative; display: inline-flex; }
+.mv-toolbar .mv-fmt-toggle { gap: 3px; }
+.mv-fmt-toggle[aria-expanded="true"] { border-color: var(--border); background: var(--surface); }
+.mv-fmt-caret { font-size: 0.6rem; color: var(--text-muted); }
+.mv-fmt-face { font-family: Georgia, serif; }
+.mv-fmt-size { font-weight: 600; }
+.mv-fmt-size small { font-size: 0.7em; }
+.mv-fmt-color { display: inline-flex; flex-direction: column; align-items: center; font-weight: 600; line-height: 1.1; }
+.mv-fmt-color-bar { width: 14px; height: 3px; border-radius: 1px; background: var(--text); }
+.mv-fmt-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 170px;
+  max-width: calc(100vw - 32px);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.mv-fmt-pop[hidden] { display: none; }
+.mv-toolbar .mv-fmt-opt { justify-content: space-between; gap: 12px; padding: 4px 8px; white-space: nowrap; line-height: 1.3; }
+.mv-fmt-opt small { font-family: 'DM Mono', monospace; font-size: 0.66rem; color: var(--text-muted); }
+.mv-fmt-pop--color { flex-direction: row; flex-wrap: wrap; width: 176px; min-width: 0; gap: 4px; padding: 6px; }
+.mv-toolbar .mv-fmt-opt--wide { width: 100%; justify-content: center; font-size: 0.75rem; }
+.mv-toolbar .mv-fmt-swatch { width: 22px; height: 22px; padding: 0; border-radius: 4px; background: var(--swatch); border: 1px solid rgba(0, 0, 0, 0.15); }
+.mv-toolbar .mv-fmt-swatch:hover { background: var(--swatch); outline: 2px solid var(--accent); outline-offset: 1px; }
 .mv-toolbar .mv-emoji-toggle { font-size: 0.95rem; padding: 1px 6px; }
 .mv-emoji-toggle[aria-expanded="true"] { border-color: var(--border); background: var(--surface); }
 .mv-emoji-pop {
@@ -465,15 +525,18 @@ button.mv-att-name:hover { color: var(--accent); }
 .mv-toolbar .mv-emoji-grid button { justify-content: center; padding: 3px 0; font-size: 1.25rem; line-height: 1.2; }
 .mv-editor {
   flex: 1;
-  min-height: 220px;
+  min-height: 80px;
+  overflow-y: auto;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 0 0 6px 6px;
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, sans-serif;
-  font-size: 0.9rem;
-  line-height: 1.55;
+  /* Same metrics as the reader (dashboard.js _renderMailHtml) and the inline styles of the sent HTML
+     (_mvComposeHtml in mailview.js) — what is written looks the same once sent */
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
   outline: none;
 }
@@ -481,12 +544,13 @@ button.mv-att-name:hover { color: var(--accent); }
 /* Dark mode: the message is written on white — as the recipient will most likely see it */
 @media (prefers-color-scheme: dark) {
   .mv-editor { background: #fff; color: #1a1a2e; color-scheme: light; caret-color: #1a1a2e; }
-  .mv-editor blockquote { border-left-color: #d0d0de; color: #707088; }
+  .mv-editor blockquote { border-left-color: #ddd; color: #555; }
   .mv-editor a { color: #2563eb; }
 }
-.mv-editor p { margin: 0; }
-.mv-editor blockquote { margin: 6px 0; padding: 0 0 0 12px; border-left: 3px solid var(--border); color: var(--text-muted); }
-.mv-editor ul, .mv-editor ol { margin: 4px 0; padding-left: 24px; }
+/* The lines written here (top level) — a quoted / forwarded original keeps its own spacing, as in the reader */
+.mv-editor > p { margin: 0; }
+.mv-editor > ul, .mv-editor > ol { margin: 4px 0; padding-left: 24px; }
+.mv-editor blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--text-muted); }
 .mv-editor a { color: var(--link); }
 .mv-editor img { max-width: 100%; height: auto; }
 .mv-compose-files { display: flex; flex-wrap: wrap; gap: 6px; }

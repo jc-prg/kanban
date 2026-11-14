@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Today page unit tests — TU-1 … TU-31
+ * Today page unit tests — TU-1 … TU-36
  *
  * today.js is loaded via vm.runInContext with minimal browser-global stubs; only the pure
  * helpers are exercised (layout resolution / folding, agenda model, weather mapping, ISO week).
@@ -402,6 +402,32 @@ test('TU-25 widget mode: _todayCollapsedForMode — all collapsed, all open, one
   expect([...ctx._todayCollapsedForMode('one', ids, set())]).toEqual(['attention', 'progress'])
   expect([...ctx._todayCollapsedForMode('one', ids, set('agenda'))]).toEqual(['agenda', 'progress'])
   expect([...ctx._todayCollapsedForMode('one', ids, set(...ids))]).toEqual(ids)   // none open: all stay collapsed
+})
+
+test('TU-35 Needs attention entry mode: closed / open / one applied to the entries', () => {
+  const entries = (...open) => ['mail', 'todo', 'new'].map((key, i) => ({ dataset: { key }, open: open[i] }))
+  const body = list => ({ querySelectorAll: () => list })
+  const state = list => list.map(d => d.open)
+  let l = entries(true, false, true)
+  ctx._todayAttApplyMode(body(l), 'closed')
+  expect(state(l)).toEqual([false, false, false])
+  ctx._todayAttApplyMode(body(l), 'open')
+  expect(state(l)).toEqual([true, true, true])
+  l = entries(false, true, true)
+  ctx._todayAttApplyMode(body(l), 'one')
+  expect(state(l)).toEqual([false, true, false])   // the first open entry stays open
+  l = entries(false, false, false)
+  ctx._todayAttApplyMode(body(l), 'one')
+  expect(state(l)).toEqual([false, false, false])
+})
+
+test('TU-36 _todayTileStale: stale once the refresh interval has passed since the last load; never with auto-refresh off', () => {
+  const now = 10 * 60_000
+  expect(ctx._todayTileStale(now - 60_000, 1, now)).toBe(true)
+  expect(ctx._todayTileStale(now - 59_000, 1, now)).toBe(false)
+  expect(ctx._todayTileStale(now - 4 * 60_000, 5, now)).toBe(false)
+  expect(ctx._todayTileStale(undefined, 1, now)).toBe(true)
+  expect(ctx._todayTileStale(0, 0, now)).toBe(false)
 })
 
 test('TU-26 Stickies tile: registered; slot angles ±1.5° … ±6°, distinct, shifted on every flip', () => {

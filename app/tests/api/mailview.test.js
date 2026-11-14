@@ -291,6 +291,28 @@ test('MVA-31 address lists — display names with specials are quoted, so "Doe, 
   expect(res.body.to).toBe('"Say \\"Hi\\"" <hi@ex.com>, Bob <bob@ex.com>, x@ex.com')
 })
 
+test('MVA-42 GET message — attachments carry the Content-ID; inline images without a file name get one', async () => {
+  const m = _msg(44)
+  m.bodyStructure = {
+    type: 'multipart/related',
+    childNodes: [
+      { part: '1', type: 'text/html', encoding: '7bit' },
+      { part: '2', type: 'image/png', encoding: 'base64', size: 8, id: '<img1@ex.com>', disposition: 'inline', dispositionParameters: { filename: 'PastedGraphic-1.png' } },
+      { part: '3', type: 'image/svg+xml', encoding: 'base64', size: 8, id: '<logo@ex.com>' },
+      { part: '4', type: 'application/pdf', encoding: 'base64', size: 8, dispositionParameters: { filename: 'report.pdf' } },
+    ],
+  }
+  m.bodyParts = new Map([['1', Buffer.from('<p>Hi</p>')]])
+  imap.messages = [m]
+  const res = await request(app).get(`${API}/message/44`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.attachments).toEqual([
+    { part: '2', name: 'PastedGraphic-1.png', type: 'image/png', size: 6, cid: 'img1@ex.com' },
+    { part: '3', name: 'image-3.svg', type: 'image/svg+xml', size: 6, cid: 'logo@ex.com' },
+    { part: '4', name: 'report.pdf', type: 'application/pdf', size: 6 },
+  ])
+})
+
 test('MVA-10 PATCH / move with ?folder= — operate in that folder; default stays account folder', async () => {
   await request(app).patch(`${API}/message/7?folder=Projects`).set(AUTH).send({ seen: true })
   expect(calls('lock').at(-1)[1]).toBe('Projects')

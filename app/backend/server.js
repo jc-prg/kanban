@@ -66,14 +66,17 @@ const site = express.Router();
 const SPA_HTML = path.join(__dirname, '..', 'frontend', 'index.html');
 // index.html references assets with root-absolute URLs; prefix them with
 // BASE_PATH and expose it to the frontend via <meta name="base-path">.
-// TEST_INSTANCE=1 adds a "Test" label to the header.
+// TEST_INSTANCE=1 adds a "Test" label to the header and "[TEST] " to the page title
+// (<meta name="test-instance"> — state.js keeps the prefix when the frontend changes the title).
 async function sendSpa(req, res, next) {
   try {
     let html = (await fs.promises.readFile(SPA_HTML, 'utf8'))
       .replace(/(\s(?:href|src))="\/(?!\/)/g, `$1="${BASE_PATH}/`)
       .replace('<head>', `<head>\n<meta name="base-path" content="${BASE_PATH}">`);
     if (TEST_INSTANCE)
-      html = html.replace('<header>', '<header>\n  <span class="test-instance-label" title="Test instance (TEST_INSTANCE=1)">Test</span>');
+      html = html.replace('<header>', '<header>\n  <span class="test-instance-label" title="Test instance (TEST_INSTANCE=1)">Test</span>')
+        .replace('<head>', '<head>\n<meta name="test-instance" content="1">')
+        .replace('<title>', '<title>[TEST] ');
     res.type('html').send(html);
   } catch (err) { next(err); }
 }

@@ -479,15 +479,21 @@ function _insertCardAttachMd(name, type) {
   insertAtCursor('cardDesc', md);
 }
 
+// Add-to-inbox dialog opened from a mail: name → URL of the mail attachment the card will get. The
+// preview shows those images at once — they reach the card only in the background or on saving.
+let _inboxAttachSources = null;
+
 async function resolveCardAttachments(container, cardId = null) {
   const id = cardId ?? _activeCardId();
-  if (!id || !_cardAttachBase()) return;
-  const base = `${_cardAttachBase()}/${id}`;
+  const sources = cardId == null && modalMode === 'inbox' ? _inboxAttachSources : null;
+  const base = id && _cardAttachBase() ? `${_cardAttachBase()}/${id}` : null;
+  if (!base && !sources) return;
   for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
     const fn = img.getAttribute('src').slice('attachment:'.length);
     try {
-      const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
-      if (!r.ok) continue;
+      let r = sources?.has(fn) ? await fetch(sources.get(fn)) : null;
+      if (!r?.ok && base) r = await fetch(`${base}/${encodeURIComponent(fn)}`);
+      if (!r?.ok) continue;
       const obj = URL.createObjectURL(await r.blob());
       if (_attachType(fn) === 'pdf') {
         const embed = document.createElement('embed');
@@ -502,7 +508,8 @@ async function resolveCardAttachments(container, cardId = null) {
   }
   for (const a of container.querySelectorAll('a[href^="attachment:"]')) {
     const fn = a.getAttribute('href').slice('attachment:'.length);
-    const url = `${base}/${encodeURIComponent(fn)}`;
+    const url = sources?.get(fn) || (base && `${base}/${encodeURIComponent(fn)}`);
+    if (!url) continue;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
     const ft = _attachType(fn);
@@ -927,6 +934,7 @@ function submitCard() {
 async function openInboxModal(preselectedBoard, prefill = null, onSuccess = null, preselectedColumn = null, existingTempCardId = null) {
   _inboxOnSuccess = onSuccess;
   _inboxExtra     = prefill?.extra || null;
+  _inboxAttachSources = prefill?.attachmentSources || null;
   // Set up a fresh temp card ID for inbox attachments; cancel any leftover cleanup timer
   _cancelInboxTempTimer();
   if (_inboxTempCardId && _inboxTempBoard && _inboxTempCardId !== existingTempCardId) {

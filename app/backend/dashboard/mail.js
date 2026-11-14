@@ -182,6 +182,13 @@ async function fetchMailAccount(account, { withFlagged = false } = {}) {
  * Root single-part messages have no .part property; BODY[1] is the correct
  * section for them.
  */
+/** File extension for an image MIME type (image/svg+xml → svg, image/jpeg → jpg). */
+function _imageExt(type) {
+  const sub = String(type || '').split('/')[1]?.toLowerCase() || '';
+  return { 'svg+xml': 'svg', jpeg: 'jpg', pjpeg: 'jpg', 'x-icon': 'ico', 'vnd.microsoft.icon': 'ico' }[sub]
+    || sub.replace(/[^a-z0-9]/g, '').slice(0, 5) || 'img';
+}
+
 function _findBodyParts(struct) {
   let text = null, html = null;
   const attachments = [];
@@ -192,12 +199,17 @@ function _findBodyParts(struct) {
     const charset = (node.parameters?.charset || '').toLowerCase();
     if (node.type === 'text/plain' && !text && part) text = { part, encoding: (node.encoding || '7bit').toLowerCase(), charset };
     if (node.type === 'text/html'  && !html && part) html = { part, encoding: (node.encoding || '7bit').toLowerCase(), charset };
-    const name = node.dispositionParameters?.filename || node.parameters?.name;
+    // Content-ID: inline images are referenced from the HTML as <img src="cid:…">
+    const cid = typeof node.id === 'string' ? node.id.trim().replace(/^<|>$/g, '') : '';
+    const isImage = /^image\//i.test(node.type || '');
+    // Inline images may come without a file name — named after their part then
+    const name = node.dispositionParameters?.filename || node.parameters?.name ||
+      (cid && isImage ? `image-${String(part).replace(/\./g, '-')}.${_imageExt(node.type)}` : '');
     if (part && name) {
       const encoding = (node.encoding || 'base64').toLowerCase();
       // bodyStructure reports the encoded size; base64 inflates by 4/3
       const size = Math.round((node.size || 0) * (encoding === 'base64' ? 0.75 : 1));
-      attachments.push({ part, name, type: node.type || 'application/octet-stream', encoding, size });
+      attachments.push({ part, name, type: node.type || 'application/octet-stream', encoding, size, ...(cid ? { cid } : {}) });
     }
     (node.childNodes || []).forEach(c => visit(c, false));
   }
@@ -313,7 +325,7 @@ async function fetchMailMessage(account, uid, folder) {
       flagColor:   flagColor(meta.flags),
       bodyHtml,
       body,
-      attachments: attachments.map(a => ({ name: a.name, part: a.part, type: a.type, size: a.size })),
+      attachments: attachments.map(a => ({ name: a.name, part: a.part, type: a.type, size: a.size, ...(a.cid ? { cid: a.cid } : {}) })),
     };
   });
 }

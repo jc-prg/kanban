@@ -1832,18 +1832,26 @@ async function _createCardFromMail(accountId, msgId, boardName = null, { folder 
       if (msg.date)    headerLines.push(`**Date:** ${new Date(msg.date).toLocaleString()}`);
       if (msg.subject) headerLines.push(`**Subject:** ${msg.subject}`);
 
+      // HTML mails keep their formatting as Markdown (mail-markdown.js); plain text as is. Attached
+      // images are embedded (![name](attachment:name)) — inline ones where the mail shows them, the
+      // others below the text; the attachments are copied to the card below
+      const atts = msg.attachments || [];
+      const used = new Set();
       let bodyText = '';
       if (msg.bodyHtml) {
         try {
-          bodyText = new DOMParser()
-            .parseFromString(msg.bodyHtml, 'text/html')
-            .body.innerText.trim();
+          bodyText = _mailHtmlToMarkdown(msg.bodyHtml, { attachments: atts, used }) || msg.body || '';
         } catch {
           bodyText = msg.body || '';
         }
       } else {
         bodyText = msg.body || '';
       }
+      const images = _mailImageAttachmentsMd(atts, used);
+      if (images) bodyText = bodyText ? `${bodyText}\n\n${images}` : images;
+      // The dialog's preview loads them from the mail until they are copied to the card
+      const attBase = `/api/dashboard/mail/${encodeURIComponent(accountId)}/message/${encodeURIComponent(msgId)}/attachment/`;
+      prefill.attachmentSources = new Map(atts.map(att => [_mailAttachName(att.name), attBase + encodeURIComponent(att.part) + folderQs]));
 
       prefill.description = headerLines.join('  \n') +
         (bodyText ? '\n\n---\n\n' + bodyText : '');

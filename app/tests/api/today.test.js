@@ -182,9 +182,25 @@ test('TD-8 cards widget: overdue / due / starts / tomorrow / unread across board
   expect(ids('dueWeek')).toEqual(['d', 'g'])
   expect(ids('startsWeek')).toEqual(['g'])
   expect(ids('unread')).toEqual(['f'])
-  expect(res.body.counts).toEqual({ overdue: 1, dueToday: 1, startsToday: 1, dueTomorrow: 1, dueWeek: 2, startsWeek: 1, unread: 1 })
+  expect(res.body.counts).toEqual({ overdue: 1, dueToday: 1, startsToday: 1, dueTomorrow: 1, dueWeek: 2, startsWeek: 1, unread: 1, todo: 7 })
   expect(res.body.overdue[0]).toMatchObject({ board: 'work', column: 'TODO' })
   expect(res.body.dueToday[0].card.description).toBe(false)
+})
+
+test('TD-23 cards widget: open cards of TODO columns ("TODO", "To Do", "to-do") across active boards', async () => {
+  for (const k of Object.keys(boards)) delete boards[k]
+  boards.b = { columns: [
+    { id: 'c1', title: 'To Do', cards: [card('b1'), card('b2', { done: true }), { id: 'bh', text: '# Section' }] },
+    { id: 'c2', title: 'Doing', cards: [card('b3')] },
+  ] }
+  boards.a = { columns: [{ id: 'c1', title: 'to-do', cards: [card('a1')] }, { id: 'c2', title: 'TODOS', cards: [card('a2')] }] }
+  boards.z = { settings: { archived: true }, columns: [{ id: 'c1', title: 'TODO', cards: [card('z1')] }] }
+
+  const res = await request(app).get('/api/today/widgets/cards?date=2026-11-10')
+  expect(res.status).toBe(200)
+  expect(res.body.todo.map(i => i.card.id)).toEqual(['a1', 'b1'])
+  expect(res.body.counts.todo).toBe(2)
+  expect(res.body.todo[1]).toMatchObject({ board: 'b', column: 'To Do' })
 })
 
 test('TD-9 weather widget: 400 without location', async () => {

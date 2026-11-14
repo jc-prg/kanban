@@ -9,6 +9,16 @@ const APP_PATH   = (() => {
   return BASE_PATH && (p === BASE_PATH || p.startsWith(BASE_PATH + '/')) ? (p.slice(BASE_PATH.length) || '/') : p;
 })();
 
+// Test instance (server: TEST_INSTANCE=1 → <meta name="test-instance">): every page title starts
+// with "[TEST] ", also after the frontend sets document.title (board, card, note, Today)
+(() => {
+  const title = document.querySelector?.('title');
+  if (!title || !document.querySelector('meta[name="test-instance"]')) return;
+  const mark = () => { if (!document.title.startsWith('[TEST] ')) document.title = `[TEST] ${document.title}`; };
+  mark();
+  new MutationObserver(mark).observe(title, { childList: true, characterData: true, subtree: true });
+})();
+
 // Board URLs are /board/<name>; special views (/today, /inbox) are top-level.
 const _pathSegs  = APP_PATH.split('/').filter(Boolean);
 const _isBoard   = _pathSegs[0] === 'board' && _pathSegs.length > 1;

@@ -304,6 +304,7 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-att--soon   .today-att-icon, .today-att--soon   .today-att-count { color: #eab308; }
 .today-att--soon   .today-row-date { color: #eab308; }
 .today-att--mail   .today-att-icon, .today-att--mail   .today-att-count { color: var(--link); }
+.today-att--todo   .today-att-icon, .today-att--todo   .today-att-count { color: var(--accent); }
 .today-att--new    .today-att-icon, .today-att--new    .today-att-count { color: var(--unread); }
 .today-att--flagged .today-att-icon, .today-att--flagged .today-att-count { color: #ff9500; }
 .today-att-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px 4px; }
@@ -384,6 +385,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-app-row { align-items: flex-start; cursor: default; padding-top: 10px; padding-bottom: 10px; }
 .today-app-row + .today-app-row,
 .today-swipe + .today-swipe > .today-mail-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
+/* Needs attention: the mail list also gets a line before the first and after the last mail */
+.today-att-list > .today-swipe:not(.today-swipe + .today-swipe) > .today-mail-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
+.today-att-list > .today-swipe:not(:has(+ .today-swipe)) > .today-mail-row { border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0; }
 /* Entry: position / company / status line — one line each, cut with … when too long */
 .today-app-line { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .today-app-title { line-height: 1.35; }
