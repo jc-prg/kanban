@@ -52,7 +52,49 @@ body.mailview-open header { z-index: 96; }
   border-radius: 2px;
   background: var(--card-color, var(--accent));
 }
-.mailview-listsearch { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+.mailview-listsearch { position: relative; display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+/* Sort / filter button + popup next to the search field */
+.mv-listopts-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.mv-listopts-btn:hover, .mv-listopts-btn[aria-expanded="true"] { background: var(--surface2); color: var(--text); }
+.mv-listopts-btn--on { color: var(--accent); border-color: var(--accent); }
+.mv-listopts {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% - 4px);
+  right: 8px;
+  width: min(250px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 6px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;   /* box: menu format in panel.css */
+}
+.mv-listopts[hidden], .mv-listopts [hidden] { display: none; }
+.mv-listopts-sec {
+  margin-top: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.mv-listopts-opt { display: flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; }
+.mv-listopts-input { width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 0.82rem; }
+.mv-listopts-dates { display: flex; flex-direction: column; gap: 4px; }
+.mv-listopts-dates > span { font-size: 0.75rem; color: var(--text-muted); }
+.mv-listopts-reset { align-self: flex-end; margin-top: 8px; padding: 3px 10px; font-size: 0.78rem; }
 .mailview-search { flex: 1; min-width: 0; box-sizing: border-box; padding: 6px 10px; }
 #mailViewCompose:disabled { opacity: 0.5; cursor: not-allowed; }
 .mailview-bar .calview-navbtn { display: inline-flex; align-items: center; justify-content: center; padding: 7px 10px; }
@@ -240,7 +282,11 @@ body.mailview-open header { z-index: 96; }
 .mv-msg.selected.active { background: color-mix(in srgb, var(--accent) 18%, transparent); border-left-color: var(--accent); }
 .mv-msg .card-meta { flex-wrap: nowrap; }
 .mv-msg-answered { font-size: 0.7rem; }
-.mv-load-more { display: block; margin: 10px auto; }
+/* Trusted badge right behind the sender: the sender only takes its width (still cut with …), the date keeps right */
+.mv-msg .dashboard-mail-from { flex: 0 1 auto; }
+.mv-msg .mail-trusted-badge { flex-shrink: 0; margin-left: -1px; vertical-align: 0; }
+.mv-msg .card-meta > .card-date { margin-left: auto; }
+.mv-load-more { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 10px; }
 
 /* Swipe actions (phones): the row slides, each action layer fills the freed space */
 .mv-msg-wrap { position: relative; overflow: hidden; }
@@ -289,13 +335,13 @@ body.mailview-open header { z-index: 96; }
 .mv-reader-head { display: flex; align-items: flex-start; gap: 8px; }
 .mv-back { display: none; padding: 4px 10px; font-size: 1rem; line-height: 1; }
 .mv-subject { margin: 0 0 10px; font-size: 1.05rem; font-weight: 600; line-height: 1.35; word-break: break-word; }
-.mv-reader-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; container: mv-actions / inline-size; }
-/* Toolbar narrower than 670 px (narrow reader pane or phone): icons only — label stays as tooltip / aria-label */
-@container mv-actions (max-width: 669px) {
-  .mv-act-label { display: none; }
-}
-.mv-reader-actions .btn { padding: 5px 10px; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 5px; }
+.mv-reader-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+/* Icons only at every width — the label stays as tooltip / aria-label (and in the markup for screen readers) */
+.mv-act-label { display: none; }
+.mv-reader-actions .btn { padding: 5px 7px; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 28px; }
 .mv-reader-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Groups: Reply / Reply all / Forward · Mark read / Flag / Move / Delete · TXT / (i) / background */
+.mv-reader-actions [data-mv-act="unread"], .mv-reader-actions [data-mv-act="delete"] + .btn { margin-left: 10px; }
 .mv-flag-icon { display: inline-flex; }
 .btn-danger-soft:hover { border-color: var(--danger); color: var(--danger); }
 .mv-reader-actions .mv-source-btn { padding: 5px 7px; }
@@ -713,3 +759,25 @@ button.mv-att-name:hover { color: var(--accent); }
   text-align: left;
 }
 .mv-hidden-toggle:hover { color: var(--text); text-decoration: underline; }
+
+/* Animated "Loading..." of the message list ("" → "." → ".." → "...") */
+.mv-loading-dots { display: inline-block; width: 1.2em; text-align: left; }
+.mv-loading-dots::after { content: ''; animation: mv-loading-dots 1.2s linear infinite; }
+@keyframes mv-loading-dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+}
+@media (prefers-reduced-motion: reduce) { .mv-loading-dots::after { animation: none; content: '...'; } }
+
+/* Mail body in dark mode: background of the app header (--bg) with white text (iframe document styled by
+   _mailDarkStyle in dashboard.js); the sun / moon button in the reader toolbar switches to white (_mvToggleLight) */
+.mv-reader-body .dashboard-mail-iframe.mail-body--dark { background: var(--bg); }
+.mv-reader-body .dashboard-mail-body.mail-body--dark {
+  background: var(--bg);
+  color: #fff;
+  padding: 12px;
+  border-top: none;
+  border-radius: 6px;
+}

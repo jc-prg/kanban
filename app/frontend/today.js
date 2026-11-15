@@ -542,8 +542,10 @@ async function initToday() {
   }
   document.getElementById('todayGrid').addEventListener('toggle', _todayScheduleFit, true);   // <details>
 
+  // ?cal= / ?mail= (reload, deep link): the view first — it covers Today — then the bar and the tiles behind it
+  await _overlayViewsFromUrl();
   _todayRenderBar();
-  _todayRelayout();
+  _todayRelayout({ load: false });   // grid only: loadToday below loads every tile once
   // /today?edit=1 (Settings → Today → "Edit layout"): start in edit mode
   const url = new URL(window.location.href);
   if (url.searchParams.get('edit') === '1') {
@@ -560,8 +562,6 @@ async function initToday() {
     openInboxModal(preselect, null, () => _todayRefresh('cards'));
   }
   await loadToday();
-  _cvInitFromUrl();
-  _mvInitFromUrl();
 }
 
 async function _todayOpenCal(mode) {
@@ -616,7 +616,8 @@ function _todayViewportWidth() {
 }
 
 /** Re-resolve the layout for the current viewport and apply it if it changed. */
-function _todayRelayout() {
+/** Apply the layout of the current breakpoint; `load`: tiles that just became visible fetch their data. */
+function _todayRelayout({ load = true } = {}) {
   const width  = _todayViewportWidth();
   const bp     = _todayBpFor(window.innerWidth);
   const layout = _todayResolveLayout(_todayCfg?.layouts, bp, _todayKnownTiles(), width);
@@ -628,7 +629,7 @@ function _todayRelayout() {
     const before = new Set([...document.querySelectorAll('#todayGrid .today-tile')].map(el => el.dataset.tile));
     _todayApplyLayout(layout);
     // Tiles that just became visible need data
-    for (const t of layout.tiles) if (!before.has(t.id) && _todayTileEls.get(t.id)?.dataset.loaded !== '1') _todayLoadTile(t.id);
+    if (load) for (const t of layout.tiles) if (!before.has(t.id) && _todayTileEls.get(t.id)?.dataset.loaded !== '1') _todayLoadTile(t.id);
   }
   _todayMeasure();
 }
@@ -962,7 +963,7 @@ async function loadToday({ quiet = false } = {}) {
     return;
   }
   _todayFetchMemo = new Map();
-  if (!quiet) _todayWeatherCache = null;   // manual refresh / settings change: fresh weather
+  if (!quiet && _todayLoadedOnce) _todayWeatherCache = null;   // manual refresh / settings change: fresh weather (the first load reuses the bar's)
   _todayStale = false;
   const fetchedAt = document.getElementById('dashboardFetchedAt');
   clearTimeout(_fetchedAtTimer);

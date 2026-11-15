@@ -10,9 +10,10 @@ const { getCouch, withHandler }                   = require('../db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID }         = require('../config');
 const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendarUrlCache,
         buildIcs, fetchRawIcs, patchMasterIcs, buildOccurrenceOverrideIcs, buildDeleteOccurrenceIcs,
-        addCardRefIcs, resolveEventUrl, hrefToUrl } = require('../dashboard/calendar');
+        addCardRefIcs, resolveEventUrl, hrefToUrl, parseEvents } = require('../dashboard/calendar');
+const { decodeText } = require('../charset');
 const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
-const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, testMailAccount,
+const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, MAIL_SORTS, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
         markMailMessage, flagMailMessage, MAIL_FLAG_COLORS, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
 
@@ -359,6 +360,51 @@ router.get('/dashboard/mail/:accountId/message/:uid/attachment/:part', withHandl
   res.send(att.data);
 }));
 
+const _ICS_MAX_BYTES = 1024 * 1024;
+
+/** Calendar attachment (text/calendar, application/ics, *.ics). */
+function _isIcsAttachment(att) {
+  return /^(text\/calendar|application\/(ics|x-ics|calendar))$/i.test(att.type || '') || /\.(ics|ical|ifb|vcs)$/i.test(att.name || '');
+}
+
+// GET /api/dashboard/mail/:accountId/message/:uid/attachment/:part/event — the events of an ICS attachment
+// (mail view / detail panel "Add to calendar") → { method, events: [{ uid, title, start, end, allDay, location,
+// description, organizer, timezone, rruleStr }] }; 422 when the attachment is no (readable) calendar file
+router.get('/dashboard/mail/:accountId/message/:uid/attachment/:part/event', withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
+  const { part } = req.params;
+  if (!/^[\d.]+$/.test(part)) return res.status(400).json({ error: 'Invalid part' });
+
+  let att;
+  try {
+    att = await fetchMailAttachment(ctx.account, req.params.uid, part, ctx.folder);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  if (!att) return res.status(404).json({ error: 'Attachment not found' });
+  if (!_isIcsAttachment(att)) return res.status(422).json({ error: 'Not a calendar file' });
+  if (att.data.length > _ICS_MAX_BYTES) return res.status(422).json({ error: 'Calendar file too large' });
+
+  const ics = decodeText(att.data);
+  let events;
+  try {
+    events = parseEvents(ics);
+  } catch {
+    return res.status(422).json({ error: 'The calendar file could not be read' });
+  }
+  if (!events.length) return res.status(422).json({ error: 'The calendar file contains no event' });
+  const method = (ics.match(/^METHOD:([^\r\n]*)/mi)?.[1] || '').trim().toUpperCase() || null;
+  res.json({
+    method,
+    events: events.map(e => ({
+      uid: e.uid, title: e.title, start: e.start, end: e.end, allDay: e.allDay, location: e.location,
+      description: e.description, organizer: String(e.organizer || '').replace(/^mailto:/i, ''),
+      timezone: e.timezone, rruleStr: e.rruleStr || null,
+    })),
+  });
+}));
+
 // POST /api/dashboard/mail/:accountId/test — test IMAP connectivity
 router.post('/dashboard/mail/:accountId/test', withHandler(async (req, res) => {
   const account = await getMailAccount(req.params.accountId);
@@ -457,15 +503,29 @@ router.post('/dashboard/mail/:accountId/folders/empty', writeRateLimit, withHand
   }
 }));
 
-// GET /api/dashboard/mail/:accountId/messages?folder=&page=&q= — one page of a folder
+/** ISO 8601 date / date-time query value → ms; '' / absent → null; invalid → NaN. */
+function _timeParam(v) {
+  if (v == null || v === '') return null;
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v)) return NaN;
+  return new Date(v).getTime();
+}
+
+// GET /api/dashboard/mail/:accountId/messages?folder=&page=&q=&sort=&since=&before=&attachments=1&duplicates=1&all=1
+// — one page of a folder (all = every message from `page` on)
 router.get('/dashboard/mail/:accountId/messages', withHandler(async (req, res) => {
-  const ctx = await _mailCtx(req, res);
-  if (!ctx) return;
   const page  = Math.max(0, Math.min(10_000, parseInt(req.query.page, 10) || 0));
   const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 200) : '';
+  const sort  = req.query.sort || 'date';
+  const since = _timeParam(req.query.since), before = _timeParam(req.query.before);
+  if (!MAIL_SORTS.includes(sort)) return res.status(400).json({ error: `sort must be one of ${MAIL_SORTS.join(', ')}` });
+  if (Number.isNaN(since) || Number.isNaN(before)) return res.status(400).json({ error: 'since / before must be ISO 8601 dates' });
+  if (since != null && before != null && since >= before) return res.status(400).json({ error: 'since must be earlier than before' });
+  const attachments = req.query.attachments === '1', duplicates = req.query.duplicates === '1', all = req.query.all === '1';
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
 
   try {
-    const data = await fetchFolderMessages(ctx.account, ctx.folder || 'INBOX', { page, query });
+    const data = await fetchFolderMessages(ctx.account, ctx.folder || 'INBOX', { page, query, sort, since, before, attachments, duplicates, all });
     await _withCardRefs(ctx.account.id, data.messages);
     res.json(data);
   } catch (err) {

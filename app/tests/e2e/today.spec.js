@@ -1688,6 +1688,364 @@ test.describe('Today page', () => {
     await expect(page).toHaveTitle('[TEST] e2e-today - Send offer (card)');
   });
 
+  test('E-T-65 mail list: Load all (kept across search / filters, reset by a folder switch), sort & filter popup, Ctrl+A, Home / End, read only after 5 s alone', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const msgs = Array.from({ length: 120 }, (_, i) => ({ id: String(i + 1), subject: `Mail ${i + 1}`, messageId: `<${i + 1}@ex.com>`,
+      from: 'Jane <jane@ex.com>', to: 'me@ex.com', date: new Date(Date.UTC(2026, 0, 1 + i)).toISOString(), size: 500,
+      unread: true, flagged: false, flagColor: null, hasAttachments: i % 10 === 0, duplicate: (i + 1) % 40 === 0 }));
+    const lists = [], patches = [];
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-l', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [] }));
+    await page.route('**/api/dashboard/mail/ma-l/**', r => {
+      const url = new URL(r.request().url());
+      const p = url.pathname.replace('/api/dashboard/mail/ma-l', '');
+      if (r.request().method() === 'PATCH') { patches.push([p, r.request().postDataJSON()]); return r.fulfill({ json: { ok: true } }); }
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 120, unseen: 120 },
+        { path: 'Archive', name: 'Archive', delimiter: '/', parent: '', specialUse: null, messages: 120, unseen: 0 }] } });
+      if (p === '/messages') {
+        const q = url.searchParams;
+        lists.push(Object.fromEntries(q));
+        let list = [...msgs].reverse();
+        if (q.get('sort') === 'date-asc') list.reverse();
+        if (q.get('attachments') === '1') list = list.filter(m => m.hasAttachments);
+        if (q.get('duplicates') === '1') list = list.filter(m => m.duplicate);
+        const page = +q.get('page') || 0;
+        const slice = list.slice(page * 50, q.get('all') === '1' ? undefined : (page + 1) * 50);
+        return r.fulfill({ json: { messages: slice, total: list.length, page, pageSize: 50 } });
+      }
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p.startsWith('/message/')) {
+        const m = msgs.find(x => x.id === p.split('/')[2]);
+        return r.fulfill({ json: { ...m, body: 'Hello', bodyHtml: '', attachments: [] } });
+      }
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.clock.install();
+    await page.goto('/today?mail=ma-l&folder=INBOX');
+    const rows = page.locator('#mailViewList .mv-msg');
+    await expect(rows).toHaveCount(50);
+
+    // Load more / Load all
+    await expect(page.locator('[data-mv-more]')).toHaveText('Load more (50)');
+    await expect(page.locator('#mailViewCount')).toHaveText('120 messages · 50 loaded');
+    await page.locator('[data-mv-all]').click();
+    await expect(rows).toHaveCount(120);
+    expect(lists.at(-1)).toMatchObject({ page: '1', all: '1' });
+    await expect(page.locator('[data-mv-more], [data-mv-all]')).toHaveCount(0);
+
+    // Read only after 5 s as the only open message
+    await page.locator('.mv-msg[data-mv-msg="120"]').click();
+    await expect(page.locator('#mailViewReader')).toContainText('Hello');
+    await page.clock.runFor(4000);
+    expect(patches).toEqual([]);
+    await page.clock.runFor(1500);
+    await expect.poll(() => patches).toEqual([['/message/120', { seen: true }]]);
+    // Moving on within 5 s leaves it unread
+    await page.locator('.mv-msg[data-mv-msg="119"]').click();
+    await page.clock.runFor(2000);
+    await page.keyboard.press('ArrowDown');   // → 118
+    await page.clock.runFor(3500);
+    expect(patches).toHaveLength(1);
+    // Ctrl+A selects every listed message, none of them is marked read
+    await page.keyboard.press('Control+a');
+    await expect(page.locator('#mailViewList .mv-msg.selected')).toHaveCount(120);
+    await expect(page.locator('#mailViewCount')).toHaveText('120 messages · 120 selected');
+    await page.clock.runFor(6000);
+    expect(patches).toHaveLength(1);
+    // Ctrl+click adds a second message: the pending read is dropped
+    await page.locator('.mv-msg[data-mv-msg="110"]').click();
+    await page.locator('.mv-msg[data-mv-msg="109"]').click({ modifiers: ['Control'] });
+    await page.clock.runFor(6000);
+    expect(patches).toHaveLength(1);
+    // Home / End open the first / last message of the list
+    await page.keyboard.press('End');
+    await expect(page.locator('#mailViewList .mv-msg.active')).toHaveAttribute('data-mv-msg', '1');
+    await page.keyboard.press('Home');
+    await expect(page.locator('#mailViewList .mv-msg.active')).toHaveAttribute('data-mv-msg', '120');
+
+    // Load all stays on when the search text changes
+    await page.locator('#mailViewSearch').fill('Mail');
+    await expect.poll(() => lists.at(-1)).toMatchObject({ q: 'Mail', page: '0', all: '1' });
+    await expect(rows).toHaveCount(120);
+    await page.locator('#mailViewSearch').fill('');
+    await expect.poll(() => lists.at(-1).q).toBeUndefined();
+
+    // Sort & filter popup
+    const btn = page.locator('#mailViewListOpts'), pop = page.locator('#mailViewListOptsPop');
+    await btn.click();
+    await expect(pop).toBeVisible();
+    await expect(pop.getByLabel('Load all')).toBeChecked();
+    await pop.getByLabel('Oldest first').check();
+    await expect.poll(() => lists.at(-1)).toMatchObject({ sort: 'date-asc', all: '1' });
+    await expect(rows.first()).toHaveAttribute('data-mv-msg', '1');
+    await expect(rows).toHaveCount(120);
+    await expect(btn).toHaveClass(/mv-listopts-btn--on/);
+    await pop.locator('[data-mv-opts-range]').selectOption('between');
+    await expect(pop.locator('[data-mv-opts-to]')).toBeVisible();
+    await pop.locator('[data-mv-opts-from]').fill('2026-02-01');
+    await pop.locator('[data-mv-opts-to]').fill('2026-02-28');
+    await expect.poll(() => lists.at(-1)).toMatchObject({ since: expect.any(String), before: expect.any(String), sort: 'date-asc' });
+    await pop.getByLabel('Has attachments').check();
+    await expect.poll(() => lists.at(-1).attachments).toBe('1');
+    await expect(page.locator('#mailViewCount')).toHaveText(/found/);
+    await pop.getByLabel('Is duplicate').check();
+    await expect.poll(() => lists.at(-1)).toMatchObject({ duplicates: '1', attachments: '1' });
+    await pop.getByLabel('Has attachments').uncheck();
+    await pop.locator('[data-mv-opts-range]').selectOption('');
+    await expect(rows).toHaveCount(3);   // 40, 80, 120
+    // Every hit carries the label, although no original is loaded (server-side `duplicate`)
+    await expect(page.locator('#mailViewList .mv-msg .card-duplicate-badge')).toHaveCount(3);
+    // Escape closes only the popup
+    await page.keyboard.press('Escape');
+    await expect(pop).toBeHidden();
+    await expect(page.locator('#mailView')).toBeVisible();
+    await btn.click();
+    await pop.locator('[data-mv-opts-reset]').click();
+    await expect.poll(() => lists.at(-1)).toEqual({ folder: 'INBOX', page: '0' });
+    await expect(btn).not.toHaveClass(/mv-listopts-btn--on/);
+    await expect(pop.getByLabel('Load all')).not.toBeChecked();
+    await expect(rows).toHaveCount(50);
+
+    // The checkbox loads the rest at once; a folder switch resets it
+    await pop.getByLabel('Load all').check();
+    await expect.poll(() => lists.at(-1)).toMatchObject({ page: '1', all: '1' });
+    await expect(rows).toHaveCount(120);
+    await page.keyboard.press('Escape');
+    await page.locator('#mailViewFolders .mv-folder[data-mv-folder="Archive"]').click();
+    await expect.poll(() => lists.at(-1)).toEqual({ folder: 'Archive', page: '0' });
+    await expect(rows).toHaveCount(50);
+    await btn.click();
+    await expect(pop.getByLabel('Load all')).not.toBeChecked();
+  });
+
+  test('E-T-66 ICS attachment → Add to calendar: untrusted sender asks first, trusted does not; dialog prefilled (mail view + detail panel); trusted badge in the list', async ({ page }) => {
+    await mockApis(page, { layouts: LAYOUTS });
+    const msg = (id, from) => ({ id, subject: `Invitation ${id}`, messageId: `<${id}@ex.com>`, from, to: 'me@ex.com',
+      date: '2026-11-15T10:00:00.000Z', size: 900, unread: false, hasAttachments: true });
+    const msgs = [msg('1', 'Stranger <x@spam.com>'), msg('2', 'Boss <boss@ex.com>')];
+    const event = { uid: 'meet-1', title: 'Kick-off', start: '2026-11-20T09:00:00.000Z', end: '2026-11-20T10:30:00.000Z', allDay: false,
+      location: 'Room 4', description: 'Agenda', organizer: 'jane@ex.com', timezone: 'Europe/Berlin', rruleStr: 'FREQ=WEEKLY;COUNT=3' };
+    const parsed = [];
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: {
+      calendarAccounts: [{ id: 'ca-e2e', label: 'Work', type: 'caldav', color: '#7c6af7' }], mailAccounts: [{ id: 'ma-i', label: 'Mail', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail-trusted-senders', r => r.fulfill({ json: { senders: ['boss@ex.com'] } }));
+    await page.route('**/api/dashboard/mail/ma-i/**', r => {
+      const url = new URL(r.request().url());
+      const p = url.pathname.replace('/api/dashboard/mail/ma-i', '');
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 2, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: msgs, total: 2, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 2 } });
+      const ev = p.match(/^\/message\/(\d+)\/attachment\/2\/event$/);
+      if (ev) { parsed.push(ev[1]); return r.fulfill({ json: { method: 'REQUEST', events: [event] } }); }
+      const one = p.match(/^\/message\/(\d+)$/);
+      if (one) return r.fulfill({ json: { ...msgs.find(m => m.id === one[1]), body: 'See attached', bodyHtml: '',
+        attachments: [{ part: '2', name: 'invite.ics', type: 'application/ics', size: 500 }, { part: '3', name: 'notes.pdf', type: 'application/pdf', size: 10 }] } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.goto('/today?mail=ma-i&folder=INBOX');
+    const modal = page.locator('#calEventModal');
+
+    // Trusted senders carry the shield badge after the sender in the list too
+    await expect(page.locator('#mailView .mv-msg[data-mv-msg="2"] .mail-trusted-badge')).toBeVisible();
+    await expect(page.locator('#mailView .mv-msg[data-mv-msg="1"] .mail-trusted-badge')).toBeHidden();
+    // … right behind the sender name (not pushed to the date)
+    const gap = await page.locator('#mailView .mv-msg[data-mv-msg="2"]').evaluate(row =>
+      row.querySelector('.mail-trusted-badge').getBoundingClientRect().left - row.querySelector('.dashboard-mail-from').getBoundingClientRect().right);
+    expect(gap).toBeLessThan(8);
+
+    // Untrusted sender: asks first — Cancel leaves it, OK opens the dialog
+    await page.locator('#mailView .mv-msg[data-mv-msg="1"]').click();
+    const add = page.locator('#mailViewReader .mail-ics-add');
+    await expect(add).toHaveCount(1);   // only next to the ICS file
+    await add.click();
+    await expect(page.locator('#dialogMsg')).toContainText('x@spam.com is not a trusted sender');
+    await expect(page.locator('#dialogMsg')).toContainText('Kick-off');
+    await page.click('#dialogCancelBtn');
+    await expect(modal).toBeHidden();
+    await add.click();
+    await page.click('#dialogOkBtn');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('#calEventTitle')).toHaveValue('Kick-off');
+    await expect(page.locator('#calEventLocation')).toHaveValue('Room 4');
+    await expect(page.locator('#calEventDescription')).toHaveValue('Agenda\n\nOrganizer: jane@ex.com');
+    await expect(page.locator('#calEventRepeat')).toBeChecked();
+    const local = await page.evaluate(() => { const d = new Date('2026-11-20T09:00:00.000Z'); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; });
+    await expect(page.locator('#calEventStartTime')).toHaveValue(local);
+    await expect(page.locator('#calEventStartDate')).toHaveValue('2026-11-20');
+    await page.click('#calEventModalClose');
+
+    // Trusted sender: no question
+    await page.locator('#mailView .mv-msg[data-mv-msg="2"]').click();
+    await add.click();
+    await expect(modal).toBeVisible();
+    await expect(page.locator('#dialogMsg')).toBeHidden();
+    await page.click('#calEventModalClose');
+    expect(parsed).toEqual(['1', '1', '2']);
+
+    // Mail detail panel: the same button next to the ICS link
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#mailView')).toBeHidden();
+    await page.evaluate(() => _openMailDetail('ma-i', '1', 'INBOX'));
+    const detailAdd = page.locator('#dashboardDetail .mail-ics-add');
+    await expect(detailAdd).toHaveCount(1);
+    await detailAdd.click();
+    await page.click('#dialogOkBtn');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('#calEventTitle')).toHaveValue('Kick-off');
+  });
+
+  test('E-T-67 ?cal= / ?mail= on load: the view loads first, Today\'s tiles / the board behind it afterwards', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    const log = [];
+    const slow = ms => new Promise(r => setTimeout(r, ms));
+    page.on('request', req => {
+      const u = new URL(req.url());
+      if (u.pathname.startsWith('/api/today/widgets/')) log.push('today');
+      if (u.pathname === '/api/e2e-today/board' && req.method() === 'GET') log.push('board');
+    });
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: {
+      calendarAccounts: [{ id: 'ca-e2e', label: 'Work', type: 'caldav', color: '#7c6af7' }], mailAccounts: [{ id: 'ma-o', label: 'Mail', color: '#0a0' }] } }));
+    // The calendar view asks for a week (from / to); the agenda tile uses the same route — only week ranges count
+    await page.route('**/api/dashboard/calendar/ca-e2e?**', async r => {
+      const u = new URL(r.request().url());
+      const days = (new Date(u.searchParams.get('to')) - new Date(u.searchParams.get('from'))) / 86400000;
+      if (days >= 7) { await slow(400); log.push('calendar'); }
+      return r.fulfill({ json: { type: 'caldav', events: [] } });
+    });
+    await page.route('**/api/dashboard/mail/ma-o/**', async r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-o', '');
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 0, unseen: 0 }] } });
+      if (p === '/messages') { await slow(400); log.push('mail'); return r.fulfill({ json: { messages: [], total: 0, page: 0, pageSize: 50 } }); }
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    const firstAfter = (what, then) => { const i = log.indexOf(what); return i >= 0 && log.indexOf(then) > i; };
+
+    // Today + mail view: the message list is in before any tile loads
+    await page.goto('/today?mail=ma-o&folder=INBOX');
+    await expect(page.locator('#mailView')).toBeVisible();
+    await expect.poll(() => firstAfter('mail', 'today')).toBe(true);
+    expect(log.indexOf('today')).toBeGreaterThan(log.indexOf('mail'));
+    // Closing the view shows Today with its tiles
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#today')).toBeVisible();
+    await expect(page.locator('.today-tile[data-tile="attention"] .today-tile-body')).not.toBeEmpty();
+    await expect(page.locator('.today-tile[data-tile="agenda"]')).toBeVisible();
+
+    // Today + calendar view
+    log.length = 0;
+    await page.goto('/today?cal=week');
+    await expect(page.locator('#calView')).toBeVisible();
+    await expect.poll(() => firstAfter('calendar', 'today')).toBe(true);
+    expect(log.slice(0, log.indexOf('calendar'))).not.toContain('today');
+
+    // Board + calendar view: the board is fetched after the week's events
+    log.length = 0;
+    await page.goto('/board/e2e-today?cal=week');
+    await expect(page.locator('#calView')).toBeVisible();
+    await expect.poll(() => firstAfter('calendar', 'board')).toBe(true);
+    expect(log.slice(0, log.indexOf('calendar'))).not.toContain('board');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.column').first()).toBeVisible();
+  });
+
+  test('E-T-68 dark mode: mail view reader shows mails on the app header colour with white text; sun / moon button switches to white (kept); light mode unchanged', async ({ page }) => {
+    await mockApis(page, { layouts: LAYOUTS });
+    const msg = (id, extra) => ({ id, subject: `Mail ${id}`, messageId: `<${id}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: '2026-11-15T10:00:00.000Z', size: 500, unread: false, ...extra });
+    const msgs = [msg('1', {}), msg('2', {})];
+    const full = {
+      1: { body: 'Hello', bodyHtml: '<style>.job-offer { background-color: rgb(230, 230, 230); padding: 15px; } .job-offer .title { color: rgb(0, 0, 0); }</style>'
+        + '<div id="frame" style="background:#eeeeee;padding:4px"><div style="background:#ffffff"><p id="t" style="color:#333333">Styled text</p><a id="l" href="https://ex.com">Link</a>'
+        + '<div id="c" style="background:#2563eb;color:#ffffff"><span id="cs">Button</span> <a id="cl" href="https://ex.com" style="color:#fde68a">go</a></div>'
+        + '<div id="g" style="background:#f5f5f5;color:#111111">Grey box</div></div>'
+        + '<details id="d" class="job-offer" open><summary><div id="dt" class="title">Principal Consultant</div></summary>Offer text</details>'
+        + '<p>' + 'Filler line<br>'.repeat(12) + '</p></div>' },
+      2: { body: 'Plain only', bodyHtml: '' },
+    };
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-d', label: 'Mail', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail/ma-d/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-d', '');
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 2, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: msgs, total: 2, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 2 } });
+      const one = p.match(/^\/message\/(\d+)$/);
+      if (one) return r.fulfill({ json: { ...msgs.find(m => m.id === one[1]), ...full[one[1]], attachments: [] } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    const frame = page.frameLocator('#mailViewReader .dashboard-mail-iframe');
+    const colors = async () => frame.locator('#t').evaluate(el => {
+      const cs = el.ownerDocument.defaultView.getComputedStyle.bind(el.ownerDocument.defaultView);
+      return { bg: cs(el.ownerDocument.body).backgroundColor, text: cs(el).color, link: cs(el.ownerDocument.getElementById('l')).color };
+    });
+
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto('/today?mail=ma-d&folder=INBOX');
+    await page.locator('#mailView .mv-msg[data-mv-msg="1"]').click();
+    await expect(frame.locator('#t')).toHaveText('Styled text');
+    // Background = the app header's colour (not black)
+    const headerBg = await page.evaluate(() => getComputedStyle(document.querySelector('header')).backgroundColor);
+    expect(headerBg).not.toBe('rgb(0, 0, 0)');
+    expect(await colors()).toEqual({ bg: headerBg, text: 'rgb(255, 255, 255)', link: 'rgb(138, 180, 248)' });
+    // The mail's own white box is see-through now
+    expect(await frame.locator('#t').evaluate(el => getComputedStyle(el.parentElement).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    // A coloured box keeps its background and its own text / link colours (as in light mode); a light grey one turns dark
+    const style = (id, prop) => frame.locator(`#${id}`).evaluate((el, p) => getComputedStyle(el)[p], prop);
+    await expect.poll(() => style('c', 'backgroundColor')).toBe('rgb(37, 99, 235)');
+    expect(await style('cs', 'color')).toBe('rgb(255, 255, 255)');
+    expect(await style('cl', 'color')).toBe('rgb(253, 230, 138)');
+    expect(await style('g', 'backgroundColor')).toBe('rgba(0, 0, 0, 0)');
+    expect(await style('g', 'color')).toBe('rgb(255, 255, 255)');
+    // A light grey box styled by the mail's stylesheet (<details class="job-offer">) keeps its grey and its black title;
+    // the grey frame around the whole mail is a page background and turns dark
+    expect(await style('d', 'backgroundColor')).toBe('rgb(230, 230, 230)');
+    expect(await style('dt', 'color')).toBe('rgb(0, 0, 0)');
+    // … and text inside it without a colour of its own is dark as in light mode, not the dark body's white
+    expect(await style('d', 'color')).toBe('rgb(34, 34, 34)');
+    expect(await style('frame', 'backgroundColor')).toBe('rgba(0, 0, 0, 0)');
+    // Icons only, also on a wide screen (labels stay as tooltip / aria-label)
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await expect(page.locator('#mailViewReaderActions .mv-act-label').first()).toBeHidden();
+    await expect(page.locator('#mailViewReaderActions [data-mv-act="reply"]')).toHaveAttribute('aria-label', 'Reply');
+    // Wider gaps between the groups: Forward | Mark read, Delete | TXT
+    const gaps = await page.locator('#mailViewReaderActions').evaluate(bar => {
+      const r = act => bar.querySelector(`[data-mv-act="${act}"]`).getBoundingClientRect();
+      return { group: [r('unread').left - r('forward').right, r('format').left - r('delete').right], inner: r('replyall').left - r('reply').right };
+    });
+    expect(gaps.group.every(g => g >= gaps.inner + 8)).toBe(true);
+    // Toolbar end: … Delete, TXT, (i), background
+    expect(await page.locator('#mailViewReaderActions > button').evaluateAll(bs => bs.slice(-4).map(b => b.dataset.mvAct))).toEqual(['delete', 'format', 'source', 'theme']);
+
+    // Sun → white background, the mail's own colours
+    const theme = page.locator('#mailViewReaderActions [data-mv-act="theme"]');
+    await expect(theme).toHaveAttribute('aria-label', 'White background');
+    await theme.click();
+    await expect(theme).toHaveAttribute('aria-label', 'Dark background');
+    await expect.poll(colors).toEqual({ bg: 'rgb(255, 255, 255)', text: 'rgb(51, 51, 51)', link: 'rgb(79, 70, 229)' });
+    // Kept across mails and reloads
+    await page.reload();
+    await page.locator('#mailView .mv-msg[data-mv-msg="1"]').click();
+    await expect(frame.locator('#t')).toHaveText('Styled text');
+    expect((await colors()).bg).toBe('rgb(255, 255, 255)');
+    await theme.click();   // back to black
+
+    // Plain-text mail: header-coloured box with white text
+    await page.locator('#mailView .mv-msg[data-mv-msg="2"]').click();
+    const pre = page.locator('#mailViewReader .dashboard-mail-body');
+    await expect(pre).toHaveText('Plain only');
+    expect(await pre.evaluate(el => [getComputedStyle(el).backgroundColor, getComputedStyle(el).color])).toEqual([headerBg, 'rgb(255, 255, 255)']);
+
+    // Light mode: no button, mails as they are
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.locator('#mailView .mv-msg[data-mv-msg="1"]').click();
+    await expect(frame.locator('#t')).toHaveText('Styled text');
+    await expect(theme).toHaveCount(0);
+    expect((await colors()).text).toBe('rgb(51, 51, 51)');
+  });
+
   test('E-T-64 mailto: links write a mail in the mail view (card dialog stays underneath, mail body iframe, reader address); without SMTP the mail program', async ({ page }) => {
     const state = { layouts: LAYOUTS };
     await mockApis(page, state);

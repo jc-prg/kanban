@@ -42,7 +42,7 @@
 
 /* ---- Menus and popups: one format for context menus (incl. their submenus and the calendar view's burger
    menu — openContextMenu), the header dropdown and board switcher, the mail sender list, emoji picker and
-   folder pickers, and the linked-card search results. Box tokens (--menu-*) on :root, so skins only change
+   folder pickers, the mail list's sort / filter popup, and the linked-card search results. Box tokens (--menu-*) on :root, so skins only change
    the tokens (skin-glass.css adds frosting). Loaded after the component stylesheets: these win over their
    copies of the same box. ---- */
 :root {
@@ -56,7 +56,7 @@
   :root { --menu-shadow: 0 8px 28px rgba(0, 0, 0, 0.14); }
 }
 :is(.context-menu, .ctx-submenu, .header-dropdown, .board-switch-menu, .mv-from-list, .mv-emoji-pop,
-    .mv-picker-box, .note-card-search-results) {
+    .mv-picker-box, .note-card-search-results, .mv-listopts) {
   background: var(--menu-bg);
   border: 1px solid var(--menu-border);
   border-radius: 8px;

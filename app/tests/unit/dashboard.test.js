@@ -4,7 +4,7 @@
  *
  * Tests the pure password-utility functions exported from routes/dashboard.js
  * without starting the HTTP server or touching CouchDB, plus the pure frontend
- * helper _calSeriesDates (DU-11 … DU-13, extracted from frontend/dashboard.js).
+ * helper _calSeriesDates (DU-11 … DU-13) and the invitation helpers _mailIsIcs / _mailIcsPrefill (DU-14, DU-15), extracted from frontend/dashboard.js.
  */
 
 vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -141,4 +141,44 @@ test('DU-12 _calSeriesDates — all-day occurrence → series start date, same d
 test('DU-13 _calSeriesDates — no seriesStart → occurrence dates unchanged', () => {
   const ev = { start: '2026-11-12T08:00:00.000Z', end: '2026-11-12T09:00:00.000Z' }
   expect(_calSeriesDates(ev)).toEqual({ start: ev.start, end: ev.end })
+})
+
+// _mailIcsPrefill / _mailIsIcs (frontend dashboard.js) — "Add to calendar" for invitations
+const _ics = new Function(`${_dashSrc.match(/function _mailIsIcs\(att\) \{[\s\S]*?\n\}/)[0]};
+  ${_dashSrc.match(/function _mailIcsPrefill\(ev\) \{[\s\S]*?\n\}/)[0]}; return { _mailIsIcs, _mailIcsPrefill };`)()
+
+test('DU-14 _mailIsIcs — calendar MIME types or .ics-like names', () => {
+  expect(_ics._mailIsIcs({ type: 'text/calendar', name: 'invite.ics' })).toBe(true)
+  expect(_ics._mailIsIcs({ type: 'application/octet-stream', name: 'Meeting.ICS' })).toBe(true)
+  expect(_ics._mailIsIcs({ type: 'application/ics', name: 'x' })).toBe(true)
+  expect(_ics._mailIsIcs({ type: 'application/pdf', name: 'ics.pdf' })).toBe(false)
+})
+
+test('DU-15 _mailIcsPrefill — timed → local Dates, all-day keeps days (end exclusive), defaults for a missing end, organizer appended', () => {
+  const t = _ics._mailIcsPrefill({ title: 'Kick-off', start: '2026-11-20T09:00:00.000Z', end: '2026-11-20T10:30:00.000Z', allDay: false,
+    location: 'Room 4', description: 'Agenda', organizer: 'jane@ex.com', rruleStr: 'FREQ=WEEKLY;COUNT=3' })
+  expect(t.start.toISOString()).toBe('2026-11-20T09:00:00.000Z')
+  expect(t.end.toISOString()).toBe('2026-11-20T10:30:00.000Z')
+  expect(t).toMatchObject({ title: 'Kick-off', allDay: false, location: 'Room 4', description: 'Agenda\n\nOrganizer: jane@ex.com',
+    rrule: 'FREQ=WEEKLY;COUNT=3', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+
+  const a = _ics._mailIcsPrefill({ title: 'Fair', start: '2026-12-01', end: '2026-12-03', allDay: true })
+  expect([a.start, a.end].map(d => [d.getFullYear(), d.getMonth() + 1, d.getDate()])).toEqual([[2026, 12, 1], [2026, 12, 3]])
+  expect(a.description).toBe('')
+
+  expect(_ics._mailIcsPrefill({ start: '2026-12-01', allDay: true }).end.getDate()).toBe(2)
+  const noEnd = _ics._mailIcsPrefill({ start: '2026-11-20T09:00:00.000Z', end: null })
+  expect(noEnd.end.getTime() - noEnd.start.getTime()).toBe(3600000)
+})
+
+const _mailBgKeep = new Function(`${_dashSrc.match(/function _mailBgKeep\(css, share = 0\) \{[\s\S]*?\n\}/)[0]}; return _mailBgKeep;`)()
+
+test('DU-16 _mailBgKeep — dark mail body keeps every non-white background of boxes (light tints too), not page backgrounds (≥ half the mail)', () => {
+  for (const c of ['rgb(37, 99, 235)', 'rgb(254, 243, 199)', 'rgb(0, 0, 0)', 'rgb(51, 51, 51)', 'rgba(220, 38, 38, 0.5)', 'rgb(16 185 129 / 80%)',
+                   'rgb(230, 230, 230)', 'rgb(230, 220, 220)', 'rgb(204, 204, 204)']) expect([c, _mailBgKeep(c, 0.1)]).toEqual([c, true])
+  for (const c of ['rgb(255, 255, 255)', 'rgb(245, 245, 245)', 'rgba(0, 0, 0, 0)', 'transparent', '', 'rgba(37, 99, 235, 0.05)']) expect([c, _mailBgKeep(c, 0.1)]).toEqual([c, false])
+  // Page background: a grey frame around the whole mail turns dark
+  expect(_mailBgKeep('rgb(238, 238, 238)', 0.5)).toBe(false)
+  expect(_mailBgKeep('rgb(37, 99, 235)', 0.9)).toBe(false)
+  expect(_mailBgKeep('rgb(238, 238, 238)')).toBe(true)
 })

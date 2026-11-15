@@ -886,3 +886,120 @@ test('MVA-41 GET message — full message carries flagged / flagColor', async ()
   const res = await request(app).get(`${API}/message/5`).set(AUTH)
   expect(res.body).toMatchObject({ flagged: true, flagColor: 'yellow' })
 })
+
+test('MVA-43 GET messages — sort (oldest first, sender), date / attachment / duplicate filters, all=1, validation', async () => {
+  const at = d => ({ envelope: { date: new Date(d) } })
+  const from = (name, d) => ({ envelope: { from: [{ name, address: `${name.toLowerCase()}@ex.com` }], date: new Date(d) } })
+  imap.messages = [
+    _msg(1, from('Zoe',  '2026-03-01T10:00:00Z')),
+    _msg(2, from('anna', '2026-03-05T10:00:00Z')),
+    _msg(3, from('Ben',  '2026-03-03T10:00:00Z')),
+    _msg(4, from('Anna', '2026-03-09T10:00:00Z')),
+  ]
+  imap.messages[2].bodyStructure = {
+    type: 'multipart/mixed', childNodes: [
+      { part: '1', type: 'text/plain', encoding: '7bit' },
+      { part: '2', type: 'application/pdf', encoding: 'base64', size: 400, dispositionParameters: { filename: 'cv.pdf' } },
+    ],
+  }
+  const ids = async qs => {
+    const res = await request(app).get(`${API}/messages?${qs}`).set(AUTH)
+    expect(res.status).toBe(200)
+    return res.body
+  }
+
+  expect((await ids('')).messages.map(m => m.id)).toEqual(['4', '2', '3', '1'])
+  expect((await ids('sort=date-asc')).messages.map(m => m.id)).toEqual(['1', '3', '2', '4'])
+  // Sender A–Z, case-insensitive; same sender latest first
+  expect((await ids('sort=from')).messages.map(m => m.id)).toEqual(['4', '2', '3', '1'])
+
+  const since = encodeURIComponent('2026-03-03T00:00:00.000Z'), before = encodeURIComponent('2026-03-09T00:00:00.000Z')
+  const range = await ids(`since=${since}&before=${before}`)
+  expect(range.messages.map(m => m.id)).toEqual(['2', '3'])
+  expect(range.total).toBe(2)
+  expect((await ids(`before=${since}`)).messages.map(m => m.id)).toEqual(['1'])
+
+  // Attachment filter: bodyStructure scan of the folder, same rule as hasAttachments
+  _resetImap(); imap.messages = [_msg(1), _msg(2), _msg(3)]
+  imap.messages[1].bodyStructure = { type: 'multipart/mixed', childNodes: [
+    { part: '1', type: 'text/plain', encoding: '7bit' },
+    { part: '2', type: 'image/png', encoding: 'base64', size: 40, parameters: { name: 'a.png' } },
+  ] }
+  const att = await ids('attachments=1')
+  expect(att.messages.map(m => m.id)).toEqual(['2'])
+  expect(att.messages[0].hasAttachments).toBe(true)
+
+  // duplicates=1: only the copies (largest copy = original), combinable with the search
+  _resetImap()
+  const dup = (uid, size) => Object.assign(_msg(uid, { envelope: { messageId: '<same@ex.com>', subject: 'Same' } }), { size })
+  imap.messages = [dup(1, 500), dup(2, 900), dup(3, 500), _msg(4)]
+  const dupList = await ids('duplicates=1')
+  expect(dupList.messages.map(m => m.id)).toEqual(['3', '1'])
+  expect(dupList.messages.every(m => m.duplicate === true)).toBe(true)
+  // Without the filter every message says whether it is a copy (the list label) — the original (largest) is not
+  expect(Object.fromEntries((await ids('')).messages.map(m => [m.id, m.duplicate]))).toEqual({ 1: true, 2: false, 3: true, 4: false })
+  imap.search = [1, 2, 4]
+  expect((await ids('duplicates=1&q=same')).messages.map(m => m.id)).toEqual(['1'])
+
+  // all=1: everything from the page on, fetched in chunks of 500 UIDs
+  _resetImap(); imap.messages = Array.from({ length: 620 }, (_, i) => _msg(i + 1, at('2026-03-01T10:00:00Z')))
+  const all = await ids('page=1&all=1')
+  expect(all.messages).toHaveLength(570)
+  expect(all.total).toBe(620)
+  expect(calls('fetch').slice(1).map(c => c[1].split(',').length)).toEqual([500, 70])
+
+  for (const qs of ['sort=size', 'since=yesterday', `since=${before}&before=${since}`]) {
+    const res = await request(app).get(`${API}/messages?${qs}`).set(AUTH)
+    expect(res.status).toBe(400)
+  }
+})
+
+test('MVA-44 GET attachment/:part/event — ICS attachment parsed; nameless text/calendar part listed as invite.ics only without a named one; non-calendar / broken → 422', async () => {
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'METHOD:REQUEST', 'BEGIN:VEVENT', 'UID:meet-1@ex.com',
+    'DTSTART;TZID=Europe/Berlin:20261120T100000', 'DTEND;TZID=Europe/Berlin:20261120T113000',
+    'SUMMARY:Kick-off', 'LOCATION:Room 4', 'DESCRIPTION:Agenda\\nfirst point', 'ORGANIZER;CN=Jane:mailto:jane@ex.com',
+    'RRULE:FREQ=WEEKLY;COUNT=3', 'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n')
+  const m = _msg(7)
+  m.bodyStructure = { type: 'multipart/mixed', childNodes: [
+    { type: 'multipart/alternative', childNodes: [
+      { part: '1.1', type: 'text/plain', encoding: '7bit' },
+      { part: '1.2', type: 'text/calendar', encoding: 'quoted-printable', parameters: { method: 'REQUEST' } },
+    ] },
+    { part: '2', type: 'application/ics', encoding: 'base64', size: 600, dispositionParameters: { filename: 'invite.ics' } },
+    { part: '3', type: 'application/pdf', encoding: 'base64', size: 10, dispositionParameters: { filename: 'a.pdf' } },
+  ] }
+  m.bodyParts = new Map([
+    ['1.1', Buffer.from('Hi')],
+    ['1.2', Buffer.from(ics.replace('Room 4', 'Raum f=C3=BCr 4'))],   // quoted-printable, UTF-8
+    ['2', Buffer.from(Buffer.from(ics).toString('base64'))],
+    ['3', Buffer.from(Buffer.from('%PDF').toString('base64'))],
+  ])
+  imap.messages = [m]
+
+  const full = await request(app).get(`${API}/message/7`).set(AUTH)
+  // The named invite.ics wins: the inline calendar part (same invitation) is not listed a second time
+  expect(full.body.attachments.map(a => [a.part, a.name])).toEqual([['2', 'invite.ics'], ['3', 'a.pdf']])
+
+  const res = await request(app).get(`${API}/message/7/attachment/2/event`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.method).toBe('REQUEST')
+  expect(res.body.events).toEqual([{
+    uid: 'meet-1@ex.com', title: 'Kick-off', start: '2026-11-20T09:00:00.000Z', end: '2026-11-20T10:30:00.000Z', allDay: false,
+    location: 'Room 4', description: 'Agenda\nfirst point', organizer: 'jane@ex.com', timezone: 'Europe/Berlin', rruleStr: 'FREQ=WEEKLY;COUNT=3',
+  }])
+
+  expect((await request(app).get(`${API}/message/7/attachment/3/event`).set(AUTH)).status).toBe(422)
+  m.bodyParts.set('2', Buffer.from(Buffer.from('BEGIN:VCALENDAR\r\nnonsense').toString('base64')))
+  expect((await request(app).get(`${API}/message/7/attachment/2/event`).set(AUTH)).status).toBe(422)
+  expect((await request(app).get(`${API}/message/7/attachment/9/event`).set(AUTH)).status).toBe(404)
+  expect((await request(app).get(`${API}/message/7/attachment/x/event`).set(AUTH)).status).toBe(400)
+
+  // Only the inline part (Outlook): listed as invite.ics, quoted-printable decoded
+  m.bodyStructure.childNodes.splice(1, 1)
+  const inline = await request(app).get(`${API}/message/7`).set(AUTH)
+  expect(inline.body.attachments.map(a => [a.part, a.name])).toEqual([['1.2', 'invite.ics'], ['3', 'a.pdf']])
+  const qp = await request(app).get(`${API}/message/7/attachment/1.2/event`).set(AUTH)
+  expect(qp.body.events[0].location).toBe('Raum für 4')
+})

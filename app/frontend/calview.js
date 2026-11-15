@@ -310,7 +310,7 @@ function _cvShow() {
   clearInterval(_cvNowTimer);
   _cvNowTimer = setInterval(_cvUpdateNowLine, 60_000);
   _cvRender();
-  _cvLoad();
+  return _cvLoad();
 }
 
 function _cvHide() {
@@ -336,6 +336,7 @@ function closeCalView() {
 }
 
 /** Open the view if the URL asks for it (called once the dashboard is initialised). */
+/** Open / update the view as the URL asks; resolves once its events are loaded (nothing to do: at once). */
 function _cvInitFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const mode   = params.get('cal');
@@ -343,7 +344,8 @@ function _cvInitFromUrl() {
   _cvMode = mode;
   const date = params.get('date');
   _cvAnchor = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? _cvParseYmd(date) : new Date();
-  if (_cvIsOpen()) { _cvRender(); _cvLoad(); } else _cvShow();
+  if (_cvIsOpen()) { _cvRender(); return _cvLoad(); }
+  return _cvShow();
 }
 
 /** `focusDay` (YYYY-MM-DD): week views scroll horizontally so this day is centred (phones). */

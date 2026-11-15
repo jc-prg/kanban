@@ -142,6 +142,17 @@ function _initOverlayHost() {
   return _overlayHostReady;
 }
 
+/**
+ * A page opened with ?cal= / ?mail= (reload, deep link, back / forward): open that view and resolve once its
+ * data is loaded — Today and board pages load what lies behind the view only afterwards. False: no view asked for.
+ */
+async function _overlayViewsFromUrl() {
+  if (!/[?&](cal|mail)=/.test(location.search)) return false;
+  await _initOverlayHost();
+  await Promise.all([_cvInitFromUrl(), _mvInitFromUrl()]).catch(() => { /* the views show their own errors */ });
+  return true;
+}
+
 /** Show the overlay host while the calendar or mail view is open (Today: instead of the page). */
 function _syncOverlayHost() {
   if (!_isOverlayHostPage()) return;
@@ -315,7 +326,8 @@ function _openMailDetail(accountId, msgId, folder) {
         const links = msg.attachments.map(a => {
           const ft = _attachType(a.name);
           const ftAttr = (ft === 'image' || ft === 'pdf') ? ` data-ft="${ft}" data-name="${escHtml(a.name)}"` : '';
-          return `<a href="${escHtml(href(a))}" download="${escHtml(a.name)}" class="dash-attachment-link"${ftAttr}>${escHtml(a.name)}</a>`;
+          const ics = _mailIsIcs(a) ? _mailIcsButtonHtml(`data-mail-ics="${escHtml(a.part)}"`) : '';
+          return `<a href="${escHtml(href(a))}" download="${escHtml(a.name)}" class="dash-attachment-link"${ftAttr}>${escHtml(a.name)}</a>${ics}`;
         }).join('');
         rows.push(['Attachments', links]);
       }
@@ -325,6 +337,13 @@ function _openMailDetail(accountId, msgId, folder) {
         rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')
       }</table>`;
       _resolveLinkedCardLinks(body);
+
+      body.querySelectorAll('[data-mail-ics]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const att = msg.attachments.find(a => a.part === btn.dataset.mailIcs);
+          if (att) _mailAddIcsToCalendar(accountId, msgId, folder, msg, att);
+        });
+      });
 
       body.querySelectorAll('.dash-attachment-link[data-ft]').forEach(a => {
         a.addEventListener('click', e => {
@@ -374,7 +393,8 @@ async function _openMailInView(accountId, msgId, folder, mode = null) {
  * (DOMPurify-sanitised, no scripts), plain text in a <pre>.
  * Used by the dashboard detail panel and the mail view.
  */
-function _renderMailBody(container, msg, { plain = false, toggle = true, attachments = null, gallery = true } = {}) {
+// dark: background of the app header + white text, the mail's own colours overridden (mail view reader in dark mode)
+function _renderMailBody(container, msg, { plain = false, toggle = true, attachments = null, gallery = true, dark = false } = {}) {
   // Trusted-sender badge in the From row (rendered hidden; shown once the list is known)
   if (_mailTrusted) _mailSyncTrustedBadges();
   else _mailLoadTrusted().then(_mailSyncTrustedBadges);
@@ -386,7 +406,7 @@ function _renderMailBody(container, msg, { plain = false, toggle = true, attachm
     const holder = document.createElement('div');
     const show = () => {
       holder.replaceChildren();
-      _renderMailBody(holder, msg, { plain, toggle: false, gallery: false });
+      _renderMailBody(holder, msg, { plain, toggle: false, gallery: false, dark });
       const t = _mailFormatToggle(plain);
       btn.textContent = t.label;
       btn.title       = t.title;
@@ -402,12 +422,13 @@ function _renderMailBody(container, msg, { plain = false, toggle = true, attachm
     // Own wrapper: toggling trust re-renders only the body (the detail panel container also holds the headers)
     const wrap = document.createElement('div');
     wrap.className = 'mail-body-wrap';
+    wrap._mailDark = dark;   // kept for the re-renders of _renderMailHtml (load images / trust sender)
     container.appendChild(wrap);
     if (_mailTrusted) _renderMailHtml(wrap, msg);
     else _mailLoadTrusted().then(() => _renderMailHtml(wrap, msg));
   } else if (msg.body) {
     const pre = document.createElement('pre');
-    pre.className = 'dashboard-mail-body';
+    pre.className = `dashboard-mail-body${dark ? ' mail-body--dark' : ''}`;
     pre.textContent = msg.body;
     container.appendChild(pre);
   }
@@ -499,6 +520,74 @@ function _mailLoadTrusted() {
       .finally(() => { _mailTrustedLoading = null; });
   }
   return _mailTrustedLoading.then(set => _mailTrusted || set);
+}
+
+// ---- Calendar invitations: ICS attachments → "Add to calendar" (mail view reader, mail detail panel) ----
+
+/** Calendar attachment — same rule as _isIcsAttachment in backend/routes/dashboard.js. */
+function _mailIsIcs(att) {
+  return /^(text\/calendar|application\/(ics|x-ics|calendar))$/i.test(att?.type || '') || /\.(ics|ical|ifb|vcs)$/i.test(att?.name || '');
+}
+
+function _mailIcsButtonHtml(attrs) {
+  return `<button type="button" class="btn mail-ics-add" ${attrs} title="Add the meeting to a calendar">${SVGICONS.date(12, 12)}<span>Add to calendar</span></button>`;
+}
+
+/** "Mon, 3 Mar 2026, 10:00" / all-day "Mon, 3 Mar 2026" of a parsed ICS event (start: ISO time or YYYY-MM-DD). */
+function _mailIcsWhen(ev) {
+  const p = _mailIcsPrefill(ev);
+  return p.start.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    ...(p.allDay ? {} : { hour: '2-digit', minute: '2-digit' }) });
+}
+
+/**
+ * New-event dialog prefill from a parsed ICS event (GET …/attachment/:part/event). Pure apart from the local
+ * time zone: timed events become local Date objects (the dialog's zone = the browser's), all-day ones keep
+ * their days (end exclusive, as DTEND); a missing end = 1 hour / 1 day. Organizer appended to the description.
+ */
+function _mailIcsPrefill(ev) {
+  const day = s => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
+  const allDay = !!ev.allDay;
+  const start = allDay ? day(ev.start) : new Date(ev.start);
+  let end = ev.end ? (allDay ? day(ev.end) : new Date(ev.end)) : null;
+  if (!end || Number.isNaN(end.getTime()) || end <= start) {
+    end = allDay ? new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1) : new Date(start.getTime() + 3600000);
+  }
+  const description = [ev.description, ev.organizer ? `Organizer: ${ev.organizer}` : ''].filter(Boolean).join('\n\n');
+  return {
+    title: ev.title || '', start, end, allDay, location: ev.location || '', description,
+    rrule: ev.rruleStr || null, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  };
+}
+
+/**
+ * "Add to calendar" for an ICS attachment of a mail: parsed server-side; several events → pick one; asks first
+ * when the sender is not trusted (or the mail cancels the meeting); then the new-event dialog, prefilled.
+ */
+async function _mailAddIcsToCalendar(accountId, msgId, folder, msg, att) {
+  const enc = encodeURIComponent;
+  let data;
+  try {
+    const r = await fetch(`/api/dashboard/mail/${enc(accountId)}/message/${enc(msgId)}/attachment/${enc(att.part)}/event${folder ? `?folder=${enc(folder)}` : ''}`);
+    data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  } catch (err) {
+    showMessage(`Could not read the calendar file: ${err.message}`);
+    return;
+  }
+  let ev = data.events[0];
+  if (data.events.length > 1) {
+    const pick = await _todayPick('Add which event?', data.events.map((e, i) =>
+      ({ value: String(i), label: `${e.title} — ${_mailIcsWhen(e)}`, icon: SVGICONS.date(12, 12) })));
+    if (pick == null) return;
+    ev = data.events[+pick];
+  }
+  const warn = [];
+  if (!_mailSenderTrusted(msg)) warn.push(`${_mailSenderAddr(msg) || 'The sender'} is not a trusted sender.`);
+  if (data.method === 'CANCEL') warn.push('This mail cancels the meeting.');
+  if (warn.length && !(await showConfirm(`${warn.join(' ')} Add “${ev.title}” (${_mailIcsWhen(ev)}) to your calendar?`,
+    { okLabel: 'Add to calendar' }))) return;
+  await _todayNewEvent(_mailIcsPrefill(ev));
 }
 
 async function _mailSetTrusted(address, trusted) {
@@ -778,8 +867,9 @@ function _renderMailHtml(wrap, msg) {
     wrap.appendChild(bar);
   }
 
+  const dark = !!wrap._mailDark;
   const iframe = document.createElement('iframe');
-  iframe.className = 'dashboard-mail-iframe';
+  iframe.className = `dashboard-mail-iframe${dark ? ' mail-body--dark' : ''}`;
   // allow-same-origin lets us write content and read scrollHeight;
   // scripts are still blocked (no allow-scripts), so this is safe.
   iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox allow-same-origin');
@@ -791,11 +881,79 @@ function _renderMailHtml(wrap, msg) {
     + ' blockquote{border-left:3px solid #ddd;margin:8px 0;padding:0 12px;color:#555}'
     + ' pre,code{font-family:monospace;font-size:0.88em;background:#f0f0f0;padding:2px 5px;border-radius:3px}';
   const emailStyleTag = res.styles ? `<style>${res.styles.replace(/<\/style/gi, '<\\/style')}</style>` : '';
+  // Dark: after the mail's styles, so the dark background / white text win over its colours (pictures stay;
+  // background images go — text written on them would be unreadable)
+  const darkStyleTag = dark ? `<style id="jc-dark">${_mailDarkStyle(_mailDarkBg())}</style>` : '';
   const bodyAttr = res.bodyClass ? ` class="${res.bodyClass.replace(/"/g, '&quot;')}"` : '';
-  iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${_mailCsp(load)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}</head><body${bodyAttr}>${res.html}</body></html>`;
+  iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${_mailCsp(load)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${baseStyle}</style>${emailStyleTag}${darkStyleTag}</head><body${bodyAttr}>${res.html}</body></html>`;
   const resize = () => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 16) + 'px'; };
+  if (dark) iframe.addEventListener('load', () => _mailKeepColoredBg(iframe.contentDocument));
   iframe.addEventListener('load', resize);
   _mailtoWireFrame(iframe);
+}
+
+/** Background of dark mail bodies = the app header's colour (its solid layer, --bg); black as a fallback. */
+function _mailDarkBg() {
+  const header = document.querySelector('header');
+  const bg = header ? getComputedStyle(header).backgroundColor : '';
+  return bg && bg !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(bg) ? bg : '#000';
+}
+
+/**
+ * Stylesheet of a dark mail body (iframe document): `bg`, white text, the mail's colours / background images off —
+ * except inside elements with a coloured background (`data-jc-keep`, _mailKeepColoredBg): those look as in light mode.
+ */
+function _mailDarkStyle(bg) {
+  const k = ':not([data-jc-keep],[data-jc-keep] *)';
+  return `html,body{background:${bg} !important;color:#fff !important;color-scheme:dark}`
+    + ` body *${k}{color:#fff !important;background-color:transparent !important;background-image:none !important;border-color:#444 !important}`
+    + ` a${k},a${k} *${k}{color:#8ab4f8 !important}`
+    + ` blockquote${k},blockquote${k} *${k}{color:#ccc !important}`
+    + ` pre${k},code${k}{background:rgba(255,255,255,0.08) !important}`
+    + ' img[data-jc-blocked]{background:rgba(255,255,255,0.1) !important;outline-color:#555 !important}';
+}
+
+/**
+ * Keep an element's background in a dark mail body? Every visible background except near-white ones (the mail's
+ * "paper") — light tints too (a grey or pink highlight box keeps the dark text the mail writes on it) — as long as
+ * the element is a box within the mail: covering at least half of it (`share`) it is a page background and turns
+ * dark, so the mail doesn't stay light as a whole. Pure. css: computed colour ('rgb(r, g, b)' / 'rgba(r, g, b, a)').
+ */
+function _mailBgKeep(css, share = 0) {
+  const m = String(css || '').match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\s*\)/);
+  if (!m || share >= 0.5) return false;
+  const [r, g, b] = [+m[1], +m[2], +m[3]];
+  const a = m[4] == null ? 1 : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : +m[4]);
+  if (a < 0.1) return false;
+  return Math.min(r, g, b) < 245;   // near-white = paper
+}
+
+/**
+ * Dark mail body: mark the elements whose own background (as the mail styles it — read with the dark sheet
+ * switched off for a moment, no paint in between) is kept by _mailBgKeep, so the dark overrides skip them and
+ * their content; they also get their light-mode text colour inline, which their content inherits. The share of the
+ * mail an element covers = its area / the document's area.
+ */
+function _mailKeepColoredBg(doc) {
+  const sheet = doc?.getElementById('jc-dark');
+  if (!sheet) return;
+  sheet.disabled = true;
+  const win  = doc.defaultView;
+  const root = doc.documentElement;
+  const docArea = Math.max(1, root.scrollWidth * root.scrollHeight);
+  const keep = [];
+  for (const el of doc.body.querySelectorAll('*')) {
+    const cs = win.getComputedStyle(el);
+    if (!_mailBgKeep(cs.backgroundColor)) continue;
+    const r = el.getBoundingClientRect();
+    // Its light-mode text colour too: text inside without a colour of its own would inherit the dark body's white
+    if (_mailBgKeep(cs.backgroundColor, (r.width * r.height) / docArea)) keep.push([el, cs.color]);
+  }
+  sheet.disabled = false;
+  for (const [el, color] of keep) {
+    el.setAttribute('data-jc-keep', '');
+    el.style.setProperty('color', color);
+  }
 }
 
 /** True when a mail has both an HTML and a non-empty plain-text part. */
@@ -2120,7 +2278,8 @@ function _calSeriesDates(ev) {
 }
 
 // prefill (create mode only): { start: Date, end: Date, allDay } — e.g. a slot picked in the calendar view —
-// and / or { title, description, onSaved() } (e.g. a sticky turned into an event)
+// and / or { title, description, onSaved() } (e.g. a sticky turned into an event); an invitation
+// (_mailIcsPrefill) also brings { location, rrule, timezone }
 async function openCalEventModal(accountId, ev, acc, scope, prefill) {
   const modal      = document.getElementById('calEventModal');
   const titleEl    = document.getElementById('calEventModalTitle');
@@ -2270,6 +2429,8 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
     endDate.value   = todayDate; endTime.value   = `${pad((startH + 1) % 24)}:00`;
     if (prefill?.title)       titleInput.value = prefill.title;
     if (prefill?.description) descInput.value  = prefill.description;
+    if (prefill?.location)    locInput.value   = prefill.location;
+    if (prefill?.rrule)       _parseRRuleToUi(prefill.rrule);
     if (prefill?.start) {
       const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
       const hm  = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -2278,7 +2439,7 @@ async function openCalEventModal(accountId, ev, acc, scope, prefill) {
       if (!prefill.allDay) { startTime.value = hm(prefill.start); endTime.value = hm(prefill.end); }
     }
 
-    _populateTzSelect(tzSel, _defaultTimezone || browserTz);
+    _populateTzSelect(tzSel, prefill?.timezone || _defaultTimezone || browserTz);
   }
 
   // Show/hide time fields based on all-day

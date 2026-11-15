@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view unit tests — MV-1 … MV-19
+ * Mail view unit tests — MV-1 … MV-21
  *
  * mailview.js is loaded via vm.runInContext with minimal browser-global stubs.
  * Only the pure helpers are exercised (folder tree, addresses, reply fields, URL state).
@@ -304,4 +304,95 @@ test('MV-19 _mvDuplicateIds — loaded copies with the same sender, To, subject,
   // Same Message-ID: size ignored, the largest copy is the original
   const withId = (id, size) => m(id, { messageId: '<a1@ex.com>', size })
   expect([...ctx._mvDuplicateIds([withId('5', 4000), withId('6', 250000), withId('7', 250032)])].sort()).toEqual(['5', '6'])
+})
+
+test('MV-20 _mvListOptsQs / _mvListFiltered — sort, local-day date filters, attachments, duplicates', () => {
+  const iso = (y, m, d) => encodeURIComponent(new Date(y, m - 1, d).toISOString())
+  const qs = o => ctx._mvListOptsQs({ sort: 'date', range: '', from: '', to: '', attachments: false, ...o })
+  expect(qs({})).toBe('')
+  expect(qs({ sort: 'date-asc' })).toBe('&sort=date-asc')
+  expect(qs({ sort: 'from', attachments: true })).toBe('&sort=from&attachments=1')
+  expect(qs({ duplicates: true })).toBe('&duplicates=1')
+  expect(ctx._mvListFiltered({ sort: 'date', duplicates: true })).toBe(true)
+  // newer than = from the following day on; older than = before that day
+  expect(qs({ range: 'newer', from: '2026-03-10' })).toBe(`&since=${iso(2026, 3, 11)}`)
+  expect(qs({ range: 'older', from: '2026-03-10' })).toBe(`&before=${iso(2026, 3, 10)}`)
+  // between: both days included, reversed ends swapped, one open end allowed
+  expect(qs({ range: 'between', from: '2026-03-10', to: '2026-03-12' })).toBe(`&since=${iso(2026, 3, 10)}&before=${iso(2026, 3, 13)}`)
+  expect(qs({ range: 'between', from: '2026-03-12', to: '2026-03-10' })).toBe(`&since=${iso(2026, 3, 10)}&before=${iso(2026, 3, 13)}`)
+  expect(qs({ range: 'between', to: '2026-03-12' })).toBe(`&before=${iso(2026, 3, 13)}`)
+  // a range without a date filters nothing
+  expect(qs({ range: 'older' })).toBe('')
+  expect(ctx._mvListFiltered({ sort: 'from', range: 'older', from: '' })).toBe(false)
+  expect(ctx._mvListFiltered({ sort: 'date', attachments: true })).toBe(true)
+})
+
+describe('MV-21 read after 5 s alone; Ctrl+A selects all; multi-selections are never marked read', () => {
+  function load() {
+    const noop = () => {}
+    const timers = []
+    const log = { unread: [] }
+    const c = vm.createContext({
+      document: { addEventListener: noop, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
+      window:   { addEventListener: noop, location: { href: 'http://x/today', search: '' } },
+      history:  { pushState: noop, replaceState: noop, back: noop },
+      localStorage: { getItem: () => null, setItem: noop },
+      Intl, Date, Math, JSON, Object, Array, String, Number, Set, Map, URL, URLSearchParams, Promise,
+      setTimeout: (fn, ms) => { const t = { fn, ms, cleared: false }; timers.push(t); return t },
+      clearTimeout: t => { if (t) t.cleared = true },
+      __log: log,
+    })
+    vm.runInContext(fs.readFileSync(path.join(FRONTEND, 'mailview.js'), 'utf8'), c)
+    vm.runInContext(`_mvIsOpen = () => true; _mvAccountId = 'a1'; _mvFolder = 'INBOX';
+      _mvMsgs = [{ id: '1', unread: true }, { id: '2', unread: true }, { id: '3', unread: false }];
+      _mvRenderListSelection = () => {}; _mvRenderReader = () => {}; _mvSetPane = () => {};
+      _mvJson = () => new Promise(() => {});
+      _mvSetUnread = (ids, unread) => { __log.unread.push([ids, unread]); };`, c)
+    const run = () => timers.filter(t => !t.cleared && !t.ran).forEach(t => { t.ran = true; t.fn() })
+    return { c, log, timers, run, ev: (o = {}) => ({ shiftKey: false, ctrlKey: false, metaKey: false, ...o }) }
+  }
+
+  test('opening an unread message marks it read only after 5 s', () => {
+    const { c, log, timers, run } = load()
+    c._mvOpenMessage('1')
+    expect(log.unread).toEqual([])
+    expect(timers.at(-1).ms).toBe(5000)
+    run()
+    expect(log.unread).toEqual([[['1'], false]])
+  })
+
+  test('moving on within 5 s leaves the message unread; already read ones get no timer', () => {
+    const { c, log, run } = load()
+    c._mvOpenMessage('1')
+    c._mvOpenMessage('3')
+    run()
+    expect(log.unread).toEqual([])
+    c._mvOpenMessage('2')
+    run()
+    expect(log.unread).toEqual([[['2'], false]])
+  })
+
+  test('Shift / Ctrl+click and Ctrl+A cancel the read; Ctrl+A selects every listed message', () => {
+    const { c, log, run, ev } = load()
+    c._mvOpenMessage('1')
+    c._mvClickMessage(ev({ ctrlKey: true }), '2')
+    run()
+    expect(log.unread).toEqual([])
+
+    c._mvOpenMessage('2')
+    c._mvSelectAll()
+    expect(vm.runInContext('[..._mvChecked]', c)).toEqual(['1', '2', '3'])
+    run()
+    expect(log.unread).toEqual([])
+  })
+
+  test('switching the folder cancels the pending read', () => {
+    const { c, log, run } = load()
+    c._mvOpenMessage('1')
+    vm.runInContext(`_mvRenderTree = () => {}; _mvRenderToolbar = () => {}; _mvRenderList = () => {};
+      _mvLoadList = () => {}; _mvLoadFolderSize = () => {}; _mvSetUrl = () => {};`, c)
+    c._mvSelectFolder('a1', 'Archive')
+    run()
+    expect(log.unread).toEqual([])
+  })
 })

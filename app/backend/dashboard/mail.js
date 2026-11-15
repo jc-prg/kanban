@@ -202,20 +202,31 @@ function _findBodyParts(struct) {
     // Content-ID: inline images are referenced from the HTML as <img src="cid:…">
     const cid = typeof node.id === 'string' ? node.id.trim().replace(/^<|>$/g, '') : '';
     const isImage = /^image\//i.test(node.type || '');
-    // Inline images may come without a file name — named after their part then
-    const name = node.dispositionParameters?.filename || node.parameters?.name ||
-      (cid && isImage ? `image-${String(part).replace(/\./g, '-')}.${_imageExt(node.type)}` : '');
+    // Inline images may come without a file name — named after their part then; so may the calendar part of an
+    // invitation (Outlook / Google: text/calendar next to the text and HTML body) — listed as invite.ics, but only
+    // when the mail has no named calendar file (Google sends both: the same invitation twice)
+    const filename = node.dispositionParameters?.filename || node.parameters?.name || '';
+    const inlineCal = !filename && /^text\/calendar$/i.test(node.type || '');
+    const name = filename ||
+      (cid && isImage ? `image-${String(part).replace(/\./g, '-')}.${_imageExt(node.type)}` : '') ||
+      (inlineCal && part ? 'invite.ics' : '');
     if (part && name) {
       const encoding = (node.encoding || 'base64').toLowerCase();
       // bodyStructure reports the encoded size; base64 inflates by 4/3
       const size = Math.round((node.size || 0) * (encoding === 'base64' ? 0.75 : 1));
-      attachments.push({ part, name, type: node.type || 'application/octet-stream', encoding, size, ...(cid ? { cid } : {}) });
+      attachments.push({ part, name, type: node.type || 'application/octet-stream', encoding, size, ...(cid ? { cid } : {}),
+        ...(inlineCal ? { _inlineCal: true } : {}) });
     }
     (node.childNodes || []).forEach(c => visit(c, false));
   }
   visit(struct, true);
   const bodyParts = new Set([text?.part, html?.part].filter(Boolean));
-  return { textPart: text, htmlPart: html, attachments: attachments.filter(a => !bodyParts.has(a.part)) };
+  const isCal = a => /^(text\/calendar|application\/(ics|x-ics|calendar))$/i.test(a.type) || /\.(ics|ical|ifb|vcs)$/i.test(a.name);
+  const namedCal = attachments.some(a => !a._inlineCal && isCal(a));
+  return {
+    textPart: text, htmlPart: html,
+    attachments: attachments.filter(a => !bodyParts.has(a.part) && !(a._inlineCal && namedCal)).map(({ _inlineCal, ...a }) => a),
+  };
 }
 
 /** Transfer-decoded bytes of a body part (base64 / quoted-printable / 7bit / 8bit / binary). */
@@ -349,10 +360,8 @@ async function _readAttachment(client, uid, part, attachments) {
   const msg = await client.fetchOne(String(uid), { bodyParts: [part] }, { uid: true });
   const buf = msg?.bodyParts?.get(part);
   if (!buf) return null;
-  const data = att.encoding === 'base64'
-    ? Buffer.from(buf.toString('ascii').replace(/\s+/g, ''), 'base64')
-    : (Buffer.isBuffer(buf) ? buf : Buffer.from(buf));
-  return { data, name: att.name, type: att.type };
+  // Transfer decoding (base64, quoted-printable — e.g. an invitation's inline text/calendar part)
+  return { data: _partBytes(buf, att.encoding), name: att.name, type: att.type };
 }
 
 /**
@@ -500,70 +509,133 @@ async function _specialFolder(client, use) {
 
 const _LIST_QUERY = { uid: true, envelope: true, bodyStructure: true, flags: true, size: true };
 
-/**
- * One page of message summaries in `folder`, newest first.
- * With `query`, the folder is searched server-side (subject, from, to, body).
- * Returns { messages, total, page, pageSize }.
- */
-// Date order per folder: { sig, uids } — reused while UIDVALIDITY / UIDNEXT / EXISTS are unchanged
-// (new, removed or moved messages change one of them; flag changes don't matter)
-const _dateOrderCache = new Map();
-const _DATE_ORDER_MAX = 50;
+// Folder index per folder: { sig, items: [{ uid, t, from }], dupes: Set } — reused while UIDVALIDITY / UIDNEXT / EXISTS
+// are unchanged (new, removed or moved messages change one of them; flag changes don't matter)
+const _folderIndexCache = new Map();
+// UIDs with attachments per folder: { sig, uids: Set } — only scanned when the attachment filter is used
+const _attachIndexCache = new Map();
+const _INDEX_CACHE_MAX = 50;
+
+/** List orders of the mail view: newest first (default), oldest first, sender A–Z (then newest first). */
+const MAIL_SORTS = ['date', 'date-asc', 'from'];
+
+function _cachePut(cache, key, value) {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > _INDEX_CACHE_MAX) cache.delete(cache.keys().next().value);
+}
+
+function _itemTime(it) {
+  const t = new Date(it.envelope?.date || it.internalDate || 0).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** Sort key of a sender: display name, else the address — lower case. */
+function _senderKey(addr) {
+  return String(addr?.name || addr?.address || '').trim().toLowerCase();
+}
 
 /** UIDs sorted by date / time, latest first (Date header, else the arrival time; ties: higher UID first). Pure. */
 function sortUidsByDate(items) {
-  const time = it => {
-    const t = new Date(it.envelope?.date || it.internalDate || 0).getTime();
-    return Number.isNaN(t) ? 0 : t;
-  };
-  return items.map(it => ({ uid: it.uid, t: time(it) }))
-    .sort((a, b) => b.t - a.t || b.uid - a.uid)
-    .map(it => it.uid);
-}
-
-/** All UIDs of the selected mailbox, latest first. */
-async function _uidsByDate(client, account, folder) {
-  const mb  = client.mailbox || {};
-  const key = `${account.id}\n${folder}`;
-  const sig = mb.uidValidity != null && mb.uidNext != null ? `${mb.uidValidity}:${mb.uidNext}:${mb.exists}` : null;
-  const hit = sig && _dateOrderCache.get(key);
-  if (hit && hit.sig === sig) return hit.uids;
-  const items = [];
-  if (mb.exists) {
-    for await (const msg of client.fetch('1:*', { uid: true, envelope: true, internalDate: true })) {
-      items.push({ uid: msg.uid, envelope: { date: msg.envelope?.date }, internalDate: msg.internalDate });
-    }
-  }
-  const uids = sortUidsByDate(items);
-  if (sig) {
-    _dateOrderCache.delete(key);
-    _dateOrderCache.set(key, { sig, uids });
-    if (_dateOrderCache.size > _DATE_ORDER_MAX) _dateOrderCache.delete(_dateOrderCache.keys().next().value);
-  }
-  return uids;
+  return orderFolderIndex(items.map(it => ({ uid: it.uid, t: _itemTime(it), from: '' })));
 }
 
 /**
- * One page of a folder (or of the search results in it), sorted by date / time, latest first.
+ * Filter + order a folder index ([{ uid, t, from }]). Pure.
+ * since / before: ms timestamps (since inclusive, before exclusive); only: Set of UIDs to keep.
+ * sort: 'date' (latest first; ties: higher UID first), 'date-asc' (oldest first; ties: lower UID first),
+ * 'from' (sender A–Z, accent- and case-insensitive; same sender latest first). Returns UIDs.
+ */
+function orderFolderIndex(items, { sort = 'date', since = null, before = null, only = null } = {}) {
+  const list = items.filter(it =>
+    (since == null || it.t >= since) && (before == null || it.t < before) && (!only || only.has(it.uid)));
+  const byDate = (a, b) => b.t - a.t || b.uid - a.uid;
+  if (sort === 'date-asc') list.sort((a, b) => a.t - b.t || a.uid - b.uid);
+  else if (sort === 'from') {
+    list.sort((a, b) => (a.from ? 0 : 1) - (b.from ? 0 : 1)
+      || a.from.localeCompare(b.from, undefined, { sensitivity: 'base' }) || byDate(a, b));
+  } else list.sort(byDate);
+  return list.map(it => it.uid);
+}
+
+function _mailboxSig(client) {
+  const mb = client.mailbox || {};
+  return mb.uidValidity != null && mb.uidNext != null ? `${mb.uidValidity}:${mb.uidNext}:${mb.exists}` : null;
+}
+
+/**
+ * All messages of the selected mailbox as { items: [{ uid, t, from }], dupes } — dupes = Set of the UIDs that
+ * are duplicate copies (findDuplicateUids: the largest copy of a group is the original).
+ */
+async function _folderIndex(client, account, folder) {
+  const key = `${account.id}\n${folder}`;
+  const sig = _mailboxSig(client);
+  const hit = sig && _folderIndexCache.get(key);
+  if (hit && hit.sig === sig) return hit;
+  const items = [], raw = [];
+  if (client.mailbox?.exists) {
+    for await (const msg of client.fetch('1:*', { uid: true, envelope: true, internalDate: true, size: true })) {
+      items.push({ uid: msg.uid, t: _itemTime(msg), from: _senderKey(msg.envelope?.from?.[0]) });
+      raw.push({ uid: msg.uid, envelope: msg.envelope, internalDate: msg.internalDate, size: msg.size });
+    }
+  }
+  const index = { sig, items, dupes: new Set(findDuplicateUids(raw)) };
+  if (sig) _cachePut(_folderIndexCache, key, index);
+  return index;
+}
+
+/** UIDs of the selected mailbox's messages with attachments (same rule as `hasAttachments` of the summaries). */
+async function _attachmentUids(client, account, folder) {
+  const key = `${account.id}\n${folder}`;
+  const sig = _mailboxSig(client);
+  const hit = sig && _attachIndexCache.get(key);
+  if (hit && hit.sig === sig) return hit.uids;
+  const uids = new Set();
+  if (client.mailbox?.exists) {
+    for await (const msg of client.fetch('1:*', { uid: true, bodyStructure: true })) {
+      if (_findBodyParts(msg.bodyStructure).attachments.length) uids.add(msg.uid);
+    }
+  }
+  if (sig) _cachePut(_attachIndexCache, key, { sig, uids });
+  return uids;
+}
+
+const _FETCH_CHUNK = 500;   // UIDs per FETCH command ("Load all" of a big folder)
+
+/**
+ * One page of a folder (or of the search results in it). Order: `sort` (MAIL_SORTS, default latest first).
+ * Filters: `query` (IMAP search in subject / from / to / body), `since` / `before` (ms, Date header, else
+ * arrival time), `attachments`, `duplicates` (only duplicate copies — findDuplicateUids). `all` returns every
+ * message from `page` on (the mail view's "Load all").
  * Returns { messages, total, page, pageSize }.
  */
-async function fetchFolderMessages(account, folder, { page = 0, pageSize = 50, query = '' } = {}) {
+async function fetchFolderMessages(account, folder, { page = 0, pageSize = 50, query = '', sort = 'date',
+  since = null, before = null, attachments = false, duplicates = false, all = false } = {}) {
   return _withMailbox(account, folder, async client => {
-    let uids = await _uidsByDate(client, account, folder);
+    const { items, dupes } = await _folderIndex(client, account, folder);
+    let only = duplicates ? dupes : null;
     if (query) {
-      const found = new Set((await client.search({
+      const found = (await client.search({
         or: [{ subject: query }, { from: query }, { to: query }, { body: query }],
-      }, { uid: true })) || []);
-      uids = uids.filter(u => found.has(u));
+      }, { uid: true })) || [];
+      only = new Set(only ? found.filter(u => only.has(u)) : found);
     }
+    if (attachments) {
+      const withAtt = await _attachmentUids(client, account, folder);
+      only = only ? new Set([...only].filter(u => withAtt.has(u))) : withAtt;
+    }
+    const uids  = orderFolderIndex(items, { sort, since, before, only });
     const total = uids.length;
-    const slice = uids.slice(page * pageSize, (page + 1) * pageSize);
+    const slice = uids.slice(page * pageSize, all ? undefined : (page + 1) * pageSize);
     const msgs  = [];
-    if (slice.length) {
-      for await (const msg of client.fetch(slice.join(','), _LIST_QUERY, { uid: true })) msgs.push(_summary(msg));
+    for (let i = 0; i < slice.length; i += _FETCH_CHUNK) {
+      const chunk = slice.slice(i, i + _FETCH_CHUNK);
+      for await (const msg of client.fetch(chunk.join(','), _LIST_QUERY, { uid: true })) msgs.push(_summary(msg));
     }
     const pos = new Map(slice.map((u, i) => [String(u), i]));
     msgs.sort((a, b) => pos.get(a.id) - pos.get(b.id));
+    // Duplicate copy anywhere in the folder (the list's "duplicate" label — same set as the duplicates filter)
+    for (const m of msgs) m.duplicate = dupes.has(Number(m.id));
     return { messages: msgs, total, page, pageSize };
   });
 }
@@ -923,6 +995,8 @@ module.exports = {
   markFolderRead,
   findDuplicateUids,
   sortUidsByDate,
+  orderFolderIndex,
+  MAIL_SORTS,
   findDuplicateMessages,
   moveMailMessage,
   deleteMailMessage,

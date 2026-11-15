@@ -756,3 +756,17 @@
 .stk-detail-actions { justify-content: flex-end; }
 .stk-detail-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
 @media (prefers-color-scheme: light) { .stk-detail-text { filter: none; } }
+
+/* "Add to calendar" next to an ICS attachment (mail detail panel + mail view reader — _mailIcsButtonHtml) */
+.mail-ics-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 0.75rem;
+  vertical-align: middle;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.mail-ics-add:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.dash-attachment-link + .mail-ics-add { margin: 2px 8px 2px 6px; }

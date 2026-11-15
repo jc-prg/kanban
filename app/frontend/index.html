@@ -109,6 +109,31 @@
         <div class="mv-resizer" data-mv-resize="list" title="Drag to resize (double-click: reset)"></div>
         <div class="mailview-listsearch">
           <input type="search" class="modal-input mailview-search" id="mailViewSearch" placeholder="Search folder… (/)" autocomplete="off" spellcheck="false">
+          <button class="mv-listopts-btn" id="mailViewListOpts" title="Sort &amp; filter" aria-label="Sort &amp; filter" aria-haspopup="true" aria-expanded="false" aria-controls="mailViewListOptsPop"><span data-icon="filter"></span></button>
+          <div class="mv-listopts" id="mailViewListOptsPop" role="dialog" aria-label="Sort &amp; filter" hidden>
+            <div class="mv-listopts-sec">Sort</div>
+            <label class="mv-listopts-opt"><input type="radio" name="mvSort" value="date"> Newest first</label>
+            <label class="mv-listopts-opt"><input type="radio" name="mvSort" value="date-asc"> Oldest first</label>
+            <label class="mv-listopts-opt"><input type="radio" name="mvSort" value="from"> Sender (A–Z)</label>
+            <div class="mv-listopts-sec">Date</div>
+            <select class="modal-input mv-listopts-input" data-mv-opts-range aria-label="Date filter">
+              <option value="">Any date</option>
+              <option value="newer">Newer than</option>
+              <option value="older">Older than</option>
+              <option value="between">Between</option>
+            </select>
+            <div class="mv-listopts-dates" hidden>
+              <input type="date" class="modal-input mv-listopts-input" data-mv-opts-from aria-label="Date">
+              <span class="mv-listopts-between" hidden>and</span>
+              <input type="date" class="modal-input mv-listopts-input mv-listopts-between" data-mv-opts-to aria-label="End date" hidden>
+            </div>
+            <div class="mv-listopts-sec">Content</div>
+            <label class="mv-listopts-opt"><input type="checkbox" data-mv-opts-att> Has attachments</label>
+            <label class="mv-listopts-opt" title="Copies of another message in this folder (same rule as Delete duplicates)"><input type="checkbox" data-mv-opts-dup> Is duplicate</label>
+            <div class="mv-listopts-sec">List</div>
+            <label class="mv-listopts-opt"><input type="checkbox" data-mv-opts-all> Load all</label>
+            <button type="button" class="btn mv-listopts-reset" data-mv-opts-reset>Reset</button>
+          </div>
         </div>
         <div class="mailview-list" id="mailViewList"></div>
         <div class="mailview-listfooter"><span id="mailViewCount"></span></div>

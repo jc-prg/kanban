@@ -160,7 +160,7 @@
   --menu-hover: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 :root[data-skin="glass"] :is(.context-menu, .header-dropdown, .board-switch-menu, .mv-from-list, .mv-emoji-pop,
-    .mv-picker-box, .note-card-search-results) {
+    .mv-picker-box, .note-card-search-results, .mv-listopts) {
   -webkit-backdrop-filter: blur(16px) saturate(160%);
   backdrop-filter: blur(16px) saturate(160%);
   box-shadow: inset 0 1px 0 var(--glass-highlight), var(--menu-shadow);

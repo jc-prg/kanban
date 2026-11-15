@@ -1731,6 +1731,8 @@ async function afterAuth() {
     item.onclick = async () => { window.hideMenu?.(); await _initOverlayHost(); open(); };
   }
   if (window.matchMedia('(min-width: 640px)').matches) document.getElementById('schedToggleBtn').style.display = '';
+  // ?cal= / ?mail= on a board URL (reload, back / forward, card links): the view first, then the board behind it
+  await _overlayViewsFromUrl();
   await load();
   if (typeof ensureScheduledColumn === 'function' && state.settings?.scheduledColumnId && state.columns.find(c => c.id === state.settings.scheduledColumnId)) ensureScheduledColumn();
   window._notesModule = _createNotesModule();
@@ -1744,12 +1746,6 @@ async function afterAuth() {
   await window._notesModule.loadNotes();
   loadCardAttachSet();
   handleUrlHash();
-  // ?cal= / ?mail= on a board URL (reload, back / forward): reopen the view over the board
-  if (/[?&](cal|mail)=/.test(location.search)) {
-    await _initOverlayHost();
-    _cvInitFromUrl();
-    _mvInitFromUrl();
-  }
 }
 
 /**

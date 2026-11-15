@@ -132,6 +132,16 @@ function _svgSearch(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="5" r="3.5"/><line x1="7.6" y1="7.6" x2="10.8" y2="10.8"/></svg>`;
 }
 
+// Sun — light background (mail view reader in dark mode)
+function _svgSun(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="2.3"/><path d="M6 .8v1.4M6 9.8v1.4M.8 6h1.4M9.8 6h1.4M2.3 2.3l1 1M8.7 8.7l1 1M2.3 9.7l1-1M8.7 3.3l1-1"/></svg>`;
+}
+
+// Crescent moon — dark background (mail view reader in dark mode)
+function _svgMoon(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 7.4A4.6 4.6 0 0 1 4.6 1.8a4.6 4.6 0 1 0 5.6 5.6Z"/></svg>`;
+}
+
 // Two chevrons pointing apart — expand all
 function _svgExpandAll(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 1.5 9 4.5M3 7.5 6 10.5 9 7.5"/></svg>`;
@@ -412,6 +422,8 @@ const SVGICONS = {
   today:          _svgToday,
   dice:           _svgDice,
   search:         _svgSearch,
+  sun:            _svgSun,
+  moon:           _svgMoon,
   stats:          _svgStats,
   expandAll:      _svgExpandAll,
   chevronDown:    _svgChevronDown,
@@ -484,6 +496,8 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgToday(16, 16),        name: 'Today',            usage: 'Navigate to the Today page' },
   { type: 'svg', svg: _svgStats(16, 16),        name: 'Statistics',       usage: 'Open the statistics / achievement history (Today progress tile)' },
   { type: 'svg', svg: _svgSearch(16, 16),       name: 'Search',           usage: 'Show / hide the filter field of the Today Notes tile' },
+  { type: 'svg', svg: _svgSun(16, 16),          name: 'Sun',              usage: 'Mail view reader (dark mode): show the mail on a white background' },
+  { type: 'svg', svg: _svgMoon(16, 16),         name: 'Moon',             usage: 'Mail view reader (dark mode): back to the black background' },
   { type: 'svg', svg: _svgExpandAll(16, 16),    name: 'ExpandAll',        usage: 'Open all folders (Today Notes tile)' },
   { type: 'svg', svg: _svgCollapseAll(16, 16),  name: 'CollapseAll',      usage: 'Collapse all folders (Today Notes tile)' },
   { type: 'svg', svg: _svgEye(16, 16),          name: 'Eye',              usage: 'Show a hidden mail folder again (mail view folder menu)' },

@@ -6,6 +6,10 @@ const _MV_HIDDEN_KEY    = 'mail-view-hidden';      // legacy per-browser list of
 const _MV_SPECIAL_ORDER = ['\\Inbox', '\\Drafts', '\\Sent', '\\Archive', '\\Junk', '\\Trash'];
 const _MV_NO_ROLLUP     = new Set(['\\Trash', '\\Junk']);   // unread counts not summed into collapsed parents
 const _MV_WIDTHS_KEY    = 'mail-view-widths';
+const _MV_SORT_KEY      = 'mail-view-sort';
+const _MV_LIGHT_KEY     = 'mail-view-light';   // '1': the reader shows mails on white also in dark mode
+const _MV_SORTS         = ['date', 'date-asc', 'from'];   // = MAIL_SORTS in backend/dashboard/mail.js
+const _MV_READ_DELAY_MS = 5000;   // an unread message counts as read once it stayed open this long (alone)
 // Trash / spam folders offering "Empty folder" (same rules as isEmptyableFolder in backend/dashboard/mail.js)
 const _MV_EMPTYABLE_USES  = new Set(['\\Trash', '\\Junk']);
 const _MV_EMPTYABLE_NAMES = new Set([
@@ -36,8 +40,48 @@ let _mvPlain       = false;       // open message shown as plain text (HTML is t
 let _mvMsgSeq      = 0;
 let _mvCompose     = null;        // { files: [File], reply: { uid, folder } | null, dirty }
 let _mvWidths      = _mvLoadWidths(); // requested column widths (px); applied clamped to the body width
+let _mvOpts        = _mvDefaultListOpts();   // list order + filters of the options popup (sort kept per browser)
+let _mvLight       = _mvLoadLight();   // reader on a white background in dark mode (sun / moon toolbar button)
+let _mvReadTimer   = null;        // { id, accountId, folder, t }: marks the open message read after _MV_READ_DELAY_MS
 
 // ---- Pure helpers (unit-tested) ----
+
+/** Local day YYYY-MM-DD → ISO time of its start (`plusDays` later). */
+function _mvDayStart(day, plusDays = 0) {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d + plusDays).toISOString();
+}
+
+/**
+ * Query string part of the list options: sort (default 'date' left out), date filter, attachments, duplicate
+ * copies (same rule as the list badge / "Delete duplicates").
+ * range 'newer' = after the day in `from`, 'older' = before it, 'between' = `from` … `to` inclusive
+ * (one open end allowed, swapped when reversed) — days in the local time zone.
+ */
+function _mvListOptsQs(o) {
+  const p = [];
+  const day = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d : null;
+  if (o.sort && o.sort !== 'date') p.push(`sort=${encodeURIComponent(o.sort)}`);
+  let since = null, before = null;
+  if (o.range === 'newer' && day(o.from)) since = _mvDayStart(o.from, 1);
+  if (o.range === 'older' && day(o.from)) before = _mvDayStart(o.from);
+  if (o.range === 'between') {
+    let a = day(o.from), b = day(o.to);
+    if (a && b && a > b) [a, b] = [b, a];
+    if (a) since = _mvDayStart(a);
+    if (b) before = _mvDayStart(b, 1);
+  }
+  if (since)  p.push(`since=${encodeURIComponent(since)}`);
+  if (before) p.push(`before=${encodeURIComponent(before)}`);
+  if (o.attachments) p.push('attachments=1');
+  if (o.duplicates)  p.push('duplicates=1');
+  return p.map(x => `&${x}`).join('');
+}
+
+/** True when the options narrow the list down (date / attachment filter — not the order). */
+function _mvListFiltered(o) {
+  return _mvListOptsQs({ ...o, sort: 'date' }) !== '';
+}
 
 function _mvParentPath(f) {
   const i = f.delimiter ? f.path.lastIndexOf(f.delimiter) : -1;
@@ -268,6 +312,52 @@ function _mvSaveWidths() {
   try { localStorage.setItem(_MV_WIDTHS_KEY, JSON.stringify(_mvWidths)); } catch { /* ignore */ }
 }
 
+/**
+ * Options popup defaults; the sort order is remembered per browser, the filters only while the page is open.
+ * `loadAll` (checkbox / "Load all" button): every list load fetches the whole result — kept across search and
+ * filter changes, reset by a folder switch.
+ */
+function _mvDefaultListOpts() {
+  let sort = 'date';
+  try { sort = localStorage.getItem(_MV_SORT_KEY) || 'date'; } catch { /* ignore */ }
+  return { sort: _MV_SORTS.includes(sort) ? sort : 'date', range: '', from: '', to: '', attachments: false, duplicates: false, loadAll: false };
+}
+
+function _mvLoadLight() {
+  try { return localStorage.getItem(_MV_LIGHT_KEY) === '1'; } catch { return false; }
+}
+
+function _mvSystemDark() {
+  try { return !!window.matchMedia?.('(prefers-color-scheme: dark)').matches; } catch { return false; }
+}
+
+/** The reader shows the mail body black with white text: dark mode, unless switched to white. */
+function _mvBodyDark() {
+  return _mvSystemDark() && !_mvLight;
+}
+
+/** Re-render the open mail's body (format / background switch) and the toolbar. */
+function _mvRerenderBody() {
+  const body = document.querySelector('#mailViewReader .mv-reader-body');
+  if (!_mvMsg || !body) return;
+  body.replaceChildren();
+  _renderMailBody(body, _mvMsg, { plain: _mvPlain, toggle: false, attachments: _MV_BODY_ATTACHMENTS, dark: _mvBodyDark() });
+  _mvRenderReaderActions();
+}
+
+function _mvToggleLight() {
+  _mvLight = !_mvLight;
+  try { if (_mvLight) localStorage.setItem(_MV_LIGHT_KEY, '1'); else localStorage.removeItem(_MV_LIGHT_KEY); } catch { /* ignore */ }
+  _mvRerenderBody();
+}
+
+function _mvSaveSort() {
+  try {
+    if (_mvOpts.sort === 'date') localStorage.removeItem(_MV_SORT_KEY);
+    else localStorage.setItem(_MV_SORT_KEY, _mvOpts.sort);
+  } catch { /* ignore */ }
+}
+
 /** Apply the requested widths, clamped to the current body width. */
 function _mvApplyWidths() {
   const body = document.querySelector('#mailView .mailview-body');
@@ -452,32 +542,38 @@ function _mvShow() {
   view.dataset.pane = 'list';
   _mvApplyWidths();
   document.body.classList.add('mailview-open');
-  _mvReload();
+  return _mvReload();
 }
 
 function _mvHide() {
   const view = document.getElementById('mailView');
   if (!view) return;
   view.style.display = 'none';
+  _mvCancelRead();
   _syncOverlayHost();
   document.body.classList.remove('mailview-open', 'mail-over-dialog');
   _mvCompose = null;
   _mvClosePicker(null);
 }
 
-/** Open the view if the URL asks for it (called once the dashboard is initialised). */
+/**
+ * Open the view if the URL asks for it; resolves once the folders and the message list are loaded (a ?mid=
+ * lookup continues on its own). Pages opened with ?mail= call it before loading what lies behind the view.
+ */
 function _mvInitFromUrl() {
   const req = _mvParseUrl(window.location.search);
   if (!req) { if (_mvIsOpen()) _mvHide(); return; }
   const changed = req.accountId !== _mvAccountId || req.folder !== _mvFolder;
   _mvAccountId = req.accountId;
   _mvFolder    = req.folder;
-  if (!_mvIsOpen()) _mvShow();
+  let loaded = null;
+  if (!_mvIsOpen()) loaded = _mvShow();
   else if (changed) _mvSelectFolder(_mvAccountId, _mvFolder, { url: false });
   if (req.mid && req.accountId) {
     _mvSetUrl(false);   // drop ?mid= so reloads / back navigation don't reopen it
     _mvOpenByMessageId(req.accountId, req.mid, req.folder);
   }
+  return loaded;
 }
 
 // ---- Data ----
@@ -497,12 +593,13 @@ async function _mvJson(url, opts) {
   return data;
 }
 
-/** Reload accounts, folder trees and the open folder. */
+/** Reload accounts, folder trees and the open folder (resolves when those are loaded; the folder size follows). */
 async function _mvReload() {
   _mvRenderTree();
   _mvRenderList();
   _mvRenderReader();
   const hiddenLoaded = _mvLoadHidden();
+  _mailLoadTrusted().then(_mailSyncTrustedBadges);   // trusted badges in the list
   try {
     const cfg = await _mvJson('/api/dashboard/config');
     _mvAccounts = (cfg.mailAccounts || []).map(a => ({
@@ -523,10 +620,10 @@ async function _mvReload() {
   }
   _mvRenderToolbar();
   await hiddenLoaded;
+  _mvLoadFolderSize();   // a scan of the whole folder: not waited for
   await Promise.all([
     ..._mvAccounts.map(a => _mvLoadFolders(a.accountId)),
     _mvLoadList(0),
-    _mvLoadFolderSize(),
   ]);
 }
 
@@ -575,23 +672,27 @@ async function _mvLoadFolderSize() {
   el.title = `${name}: ${messages} message${messages === 1 ? '' : 's'}, ${size.toLocaleString()} bytes`;
 }
 
-async function _mvLoadList(page) {
+/** Load a page of the open folder (`all`: every message from `page` on — "Load all"). */
+async function _mvLoadList(page, { all = false } = {}) {
   if (!_mvAccountId) { _mvMsgs = []; _mvTotal = 0; _mvRenderList(); return; }
+  if (_mvOpts.loadAll) all = true;
   const seq = ++_mvListSeq;
   const list = document.getElementById('mailViewList');
   list.classList.add('mailview-loading');
+  if (!_mvMsgs.length) _mvRenderList();   // "Loading..." instead of "No messages." until the first page arrives
   let data;
   try {
     const q = _mvQuery ? `&q=${encodeURIComponent(_mvQuery)}` : '';
-    data = await _mvJson(_mvApi(_mvAccountId, `/messages?${_mvFolderQs()}&page=${page}${q}`));
+    const opts = _mvListOptsQs(_mvOpts) + (all ? '&all=1' : '');
+    data = await _mvJson(_mvApi(_mvAccountId, `/messages?${_mvFolderQs()}&page=${page}${q}${opts}`));
   } catch (err) {
     data = { messages: [], total: 0, error: err.message };
   }
   if (seq !== _mvListSeq) return;
   list.classList.remove('mailview-loading');
-  _mvPage  = page;
   _mvTotal = data.total || 0;
   _mvMsgs  = page === 0 ? data.messages : [..._mvMsgs, ...data.messages];
+  _mvPage  = all ? Math.max(page, Math.ceil(_mvMsgs.length / (data.pageSize || 50)) - 1) : page;
   _mvChecked = new Set([..._mvChecked].filter(id => _mvMsgs.some(m => m.id === id)));
   _mvRenderList(data.error);
 }
@@ -617,6 +718,9 @@ function _mvSelectFolder(accountId, path, { url = true } = {}) {
   _mvAnchor    = null;
   _mvMsgs      = [];
   _mvTotal     = 0;
+  _mvCancelRead();
+  _mvOpts.loadAll = false;   // "Load all" applies to one folder
+  _mvSyncListOpts();
   if (url) _mvSetUrl(false);
   if (!_mvCompose) _mvRenderReader();
   _mvSetPane('list');
@@ -640,6 +744,7 @@ async function _mvOpenMessage(id) {
   _mvPlain = false;
   _mvChecked = new Set([id]);
   _mvAnchor  = id;
+  _mvScheduleRead(id);
   _mvRenderListSelection();
   _mvSetPane('reader');
   _mvRenderReader('loading');
@@ -655,8 +760,45 @@ async function _mvOpenMessage(id) {
   if (seq !== _mvMsgSeq) return;
   _mvMsg = msg;
   _mvRenderReader();
-  const summary = _mvMsgs.find(m => m.id === id);
-  if (summary?.unread) _mvSetUnread([id], false);
+}
+
+// ---- Read after a while: navigating through the list leaves the messages passed unread ----
+
+function _mvCancelRead() {
+  if (_mvReadTimer) clearTimeout(_mvReadTimer.t);
+  _mvReadTimer = null;
+}
+
+/** Mark `id` read once it stayed the only selected, open message for _MV_READ_DELAY_MS. */
+function _mvScheduleRead(id) {
+  _mvCancelRead();
+  if (!_mvMsgs.find(m => m.id === id)?.unread) return;
+  const timer = { id, accountId: _mvAccountId, folder: _mvFolder };
+  timer.t = setTimeout(() => {
+    if (_mvReadTimer !== timer) return;
+    _mvReadTimer = null;
+    if (!_mvIsOpen() || _mvSelId !== id || _mvAccountId !== timer.accountId || _mvFolder !== timer.folder) return;
+    if (_mvChecked.size > 1) return;   // part of a multi-selection: never marked read
+    if (_mvMsgs.find(m => m.id === id)?.unread) _mvSetUnread([id], false);
+  }, _MV_READ_DELAY_MS);
+  _mvReadTimer = timer;
+}
+
+/** Select every message in the list (Ctrl/Cmd+A) — the loaded, filtered ones. */
+function _mvSelectAll() {
+  if (!_mvMsgs.length) return;
+  _mvChecked = new Set(_mvMsgs.map(m => m.id));
+  if (!_mvAnchor) _mvAnchor = _mvSelId || _mvMsgs[0].id;
+  if (_mvChecked.size > 1) _mvCancelRead();
+  _mvRenderListSelection();
+}
+
+/** Open the first (`'first'`) or last loaded message of the list (Home / End). */
+function _mvJumpSelection(where) {
+  const next = where === 'first' ? _mvMsgs[0] : _mvMsgs.at(-1);
+  if (!next) return;
+  if (next.id !== _mvSelId) _mvOpenMessage(next.id);
+  document.querySelector(`#mailViewList [data-mv-msg="${CSS.escape(next.id)}"]`)?.scrollIntoView({ block: 'nearest' });
 }
 
 function _mvMoveSelection(dir) {
@@ -688,12 +830,14 @@ function _mvSelectedIds() {
 function _mvClickMessage(e, id) {
   if (e.shiftKey && _mvAnchor) {
     for (const x of _mvRangeIds(_mvMsgs.map(m => m.id), _mvAnchor, id)) _mvChecked.add(x);
+    if (_mvChecked.size > 1) _mvCancelRead();
     _mvRenderListSelection();
     return;
   }
   if (e.ctrlKey || e.metaKey) {
     if (!_mvChecked.size && _mvSelId) _mvChecked.add(_mvSelId);
     if (_mvChecked.has(id)) _mvChecked.delete(id); else _mvChecked.add(id);
+    if (_mvChecked.size > 1) _mvCancelRead();
     _mvAnchor = id;
     _mvRenderListSelection();
     return;
@@ -708,6 +852,7 @@ function _mvMessagesUrl(ids, suffix, folder) {
 }
 
 async function _mvSetUnread(ids, unread) {
+  if (_mvReadTimer && ids.includes(_mvReadTimer.id)) _mvCancelRead();
   const changed = ids.map(id => _mvMsgs.find(x => x.id === id)).filter(m => m && m.unread !== unread);
   if (!changed.length) return;
   changed.forEach(m => { m.unread = unread; });
@@ -1032,12 +1177,9 @@ function _mvOpenAttachment(att) {
 
 /** Switch the open message between its HTML and plain-text version. */
 function _mvToggleFormat() {
-  const body = document.querySelector('#mailViewReader .mv-reader-body');
-  if (!_mvMsg || !body) return;
+  if (!_mvMsg || !document.querySelector('#mailViewReader .mv-reader-body')) return;
   _mvPlain = !_mvPlain;
-  body.replaceChildren();
-  _renderMailBody(body, _mvMsg, { plain: _mvPlain, toggle: false, attachments: _MV_BODY_ATTACHMENTS });
-  _mvRenderReaderActions();
+  _mvRerenderBody();
 }
 
 const _MV_SOURCE_MAX = 2 * 1024 * 1024;   // characters shown; the download always has everything
@@ -1488,12 +1630,15 @@ function _mvListItemHtml(m, dupes) {
   // Same markup classes as the dashboard mail panel items (card-text / card-meta)
   const meta = [];
   if (m.flagColor)      meta.push(_mailFlagHtml(m.flagColor, 11));
-  if (dupes?.has(m.id)) meta.push('<span class="card-duplicate-badge" title="Same message (Message-ID, sender, recipients, subject, date) as a larger or older loaded copy in this folder">duplicate</span>');
+  // `duplicate` from the server covers the whole folder; the loaded-only check is the fallback (e.g. after a move)
+  if (m.duplicate ?? dupes?.has(m.id)) meta.push('<span class="card-duplicate-badge" title="Same message (Message-ID, sender, recipients, subject, date) as a larger or older copy in this folder">duplicate</span>');
   if (m.answered)       meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Answered">\u21a9</span>');
   if (m.forwarded)      meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Forwarded">\u21aa</span>');
   if (m.hasAttachments) meta.push(`<span class="dashboard-mail-attach" title="Has attachments">${SVGICONS.attachment(11, 11)}</span>`);
   if (m.cardRefs?.length) meta.push(`<span class="dashboard-mail-attach" title="Linked to a card">${SVGICONS.card(13, 9)}</span>`);
   if (who)              meta.push(`<span class="dashboard-mail-from">${escHtml(who)}</span>`);
+  // Trusted sender: same badge as in the reader (kept in sync by _mailSyncTrustedBadges); not for To: rows
+  if (who && !who.startsWith('To: ')) meta.push(_mailTrustedBadgeHtml(m));
   const date = _mvFmtListDate(m.date);
   if (date)             meta.push(`<span class="card-date">${escHtml(date)}</span>`);
   const selected = _mvChecked.size > 1 && _mvChecked.has(m.id);
@@ -1647,14 +1792,17 @@ function _mvRenderList(error) {
   if (!_mvAccountId) { el.innerHTML = ''; return; }
   if (!_mvMsgs.length) {
     el.innerHTML = el.classList.contains('mailview-loading') || _mvListSeq === 0
-      ? '<p class="dashboard-empty">Loading…</p>'
-      : `<p class="dashboard-empty">${_mvQuery ? 'No messages match the search.' : 'No messages.'}</p>`;
+      ? '<p class="dashboard-empty">Loading<span class="mv-loading-dots" aria-hidden="true"></span></p>'
+      : `<p class="dashboard-empty">${_mvQuery ? 'No messages match the search.' : _mvListFiltered(_mvOpts) ? 'No messages match the filters.' : 'No messages.'}</p>`;
     return;
   }
   _mvSwipe = null;
   const dupes = _mvDuplicateIds(_mvMsgs);   // only among the loaded messages
   el.innerHTML = _mvMsgs.map(m => _mvListItemHtml(m, dupes)).join('')
-    + (_mvMsgs.length < _mvTotal ? `<button class="btn mv-load-more" data-mv-more="1">Load more (${_mvTotal - _mvMsgs.length})</button>` : '');
+    + (_mvMsgs.length < _mvTotal ? `<div class="mv-load-more">
+        <button class="btn" data-mv-more="1">Load more (${Math.min(50, _mvTotal - _mvMsgs.length)})</button>
+        <button class="btn" data-mv-all="1">Load all (${_mvTotal - _mvMsgs.length})</button>
+      </div>` : '');
 }
 
 function _mvRenderListSelection() {
@@ -1669,7 +1817,8 @@ function _mvRenderListSelection() {
 function _mvRenderCount() {
   const count = document.getElementById('mailViewCount');
   if (!count) return;
-  const total = _mvTotal ? `${_mvTotal} ${_mvQuery ? 'found' : 'messages'}` : '';
+  let total = _mvTotal ? `${_mvTotal} ${_mvQuery || _mvListFiltered(_mvOpts) ? 'found' : 'messages'}` : '';
+  if (_mvMsgs.length && _mvMsgs.length < _mvTotal) total += ` \u00b7 ${_mvMsgs.length} loaded`;
   count.textContent = _mvChecked.size > 1 ? `${total} \u00b7 ${_mvChecked.size} selected` : total;
 }
 
@@ -1697,8 +1846,12 @@ function _mvRenderReaderActions() {
         flag ? `Flagged (${_mailFlagInfo(flag).label})` : 'Flag', { key: 's' }),
     btn('move',     SVGICONS.moveTo,   'Move'),
     btn('delete',   SVGICONS.delete,   'Delete',    { key: 'Del', cls: ' btn-danger-soft' }),
-    `<button class="btn btn--icon mv-source-btn" data-mv-act="source" title="Show source" aria-label="Show source">${SVGICONS.cardInfo(12, 12)}</button>`,
     _mailHasBothParts(_mvMsg) ? (t => `<button class="btn mv-format-btn" data-mv-act="format" title="${t.title}" aria-label="${t.title}" aria-pressed="${_mvPlain}">${escHtml(t.label)}</button>`)(_mailFormatToggle(_mvPlain)) : '',
+    `<button class="btn btn--icon mv-source-btn" data-mv-act="source" title="Show source" aria-label="Show source">${SVGICONS.cardInfo(12, 12)}</button>`,
+    // Dark mode only: black (default) ⇄ white background of the mail
+    _mvSystemDark() ? (_mvLight
+      ? `<button class="btn btn--icon mv-theme-btn" data-mv-act="theme" title="Dark background" aria-label="Dark background" aria-pressed="true">${SVGICONS.moon(12, 12)}</button>`
+      : `<button class="btn btn--icon mv-theme-btn" data-mv-act="theme" title="White background" aria-label="White background" aria-pressed="false">${SVGICONS.sun(12, 12)}</button>`) : '',
   ].join('');
 }
 
@@ -1728,7 +1881,7 @@ function _mvRenderReader(mode, error) {
     return `<span class="mv-att">
         <button class="mv-att-name" data-mv-att-view="${i}" title="${verb} ${escHtml(a.name)}">${_mvAttIcon(ft)}<span>${escHtml(a.name)}</span>${a.size ? `<span class="mv-att-size">${_mvFmtSize(a.size)}</span>` : ''}</button>
         ${extra}<button class="mv-att-dl" data-mv-att-dl="${i}" title="Download">${SVGICONS.download(12, 12)}</button>
-      </span>`;
+      </span>${_mailIsIcs(a) ? _mailIcsButtonHtml(`data-mv-att-cal="${i}"`) : ''}`;
   }).join('');
   el.innerHTML = `
     <div class="mv-reader-head">
@@ -1741,7 +1894,7 @@ function _mvRenderReader(mode, error) {
     <div class="mv-reader-body"></div>`;
   _mvRenderReaderActions();
   _resolveLinkedCardLinks(el.querySelector('.mv-headers'));
-  _renderMailBody(el.querySelector('.mv-reader-body'), msg, { plain: _mvPlain, toggle: false, attachments: _MV_BODY_ATTACHMENTS });
+  _renderMailBody(el.querySelector('.mv-reader-body'), msg, { plain: _mvPlain, toggle: false, attachments: _MV_BODY_ATTACHMENTS, dark: _mvBodyDark() });
 }
 
 // ---- Compose ----
@@ -2368,6 +2521,67 @@ function _mvFlash(text, isError = false) {
   _mvFlashTimer = setTimeout(() => { el.hidden = true; }, isError ? 6000 : 2500);
 }
 
+// ---- Sort / filter popup ----
+
+function _mvToggleListOpts(open) {
+  const pop = document.getElementById('mailViewListOptsPop');
+  const btn = document.getElementById('mailViewListOpts');
+  if (!pop || !btn) return;
+  const show = open ?? pop.hidden;
+  pop.hidden = !show;
+  btn.setAttribute('aria-expanded', String(show));
+  if (show) _mvSyncListOpts();
+}
+
+function _mvReadListOpts(pop) {
+  return {
+    sort:        pop.querySelector('[name="mvSort"]:checked')?.value || 'date',
+    range:       pop.querySelector('[data-mv-opts-range]').value,
+    from:        pop.querySelector('[data-mv-opts-from]').value,
+    to:          pop.querySelector('[data-mv-opts-to]').value,
+    attachments: pop.querySelector('[data-mv-opts-att]').checked,
+    duplicates:  pop.querySelector('[data-mv-opts-dup]').checked,
+    loadAll:     pop.querySelector('[data-mv-opts-all]').checked,
+  };
+}
+
+/** Popup inputs + button highlight from `_mvOpts`. */
+function _mvSyncListOpts() {
+  const pop = document.getElementById('mailViewListOptsPop');
+  const btn = document.getElementById('mailViewListOpts');
+  if (!pop || !btn) return;
+  pop.querySelectorAll('[name="mvSort"]').forEach(r => { r.checked = r.value === _mvOpts.sort; });
+  pop.querySelector('[data-mv-opts-range]').value = _mvOpts.range;
+  pop.querySelector('[data-mv-opts-from]').value  = _mvOpts.from;
+  pop.querySelector('[data-mv-opts-to]').value    = _mvOpts.to;
+  pop.querySelector('[data-mv-opts-att]').checked = _mvOpts.attachments;
+  pop.querySelector('[data-mv-opts-dup]').checked = _mvOpts.duplicates;
+  pop.querySelector('[data-mv-opts-all]').checked = _mvOpts.loadAll;
+  pop.querySelector('.mv-listopts-dates').hidden  = !_mvOpts.range;
+  pop.querySelectorAll('.mv-listopts-between').forEach(el => { el.hidden = _mvOpts.range !== 'between'; });
+  const on = _mvOpts.sort !== 'date' || _mvListFiltered(_mvOpts);
+  btn.classList.toggle('mv-listopts-btn--on', on);
+  btn.title = on ? 'Sort & filter (active)' : 'Sort & filter';
+}
+
+/**
+ * Take over new options; reloads the list when the request changes. Turning "Load all" on loads the rest of
+ * the list (keeps the selection); turning it off keeps the loaded messages until the next reload.
+ */
+function _mvApplyListOpts(next) {
+  const before = _mvListOptsQs(_mvOpts), wasAll = _mvOpts.loadAll;
+  _mvOpts = { ..._mvOpts, ...next };
+  _mvSaveSort();
+  _mvSyncListOpts();
+  if (_mvListOptsQs(_mvOpts) === before) {
+    if (_mvOpts.loadAll && !wasAll && _mvAccountId && _mvMsgs.length < _mvTotal) _mvLoadList(_mvPage + 1);
+    return;
+  }
+  _mvSelId = null;
+  _mvCancelRead();
+  _mvLoadList(0);
+}
+
 // ---- Wiring ----
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -2444,6 +2658,19 @@ document.addEventListener('DOMContentLoaded', () => {
       _mvLoadList(0);
     }
   });
+
+  // Sort / filter popup next to the search field
+  const optsBtn = document.getElementById('mailViewListOpts');
+  const optsPop = document.getElementById('mailViewListOptsPop');
+  optsBtn.addEventListener('click', e => { e.stopPropagation(); _mvToggleListOpts(); });
+  optsPop.addEventListener('change', () => _mvApplyListOpts(_mvReadListOpts(optsPop)));
+  optsPop.querySelector('[data-mv-opts-reset]').addEventListener('click', () => {
+    _mvApplyListOpts({ sort: 'date', range: '', from: '', to: '', attachments: false, duplicates: false, loadAll: false });
+  });
+  document.addEventListener('pointerdown', e => {
+    if (!optsPop.hidden && !e.target.closest('#mailViewListOptsPop, #mailViewListOpts')) _mvToggleListOpts(false);
+  }, true);
+  _mvSyncListOpts();
 
   // Folder tree
   folders.addEventListener('click', e => {
@@ -2533,6 +2760,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Message list
   list.addEventListener('click', e => {
     if (e.target.closest('[data-mv-more]')) { _mvLoadList(_mvPage + 1); return; }
+    if (e.target.closest('[data-mv-all]'))  { _mvApplyListOpts({ loadAll: true }); return; }
     const row = e.target.closest('[data-mv-msg]');
     if (row) _mvClickMessage(e, row.dataset.mvMsg);
   });
@@ -2563,10 +2791,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (act.dataset.mvAct === 'delete')   _mvDeleteMessages([id]);
       if (act.dataset.mvAct === 'source')   _mvOpenSource();
       if (act.dataset.mvAct === 'format')   _mvToggleFormat();
+      if (act.dataset.mvAct === 'theme')    _mvToggleLight();
       return;
     }
     const view = e.target.closest('[data-mv-att-view]');
     if (view && _mvMsg) { _mvOpenAttachment(_mvMsg.attachments[+view.dataset.mvAttView]); return; }
+    const cal = e.target.closest('[data-mv-att-cal]');
+    if (cal && _mvMsg) { _mailAddIcsToCalendar(_mvAccountId, _mvMsg.id, _mvFolder, _mvMsg, _mvMsg.attachments[+cal.dataset.mvAttCal]); return; }
     const dl = e.target.closest('[data-mv-att-dl]');
     if (dl && _mvMsg) { _mvDownloadAttachment(_mvMsg.attachments[+dl.dataset.mvAttDl]); return; }
     const toggle = e.target.closest('.dash-addr-toggle');
@@ -2655,8 +2886,17 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if ([...document.querySelectorAll('.context-menu')].some(m => getComputedStyle(m).display !== 'none')) return;
+    if (!optsPop.hidden) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _mvToggleListOpts(false); optsBtn.focus(); }
+      return;
+    }
     if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) {
       if (e.key === 'Escape' && _mvCompose && e.target.closest('.mv-compose')) { e.preventDefault(); _mvDiscardCompose(); }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !_mvCompose && (_mvSelId || _mvChecked.size) && _mvMsgs.length) {
+      e.preventDefault();
+      _mvSelectAll();
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -2670,6 +2910,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if ((e.key === 'Delete' || e.key === '#') && _mvSelectedIds().length) { e.preventDefault(); _mvDeleteMessages(_mvSelectedIds()); }
     else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); _mvMoveSelection(1); }
     else if (e.key === 'ArrowUp'   || e.key === 'k') { e.preventDefault(); _mvMoveSelection(-1); }
+    else if (e.key === 'Home') { e.preventDefault(); _mvJumpSelection('first'); }
+    else if (e.key === 'End')  { e.preventDefault(); _mvJumpSelection('last'); }
     else if (e.key === 'r' && _mvMsg) _mvOpenCompose('reply');
     else if (e.key === 'a' && _mvMsg) _mvOpenCompose('replyall');
     else if (e.key === 'f' && _mvMsg) _mvOpenCompose('forward');
@@ -2681,6 +2923,9 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.key === 's' && _mvSelectedIds().length) _mvToggleFlag(_mvSelectedIds());
     else if (e.key === '/') { e.preventDefault(); _mvSetPane('list'); search.focus(); }
   }, true);
+
+  // System switches between light and dark: the open mail follows (and the background button comes / goes)
+  try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (_mvIsOpen()) _mvRerenderBody(); }); } catch { /* ignore */ }
 
   window.addEventListener('popstate', () => {
     if (!_isOverlayHostPage()) return;
