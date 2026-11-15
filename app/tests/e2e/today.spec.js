@@ -1952,6 +1952,148 @@ test.describe('Today page', () => {
     await expect(page.locator('.column').first()).toBeVisible();
   });
 
+  test('E-T-69 mail view conversations: grouping toggle (popup + list button), conversation row = first message + count, chevron-only expand / expand all, open a reply from Sent, reader strip ‹ › in the header format, delete in its own folder, move with replies (asks first)', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const msg = (id, folder, subject, from, day, extra = {}) => ({ id, folder, subject, from, to: 'me@ex.com', messageId: `<${folder}-${id}>`,
+      date: `2026-11-0${day}T10:00:00.000Z`, size: 500, unread: false, flagged: false, flagColor: null, hasAttachments: false, ...extra });
+    const tree = () => [
+      { id: 'm:<a>', messages: [
+        { ...msg('1', 'INBOX', 'Plan', 'Jane <jane@ex.com>', 1), node: 'm:<a>', parent: null, depth: 0, foreign: false },
+        { ...msg('5', 'Sent', 'Re: Plan', 'Me <me@ex.com>', 2), node: 'm:<b>', parent: 'm:<a>', depth: 1, foreign: true },
+        { ...msg('2', 'INBOX', 'Re: Plan', 'Jane <jane@ex.com>', 3, { unread: true }), node: 'm:<c>', parent: 'm:<b>', depth: 2, foreign: false },
+        { ...msg('9', 'Archive', 'Re: Plan', 'Bob <bob@ex.com>', 4), node: 'm:<d>', parent: 'm:<c>', depth: 3, foreign: true },
+      ] },
+      { id: 'm:<z>', messages: [{ ...msg('3', 'INBOX', 'Other', 'Ann <ann@ex.com>', 2), node: 'm:<z>', parent: null, depth: 0, foreign: false }] },
+    ];
+    const lists = [], deletes = [], moves = [];
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-t', label: 'Work', color: '#0a0', user: 'me@ex.com' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [] }));
+    await page.route('**/api/dashboard/mail/ma-t/**', r => {
+      const url = new URL(r.request().url());
+      const p = url.pathname.replace('/api/dashboard/mail/ma-t', '');
+      const folder = url.searchParams.get('folder') || 'INBOX';
+      if (r.request().method() === 'DELETE') { deletes.push(`${p}?folder=${folder}`); return r.fulfill({ json: { ok: true, permanent: false } }); }
+      if (r.request().method() === 'PATCH') return r.fulfill({ json: { ok: true } });
+      if (r.request().method() === 'POST' && p.endsWith('/move')) { moves.push([`${p}?folder=${folder}`, r.request().postDataJSON().folder]); return r.fulfill({ json: { ok: true } }); }
+      if (p === '/folders') return r.fulfill({ json: { folders: ['INBOX', 'Sent', 'Archive'].map(path => ({ path, name: path, delimiter: '/', parent: '',
+        specialUse: path === 'INBOX' ? '\\Inbox' : path === 'Sent' ? '\\Sent' : null, messages: 3, unseen: 0 })) } });
+      if (p === '/messages') {
+        lists.push(Object.fromEntries(url.searchParams));
+        const threads = tree();
+        const own = threads.flatMap(t => t.messages.filter(m => !m.foreign));
+        if (url.searchParams.get('threads') === '1') return r.fulfill({ json: { threads, messages: own, total: 2, totalMessages: 3, page: 0, pageSize: 50 } });
+        return r.fulfill({ json: { messages: own.sort((a, b) => b.date.localeCompare(a.date)), total: 3, page: 0, pageSize: 50 } });
+      }
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p.startsWith('/message/')) {
+        const m = tree().flatMap(t => t.messages).find(x => x.id === p.split('/')[2] && x.folder === folder);
+        return m ? r.fulfill({ json: { ...m, body: `Body ${folder}/${m.id}`, bodyHtml: '', attachments: [] } }) : r.fulfill({ status: 404, json: { error: 'nf' } });
+      }
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.goto('/today?mail=ma-t&folder=INBOX');
+    const rows = page.locator('#mailViewList .mv-msg');
+    await expect(rows).toHaveCount(3);
+    await expect(page.locator('#mailViewThreadsAll')).toBeHidden();
+
+    // List button: grouping on / off
+    await page.locator('#mailViewThreads').click();
+    await expect.poll(() => lists.at(-1)).toMatchObject({ threads: '1' });
+    await expect(page.locator('#mailViewThreads')).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows).toHaveCount(2);
+    await page.locator('#mailViewThreads').click();
+    await expect(rows).toHaveCount(3);
+    await expect(page.locator('#mailViewThreads')).toHaveAttribute('aria-pressed', 'false');
+
+    // Group conversations (sort & filter popup) — kept per browser
+    await page.locator('#mailViewListOpts').click();
+    await page.locator('[data-mv-opts-threads]').check();
+    await expect.poll(() => lists.at(-1)).toMatchObject({ threads: '1' });
+    await page.keyboard.press('Escape');
+    await expect(rows).toHaveCount(2);
+    const head = page.locator('#mailViewList .mv-thread');
+    await expect(head).toHaveAttribute('data-mv-msg', '1');   // the conversation's first message
+    await expect(head.locator('.mv-thread-subject')).toHaveText('Plan');
+    await expect(head.locator('.mv-thread-count')).toHaveText('4 · 1');
+    await expect(head).toHaveClass(/mv-unread/);
+    await expect(page.locator('#mailViewCount')).toHaveText('2 conversations · 3 messages');
+    expect(await page.evaluate(() => localStorage.getItem('mail-view-threads'))).toBe('1');
+
+    // Expand all / collapse all (list button), then the row's own chevron
+    const all = page.locator('#mailViewThreadsAll');
+    await expect(all).toHaveAttribute('title', 'Expand all conversations');
+    await all.click();
+    await expect(rows).toHaveCount(5);
+    await expect(all).toHaveAttribute('title', 'Collapse all conversations');
+    await all.click();
+    await expect(rows).toHaveCount(2);
+    // Expand: the replies below the first message (not repeated), from Sent / Archive dimmed with their folder
+    await head.locator('[data-mv-tchev]').click();
+    await expect(rows).toHaveCount(5);
+    await expect(page.locator('#mailViewList [data-mv-msg="1"]')).toHaveCount(1);
+    await expect(page.locator('#mailViewList .mv-msg--foreign')).toHaveCount(2);
+    await expect(page.locator('#mailViewList .mv-msg--foreign .mv-folder-chip')).toHaveText(['Sent', 'Archive']);
+    await expect(page.locator('#mailViewList [data-mv-msg="2"]')).toHaveAttribute('style', /--mv-depth:2/);
+
+    // Open the reply in Sent: read in its folder, reader shows the folder and the conversation strip
+    await page.locator('#mailViewList [data-mv-ext-uid="5"][data-mv-ext-folder="Sent"]').click();
+    const reader = page.locator('#mailViewReader');
+    await expect(reader).toContainText('Body Sent/5');
+    await expect(reader.locator('.mv-show-folder')).toHaveText('Sent');
+    await expect(reader.locator('.mv-thread-toggle')).toContainText('Conversation · 4 messages · 3 folders');
+    // Widget header format (skins restyle .panel / .panel-hdr)
+    await expect(reader.locator('#mailViewThread')).toHaveClass(/\bpanel\b/);
+    await expect(reader.locator('.mv-thread-bar')).toHaveClass(/panel-hdr/);
+    await expect(reader.locator('.mv-thread-pos')).toHaveText('2 / 4');
+    await expect(page.locator('#mailViewList .mv-msg.active')).toHaveAttribute('data-mv-ext-folder', 'Sent');
+
+    // ] / [ walk through the conversation in date order, across folders
+    await page.keyboard.press(']');
+    await expect(reader).toContainText('Body INBOX/2');
+    await expect(page.locator('#mailViewList .mv-msg.active')).toHaveAttribute('data-mv-msg', '2');
+    await reader.locator('[data-mv-tnav="1"]').click();
+    await expect(reader).toContainText('Body Archive/9');
+    await expect(reader.locator('[data-mv-tnav="1"]')).toBeDisabled();
+    // The tree in the strip opens any message
+    await reader.locator('[data-mv-ttoggle]').click();
+    await expect(reader.locator('.mv-thread-node')).toHaveCount(4);
+    await reader.locator('.mv-thread-node[data-mv-topen="5"]').click();
+    await expect(reader).toContainText('Body Sent/5');
+
+    // Delete acts on the message's own folder; it leaves the conversation
+    await reader.locator('[data-mv-act="delete"]').click();
+    await expect.poll(() => deletes).toEqual(['/message/5?folder=Sent']);
+    await expect(page.locator('#mailViewList .mv-msg--foreign')).toHaveCount(1);
+    await expect(head.locator('.mv-thread-count')).toHaveText('3 · 1');
+
+    // Collapse again: one row; a click opens the first message and does not expand
+    await head.locator('[data-mv-tchev]').click();
+    await expect(rows).toHaveCount(2);
+    await head.locator('.mv-thread-subject').click();
+    await expect(reader).toContainText('Body INBOX/1');
+    await expect(rows).toHaveCount(2);
+    await expect(head).toHaveClass(/active/);
+
+    // Move: a message of another folder without replies moves at once (its own folder)
+    await head.locator('[data-mv-tchev]').click();
+    await page.locator('#mailViewList [data-mv-ext-uid="9"]').click({ button: 'right' });
+    await page.locator('.context-menu:visible').getByText('Move to…').click();
+    await page.locator('#mailViewPicker [data-mv-pick="Sent"]').click();
+    await expect.poll(() => moves).toEqual([['/message/9/move?folder=Archive', 'Sent']]);
+    await expect(page.locator('#mailViewList .mv-msg--foreign')).toHaveCount(0);
+    // The first message takes its reply along — asked first
+    await head.click({ button: 'right' });
+    await page.locator('.context-menu:visible').getByText(/^Move to…/).click();
+    await page.locator('#mailViewPicker [data-mv-pick="Archive"]').click();
+    await expect(page.locator('#dialogMsg')).toHaveText('Move this message and 1 reply to "Archive"?');
+    await page.locator('#dialogOkBtn').click();
+    await expect.poll(() => moves.length).toBe(2);
+    expect(moves[1]).toEqual(['/message/1,2/move?folder=INBOX', 'Archive']);
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText('Other');
+  });
+
   test('E-T-68 dark mode: mail view reader shows mails on the app header colour with white text; sun / moon button switches to white (kept); light mode unchanged', async ({ page }) => {
     await mockApis(page, { layouts: LAYOUTS });
     const msg = (id, extra) => ({ id, subject: `Mail ${id}`, messageId: `<${id}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com',

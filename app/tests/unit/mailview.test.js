@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view unit tests — MV-1 … MV-21
+ * Mail view unit tests — MV-1 … MV-24
  *
  * mailview.js is loaded via vm.runInContext with minimal browser-global stubs.
  * Only the pure helpers are exercised (folder tree, addresses, reply fields, URL state).
@@ -395,4 +395,79 @@ describe('MV-21 read after 5 s alone; Ctrl+A selects all; multi-selections are n
     run()
     expect(log.unread).toEqual([])
   })
+})
+
+// ---- Conversations ----
+
+/** INBOX conversation: a (1) ← b (Sent 5, foreign) ← c (2), plus a missing message with two replies; and a single mail. */
+function _threads() {
+  const msg = (id, folder, depth, date, extra = {}) => ({ id, folder, depth, date: `2026-11-0${date}T10:00:00Z`, foreign: folder !== 'INBOX', subject: 'Re: Plan', from: 'jane@ex.com', ...extra })
+  return [
+    { id: 'm:<a>', messages: [
+      msg('1', 'INBOX', 0, 1, { subject: 'Plan' }), msg('5', 'Sent', 1, 2), msg('2', 'INBOX', 2, 3, { unread: true }),
+      { placeholder: true, node: 'm:<y>', depth: 1 }, msg('7', 'INBOX', 2, 4),
+    ] },
+    { id: 'm:<z>', messages: [msg('3', 'INBOX', 0, 2)] },
+    { id: 'm:<o>', messages: [msg('8', 'Archive', 0, 1)] },   // nothing in this folder: no row
+  ]
+}
+
+test('MV-22 _mvThreadRows — collapsed: one row per conversation (its first message); open: the further messages below it (root not repeated), other folders and gaps', () => {
+  const threads = _threads()
+  const shut = plain(ctx._mvThreadRows(threads, () => false).map(r => [r.kind, r.msg?.id, r.open]))
+  expect(shut).toEqual([['thread', '1', false], ['msg', '3', null]])
+  const open = ctx._mvThreadRows(threads, t => t.id === 'm:<a>')
+  expect(plain(open.map(r => [r.kind, r.msg?.id ?? null, r.depth, !!r.child]))).toEqual([
+    ['thread', '1', 0, false], ['msg', '5', 1, true], ['msg', '2', 2, true],
+    ['gap', null, 1, true], ['msg', '7', 2, true], ['msg', '3', 0, false],
+  ])
+  expect(plain(ctx._mvThreadChron(threads[0].messages).map(m => m.id))).toEqual(['1', '5', '2', '7'])
+  expect(ctx._mvBareSubject('Re: AW: Fwd: Plan')).toBe('Plan')
+  expect(ctx._mvBareSubject('Re[2]: ')).toBe('(no subject)')
+})
+
+test('MV-23 conversation mode — a collapsed row stands for its messages here (selection, actions); open ones for one; keyboard rows', () => {
+  vm.runInContext(`
+    _mvFolder = 'INBOX';
+    _mvOpts = { ..._mvDefaultListOpts(), threads: true };
+    _mvThreads = __threads;
+    _mvMsgs = _mvThreads.flatMap(t => t.messages.filter(m => !m.placeholder && !m.foreign));
+    _mvTOpen = new Map();
+    _mvChecked = new Set(['1']);
+    _mvSelId = '1';
+  `, Object.assign(ctx, { __threads: _threads() }))
+  expect(plain(ctx._mvSelectedIds())).toEqual(['1', '2', '7'])
+  expect(plain(ctx._mvRowIds('3'))).toEqual(['3'])
+  expect(plain(ctx._mvNavRows())).toEqual([{ id: '1', folder: 'INBOX' }, { id: '3', folder: 'INBOX' }])
+
+  vm.runInContext(`_mvTOpen.set('m:<a>', true)`, ctx)
+  expect(plain(ctx._mvSelectedIds())).toEqual(['1'])
+  // Open: every message is a row of its own — the one in Sent too (opened in its folder)
+  expect(plain(ctx._mvNavRows().map(r => `${r.folder}/${r.id}`))).toEqual(['INBOX/1', 'Sent/5', 'INBOX/2', 'INBOX/7', 'INBOX/3'])
+  expect(ctx._mvFindListed('5', 'Sent').folder).toBe('Sent')
+  expect(ctx._mvFindListed('5')).toBe(null)
+  // Filtered lists open conversations by default
+  vm.runInContext(`_mvTOpen = new Map(); _mvQuery = 'plan'`, ctx)
+  expect(ctx._mvThreadOpen(ctx.__threads[0])).toBe(true)
+  vm.runInContext(`_mvQuery = ''; _mvOpts = _mvDefaultListOpts()`, ctx)
+  expect(ctx._mvListOptsQs({ threads: true })).toBe('&threads=1')
+  expect(ctx._mvListFiltered({ threads: true })).toBe(false)
+})
+
+test('MV-24 _mvTreeMovePlan — a message moves with its replies (any folder); nested anchors count as replies; target folder stays', () => {
+  const threads = _threads()
+  const plan = (anchors, target = 'Archive') => plain(ctx._mvTreeMovePlan(threads, anchors, target))
+  const ids = p => p.items.map(m => `${m.folder}/${m.id}`)
+  const root = plan([{ id: '1', folder: 'INBOX' }])
+  expect(ids(root)).toEqual(['INBOX/1', 'Sent/5', 'INBOX/2', 'INBOX/7'])
+  expect([root.anchors, root.replies]).toEqual([1, 3])
+  // A reply's subtree ends at the next entry that is not deeper (here the gap of the other branch)
+  const mid = plan([{ id: '5', folder: 'Sent' }])
+  expect([ids(mid), mid.replies]).toEqual([['Sent/5', 'INBOX/2'], 1])
+  // Already in the target: stays
+  expect(ids(plan([{ id: '1', folder: 'INBOX' }], 'Sent'))).toEqual(['INBOX/1', 'INBOX/2', 'INBOX/7'])
+  // Anchor inside another anchor's subtree = reply; a message without conversation moves alone
+  const both = plan([{ id: '2', folder: 'INBOX' }, { id: '1', folder: 'INBOX' }, { id: '99', folder: 'INBOX' }])
+  expect([both.items.length, both.anchors, both.replies]).toEqual([5, 2, 3])
+  expect(plan([{ id: '7', folder: 'INBOX' }]).replies).toBe(0)
 })

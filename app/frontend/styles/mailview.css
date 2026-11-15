@@ -67,7 +67,8 @@ body.mailview-open header { z-index: 96; }
   cursor: pointer;
 }
 .mv-listopts-btn:hover, .mv-listopts-btn[aria-expanded="true"] { background: var(--surface2); color: var(--text); }
-.mv-listopts-btn--on { color: var(--accent); border-color: var(--accent); }
+.mv-listopts-btn--on, .mv-listopts-btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.mv-listopts-btn[hidden] { display: none; }
 .mv-listopts {
   position: absolute;
   z-index: 30;
@@ -266,7 +267,8 @@ body.mailview-open header { z-index: 96; }
   min-width: 0;
   border-right: 1px solid var(--border);
 }
-.mailview-list { flex: 1; overflow-y: auto; transition: opacity 0.15s ease; }
+/* Rows are click / drag / swipe targets — no text selection anywhere in the list */
+.mailview-list { flex: 1; overflow-y: auto; transition: opacity 0.15s ease; -webkit-user-select: none; user-select: none; }
 .mailview-list.mailview-loading { opacity: 0.6; }
 .mailview-list > .dashboard-empty, .mailview-list > .dashboard-source-error { margin: 12px; }
 .mv-msg {
@@ -287,6 +289,71 @@ body.mailview-open header { z-index: 96; }
 .mv-msg .mail-trusted-badge { flex-shrink: 0; margin-left: -1px; vertical-align: 0; }
 .mv-msg .card-meta > .card-date { margin-left: auto; }
 .mv-load-more { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 10px; }
+
+/* Conversations: header row (chevron, subject, count), indented reply tree, other folders dimmed.
+   Grouped list (.mv-list--threads): every row's text starts after the same gutter, the chevron sits in it. */
+.mv-list--threads { --mv-gutter: 22px; }
+.mv-list--threads .mv-msg { padding-left: calc(10px + var(--mv-gutter)); }
+.mv-list--threads .mv-thread-chev { position: absolute; left: 8px; top: 9px; }
+.mv-thread .card-text { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mv-thread-subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-thread-chev {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+.mv-thread-chev:hover { background: var(--surface2); color: var(--text); }
+.mv-thread--open .mv-thread-chev, .mv-thread-toggle[aria-expanded="true"] .mv-thread-chev { transform: none; }
+.mv-thread-count {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.mv-thread--open { border-bottom-color: transparent; }
+.mv-list--threads .mv-msg.mv-msg--child, .mv-msg--child {
+  /* depth 0 = the common text start; each reply level one step further, a guide line left of the text */
+  --mv-indent: calc(var(--mv-depth, 0) * 14px);
+  padding-left: calc(10px + var(--mv-gutter, 14px) + var(--mv-indent));
+  background-image: linear-gradient(color-mix(in srgb, var(--border) 90%, transparent), color-mix(in srgb, var(--border) 90%, transparent));
+  background-size: 1px 100%;
+  background-position: calc(var(--mv-gutter, 14px) + var(--mv-indent) + 2px) 0;
+  background-repeat: no-repeat;
+}
+.mv-msg--child .card-text { font-size: 0.82rem; }
+.mv-msg--foreign { opacity: 0.62; }
+.mv-msg--foreign:hover, .mv-msg--foreign.active { opacity: 1; }
+.mv-msg--nomatch:not(.active) { opacity: 0.5; }
+.mv-msg--gap { cursor: default; color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
+.mv-msg--gap:hover { background: none; }
+.mv-folder-chip {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
 
 /* Swipe actions (phones): the row slides, each action layer fills the freed space */
 .mv-msg-wrap { position: relative; overflow: hidden; }
@@ -329,13 +396,64 @@ body.mailview-open header { z-index: 96; }
   justify-content: center;
   color: var(--text-muted);
   opacity: 0.6;
-  gap: 8px;
-  font-size: 0.85rem;
+  /* Grows with the screen (smaller side), up to 3× the base size: icon 32 → 96 px, text 0.85 → 2.55rem */
+  gap: clamp(8px, 1.75vmin, 24px);
+  font-size: clamp(0.85rem, 1.6vmin, 2.55rem);
 }
+.mv-reader-empty svg { width: clamp(32px, 7vmin, 96px); height: clamp(32px, 7vmin, 96px); }
 .mv-reader-head { display: flex; align-items: flex-start; gap: 8px; }
 .mv-back { display: none; padding: 4px 10px; font-size: 1rem; line-height: 1; }
 .mv-subject { margin: 0 0 10px; font-size: 1.05rem; font-weight: 600; line-height: 1.35; word-break: break-word; }
 .mv-reader-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+/* Conversation strip: "Conversation · n messages" (opens the tree), ‹ position › */
+.mv-thread-strip {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  overflow: hidden;   /* the header keeps the box's rounded corners */
+  font-size: 0.78rem;
+}
+/* Header bar in the widget format (.panel-hdr — skin colours); closed strip: no line under it */
+.mv-thread-bar { padding: 3px 6px 3px 4px; min-height: 0; }
+.mv-thread-strip:not(.mv-thread-strip--open) > .mv-thread-bar { border-bottom-color: transparent; }
+.mv-thread-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.mv-thread-nav { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.mv-thread-nav .btn { min-width: 26px; padding: 2px 6px; font-size: 0.95rem; line-height: 1; }
+.mv-thread-nav .btn:disabled { opacity: 0.4; cursor: default; }
+.mv-thread-pos { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.mv-thread-tree { padding: 4px 0; max-height: 40vh; overflow-y: auto; }
+.mv-thread-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 10px 4px calc(10px + var(--mv-depth, 0) * 14px);
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mv-thread-node:hover { background: var(--surface2); }
+.mv-thread-node.active { background: color-mix(in srgb, var(--accent) 18%, transparent); border-left-color: var(--accent); }
+.mv-thread-node.mv-unread .mv-thread-from { font-weight: 600; }
+.mv-thread-node--gap { cursor: default; color: var(--text-muted); font-style: italic; }
+.mv-thread-from { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-thread-node .card-date { flex-shrink: 0; color: var(--text-muted); }
 /* Icons only at every width — the label stays as tooltip / aria-label (and in the markup for screen readers) */
 .mv-act-label { display: none; }
 .mv-reader-actions .btn { padding: 5px 7px; font-size: 0.75rem; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 28px; }

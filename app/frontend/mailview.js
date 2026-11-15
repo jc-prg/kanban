@@ -10,6 +10,9 @@ const _MV_SORT_KEY      = 'mail-view-sort';
 const _MV_LIGHT_KEY     = 'mail-view-light';   // '1': the reader shows mails on white also in dark mode
 const _MV_SORTS         = ['date', 'date-asc', 'from'];   // = MAIL_SORTS in backend/dashboard/mail.js
 const _MV_READ_DELAY_MS = 5000;   // an unread message counts as read once it stayed open this long (alone)
+const _MV_THREADS_KEY   = 'mail-view-threads';       // '1': the list groups conversations
+const _MV_TSTRIP_KEY    = 'mail-view-thread-open';   // '1': the reader's conversation tree is expanded
+const _MV_MAX_DEPTH     = 6;      // deeper replies are indented like this level
 // Trash / spam folders offering "Empty folder" (same rules as isEmptyableFolder in backend/dashboard/mail.js)
 const _MV_EMPTYABLE_USES  = new Set(['\\Trash', '\\Junk']);
 const _MV_EMPTYABLE_NAMES = new Set([
@@ -43,6 +46,12 @@ let _mvWidths      = _mvLoadWidths(); // requested column widths (px); applied c
 let _mvOpts        = _mvDefaultListOpts();   // list order + filters of the options popup (sort kept per browser)
 let _mvLight       = _mvLoadLight();   // reader on a white background in dark mode (sun / moon toolbar button)
 let _mvReadTimer   = null;        // { id, accountId, folder, t }: marks the open message read after _MV_READ_DELAY_MS
+let _mvThreads     = [];          // conversation mode: [{ id, messages }] of the loaded pages (tree order, every folder)
+let _mvTotalMsgs   = 0;           // conversation mode: messages behind the `_mvTotal` conversations
+let _mvTOpen       = new Map();   // conversation id → expanded in the list (default: expanded while filtered)
+let _mvExtSel      = null;        // { id, folder }: open message of another folder (from a conversation)
+let _mvThread      = null;        // reader: { id, messages } conversation of the open message
+let _mvTStripOpen  = (() => { try { return localStorage.getItem(_MV_TSTRIP_KEY) === '1'; } catch { return false; } })();
 
 // ---- Pure helpers (unit-tested) ----
 
@@ -75,12 +84,85 @@ function _mvListOptsQs(o) {
   if (before) p.push(`before=${encodeURIComponent(before)}`);
   if (o.attachments) p.push('attachments=1');
   if (o.duplicates)  p.push('duplicates=1');
+  if (o.threads)     p.push('threads=1');
   return p.map(x => `&${x}`).join('');
 }
 
-/** True when the options narrow the list down (date / attachment filter — not the order). */
+/** True when the options narrow the list down (date / attachment filter — not the order or grouping). */
 function _mvListFiltered(o) {
-  return _mvListOptsQs({ ...o, sort: 'date' }) !== '';
+  return _mvListOptsQs({ ...o, sort: 'date', threads: false }) !== '';
+}
+
+/** Subject without reply / forward prefixes ("Re: AW: Fwd: …"). */
+function _mvBareSubject(subject) {
+  return String(subject || '').replace(/^\s*((re|aw|fwd?|wg|sv|vs)(\[\d+\])?\s*:\s*)+/i, '').trim() || '(no subject)';
+}
+
+function _mvTime(m) {
+  const t = new Date(m?.date || 0).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/**
+ * Visible list rows of the conversation mode. Pure. threads: [{ id, messages }] — messages in tree order with
+ * `depth`, `foreign` (another folder) and `placeholder` (missing message); isOpen(thread) → expanded.
+ * A conversation with one message is a plain 'msg' row; else a 'thread' row = its first message (the root —
+ * the first one there is when the root is missing; may be in another folder) followed, when open, by one row
+ * per further message ('msg', foreign ones included) or missing one ('gap'). The root is never repeated.
+ * Returns [{ kind: 'msg' | 'thread' | 'gap', thread, msg, depth, child?, open? }].
+ */
+function _mvThreadRows(threads, isOpen) {
+  const rows = [];
+  for (const th of threads) {
+    const real = th.messages.filter(m => !m.placeholder);
+    const own  = real.filter(m => !m.foreign);
+    if (!own.length) continue;
+    if (real.length === 1) { rows.push({ kind: 'msg', thread: th, msg: own[0], depth: 0 }); continue; }
+    const head = real[0];
+    const open = !!isOpen(th);
+    rows.push({ kind: 'thread', thread: th, msg: head, depth: 0, open });
+    if (open) {
+      for (const m of th.messages) {
+        if (m === head) continue;
+        rows.push({ kind: m.placeholder ? 'gap' : 'msg', thread: th, msg: m.placeholder ? null : m, depth: m.depth || 0, child: true });
+      }
+    }
+  }
+  return rows;
+}
+
+/**
+ * What a move in the reply tree takes along. Pure. threads: [{ messages }] (tree order, `depth`, `folder`);
+ * anchors: [{ id, folder }] — the messages the user moves. Each anchor brings its replies (the deeper entries
+ * following it); an anchor inside another one's subtree counts as a reply; anchors in no conversation move
+ * alone; messages already in `target` stay. Returns { items: [{ id, folder }], anchors (moved anchors), replies }.
+ */
+function _mvTreeMovePlan(threads, anchors, target) {
+  const key = m => `${m.folder}\n${m.id}`;
+  const want = new Set(anchors.map(key));
+  const taken = new Map(), roots = new Set();
+  for (const th of threads) {
+    const msgs = th?.messages || [];
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i];
+      if (m.placeholder || !want.has(key(m)) || taken.has(key(m))) continue;
+      roots.add(key(m));
+      taken.set(key(m), m);
+      const d = m.depth || 0;
+      for (let j = i + 1; j < msgs.length && (msgs[j].depth || 0) > d; j++) {
+        if (!msgs[j].placeholder && !taken.has(key(msgs[j]))) taken.set(key(msgs[j]), msgs[j]);
+      }
+    }
+  }
+  for (const a of anchors) if (!taken.has(key(a))) { roots.add(key(a)); taken.set(key(a), a); }
+  const items = [...taken.values()].filter(m => m.folder !== target).map(m => ({ id: m.id, folder: m.folder }));
+  const moved = items.filter(m => roots.has(key(m))).length;
+  return { items, anchors: moved, replies: items.length - moved };
+}
+
+/** Messages of a conversation in date order (placeholders left out). Pure. */
+function _mvThreadChron(messages) {
+  return messages.filter(m => !m.placeholder).sort((a, b) => _mvTime(a) - _mvTime(b) || Number(a.id) - Number(b.id));
 }
 
 function _mvParentPath(f) {
@@ -320,7 +402,9 @@ function _mvSaveWidths() {
 function _mvDefaultListOpts() {
   let sort = 'date';
   try { sort = localStorage.getItem(_MV_SORT_KEY) || 'date'; } catch { /* ignore */ }
-  return { sort: _MV_SORTS.includes(sort) ? sort : 'date', range: '', from: '', to: '', attachments: false, duplicates: false, loadAll: false };
+  let threads = false;
+  try { threads = localStorage.getItem(_MV_THREADS_KEY) === '1'; } catch { /* ignore */ }
+  return { sort: _MV_SORTS.includes(sort) ? sort : 'date', range: '', from: '', to: '', attachments: false, duplicates: false, loadAll: false, threads };
 }
 
 function _mvLoadLight() {
@@ -355,6 +439,8 @@ function _mvSaveSort() {
   try {
     if (_mvOpts.sort === 'date') localStorage.removeItem(_MV_SORT_KEY);
     else localStorage.setItem(_MV_SORT_KEY, _mvOpts.sort);
+    if (_mvOpts.threads) localStorage.setItem(_MV_THREADS_KEY, '1');
+    else localStorage.removeItem(_MV_THREADS_KEY);
   } catch { /* ignore */ }
 }
 
@@ -691,10 +777,20 @@ async function _mvLoadList(page, { all = false } = {}) {
   if (seq !== _mvListSeq) return;
   list.classList.remove('mailview-loading');
   _mvTotal = data.total || 0;
-  _mvMsgs  = page === 0 ? data.messages : [..._mvMsgs, ...data.messages];
-  _mvPage  = all ? Math.max(page, Math.ceil(_mvMsgs.length / (data.pageSize || 50)) - 1) : page;
+  // Conversation mode: the list's messages are the threads' own messages (same objects, so updates show in both)
+  const threads = _mvOpts.threads ? (data.threads || []) : [];
+  _mvThreads   = page === 0 ? threads : [..._mvThreads, ...threads];
+  _mvTotalMsgs = data.totalMessages || 0;
+  const fresh = _mvOpts.threads ? threads.flatMap(t => t.messages.filter(m => !m.placeholder && !m.foreign)) : data.messages;
+  _mvMsgs  = page === 0 ? fresh : [..._mvMsgs, ...fresh];
+  _mvPage  = all ? Math.max(page, Math.ceil(_mvLoadedCount() / (data.pageSize || 50)) - 1) : page;
   _mvChecked = new Set([..._mvChecked].filter(id => _mvMsgs.some(m => m.id === id)));
   _mvRenderList(data.error);
+}
+
+/** Loaded list entries: conversations in conversation mode, else messages (compared with `_mvTotal`). */
+function _mvLoadedCount() {
+  return _mvOpts.threads ? _mvThreads.length : _mvMsgs.length;
 }
 
 function _mvFolderInfo(accountId = _mvAccountId, path = _mvFolder) {
@@ -718,6 +814,10 @@ function _mvSelectFolder(accountId, path, { url = true } = {}) {
   _mvAnchor    = null;
   _mvMsgs      = [];
   _mvTotal     = 0;
+  _mvThreads   = [];
+  _mvTOpen     = new Map();
+  _mvExtSel    = null;
+  _mvThread    = null;
   _mvCancelRead();
   _mvOpts.loadAll = false;   // "Load all" applies to one folder
   _mvSyncListOpts();
@@ -736,20 +836,24 @@ function _mvSetPane(pane) {
   document.getElementById('mailView').dataset.pane = pane;
 }
 
-async function _mvOpenMessage(id) {
+/** Open a message in the reader; `folder` ≠ the list's folder = a message of another folder (from a conversation). */
+async function _mvOpenMessage(id, folder = _mvFolder) {
   if (_mvCompose?.dirty && !(await showConfirm('Discard the message you are writing?', { okLabel: 'Discard', danger: true }))) return;
+  const foreign = folder !== _mvFolder;
   _mvCompose = null;
-  _mvSelId = id;
-  _mvMsg   = null;
-  _mvPlain = false;
-  _mvChecked = new Set([id]);
-  _mvAnchor  = id;
-  _mvScheduleRead(id);
+  _mvSelId  = foreign ? null : id;
+  _mvExtSel = foreign ? { id, folder } : null;
+  _mvMsg    = null;
+  _mvThread = null;
+  _mvPlain  = false;
+  _mvChecked = foreign ? new Set() : new Set([id]);
+  if (!foreign) _mvAnchor = id;
+  _mvScheduleRead(id, folder);
   _mvRenderListSelection();
   _mvSetPane('reader');
   _mvRenderReader('loading');
   const seq = ++_mvMsgSeq;
-  const accountId = _mvAccountId, folder = _mvFolder;
+  const accountId = _mvAccountId;
   let msg;
   try {
     msg = await _mvJson(_mvApi(accountId, `/message/${encodeURIComponent(id)}?${_mvFolderQs(folder)}`));
@@ -758,8 +862,10 @@ async function _mvOpenMessage(id) {
     return;
   }
   if (seq !== _mvMsgSeq) return;
+  msg.folder = folder;
   _mvMsg = msg;
   _mvRenderReader();
+  _mvLoadThread(msg);
 }
 
 // ---- Read after a while: navigating through the list leaves the messages passed unread ----
@@ -769,17 +875,19 @@ function _mvCancelRead() {
   _mvReadTimer = null;
 }
 
-/** Mark `id` read once it stayed the only selected, open message for _MV_READ_DELAY_MS. */
-function _mvScheduleRead(id) {
+/** Mark `id` (in `folder`) read once it stayed the only selected, open message for _MV_READ_DELAY_MS. */
+function _mvScheduleRead(id, folder = _mvFolder) {
   _mvCancelRead();
-  if (!_mvMsgs.find(m => m.id === id)?.unread) return;
-  const timer = { id, accountId: _mvAccountId, folder: _mvFolder };
+  if (!_mvFindListed(id, folder)?.unread) return;
+  const timer = { id, msgFolder: folder, accountId: _mvAccountId, folder: _mvFolder };
   timer.t = setTimeout(() => {
     if (_mvReadTimer !== timer) return;
     _mvReadTimer = null;
-    if (!_mvIsOpen() || _mvSelId !== id || _mvAccountId !== timer.accountId || _mvFolder !== timer.folder) return;
+    if (!_mvIsOpen() || _mvCurKey() !== _mvKey(id, folder) || _mvAccountId !== timer.accountId || _mvFolder !== timer.folder) return;
     if (_mvChecked.size > 1) return;   // part of a multi-selection: never marked read
-    if (_mvMsgs.find(m => m.id === id)?.unread) _mvSetUnread([id], false);
+    if (!_mvFindListed(id, folder)?.unread) return;
+    if (folder === _mvFolder) _mvSetUnread([id], false);
+    else _mvExtSetUnread(id, folder, false);
   }, _MV_READ_DELAY_MS);
   _mvReadTimer = timer;
 }
@@ -793,21 +901,148 @@ function _mvSelectAll() {
   _mvRenderListSelection();
 }
 
+// ---- Conversations ----
+
+function _mvKey(id, folder = _mvFolder) {
+  return `${folder}\n${id}`;
+}
+
+/** Key of the open message (list folder or another folder). */
+function _mvCurKey() {
+  return _mvExtSel ? _mvKey(_mvExtSel.id, _mvExtSel.folder) : _mvSelId ? _mvKey(_mvSelId) : null;
+}
+
+function _mvThreadOpen(th) {
+  if (_mvTOpen.has(th.id)) return _mvTOpen.get(th.id);
+  return !!(_mvQuery || _mvListFiltered(_mvOpts));   // filtered: the hits are shown inside their conversation
+}
+
+/** Conversation of the list containing a message, null when none / not in conversation mode. */
+function _mvThreadOf(id, folder = _mvFolder) {
+  return _mvThreads.find(t => t.messages.some(m => !m.placeholder && m.id === id && m.folder === folder)) || null;
+}
+
+/** Every loaded copy of a message (list, conversations, the reader's conversation) — `[0]` is the list's one. */
+function _mvAllListed(id, folder = _mvFolder) {
+  const out = [];
+  if (folder === _mvFolder) out.push(..._mvMsgs.filter(m => m.id === id));
+  for (const m of [..._mvThreads.flatMap(t => t.messages), ...(_mvThread?.messages || [])]) {
+    if (!m.placeholder && m.id === id && (m.folder || _mvFolder) === folder && !out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
+function _mvFindListed(id, folder = _mvFolder) {
+  return _mvAllListed(id, folder)[0] || null;
+}
+
+/**
+ * Rows the keyboard walks through: messages, or in conversation mode the visible rows (a collapsed
+ * conversation = its latest message; foreign messages of open conversations included).
+ */
+function _mvNavRows() {
+  if (!_mvOpts.threads) return _mvMsgs.map(m => ({ id: m.id, folder: _mvFolder }));
+  return _mvThreadRows(_mvThreads, _mvThreadOpen).filter(r => r.msg)
+    .map(r => ({ id: r.msg.id, folder: r.msg.foreign ? r.msg.folder : _mvFolder }));
+}
+
+/** In-folder messages a list row stands for: all of a collapsed conversation (its first message's row), else the message. */
+function _mvRowIds(id) {
+  if (!_mvOpts.threads) return [id];
+  const th = _mvThreadOf(id);
+  if (!th || _mvThreadOpen(th)) return [id];
+  const own = th.messages.filter(m => !m.placeholder && !m.foreign).map(m => m.id);
+  return own.length > 1 ? own : [id];
+}
+
+function _mvThreadOwnIds(threadId) {
+  const th = _mvThreads.find(t => t.id === threadId);
+  return th ? th.messages.filter(m => !m.placeholder && !m.foreign).map(m => m.id) : [];
+}
+
+/** Conversations of the list with ≥ 2 messages (the ones that can be expanded). */
+function _mvMultiThreads() {
+  return _mvThreads.filter(t => t.messages.filter(m => !m.placeholder).length > 1);
+}
+
+/** List toolbar: grouping toggle (pressed while on) and Expand / Collapse all (only with expandable conversations). */
+function _mvSyncThreadBtns() {
+  const btn = document.getElementById('mailViewThreads');
+  const all = document.getElementById('mailViewThreadsAll');
+  if (!btn || !all) return;
+  btn.setAttribute('aria-pressed', String(!!_mvOpts.threads));
+  btn.title = _mvOpts.threads ? 'Ungroup conversations' : 'Group conversations';
+  const multi = _mvOpts.threads ? _mvMultiThreads() : [];
+  all.hidden = !multi.length;
+  const expand = multi.some(t => !_mvThreadOpen(t));
+  const label = expand ? 'Expand all conversations' : 'Collapse all conversations';
+  if (all.dataset.mode !== (expand ? 'expand' : 'collapse')) {
+    all.dataset.mode = expand ? 'expand' : 'collapse';
+    all.innerHTML = expand ? SVGICONS.expandAll() : SVGICONS.collapseAll();
+  }
+  all.title = label;
+  all.setAttribute('aria-label', label);
+}
+
+/** Expand (some are closed) or collapse every loaded conversation. */
+function _mvToggleAllThreads() {
+  const multi = _mvMultiThreads();
+  const open = multi.some(t => !_mvThreadOpen(t));
+  for (const t of multi) _mvTOpen.set(t.id, open);
+  _mvRenderList();
+}
+
+function _mvSetThreadOpen(threadId, open) {
+  _mvTOpen.set(threadId, open);
+  _mvRenderList();
+}
+
+function _mvToggleThread(threadId) {
+  const th = _mvThreads.find(t => t.id === threadId);
+  if (th) _mvSetThreadOpen(threadId, !_mvThreadOpen(th));
+}
+
+/** ← / →: collapse / expand the conversation of the open message. */
+function _mvExpandCurrent(open) {
+  const cur = _mvExtSel || (_mvSelId && { id: _mvSelId, folder: _mvFolder });
+  const th = cur && _mvThreadOf(cur.id, cur.folder);
+  if (!th || _mvThreadOpen(th) === open || th.messages.filter(m => !m.placeholder).length < 2) return;
+  const head = _mvThreadRows([th], () => false)[0]?.msg;
+  const headFolder = head?.foreign ? head.folder : _mvFolder;
+  // Collapsing hides the replies: the selection goes to the conversation's first message
+  if (!open && head && _mvKey(head.id, headFolder) !== _mvKey(cur.id, cur.folder)) _mvOpenMessage(head.id, headFolder);
+  _mvSetThreadOpen(th.id, open);
+  _mvScrollToRow(_mvExtSel || { id: _mvSelId, folder: _mvFolder });
+}
+
+function _mvRowSelector({ id, folder }) {
+  return folder === _mvFolder
+    ? `#mailViewList [data-mv-msg="${CSS.escape(id)}"]`
+    : `#mailViewList [data-mv-ext-uid="${CSS.escape(id)}"][data-mv-ext-folder="${CSS.escape(folder)}"]`;
+}
+
+function _mvScrollToRow(row) {
+  if (row?.id) document.querySelector(_mvRowSelector(row))?.scrollIntoView({ block: 'nearest' });
+}
+
 /** Open the first (`'first'`) or last loaded message of the list (Home / End). */
 function _mvJumpSelection(where) {
-  const next = where === 'first' ? _mvMsgs[0] : _mvMsgs.at(-1);
+  const rows = _mvNavRows();
+  const next = where === 'first' ? rows[0] : rows.at(-1);
   if (!next) return;
-  if (next.id !== _mvSelId) _mvOpenMessage(next.id);
-  document.querySelector(`#mailViewList [data-mv-msg="${CSS.escape(next.id)}"]`)?.scrollIntoView({ block: 'nearest' });
+  if (_mvKey(next.id, next.folder) !== _mvCurKey()) _mvOpenMessage(next.id, next.folder);
+  _mvScrollToRow(next);
 }
 
 function _mvMoveSelection(dir) {
-  if (!_mvMsgs.length) return;
-  const i = _mvMsgs.findIndex(m => m.id === _mvSelId);
-  const next = _mvMsgs[Math.max(0, Math.min(_mvMsgs.length - 1, i < 0 ? 0 : i + dir))];
-  if (next && next.id !== _mvSelId) {
-    _mvOpenMessage(next.id);
-    document.querySelector(`#mailViewList [data-mv-msg="${CSS.escape(next.id)}"]`)?.scrollIntoView({ block: 'nearest' });
+  const rows = _mvNavRows();
+  if (!rows.length) return;
+  const cur = _mvCurKey();
+  const i = rows.findIndex(r => _mvKey(r.id, r.folder) === cur);
+  const next = rows[Math.max(0, Math.min(rows.length - 1, i < 0 ? 0 : i + dir))];
+  if (next && _mvKey(next.id, next.folder) !== cur) {
+    _mvOpenMessage(next.id, next.folder);
+    _mvScrollToRow(next);
   }
 }
 
@@ -821,15 +1056,18 @@ function _mvRangeIds(ids, a, b) {
   return ids.slice(Math.min(i, j), Math.max(i, j) + 1);
 }
 
-/** Selected ids in list order; falls back to the open message. */
+/** Selected ids in list order (a collapsed conversation counts with all its messages); falls back to the open message. */
 function _mvSelectedIds() {
-  const ids = _mvMsgs.filter(m => _mvChecked.has(m.id)).map(m => m.id);
-  return ids.length ? ids : (_mvSelId ? [_mvSelId] : []);
+  const picked = _mvMsgs.filter(m => _mvChecked.has(m.id)).map(m => m.id);
+  const ids = new Set((picked.length ? picked : (_mvSelId ? [_mvSelId] : [])).flatMap(_mvRowIds));
+  const out = _mvMsgs.filter(m => ids.has(m.id)).map(m => m.id);
+  return out.length ? out : (_mvSelId ? [_mvSelId] : []);
 }
 
 function _mvClickMessage(e, id) {
   if (e.shiftKey && _mvAnchor) {
-    for (const x of _mvRangeIds(_mvMsgs.map(m => m.id), _mvAnchor, id)) _mvChecked.add(x);
+    const ids = _mvNavRows().filter(r => r.folder === _mvFolder).map(r => r.id);
+    for (const x of _mvRangeIds(ids, _mvAnchor, id)) _mvChecked.add(x);
     if (_mvChecked.size > 1) _mvCancelRead();
     _mvRenderListSelection();
     return;
@@ -911,7 +1149,17 @@ function _mvDropFromList(ids, { stay = false } = {}) {
   if (first < 0) return;
   const removed = _mvMsgs.filter(m => drop.has(m.id));
   _mvMsgs  = _mvMsgs.filter(m => !drop.has(m.id));
-  _mvTotal = Math.max(0, _mvTotal - removed.length);
+  if (_mvOpts.threads) {
+    // Conversations keep their other messages; one without a message in this folder leaves the list
+    const before = _mvThreads.length;
+    _mvThreads = _mvThreads
+      .map(t => ({ ...t, messages: t.messages.filter(m => m.foreign || m.placeholder || !drop.has(m.id)) }))
+      .filter(t => t.messages.some(m => !m.placeholder && !m.foreign));
+    _mvTotal = Math.max(0, _mvTotal - (before - _mvThreads.length));
+    _mvTotalMsgs = Math.max(0, _mvTotalMsgs - removed.length);
+  } else {
+    _mvTotal = Math.max(0, _mvTotal - removed.length);
+  }
   const unread = removed.filter(m => m.unread).length;
   if (unread) _mvAdjustUnseen(-unread);
   ids.forEach(id => _mvChecked.delete(id));
@@ -932,6 +1180,9 @@ async function _mvDeleteMessages(ids, opts = {}) {
   // Several messages out of trash / spam: deletion may be permanent → ask first
   if (ids.length > 1 && f && _mvIsEmptyable(f, _mvAccounts.find(a => a.accountId === accountId)?.trashFolder)
       && !(await showConfirm(`Delete ${ids.length} messages from "${_mvFolderLabel(f)}"? This cannot be undone.`, { okLabel: 'Delete', danger: true }))) return;
+  // Conversation mode: one row can stand for several messages → say how many
+  else if (ids.length > 1 && _mvOpts.threads && !opts.confirmed
+      && !(await showConfirm(`Delete ${ids.length} messages?`, { okLabel: 'Delete', danger: true }))) return;
   _mvDropFromList(ids, opts);
   const n = ids.length === 1 ? 'Message' : `${ids.length} messages`;
   try {
@@ -946,6 +1197,8 @@ async function _mvDeleteMessages(ids, opts = {}) {
 
 async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _mvFolder, opts = {}) {
   if (!ids.length || target === folder) return;
+  // Conversations: a message moves with its replies (any folder)
+  if (_mvOpts.threads && accountId === _mvAccountId && folder === _mvFolder) return _mvMoveItems(_mvMoveAnchors(ids), target, opts);
   if (accountId === _mvAccountId && folder === _mvFolder) _mvDropFromList(ids, opts);
   try {
     await _mvJson(_mvApi(accountId, `/message/${ids.join(',')}/move?${_mvFolderQs(folder)}`), {
@@ -961,10 +1214,163 @@ async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _
   _mvRefreshFoldersSoon(accountId);
 }
 
+/**
+ * Anchors of a move from list ids: a collapsed conversation's row (all its messages here, _mvRowIds) is its first
+ * message — so the whole conversation goes; other ids are themselves.
+ */
+function _mvMoveAnchors(ids) {
+  const out = new Map();
+  for (const id of ids) {
+    const th = _mvThreadOf(id);
+    const head = th && !_mvThreadOpen(th) && _mvThreadRows([th], () => false)[0];
+    const a = head?.kind === 'thread' ? { id: head.msg.id, folder: head.msg.folder || _mvFolder } : { id, folder: _mvFolder };
+    out.set(_mvKey(a.id, a.folder), a);
+  }
+  return [...out.values()];
+}
+
+/**
+ * Move messages of any folder with their replies (_mvTreeMovePlan over the list's conversations and the reader's)
+ * to `target`; asks first when replies come along. One request per source folder (≤ 500 UIDs each).
+ */
+async function _mvMoveItems(anchors, target, opts = {}) {
+  const accountId = _mvAccountId;
+  const plan = _mvTreeMovePlan([..._mvThreads, ...(_mvThread ? [_mvThread] : [])], anchors, target);
+  if (!plan.items.length) return;
+  const tf = _mvFolderInfo(accountId, target);
+  const label = tf ? _mvFolderLabel(tf) : target;
+  if (plan.replies > 0) {
+    const what = plan.anchors === 1 ? 'this message' : `${plan.anchors} messages`;
+    const replies = `${plan.replies} ${plan.replies === 1 ? 'reply' : 'replies'}`;
+    if (!(await showConfirm(`Move ${what} and ${replies} to "${label}"?`, { okLabel: 'Move' }))) return;
+  }
+  const byFolder = new Map();
+  for (const m of plan.items) (byFolder.get(m.folder) || byFolder.set(m.folder, []).get(m.folder)).push(m.id);
+  // Out of the list, the conversations and the reader at once
+  const gone = new Set(plan.items.map(m => _mvKey(m.id, m.folder)));
+  const keep = m => m.placeholder || !gone.has(_mvKey(m.id, m.folder || _mvFolder));
+  if (byFolder.has(_mvFolder)) _mvDropFromList(byFolder.get(_mvFolder), opts);
+  _mvThreads = _mvThreads.map(t => ({ ...t, messages: t.messages.filter(keep) }));
+  if (_mvThread) _mvThread = { ..._mvThread, messages: _mvThread.messages.filter(keep) };
+  if (_mvExtSel && gone.has(_mvKey(_mvExtSel.id, _mvExtSel.folder))) {
+    _mvExtSel = null;
+    _mvMsg = null;
+    _mvThread = null;
+    _mvRenderReader();
+    _mvSetPane('list');
+  }
+  _mvRenderList();
+  _mvRenderThreadStrip();
+  let moved = 0, error = null;
+  for (const [folder, ids] of byFolder) {
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      try {
+        await _mvJson(_mvApi(accountId, `/message/${chunk.join(',')}/move?${_mvFolderQs(folder)}`), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: target }),
+        });
+        moved += chunk.length;
+      } catch (err) { error = err.message; }
+    }
+  }
+  if (moved) _addRecentFolder(accountId, target);
+  if (error) {
+    _mvFlash(`Move failed${moved ? ` for some messages (${moved} moved)` : ''}: ${error}`, true);
+    _mvLoadList(0);
+  } else {
+    _mvFlash(`${moved === 1 ? 'Moved' : `${moved} messages moved`} to ${label}`);
+    if (target === _mvFolder) _mvLoadList(0);   // they belong to this folder now
+  }
+  _mvRefreshFoldersSoon(accountId);
+}
+
+/** "Move to…" for a message of another folder (conversation row / reader): with its replies. */
+async function _mvPickAndMoveItem(id, folder) {
+  const target = await _mvPickFolder(_mvAccountId, 'Move message to…', { exclude: [folder], withRecents: true });
+  if (target) _mvMoveItems([{ id, folder }], target);
+}
+
 async function _mvPickAndMoveMessages(ids, opts = {}) {
   const title = ids.length === 1 ? 'Move message to…' : `Move ${ids.length} messages to…`;
   const target = await _mvPickFolder(_mvAccountId, title, { exclude: [_mvFolder], withRecents: true });
   if (target) _mvMoveMessages(ids, target, _mvAccountId, _mvFolder, opts);
+}
+
+// ---- Messages of other folders (opened from a conversation): reader actions on their own folder ----
+
+function _mvExtPatch(id, folder, body) {
+  return _mvJson(_mvMessagesUrl([id], '', folder), {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+}
+
+function _mvExtRender() {
+  _mvRenderList();
+  _mvRenderReaderActions();
+  _mvRenderThreadStrip();
+}
+
+async function _mvExtSetUnread(id, folder, unread) {
+  const copies = _mvAllListed(id, folder);
+  if (_mvReadTimer?.id === id && _mvReadTimer.msgFolder === folder) _mvCancelRead();
+  copies.forEach(m => { m.unread = unread; });
+  _mvExtRender();
+  try {
+    await _mvExtPatch(id, folder, { seen: !unread });
+    _mvRefreshFoldersSoon(_mvAccountId);
+  } catch (err) {
+    _mvFlash(`Could not update message: ${err.message}`, true);
+  }
+}
+
+async function _mvExtSetFlag(id, folder, color) {
+  const copies = _mvAllListed(id, folder);
+  for (const m of [...copies, _mvMsg?.id === id && _mvMsg.folder === folder ? _mvMsg : null]) {
+    if (m) { m.flagColor = color; m.flagged = !!color; }
+  }
+  _mvExtRender();
+  try { await _mvExtPatch(id, folder, { flag: color }); }
+  catch (err) { _mvFlash(`Could not ${color ? 'flag' : 'unflag'} message: ${err.message}`, true); }
+}
+
+/** The message left its folder (moved / deleted): out of the conversations, the reader closes. */
+function _mvExtDrop(id, folder) {
+  const gone = m => !m.placeholder && m.id === id && m.folder === folder;
+  _mvThreads = _mvThreads.map(t => ({ ...t, messages: t.messages.filter(m => !gone(m)) }));
+  if (_mvThread) _mvThread = { ..._mvThread, messages: _mvThread.messages.filter(m => !gone(m)) };
+  if (_mvExtSel?.id === id && _mvExtSel.folder === folder) {
+    _mvExtSel = null;
+    _mvMsg = null;
+    _mvThread = null;
+    _mvRenderReader();
+    _mvSetPane('list');
+  }
+  _mvRenderList();
+}
+
+/** Reader toolbar on a message of another folder: read state, flag, move, delete in that folder. */
+async function _mvExtAction(act, btn) {
+  const msg = _mvMsg;
+  if (!msg) return;
+  const { id, folder } = msg, accountId = _mvAccountId;
+  const listed = _mvFindListed(id, folder) || msg;
+  if (act === 'unread') return _mvExtSetUnread(id, folder, !listed.unread);
+  if (act === 'flag') {
+    const r = btn.getBoundingClientRect();
+    openContextMenu({ clientX: r.left, clientY: r.bottom + 4, stopPropagation() {} },
+      _mailFlagMenuItems(listed.flagColor || null, c => _mvExtSetFlag(id, folder, c), !!listed.flagColor));
+    return;
+  }
+  if (act === 'move') return _mvPickAndMoveItem(id, folder);   // with its replies
+  try {
+    const res = await _mvJson(_mvMessagesUrl([id], '', folder), { method: 'DELETE' });
+    _mvFlash(res.permanent ? 'Message deleted permanently' : 'Message moved to trash');
+  } catch (err) {
+    _mvFlash(`Delete failed: ${err.message}`, true);
+    return;
+  }
+  _mvExtDrop(id, folder);
+  _mvRefreshFoldersSoon(accountId);
 }
 
 let _mvBoardsCache = null;
@@ -1061,11 +1467,12 @@ async function _mvAddressMenu(e, addr, shown = addr) {
 }
 
 /** Context menu: acts on the whole selection when the row is part of a multi-selection. */
-async function _mvMessageMenu(e, id) {
+/** `group`: the in-folder messages of a conversation row (collapsed or its header). */
+async function _mvMessageMenu(e, id, group = null) {
   const m = _mvMsgs.find(x => x.id === id);
   if (!m) return;
-  const multi = _mvChecked.size > 1 && _mvChecked.has(id);
-  const ids   = multi ? _mvSelectedIds() : [id];
+  const ids   = _mvChecked.size > 1 && _mvChecked.has(id) ? _mvSelectedIds() : (group?.length ? group : [id]);
+  const multi = ids.length > 1;
   const msgs  = ids.map(x => _mvMsgs.find(y => y.id === x)).filter(Boolean);
   const count = multi ? ` (${ids.length})` : '';
   const items = [];
@@ -1197,7 +1604,7 @@ async function _mvOpenSource() {
   viewer.style.display = 'flex';
   let blob;
   try {
-    const r = await fetch(_mvApi(_mvAccountId, `/message/${encodeURIComponent(msg.id)}/source?${_mvFolderQs()}`));
+    const r = await fetch(_mvApi(_mvAccountId, `/message/${encodeURIComponent(msg.id)}/source?${_mvFolderQs(msg.folder)}`));
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
     blob = await r.blob();
   } catch (err) {
@@ -1220,7 +1627,7 @@ async function _mvOpenSource() {
 const _MV_BODY_ATTACHMENTS = { url: att => _mvAttachmentUrl(att), open: att => _mvOpenAttachment(att) };
 
 function _mvAttachmentUrl(att) {
-  return _mvApi(_mvAccountId, `/message/${encodeURIComponent(_mvMsg.id)}/attachment/${encodeURIComponent(att.part)}?${_mvFolderQs()}`);
+  return _mvApi(_mvAccountId, `/message/${encodeURIComponent(_mvMsg.id)}/attachment/${encodeURIComponent(att.part)}?${_mvFolderQs(_mvMsg.folder)}`);
 }
 
 // ---- Folder actions ----
@@ -1624,8 +2031,15 @@ function _mvDuplicateIds(msgs) {
   return dupes;
 }
 
-function _mvListItemHtml(m, dupes) {
-  const special = _mvFolderInfo()?.specialUse;
+/**
+ * One message row. `child`: inside an open conversation (indented by `depth`); messages of other folders
+ * (`m.foreign`) are dimmed, carry their folder as a chip and open via data-mv-ext-* (no selection / drag).
+ * `thread` (a 'thread' row of _mvThreadRows): the conversation's first message with the expand chevron in front
+ * and the message count (+ unread here); collapsed it is bold while any message here is unread, and selection,
+ * drag, swipe and menus act on all its messages in the folder (_mvRowIds).
+ */
+function _mvListItemHtml(m, dupes, { child = false, depth = 0, thread = null } = {}) {
+  const special = _mvFolderInfo(_mvAccountId, m.foreign ? m.folder : _mvFolder)?.specialUse;
   const who = special === '\\Sent' || special === '\\Drafts' ? `To: ${_mvDisplayName(m.to)}` : _mvDisplayName(m.from);
   // Same markup classes as the dashboard mail panel items (card-text / card-meta)
   const meta = [];
@@ -1641,12 +2055,62 @@ function _mvListItemHtml(m, dupes) {
   if (who && !who.startsWith('To: ')) meta.push(_mailTrustedBadgeHtml(m));
   const date = _mvFmtListDate(m.date);
   if (date)             meta.push(`<span class="card-date">${escHtml(date)}</span>`);
-  const selected = _mvChecked.size > 1 && _mvChecked.has(m.id);
+  if (m.foreign)        meta.push(`<span class="mv-folder-chip" title="In folder ${escHtml(m.folder)}">${escHtml(_mvFolderName(m.folder))}</span>`);
+  const selected = !m.foreign && _mvChecked.size > 1 && _mvChecked.has(m.id);
+  const active = m.foreign ? _mvExtSel?.id === m.id && _mvExtSel.folder === m.folder : m.id === _mvSelId;
+  const cls = (child ? ' mv-msg--child' : '') + (m.foreign ? ' mv-msg--foreign' : '') + (m.match === false ? ' mv-msg--nomatch' : '');
+  const attrs = m.foreign
+    ? `data-mv-ext-uid="${escHtml(m.id)}" data-mv-ext-folder="${escHtml(m.folder)}" draggable="true"`
+    : `data-mv-msg="${escHtml(m.id)}" draggable="true"`;
+  const style = child ? ` style="--mv-depth:${Math.min(depth, _MV_MAX_DEPTH)}"` : '';
+  let bold = m.unread, text = '';
+  let tcls = '', tattr = '';
+  if (thread) {
+    const th = thread.thread;
+    const real = th.messages.filter(x => !x.placeholder);
+    const unread = real.filter(x => !x.foreign && x.unread).length;
+    const folders = new Set(real.map(x => x.folder)).size;
+    const tip = `${real.length} messages${folders > 1 ? ` in ${folders} folders` : ''}${unread ? `, ${unread} unread` : ''}`;
+    if (!thread.open && unread) bold = true;
+    tcls  = ` mv-thread${thread.open ? ' mv-thread--open' : ''}`;
+    tattr = ` data-mv-thread="${escHtml(th.id)}"`;
+    const subject = escHtml(m.subject);
+    text = `<button type="button" class="mv-thread-chev" data-mv-tchev="${escHtml(th.id)}" aria-expanded="${thread.open}" title="${thread.open ? 'Collapse' : 'Expand'} conversation">${SVGICONS.chevronDown(10, 10)}</button>`
+      + `<span class="mv-thread-subject">${bold ? `<strong>${subject}</strong>` : subject}</span>`
+      + `<span class="mv-thread-count" title="${escHtml(tip)}">${real.length}${unread ? ` \u00b7 ${unread}` : ''}</span>`;
+  } else {
+    text = bold ? `<strong>${escHtml(m.subject)}</strong>` : escHtml(m.subject);
+  }
   // Wrapper: on phones the row slides inside it to reveal the swipe actions
-  return `<div class="mv-msg-wrap"><div class="mv-msg${m.unread ? ' mv-unread' : ''}${m.id === _mvSelId ? ' active' : ''}${selected ? ' selected' : ''}" data-mv-msg="${escHtml(m.id)}" draggable="true">
-      <div class="card-text">${m.unread ? `<strong>${escHtml(m.subject)}</strong>` : escHtml(m.subject)}</div>
+  return `<div class="mv-msg-wrap"><div class="mv-msg${bold ? ' mv-unread' : ''}${active ? ' active' : ''}${selected ? ' selected' : ''}${cls}${tcls}" ${attrs}${tattr}${style}>
+      <div class="card-text">${text}</div>
       ${meta.length ? `<div class="card-meta">${meta.join('')}</div>` : ''}
     </div></div>`;
+}
+
+/** Folder label for chips (special-use name / leaf name). */
+function _mvFolderName(path) {
+  const f = _mvFolderInfo(_mvAccountId, path);
+  return f ? _mvFolderLabel(f) : _mvLeafName(path, '/');
+}
+
+/** "Jane, me, Bob" — senders of a conversation in date order, own addresses as "me" (≤ 3 names). */
+function _mvParticipants(messages) {
+  const own = new Set((_mvAccounts.find(a => a.accountId === _mvAccountId)?.own || []).map(a => a.toLowerCase()));
+  const names = [];
+  for (const m of _mvThreadChron(messages)) {
+    const name = own.has(_mvAddrOf(_mvSplitAddrs(m.from)[0] || '')) ? 'me' : _mvDisplayName(m.from);
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names.length > 3 ? `${names.slice(0, 3).join(', ')} +${names.length - 3}` : names.join(', ');
+}
+
+function _mvThreadRowHtml(r, dupes) {
+  if (r.kind === 'thread') return _mvListItemHtml(r.msg, dupes, { thread: r });
+  if (r.kind === 'gap') {
+    return `<div class="mv-msg-wrap"><div class="mv-msg mv-msg--child mv-msg--gap" style="--mv-depth:${Math.min(r.depth, _MV_MAX_DEPTH)}">Earlier message not available</div></div>`;
+  }
+  return _mvListItemHtml(r.msg, dupes, { child: !!r.child, depth: r.depth });
 }
 
 // ---- Swipe actions on phones: left → Move + Delete, right → Mark read / unread + Flag / Clear flag ----
@@ -1671,7 +2135,8 @@ function _mvSwipeLayers(row) {
   let end   = wrap.querySelector('.mv-swipe-actions--end');
   let start = wrap.querySelector('.mv-swipe-actions--start');
   if (!end) {
-    const m = _mvMsgs.find(x => x.id === row.dataset.mvMsg);
+    const group = _mvRowIds(row.dataset.mvMsg).map(id => _mvMsgs.find(x => x.id === id)).filter(Boolean);
+    const m = { unread: group.some(x => x.unread), flagColor: group.find(x => x.flagColor)?.flagColor };
     const btn = (act, icon, label, cls) =>
       `<button type="button" class="mv-swipe-btn mv-swipe-btn--${cls}" data-mv-swipe="${act}" title="${label}" aria-label="${label}">${icon}</button>`;
     wrap.insertAdjacentHTML('afterbegin',
@@ -1712,11 +2177,12 @@ function _mvSwipeAction(act, id) {
   _mvSwipeClose(false);
   const m = _mvMsgs.find(x => x.id === id);
   if (!m) return;
-  if (act === 'read' || act === 'unread') _mvSetUnread([id], act === 'unread');
-  else if (act === 'flag' || act === 'unflag') _mvSetFlag([id], act === 'flag' ? _MV_SWIPE_FLAG : null);
+  const ids = _mvRowIds(id);   // a collapsed conversation: all its messages in this folder
+  if (act === 'read' || act === 'unread') _mvSetUnread(ids, act === 'unread');
+  else if (act === 'flag' || act === 'unflag') _mvSetFlag(ids, act === 'flag' ? _MV_SWIPE_FLAG : null);
   // Swipe actions keep the list in view (no jump to the next message)
-  else if (act === 'delete') _mvDeleteMessages([id], { stay: true });
-  else if (act === 'move') _mvPickAndMoveMessages([id], { stay: true });
+  else if (act === 'delete') _mvDeleteMessages(ids, { stay: true });
+  else if (act === 'move') _mvPickAndMoveMessages(ids, { stay: true });
 }
 
 /** Touch swipe on the message list (phone layout only). */
@@ -1726,7 +2192,7 @@ function _mvWireSwipe(list) {
   list.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'touch' || !_cvIsPhone() || e.target.closest('.mv-swipe-actions')) return;
     const row = e.target.closest('.mv-msg');
-    if (!row) return;
+    if (!row?.dataset.mvMsg) return;   // other folders' messages / expanded conversation headers don't swipe
     // Touching another row while one is open only closes the open one (unless it turns into a swipe)
     const closedOther = !!_mvSwipe && _mvSwipe.row !== row;
     if (closedOther) _mvSwipeClose();
@@ -1788,28 +2254,35 @@ function _mvRenderList(error) {
   const el = document.getElementById('mailViewList');
   if (!el) return;
   _mvRenderCount();
+  _mvSyncThreadBtns();
+  el.classList.toggle('mv-list--threads', !!_mvOpts.threads);   // common text start, chevrons in the gutter
   if (error) { el.innerHTML = `<p class="dashboard-source-error">${escHtml(error)}</p>`; return; }
   if (!_mvAccountId) { el.innerHTML = ''; return; }
   if (!_mvMsgs.length) {
     el.innerHTML = el.classList.contains('mailview-loading') || _mvListSeq === 0
-      ? '<p class="dashboard-empty">Loading<span class="mv-loading-dots" aria-hidden="true"></span></p>'
+      ? `<p class="dashboard-empty">${_mvOpts.threads ? 'Loading conversations' : 'Loading'}<span class="mv-loading-dots" aria-hidden="true"></span></p>`
       : `<p class="dashboard-empty">${_mvQuery ? 'No messages match the search.' : _mvListFiltered(_mvOpts) ? 'No messages match the filters.' : 'No messages.'}</p>`;
     return;
   }
   _mvSwipe = null;
   const dupes = _mvDuplicateIds(_mvMsgs);   // only among the loaded messages
-  el.innerHTML = _mvMsgs.map(m => _mvListItemHtml(m, dupes)).join('')
-    + (_mvMsgs.length < _mvTotal ? `<div class="mv-load-more">
-        <button class="btn" data-mv-more="1">Load more (${Math.min(50, _mvTotal - _mvMsgs.length)})</button>
-        <button class="btn" data-mv-all="1">Load all (${_mvTotal - _mvMsgs.length})</button>
+  const rest = _mvTotal - _mvLoadedCount();
+  el.innerHTML = (_mvOpts.threads
+    ? _mvThreadRows(_mvThreads, _mvThreadOpen).map(r => _mvThreadRowHtml(r, dupes))
+    : _mvMsgs.map(m => _mvListItemHtml(m, dupes))).join('')
+    + (rest > 0 ? `<div class="mv-load-more">
+        <button class="btn" data-mv-more="1">Load more (${Math.min(50, rest)})</button>
+        <button class="btn" data-mv-all="1">Load all (${rest})</button>
       </div>` : '');
 }
 
 function _mvRenderListSelection() {
   const multi = _mvChecked.size > 1;
   document.querySelectorAll('#mailViewList .mv-msg').forEach(el => {
-    el.classList.toggle('active', el.dataset.mvMsg === _mvSelId);
-    el.classList.toggle('selected', multi && _mvChecked.has(el.dataset.mvMsg));
+    const ext = el.dataset.mvExtUid;
+    el.classList.toggle('active', ext ? _mvExtSel?.id === ext && _mvExtSel.folder === el.dataset.mvExtFolder
+      : !!el.dataset.mvMsg && el.dataset.mvMsg === _mvSelId);
+    el.classList.toggle('selected', multi && !!el.dataset.mvMsg && _mvChecked.has(el.dataset.mvMsg));
   });
   _mvRenderCount();
 }
@@ -1817,8 +2290,12 @@ function _mvRenderListSelection() {
 function _mvRenderCount() {
   const count = document.getElementById('mailViewCount');
   if (!count) return;
-  let total = _mvTotal ? `${_mvTotal} ${_mvQuery || _mvListFiltered(_mvOpts) ? 'found' : 'messages'}` : '';
-  if (_mvMsgs.length && _mvMsgs.length < _mvTotal) total += ` \u00b7 ${_mvMsgs.length} loaded`;
+  const found = _mvQuery || _mvListFiltered(_mvOpts);
+  let total = !_mvTotal ? ''
+    : _mvOpts.threads ? `${_mvTotal} ${_mvTotal === 1 ? 'conversation' : 'conversations'} \u00b7 ${_mvTotalMsgs} ${found ? 'found' : 'messages'}`
+    : `${_mvTotal} ${found ? 'found' : 'messages'}`;
+  const loaded = _mvLoadedCount();
+  if (loaded && loaded < _mvTotal) total += ` \u00b7 ${loaded} loaded`;
   count.textContent = _mvChecked.size > 1 ? `${total} \u00b7 ${_mvChecked.size} selected` : total;
 }
 
@@ -1826,7 +2303,7 @@ function _mvRenderReaderActions() {
   const bar = document.getElementById('mailViewReaderActions');
   if (!bar || !_mvMsg) return;
   const acc = _mvAccounts.find(a => a.accountId === _mvAccountId);
-  const listed = _mvMsgs.find(m => m.id === _mvMsg.id);
+  const listed = _mvFindListed(_mvMsg.id, _mvMsg.folder || _mvFolder);
   const unread = listed?.unread;
   const flag   = listed ? listed.flagColor : _mvMsg.flagColor;
   // Icon + label; below 670 px toolbar width only the icon (CSS container query; label stays as tooltip / aria-label)
@@ -1870,6 +2347,9 @@ function _mvRenderReader(mode, error) {
   if (msg.to) rows.push(['To', _foldAddresses(msg.to)]);
   if (msg.cc) rows.push(['Cc', _foldAddresses(msg.cc)]);
   if (msg.date) rows.push(['Date', escHtml(new Date(msg.date).toLocaleString())]);
+  if (msg.folder && msg.folder !== _mvFolder) {
+    rows.push(['Folder', `<a href="#" class="mv-show-folder" data-mv-showfolder title="Open this folder">${escHtml(_mvFolderName(msg.folder))}</a>`]);
+  }
   if (msg.cardRefs?.length) rows.push([msg.cardRefs.length > 1 ? 'Cards' : 'Card', _linkedCardLinksHtml(msg.cardRefs)]);
   const atts = (msg.attachments || []).map((a, i) => {
     const ft = _attachType(a.name);
@@ -1889,12 +2369,91 @@ function _mvRenderReader(mode, error) {
       <h2 class="mv-subject">${escHtml(msg.subject)}</h2>
     </div>
     <div class="mv-reader-actions" id="mailViewReaderActions"></div>
+    <div class="mv-thread-strip" id="mailViewThread" hidden></div>
     <table class="dashboard-detail-table mv-headers">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table>
     ${atts ? `<div class="mv-atts">${atts}</div>` : ''}
     <div class="mv-reader-body"></div>`;
   _mvRenderReaderActions();
+  _mvRenderThreadStrip();
   _resolveLinkedCardLinks(el.querySelector('.mv-headers'));
   _renderMailBody(el.querySelector('.mv-reader-body'), msg, { plain: _mvPlain, toggle: false, attachments: _MV_BODY_ATTACHMENTS, dark: _mvBodyDark() });
+}
+
+// ---- Reader: conversation strip (position, ‹ › through the conversation in date order, tree) ----
+
+/**
+ * Conversation of the opened message: from the list in conversation mode, else fetched — only for messages that
+ * belong to one (In-Reply-To / References, or answered), so plain mails cost no request.
+ */
+async function _mvLoadThread(msg) {
+  const folder = msg.folder || _mvFolder;
+  const th = _mvThreadOf(msg.id, folder);
+  if (th) { _mvThread = { id: th.id, messages: th.messages }; _mvRenderThreadStrip(); return; }
+  if (!msg.inReplyTo && !msg.references?.length && !_mvFindListed(msg.id, folder)?.answered) return;
+  let data;
+  try { data = await _mvJson(_mvApi(_mvAccountId, `/thread/${encodeURIComponent(msg.id)}?${_mvFolderQs(folder)}`)); }
+  catch { return; }
+  if (_mvMsg !== msg || !Array.isArray(data?.messages)) return;
+  _mvThread = { id: data.id, messages: data.messages };
+  _mvRenderThreadStrip();
+}
+
+function _mvThreadPos() {
+  const chron = _mvThreadChron(_mvThread?.messages || []);
+  const folder = _mvMsg?.folder || _mvFolder;
+  return { chron, i: chron.findIndex(m => m.id === _mvMsg?.id && (m.folder || _mvFolder) === folder) };
+}
+
+/** `[` / `]`, ‹ ›: previous / next message of the conversation in date order (any folder). */
+function _mvThreadStep(dir) {
+  const { chron, i } = _mvThreadPos();
+  const next = i < 0 ? null : chron[i + dir];
+  if (!next) return;
+  const folder = next.folder || _mvFolder;
+  const th = _mvThreadOf(next.id, folder);
+  if (folder !== _mvFolder && th && !_mvThreadOpen(th)) _mvSetThreadOpen(th.id, true);   // keep it visible in the list
+  _mvOpenMessage(next.id, folder);
+  _mvScrollToRow({ id: next.id, folder });
+}
+
+function _mvRenderThreadStrip() {
+  const el = document.getElementById('mailViewThread');
+  if (!el) return;
+  const msgs = (_mvThread?.messages || []).filter(m => !m.placeholder);
+  if (!_mvMsg || msgs.length < 2) { el.hidden = true; el.innerHTML = ''; return; }
+  const { chron, i } = _mvThreadPos();
+  const folders = new Set(msgs.map(m => m.folder)).size;
+  const cur = _mvKey(_mvMsg.id, _mvMsg.folder || _mvFolder);
+  const tree = !_mvTStripOpen ? '' : `<div class="mv-thread-tree">${_mvThread.messages.map(m => {
+    const depth = `--mv-depth:${Math.min(m.depth || 0, _MV_MAX_DEPTH)}`;
+    if (m.placeholder) return `<div class="mv-thread-node mv-thread-node--gap" style="${depth}">Earlier message not available</div>`;
+    const folder = m.folder || _mvFolder;
+    const chip = folder !== _mvFolder ? `<span class="mv-folder-chip">${escHtml(_mvFolderName(folder))}</span>` : '';
+    const on = _mvKey(m.id, folder) === cur;
+    return `<button type="button" class="mv-thread-node${on ? ' active' : ''}${m.unread ? ' mv-unread' : ''}" style="${depth}"`
+      + ` data-mv-topen="${escHtml(m.id)}" data-mv-tfolder="${escHtml(folder)}"${on ? ' aria-current="true"' : ''}>`
+      + `<span class="mv-thread-from">${escHtml(_mvParticipants([m]))}</span>${chip}`
+      + `<span class="card-date">${escHtml(_mvFmtListDate(m.date))}</span></button>`;
+  }).join('')}</div>`;
+  el.hidden = false;
+  el.classList.add('panel');
+  el.classList.toggle('mv-thread-strip--open', _mvTStripOpen);
+  el.innerHTML = `<div class="mv-thread-bar panel-hdr">
+      <button type="button" class="mv-thread-toggle panel-hdr-title" data-mv-ttoggle aria-expanded="${_mvTStripOpen}" title="${_mvTStripOpen ? 'Hide' : 'Show'} the conversation">`
+    + `<span class="mv-thread-chev" aria-hidden="true">${SVGICONS.chevronDown(10, 10)}</span>`
+    + `Conversation \u00b7 ${msgs.length} messages${folders > 1 ? ` \u00b7 ${folders} folders` : ''}</button>
+      <span class="mv-thread-nav">
+        <button type="button" class="btn btn--icon" data-mv-tnav="-1" title="Previous in conversation ([)" aria-label="Previous in conversation"${i <= 0 ? ' disabled' : ''}>\u2039</button>
+        <span class="mv-thread-pos">${i + 1} / ${chron.length}</span>
+        <button type="button" class="btn btn--icon" data-mv-tnav="1" title="Next in conversation (])" aria-label="Next in conversation"${i < 0 || i >= chron.length - 1 ? ' disabled' : ''}>\u203a</button>
+      </span>
+    </div>${tree}`;
+}
+
+function _mvToggleThreadStrip() {
+  _mvTStripOpen = !_mvTStripOpen;
+  try { if (_mvTStripOpen) localStorage.setItem(_MV_TSTRIP_KEY, '1'); else localStorage.removeItem(_MV_TSTRIP_KEY); } catch { /* ignore */ }
+  _mvRenderThreadStrip();
 }
 
 // ---- Compose ----
@@ -1919,9 +2478,9 @@ function _mvOpenCompose(mode, prefill = null) {
   _mvCompose = {
     files:  [],
     dirty:  false,
-    reply:  reply ? { uid: reply.id, folder: _mvFolder, accountId: _mvAccountId } : null,
+    reply:  reply ? { uid: reply.id, folder: reply.folder || _mvFolder, accountId: _mvAccountId } : null,
     // Original attachments are attached server-side; removing a chip drops it from `atts`
-    forward: forward ? { uid: forward.id, folder: _mvFolder, accountId: _mvAccountId, atts: [...(forward.attachments || [])] } : null,
+    forward: forward ? { uid: forward.id, folder: forward.folder || _mvFolder, accountId: _mvAccountId, atts: [...(forward.attachments || [])] } : null,
     inReplyTo:  fields?.inReplyTo || '',
     references: fields?.references || [],
     onSent:     (!reply && !forward && prefill?.onSent) || null,
@@ -2542,6 +3101,7 @@ function _mvReadListOpts(pop) {
     attachments: pop.querySelector('[data-mv-opts-att]').checked,
     duplicates:  pop.querySelector('[data-mv-opts-dup]').checked,
     loadAll:     pop.querySelector('[data-mv-opts-all]').checked,
+    threads:     pop.querySelector('[data-mv-opts-threads]').checked,
   };
 }
 
@@ -2557,6 +3117,8 @@ function _mvSyncListOpts() {
   pop.querySelector('[data-mv-opts-att]').checked = _mvOpts.attachments;
   pop.querySelector('[data-mv-opts-dup]').checked = _mvOpts.duplicates;
   pop.querySelector('[data-mv-opts-all]').checked = _mvOpts.loadAll;
+  pop.querySelector('[data-mv-opts-threads]').checked = !!_mvOpts.threads;
+  _mvSyncThreadBtns();
   pop.querySelector('.mv-listopts-dates').hidden  = !_mvOpts.range;
   pop.querySelectorAll('.mv-listopts-between').forEach(el => { el.hidden = _mvOpts.range !== 'between'; });
   const on = _mvOpts.sort !== 'date' || _mvListFiltered(_mvOpts);
@@ -2578,8 +3140,15 @@ function _mvApplyListOpts(next) {
     return;
   }
   _mvSelId = null;
+  _mvExtSel = null;
   _mvCancelRead();
   _mvLoadList(0);
+}
+
+/** Open the folder of a message (from a conversation) with the message selected. */
+function _mvShowInFolder(id, folder) {
+  _mvSelectFolder(_mvAccountId, folder);
+  _mvOpenMessage(id);
 }
 
 // ---- Wiring ----
@@ -2664,6 +3233,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const optsPop = document.getElementById('mailViewListOptsPop');
   optsBtn.addEventListener('click', e => { e.stopPropagation(); _mvToggleListOpts(); });
   optsPop.addEventListener('change', () => _mvApplyListOpts(_mvReadListOpts(optsPop)));
+  // Conversations right in the list toolbar: group on / off, expand / collapse all
+  document.getElementById('mailViewThreads').addEventListener('click', () => _mvApplyListOpts({ threads: !_mvOpts.threads }));
+  document.getElementById('mailViewThreadsAll').addEventListener('click', _mvToggleAllThreads);
   optsPop.querySelector('[data-mv-opts-reset]').addEventListener('click', () => {
     _mvApplyListOpts({ sort: 'date', range: '', from: '', to: '', attachments: false, duplicates: false, loadAll: false });
   });
@@ -2707,11 +3279,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // Drag messages / folders onto folders
   let dragData = null;
   list.addEventListener('dragstart', e => {
+    const ext = e.target.closest('[data-mv-ext-uid]');
+    if (ext) {   // message of another folder (open conversation): moves with its replies
+      dragData = { kind: 'ext', accountId: _mvAccountId, folder: ext.dataset.mvExtFolder, items: [{ id: ext.dataset.mvExtUid, folder: ext.dataset.mvExtFolder }] };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', ext.querySelector('.card-text')?.textContent || '');
+      return;
+    }
     const row = e.target.closest('[data-mv-msg]');
     if (!row) return;
     const id = row.dataset.mvMsg;
-    // Dragging a row of a multi-selection moves the whole selection
-    const ids = _mvChecked.size > 1 && _mvChecked.has(id) ? _mvSelectedIds() : [id];
+    // Dragging a row of a multi-selection moves the whole selection (a collapsed conversation: all its messages)
+    const ids = _mvChecked.size > 1 && _mvChecked.has(id) ? _mvSelectedIds() : _mvRowIds(id);
     dragData = { kind: 'msg', accountId: _mvAccountId, folder: _mvFolder, ids };
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', row.querySelector('.card-text')?.textContent || '');
@@ -2734,7 +3313,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const accountId = row.dataset.mvAcc || row.dataset.mvAccount;
     const path = row.dataset.mvFolder ?? '';
     if (accountId !== dragData.accountId) return null;
-    if (dragData.kind === 'msg') return path && path !== dragData.folder && !row.classList.contains('mv-noselect') ? { row, path } : null;
+    if (dragData.kind === 'msg' || dragData.kind === 'ext') return path && path !== dragData.folder && !row.classList.contains('mv-noselect') ? { row, path } : null;
     const delim = _mvDelimiter(accountId, dragData.path);
     if (path === dragData.path || path.startsWith(dragData.path + delim) || path === _mvParentPath({ path: dragData.path, delimiter: delim })) return null;
     return { row, path };
@@ -2753,7 +3332,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const d = dragData;
     dragData = null;
     t.row.classList.remove('mv-drop-target');
-    if (d.kind === 'msg') _mvMoveMessages(d.ids, t.path, d.accountId, d.folder);
+    if (d.kind === 'ext') _mvMoveItems(d.items, t.path);
+    else if (d.kind === 'msg') _mvMoveMessages(d.ids, t.path, d.accountId, d.folder);
     else _mvMoveFolder(d.accountId, d.path, t.path);
   });
 
@@ -2761,13 +3341,38 @@ document.addEventListener('DOMContentLoaded', () => {
   list.addEventListener('click', e => {
     if (e.target.closest('[data-mv-more]')) { _mvLoadList(_mvPage + 1); return; }
     if (e.target.closest('[data-mv-all]'))  { _mvApplyListOpts({ loadAll: true }); return; }
+    const chev = e.target.closest('[data-mv-tchev]');
+    if (chev) { _mvToggleThread(chev.dataset.mvTchev); return; }
+    const ext = e.target.closest('[data-mv-ext-uid]');
+    if (ext) { _mvOpenMessage(ext.dataset.mvExtUid, ext.dataset.mvExtFolder); return; }
     const row = e.target.closest('[data-mv-msg]');
+    // A conversation's row is its first message: a click opens it; only the chevron expands / collapses
     if (row) _mvClickMessage(e, row.dataset.mvMsg);
   });
   _mvWireSwipe(list);
   // Shift+click must not select text
   list.addEventListener('mousedown', e => { if (e.shiftKey && e.target.closest('[data-mv-msg]')) e.preventDefault(); });
   list.addEventListener('contextmenu', e => {
+    const conv = e.target.closest('.mv-thread:not(.mv-thread--open)');
+    const group = conv ? _mvThreadOwnIds(conv.dataset.mvThread) : [];
+    if (group.length) {   // collapsed conversation: acts on all its messages here
+      e.preventDefault();
+      e.stopPropagation();
+      _mvMessageMenu(e, conv.dataset.mvMsg || group[0], group);
+      return;
+    }
+    const ext = e.target.closest('[data-mv-ext-uid]');
+    if (ext) {   // message of another folder: open it there or in the reader
+      e.preventDefault();
+      e.stopPropagation();
+      const { mvExtUid: id, mvExtFolder: folder } = ext.dataset;
+      openContextMenu(e, [
+        { labelHtml: `<span class="ctx-icon">${SVGICONS.email()}</span>Open`, action: () => _mvOpenMessage(id, folder) },
+        { labelHtml: `<span class="ctx-icon">${SVGICONS.folder()}</span>Show in folder`, action: () => _mvShowInFolder(id, folder) },
+        { labelHtml: `<span class="ctx-icon">${SVGICONS.moveTo()}</span>Move to…`, action: () => _mvPickAndMoveItem(id, folder) },
+      ]);
+      return;
+    }
     const row = e.target.closest('[data-mv-msg]');
     if (!row) return;
     e.preventDefault();
@@ -2779,7 +3384,24 @@ document.addEventListener('DOMContentLoaded', () => {
   reader.addEventListener('click', e => {
     const back = e.target.closest('[data-mv-back]');
     if (back) { _mvSetPane(back.dataset.mvBack); return; }
+    const tnav = e.target.closest('[data-mv-tnav]');
+    if (tnav) { _mvThreadStep(Number(tnav.dataset.mvTnav)); return; }
+    if (e.target.closest('[data-mv-ttoggle]')) { _mvToggleThreadStrip(); return; }
+    const topen = e.target.closest('[data-mv-topen]');
+    if (topen) {
+      const folder = topen.dataset.mvTfolder;
+      const th = _mvThreadOf(topen.dataset.mvTopen, folder);
+      if (folder !== _mvFolder && th && !_mvThreadOpen(th)) _mvSetThreadOpen(th.id, true);
+      _mvOpenMessage(topen.dataset.mvTopen, folder);
+      _mvScrollToRow({ id: topen.dataset.mvTopen, folder });
+      return;
+    }
+    if (e.target.closest('[data-mv-showfolder]') && _mvMsg) { e.preventDefault(); _mvShowInFolder(_mvMsg.id, _mvMsg.folder); return; }
     const act = e.target.closest('[data-mv-act]');
+    if (act && _mvMsg && _mvMsg.folder && _mvMsg.folder !== _mvFolder && ['unread', 'flag', 'move', 'delete'].includes(act.dataset.mvAct)) {
+      _mvExtAction(act.dataset.mvAct, act);
+      return;
+    }
     if (act && _mvMsg) {
       const id = _mvMsg.id;
       if (act.dataset.mvAct === 'reply')    _mvOpenCompose('reply');
@@ -2797,7 +3419,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const view = e.target.closest('[data-mv-att-view]');
     if (view && _mvMsg) { _mvOpenAttachment(_mvMsg.attachments[+view.dataset.mvAttView]); return; }
     const cal = e.target.closest('[data-mv-att-cal]');
-    if (cal && _mvMsg) { _mailAddIcsToCalendar(_mvAccountId, _mvMsg.id, _mvFolder, _mvMsg, _mvMsg.attachments[+cal.dataset.mvAttCal]); return; }
+    if (cal && _mvMsg) { _mailAddIcsToCalendar(_mvAccountId, _mvMsg.id, _mvMsg.folder || _mvFolder, _mvMsg, _mvMsg.attachments[+cal.dataset.mvAttCal]); return; }
     const dl = e.target.closest('[data-mv-att-dl]');
     if (dl && _mvMsg) { _mvDownloadAttachment(_mvMsg.attachments[+dl.dataset.mvAttDl]); return; }
     const toggle = e.target.closest('.dash-addr-toggle');
@@ -2912,6 +3534,10 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.key === 'ArrowUp'   || e.key === 'k') { e.preventDefault(); _mvMoveSelection(-1); }
     else if (e.key === 'Home') { e.preventDefault(); _mvJumpSelection('first'); }
     else if (e.key === 'End')  { e.preventDefault(); _mvJumpSelection('last'); }
+    else if (e.key === 'ArrowRight' && _mvOpts.threads) { e.preventDefault(); _mvExpandCurrent(true); }
+    else if (e.key === 'ArrowLeft'  && _mvOpts.threads) { e.preventDefault(); _mvExpandCurrent(false); }
+    else if (e.key === ']' && _mvMsg) _mvThreadStep(1);
+    else if (e.key === '[' && _mvMsg) _mvThreadStep(-1);
     else if (e.key === 'r' && _mvMsg) _mvOpenCompose('reply');
     else if (e.key === 'a' && _mvMsg) _mvOpenCompose('replyall');
     else if (e.key === 'f' && _mvMsg) _mvOpenCompose('forward');

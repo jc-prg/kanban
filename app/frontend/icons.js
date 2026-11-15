@@ -147,6 +147,11 @@ function _svgExpandAll(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 1.5 9 4.5M3 7.5 6 10.5 9 7.5"/></svg>`;
 }
 
+// Reply tree: a message line with two indented replies hanging from it — mail conversations
+function _svgThreads(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 2h9M2.5 2v6.5h1.5M4.5 5.5H10M2.5 5.5h2M4 8.5h6"/></svg>`;
+}
+
 // One chevron pointing down — open a collapsed widget
 function _svgChevronDown(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5"/></svg>`;
@@ -428,6 +433,7 @@ const SVGICONS = {
   expandAll:      _svgExpandAll,
   chevronDown:    _svgChevronDown,
   collapseAll:    _svgCollapseAll,
+  threads:        _svgThreads,
   accordion:      _svgAccordion,
   eye:            _svgEye,
   eyeOff:         _svgEyeOff,

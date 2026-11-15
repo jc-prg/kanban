@@ -563,9 +563,15 @@ function _mailboxSig(client) {
   return mb.uidValidity != null && mb.uidNext != null ? `${mb.uidValidity}:${mb.uidNext}:${mb.exists}` : null;
 }
 
+/** First message id of an In-Reply-To value ('' when none). */
+function _firstMsgId(v) {
+  return (String(v || '').match(/<[^<>\s]+>/) || [''])[0];
+}
+
 /**
- * All messages of the selected mailbox as { items: [{ uid, t, from }], dupes } — dupes = Set of the UIDs that
- * are duplicate copies (findDuplicateUids: the largest copy of a group is the original).
+ * All messages of the selected mailbox as { items: [{ uid, t, from, mid, irt, refs }], dupes } — dupes = Set of
+ * the UIDs that are duplicate copies (findDuplicateUids: the largest copy of a group is the original);
+ * mid / irt / refs = Message-ID, In-Reply-To, References (conversation threads).
  */
 async function _folderIndex(client, account, folder) {
   const key = `${account.id}\n${folder}`;
@@ -574,8 +580,11 @@ async function _folderIndex(client, account, folder) {
   if (hit && hit.sig === sig) return hit;
   const items = [], raw = [];
   if (client.mailbox?.exists) {
-    for await (const msg of client.fetch('1:*', { uid: true, envelope: true, internalDate: true, size: true })) {
-      items.push({ uid: msg.uid, t: _itemTime(msg), from: _senderKey(msg.envelope?.from?.[0]) });
+    const query = { uid: true, envelope: true, internalDate: true, size: true, headers: ['references'] };
+    for await (const msg of client.fetch('1:*', query)) {
+      items.push({ uid: msg.uid, t: _itemTime(msg), from: _senderKey(msg.envelope?.from?.[0]),
+        mid: (msg.envelope?.messageId || '').trim(), irt: _firstMsgId(msg.envelope?.inReplyTo),
+        refs: _parseReferences(msg.headers) });
       raw.push({ uid: msg.uid, envelope: msg.envelope, internalDate: msg.internalDate, size: msg.size });
     }
   }
@@ -603,28 +612,41 @@ async function _attachmentUids(client, account, folder) {
 const _FETCH_CHUNK = 500;   // UIDs per FETCH command ("Load all" of a big folder)
 
 /**
+ * UIDs of the selected mailbox that pass the list filters, in list order (see fetchFolderMessages).
+ * `query` = IMAP search in subject / from / to / body.
+ */
+async function _listUids(client, account, folder, { query = '', sort = 'date', since = null, before = null,
+  attachments = false, duplicates = false } = {}, index = null) {
+  const { items, dupes } = index || await _folderIndex(client, account, folder);
+  let only = duplicates ? dupes : null;
+  if (query) {
+    const found = (await client.search({
+      or: [{ subject: query }, { from: query }, { to: query }, { body: query }],
+    }, { uid: true })) || [];
+    only = new Set(only ? found.filter(u => only.has(u)) : found);
+  }
+  if (attachments) {
+    const withAtt = await _attachmentUids(client, account, folder);
+    only = only ? new Set([...only].filter(u => withAtt.has(u))) : withAtt;
+  }
+  return orderFolderIndex(items, { sort, since, before, only });
+}
+
+/**
  * One page of a folder (or of the search results in it). Order: `sort` (MAIL_SORTS, default latest first).
  * Filters: `query` (IMAP search in subject / from / to / body), `since` / `before` (ms, Date header, else
  * arrival time), `attachments`, `duplicates` (only duplicate copies — findDuplicateUids). `all` returns every
  * message from `page` on (the mail view's "Load all").
  * Returns { messages, total, page, pageSize }.
+ * `threads`: conversations instead (_fetchThreadPage) — pages count threads.
  */
-async function fetchFolderMessages(account, folder, { page = 0, pageSize = 50, query = '', sort = 'date',
-  since = null, before = null, attachments = false, duplicates = false, all = false } = {}) {
+async function fetchFolderMessages(account, folder, opts = {}) {
+  if (opts.threads) return _withClient(account, client => _fetchThreadPage(client, account, folder, opts));
+  const { page = 0, pageSize = 50, all = false } = opts;
   return _withMailbox(account, folder, async client => {
-    const { items, dupes } = await _folderIndex(client, account, folder);
-    let only = duplicates ? dupes : null;
-    if (query) {
-      const found = (await client.search({
-        or: [{ subject: query }, { from: query }, { to: query }, { body: query }],
-      }, { uid: true })) || [];
-      only = new Set(only ? found.filter(u => only.has(u)) : found);
-    }
-    if (attachments) {
-      const withAtt = await _attachmentUids(client, account, folder);
-      only = only ? new Set([...only].filter(u => withAtt.has(u))) : withAtt;
-    }
-    const uids  = orderFolderIndex(items, { sort, since, before, only });
+    const index = await _folderIndex(client, account, folder);
+    const { dupes } = index;
+    const uids  = await _listUids(client, account, folder, opts, index);
     const total = uids.length;
     const slice = uids.slice(page * pageSize, all ? undefined : (page + 1) * pageSize);
     const msgs  = [];
@@ -702,6 +724,234 @@ async function findDuplicateMessages(account, folder) {
       }
     }
     return { messages, uids: findDuplicateUids(msgs) };
+  });
+}
+
+// ---- Conversation threads ----
+
+/**
+ * Reply tree of messages — JWZ threading without subject matching (no false merges of "Re: Invoice"). Pure.
+ * list: [{ key, mid, irt, refs, t }] — key unique per message copy; nodes with the same mid are copies of one
+ * message. Parent = In-Reply-To, else the last References entry; the References chain links the ancestors (a
+ * message's own headers win over what other messages say about it); links that would close a cycle are refused.
+ * A missing ancestor stays as a placeholder only while it holds ≥ 2 children, else its children move up.
+ * Returns { nodes: Map(id → { id, keys, parent, children: [id] (oldest first), t }), nodeOf: Map(key → id),
+ * threadOf: Map(key → root id) }. Node ids: `m:<Message-ID>`, `k:<key>` for messages without one.
+ */
+function buildThreads(list) {
+  const nodes = new Map();
+  const get = id => nodes.get(id) || nodes.set(id, { id, keys: [], parent: null, children: [], t: Infinity }).get(id);
+  // true when `a` is `b` or one of its ancestors
+  const above = (a, b) => {
+    for (let n = b, i = 0; n && i < 100_000; n = n.parent ? nodes.get(n.parent) : null, i++) if (n.id === a) return true;
+    return false;
+  };
+  const link = (parentId, childId, force) => {
+    if (parentId === childId) return;
+    const c = get(childId);
+    if (c.parent === parentId || (c.parent && !force) || above(childId, get(parentId))) return;
+    c.parent = parentId;
+  };
+  const nodeOf = new Map(), chains = [];
+  for (const it of list) {
+    const id = it.mid ? `m:${it.mid}` : `k:${it.key}`;
+    const n = get(id);
+    n.keys.push(it.key);
+    n.t = Math.min(n.t, it.t ?? Infinity);
+    nodeOf.set(it.key, id);
+    if (!it.mid) continue;
+    const chain = (it.refs || []).filter(r => r !== it.mid);
+    if (it.irt && it.irt !== it.mid && chain[chain.length - 1] !== it.irt) chain.push(it.irt);
+    chains.push([id, chain.map(r => `m:${r}`)]);
+  }
+  for (const [, chain] of chains) for (let i = 1; i < chain.length; i++) link(chain[i - 1], chain[i], false);
+  for (const [id, chain] of chains) if (chain.length) link(chain[chain.length - 1], id, true);
+
+  const kids = new Map();
+  const kidsOf = id => kids.get(id) || kids.set(id, []).get(id);
+  for (const n of nodes.values()) if (n.parent) kidsOf(n.parent).push(n.id);
+  // Missing ancestors with < 2 children go; their child moves up
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const n of [...nodes.values()]) {
+      if (n.keys.length || kidsOf(n.id).length >= 2) continue;
+      for (const c of kidsOf(n.id)) { nodes.get(c).parent = n.parent; if (n.parent) kidsOf(n.parent).push(c); }
+      if (n.parent) { const pk = kidsOf(n.parent); pk.splice(pk.indexOf(n.id), 1); }
+      kids.delete(n.id);
+      nodes.delete(n.id);
+      changed = true;
+    }
+  }
+  // Placeholders take the time of their earliest child; siblings oldest first
+  const time = id => { const n = nodes.get(id); if (n.t === Infinity && !n.keys.length) n.t = Math.min(...kidsOf(id).map(time)); return n.t; };
+  for (const n of nodes.values()) n.children = kidsOf(n.id).sort((a, b) => time(a) - time(b) || (a < b ? -1 : 1));
+  const rootOf = new Map();
+  const root = id => {
+    if (rootOf.has(id)) return rootOf.get(id);
+    const n = nodes.get(id);
+    const r = n.parent ? root(n.parent) : id;
+    rootOf.set(id, r);
+    return r;
+  };
+  const threadOf = new Map();
+  for (const [key, id] of nodeOf) threadOf.set(key, root(id));
+  return { nodes, nodeOf, threadOf };
+}
+
+const _threadIndexCache = new Map();   // account id → { sig, idx: Map(folder → folder index), …buildThreads }
+
+/**
+ * Folders a conversation is collected from: every selectable folder except trash / spam (isEmptyableFolder),
+ * plus `openFolder` itself. LIST-STATUS gives the signature to reuse cached folder indexes without selecting them.
+ */
+async function _threadFolders(client, account, openFolder) {
+  let list;
+  try { list = await client.list({ statusQuery: { messages: true, uidNext: true, uidValidity: true } }); }
+  catch { list = await client.list(); }
+  const out = (list || []).filter(f => {
+    const m = _mapFolder(f);
+    return !m.noselect && (f.path === openFolder || !isEmptyableFolder(m, account));
+  });
+  if (!out.some(f => f.path === openFolder)) out.push({ path: openFolder });
+  return out;
+}
+
+/** Folder index of `f` (a LIST entry) — from the cache when its LIST-STATUS signature matches; null if not selectable. */
+async function _folderIndexAt(client, account, f) {
+  const st = f.status;
+  if (st?.uidValidity != null && st.uidNext != null) {
+    const hit = _folderIndexCache.get(`${account.id}\n${f.path}`);
+    if (hit && hit.sig === `${st.uidValidity}:${st.uidNext}:${st.messages}`) return hit;
+  }
+  let lock;
+  try { lock = await client.getMailboxLock(f.path, { readOnly: true }); } catch { return null; }
+  try { return await _folderIndex(client, account, f.path); } finally { lock.release(); }
+}
+
+/** Conversation threads of the whole account (_threadFolders), rebuilt only when a folder changed. */
+async function _threadIndex(client, account, openFolder) {
+  const idx = new Map();
+  for (const f of await _threadFolders(client, account, openFolder)) {
+    const i = await _folderIndexAt(client, account, f);
+    if (i) idx.set(f.path, i);
+  }
+  const sig = [...idx].map(([p, i]) => `${p}\n${i.sig}`).join('\n\n');
+  const hit = _threadIndexCache.get(account.id);
+  if (hit && hit.sig === sig && [...idx.values()].every(i => i.sig)) return hit;
+  const list = [];
+  for (const [path, i] of idx) for (const it of i.items) list.push({ key: `${path}\n${it.uid}`, mid: it.mid, irt: it.irt, refs: it.refs, t: it.t });
+  const res = { sig, idx, ...buildThreads(list) };
+  _cachePut(_threadIndexCache, account.id, res);
+  return res;
+}
+
+function _splitKey(key) {
+  const i = key.lastIndexOf('\n');
+  return [key.slice(0, i), Number(key.slice(i + 1))];
+}
+
+/**
+ * A thread in tree order (depth first, siblings oldest first): [{ node, parent, depth, key | null }] — key null =
+ * placeholder of a missing message. Copies: every copy in `folder`, else the first one.
+ */
+function _threadEntries(t, rootId, folder, fallbackKey) {
+  if (!t.nodes.has(rootId)) return [{ node: rootId, parent: null, depth: 0, key: fallbackKey }];
+  const out = [];
+  const walk = (id, parent, depth) => {
+    const n = t.nodes.get(id);
+    const here = n.keys.filter(k => _splitKey(k)[0] === folder);
+    const keys = here.length ? here : n.keys.slice(0, 1);
+    if (!keys.length) out.push({ node: id, parent, depth, key: null });
+    for (const k of keys) out.push({ node: id, parent, depth, key: k });
+    for (const c of n.children) walk(c, id, depth + 1);
+  };
+  walk(rootId, null, 0);
+  return out;
+}
+
+/**
+ * Summaries for thread entries (one read-only lock per folder): [{ …summary, folder, node, parent, depth, foreign,
+ * duplicate, match? }] and { placeholder: true, node, parent, depth } for missing messages; entries whose message
+ * is gone are dropped. `matches` (Set of UIDs in `folder`) marks the hits of a filtered list.
+ */
+async function _threadMessages(client, t, entries, folder, matches = null) {
+  const byFolder = new Map();
+  for (const e of entries) {
+    if (!e.key) continue;
+    const [f, uid] = _splitKey(e.key);
+    (byFolder.get(f) || byFolder.set(f, []).get(f)).push(uid);
+  }
+  const msgs = new Map();
+  for (const [f, uids] of byFolder) {
+    let lock;
+    try { lock = await client.getMailboxLock(f, { readOnly: true }); } catch { continue; }
+    try {
+      for (let i = 0; i < uids.length; i += _FETCH_CHUNK) {
+        for await (const msg of client.fetch(uids.slice(i, i + _FETCH_CHUNK).join(','), _LIST_QUERY, { uid: true })) {
+          msgs.set(`${f}\n${msg.uid}`, msg);
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  }
+  const out = [];
+  for (const e of entries) {
+    const base = { node: e.node, parent: e.parent, depth: e.depth };
+    if (!e.key) { out.push({ ...base, placeholder: true }); continue; }
+    const msg = msgs.get(e.key);
+    if (!msg) continue;
+    const [f, uid] = _splitKey(e.key);
+    out.push({ ..._summary(msg), folder: f, ...base, foreign: f !== folder, duplicate: !!t.idx.get(f)?.dupes.has(uid),
+      ...(matches && f === folder ? { match: matches.has(uid) } : {}) });
+  }
+  return out;
+}
+
+/**
+ * Conversation page of a folder: threads with ≥ 1 message in `folder` that passes the list filters, ordered by
+ * their first message in list order, paged by thread (`all` = every thread from `page` on). Each thread carries
+ * its messages from every folder (_threadFolders) in tree order. Returns { threads: [{ id, messages }],
+ * messages (the page's messages in `folder`), total (threads), totalMessages, page, pageSize }.
+ */
+async function _fetchThreadPage(client, account, folder, { page = 0, pageSize = 50, all = false, ...opts } = {}) {
+  const t = await _threadIndex(client, account, folder);
+  let uids;
+  const lock = await client.getMailboxLock(folder);
+  try { uids = await _listUids(client, account, folder, opts, t.idx.get(folder)); } finally { lock.release(); }
+  const filtered = !!(opts.query || opts.since != null || opts.before != null || opts.attachments || opts.duplicates);
+  const order = [], first = new Map();
+  for (const uid of uids) {
+    const key = `${folder}\n${uid}`;
+    const id = t.threadOf.get(key) || `k:${key}`;
+    if (!first.has(id)) { first.set(id, key); order.push(id); }
+  }
+  const ids = order.slice(page * pageSize, all ? undefined : (page + 1) * pageSize);
+  const parts = ids.map(id => _threadEntries(t, id, folder, first.get(id)));
+  const msgs = await _threadMessages(client, t, parts.flat(), folder, filtered ? new Set(uids) : null);
+  const byNode = new Map();
+  for (const m of msgs) (byNode.get(m.node) || byNode.set(m.node, []).get(m.node)).push(m);
+  const threads = ids.map((id, i) => ({
+    id, messages: [...new Set(parts[i].map(e => e.node))].flatMap(n => byNode.get(n) || []),
+  })).filter(th => th.messages.some(m => !m.placeholder && !m.foreign));
+  return {
+    threads, messages: threads.flatMap(th => th.messages.filter(m => !m.placeholder && !m.foreign)),
+    total: order.length, totalMessages: uids.length, page, pageSize,
+  };
+}
+
+/**
+ * Conversation of one message for the reader: { id, messages } (tree order, every folder — _threadMessages);
+ * null when the message is not in the folder.
+ */
+async function fetchThread(account, uid, folder) {
+  folder = _folderOf(account, folder);
+  return _withClient(account, async client => {
+    const t = await _threadIndex(client, account, folder);
+    const key = `${folder}\n${uid}`;
+    const id = t.threadOf.get(key);
+    if (!id) return null;
+    return { id, messages: await _threadMessages(client, t, _threadEntries(t, id, folder, key), folder) };
   });
 }
 
@@ -994,6 +1244,8 @@ module.exports = {
   markMailMessage,
   markFolderRead,
   findDuplicateUids,
+  buildThreads,
+  fetchThread,
   sortUidsByDate,
   orderFolderIndex,
   MAIL_SORTS,

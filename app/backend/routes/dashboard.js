@@ -13,7 +13,7 @@ const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendar
         addCardRefIcs, resolveEventUrl, hrefToUrl, parseEvents } = require('../dashboard/calendar');
 const { decodeText } = require('../charset');
 const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
-const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, MAIL_SORTS, testMailAccount,
+const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, fetchThread, MAIL_SORTS, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
         markMailMessage, flagMailMessage, MAIL_FLAG_COLORS, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
 
@@ -510,8 +510,8 @@ function _timeParam(v) {
   return new Date(v).getTime();
 }
 
-// GET /api/dashboard/mail/:accountId/messages?folder=&page=&q=&sort=&since=&before=&attachments=1&duplicates=1&all=1
-// — one page of a folder (all = every message from `page` on)
+// GET /api/dashboard/mail/:accountId/messages?folder=&page=&q=&sort=&since=&before=&attachments=1&duplicates=1&all=1&threads=1
+// — one page of a folder (all = every message from `page` on; threads = conversations, paged by thread)
 router.get('/dashboard/mail/:accountId/messages', withHandler(async (req, res) => {
   const page  = Math.max(0, Math.min(10_000, parseInt(req.query.page, 10) || 0));
   const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 200) : '';
@@ -521,16 +521,33 @@ router.get('/dashboard/mail/:accountId/messages', withHandler(async (req, res) =
   if (Number.isNaN(since) || Number.isNaN(before)) return res.status(400).json({ error: 'since / before must be ISO 8601 dates' });
   if (since != null && before != null && since >= before) return res.status(400).json({ error: 'since must be earlier than before' });
   const attachments = req.query.attachments === '1', duplicates = req.query.duplicates === '1', all = req.query.all === '1';
+  const threads = req.query.threads === '1';
   const ctx = await _mailCtx(req, res);
   if (!ctx) return;
 
   try {
-    const data = await fetchFolderMessages(ctx.account, ctx.folder || 'INBOX', { page, query, sort, since, before, attachments, duplicates, all });
-    await _withCardRefs(ctx.account.id, data.messages);
+    const data = await fetchFolderMessages(ctx.account, ctx.folder || 'INBOX', { page, query, sort, since, before, attachments, duplicates, all, threads });
+    await _withCardRefs(ctx.account.id, threads ? data.threads.flatMap(t => t.messages) : data.messages);
     res.json(data);
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+}));
+
+// GET /api/dashboard/mail/:accountId/thread/:uid?folder= — { id, messages }: the message's conversation from every
+// folder except trash / spam, in tree order (fetchThread); 404 when the message is not in the folder
+router.get('/dashboard/mail/:accountId/thread/:uid', withHandler(async (req, res) => {
+  const ctx = await _mailCtx(req, res);
+  if (!ctx) return;
+  let data;
+  try {
+    data = await fetchThread(ctx.account, req.params.uid, ctx.folder);
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+  if (!data) return res.status(404).json({ error: 'Message not found' });
+  await _withCardRefs(ctx.account.id, data.messages);
+  res.json(data);
 }));
 
 // GET /api/dashboard/mail/:accountId/duplicates?folder= — { messages, uids }: duplicate copies in the folder

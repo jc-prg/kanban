@@ -1,6 +1,6 @@
 'use strict'
 /**
- * Mail view API tests — MVA-1 … MVA-36 (+ MVA-32b)
+ * Mail view API tests — MVA-1 … MVA-48 (+ MVA-32b)
  *
  * Folder management, paged/searchable message lists, ?folder= on message routes,
  * trash handling and sending via SMTP (nodemailer mocked) with a sent copy.
@@ -57,15 +57,17 @@ function _resetImap() {
     folders:  [],      // raw LIST entries
     search:   [],      // UIDs returned by search()
     searchByFolder: null,   // { [folder]: [uids] } — overrides `search` per locked folder
+    byFolder: null,    // { [folder]: [messages] } — overrides `messages` per locked folder
     locked:   null,
   }
 }
+const _lockedMsgs = () => imap.byFolder ? (imap.byFolder[imap.locked] || []) : imap.messages
 
 class MockImapFlow {
   constructor(opts) { this.opts = opts }
   async connect() {}
   async logout() {}
-  get mailbox() { return { exists: imap.messages.length, uidValidity: imap.uidValidity, uidNext: imap.uidNext } }
+  get mailbox() { return { exists: _lockedMsgs().length, uidValidity: imap.uidValidity, uidNext: imap.uidNext } }
   async getMailboxLock(folder, opts) { imap.calls.push(['lock', folder, opts]); imap.locked = folder; return { release: () => {} } }
   async list(opts) { imap.calls.push(['list', opts]); return imap.folders }
   async search(query, opts) {
@@ -76,10 +78,10 @@ class MockImapFlow {
     imap.calls.push(['fetch', range, opts])
     if (opts?.uid) {
       const uids = new Set(String(range).split(',').map(Number))
-      for (const m of imap.messages) if (uids.has(m.uid)) yield m
+      for (const m of _lockedMsgs()) if (uids.has(m.uid)) yield m
     } else {
-      const [a, b] = String(range).split(':').map(x => x === '*' ? imap.messages.length : Number(x))
-      for (const m of imap.messages.slice(a - 1, b)) yield m
+      const [a, b] = String(range).split(':').map(x => x === '*' ? _lockedMsgs().length : Number(x))
+      for (const m of _lockedMsgs().slice(a - 1, b)) yield m
     }
   }
   async fetchOne(uid) { return imap.messages.find(m => String(m.uid) === String(uid)) ?? null }
@@ -1002,4 +1004,122 @@ test('MVA-44 GET attachment/:part/event — ICS attachment parsed; nameless text
   expect(inline.body.attachments.map(a => [a.part, a.name])).toEqual([['1.2', 'invite.ics'], ['3', 'a.pdf']])
   const qp = await request(app).get(`${API}/message/7/attachment/1.2/event`).set(AUTH)
   expect(qp.body.events[0].location).toBe('Raum für 4')
+})
+
+// ---------------------------------------------------------------------------
+// Conversations (threads across folders)
+// ---------------------------------------------------------------------------
+
+const { buildThreads } = require('../../backend/dashboard/mail.js')
+
+test('MVA-45 buildThreads — reply chain, own headers win, missing ancestors, cycles, copies, no Message-ID', () => {
+  const t = buildThreads([
+    { key: 'INBOX\n1', mid: '<a>', irt: '', refs: [], t: 1 },
+    { key: 'Sent\n5',  mid: '<b>', irt: '<a>', refs: ['<a>'], t: 2 },
+    // References claims <x> → <b>, but <b>'s own In-Reply-To (<a>) wins
+    { key: 'INBOX\n2', mid: '<c>', irt: '<b>', refs: ['<x>', '<b>'], t: 3 },
+    { key: 'INBOX\n3', mid: '<d>', irt: '<gone>', refs: ['<gone>'], t: 4 },   // missing parent, one child → moves up
+    { key: 'INBOX\n4', mid: '<e>', irt: '<y>', refs: ['<y>'], t: 6 },
+    { key: 'INBOX\n6', mid: '<f>', irt: '<y>', refs: ['<y>'], t: 5 },         // missing parent, two children → placeholder
+    { key: 'INBOX\n7', mid: '<g>', irt: '<h>', refs: [], t: 7 },
+    { key: 'INBOX\n8', mid: '<h>', irt: '<g>', refs: [], t: 8 },              // cycle refused
+    { key: 'Archive\n1', mid: '<a>', irt: '', refs: [], t: 1 },               // copy of <a>
+    { key: 'INBOX\n9', mid: '', irt: '<a>', refs: [], t: 9 },                 // no Message-ID: own thread
+  ])
+  const thread = k => t.threadOf.get(k)
+  expect(['INBOX\n1', 'Sent\n5', 'INBOX\n2', 'Archive\n1'].map(thread)).toEqual(Array(4).fill('m:<a>'))
+  expect(t.nodes.get('m:<b>').parent).toBe('m:<a>')
+  expect(t.nodes.get('m:<c>').parent).toBe('m:<b>')
+  expect(t.nodes.has('m:<x>')).toBe(false)                     // empty ancestor with one child dropped
+  expect(t.nodes.get('m:<a>').keys).toEqual(['INBOX\n1', 'Archive\n1'])
+  expect(thread('INBOX\n3')).toBe('m:<d>')
+  expect(t.nodes.has('m:<gone>')).toBe(false)
+  expect(t.nodes.get('m:<y>')).toMatchObject({ keys: [], parent: null, children: ['m:<f>', 'm:<e>'] })   // oldest first
+  expect(thread('INBOX\n4')).toBe('m:<y>')
+  expect(thread('INBOX\n7')).toBe(thread('INBOX\n8'))
+  expect(thread('INBOX\n9')).toBe('k:INBOX\n9')
+})
+
+/** INBOX: <a> (1), <c> → <b> (2), unrelated <z> (3); Sent: <b> → <a>; Archive: <d> → <c>; Trash: <e> → <a>. */
+function _threadFixture() {
+  const m = (uid, mid, irt, refs, day, from = 'jane@ex.com') => _msg(uid, {
+    envelope: { messageId: mid, inReplyTo: irt, subject: mid === '<a>' ? 'Plan' : `Re: Plan`, date: new Date(`2026-11-0${day}T10:00:00Z`),
+      from: [{ address: from }] },
+    headers: refs.length ? Buffer.from(`References: ${refs.join('\r\n ')}\r\n\r\n`) : undefined,
+  })
+  imap.byFolder = {
+    INBOX:   [m(1, '<a>', '', [], 1), m(2, '<c>', '<b>', ['<a>', '<b>'], 3), m(3, '<z>', '', [], 2)],
+    Sent:    [m(5, '<b>', '<a>', ['<a>'], 2, 'me@ex.com')],
+    Archive: [m(9, '<d>', '<c>', ['<a>', '<b>', '<c>'], 4)],
+    Trash:   [m(4, '<e>', '<a>', ['<a>'], 5)],
+  }
+  imap.folders = ['INBOX', 'Sent', 'Archive', 'Trash'].map(path => ({
+    path, name: path, delimiter: '/', flags: new Set(), specialUse: path === 'Trash' ? '\\Trash' : path === 'INBOX' ? '\\Inbox' : null,
+  }))
+}
+
+test('MVA-46 GET messages?threads=1 — conversations across folders (trash left out), tree order, paged by thread, search hits', async () => {
+  _threadFixture()
+  const res = await request(app).get(`${API}/messages?folder=INBOX&threads=1`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body).toMatchObject({ total: 2, totalMessages: 3, page: 0 })
+  const [plan, other] = res.body.threads
+  expect(plan.id).toBe('m:<a>')
+  expect(plan.messages.map(x => [x.folder, x.id, x.depth, x.foreign])).toEqual([
+    ['INBOX', '1', 0, false], ['Sent', '5', 1, true], ['INBOX', '2', 2, false], ['Archive', '9', 3, true],
+  ])
+  expect(plan.messages[1].parent).toBe('m:<a>')
+  expect(other.messages.map(x => x.id)).toEqual(['3'])
+  // Flat list = this folder's messages of the page, in conversation order
+  expect(res.body.messages.map(x => x.id)).toEqual(['1', '2', '3'])
+  expect(JSON.stringify(res.body)).not.toContain('"Trash"')
+
+  // Search: a conversation shows when one of its messages here matches; hits are marked
+  imap.searchByFolder = { INBOX: [1] }
+  const hit = await request(app).get(`${API}/messages?folder=INBOX&threads=1&q=plan`).set(AUTH)
+  expect(hit.body.total).toBe(1)
+  expect(hit.body.threads[0].messages.map(x => [x.id, x.match])).toEqual([['1', true], ['5', undefined], ['2', false], ['9', undefined]])
+
+  // Opened from the trash, the trash itself takes part
+  const trash = await request(app).get(`${API}/messages?folder=Trash&threads=1`).set(AUTH)
+  expect(trash.body.threads[0].messages.map(x => `${x.folder}/${x.id}`)).toEqual(['INBOX/1', 'Sent/5', 'INBOX/2', 'Archive/9', 'Trash/4'])
+})
+
+test('MVA-47 GET thread/:uid — conversation of one message from every folder; 404 unknown, 400 bad uid', async () => {
+  _threadFixture()
+  const res = await request(app).get(`${API}/thread/9?folder=Archive`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body.id).toBe('m:<a>')
+  expect(res.body.messages.map(x => [x.folder, x.id, x.foreign])).toEqual([
+    ['INBOX', '1', true], ['Sent', '5', true], ['INBOX', '2', true], ['Archive', '9', false],
+  ])
+  expect((await request(app).get(`${API}/thread/77?folder=INBOX`).set(AUTH)).status).toBe(404)
+  expect((await request(app).get(`${API}/thread/x`).set(AUTH)).status).toBe(400)
+})
+
+test('MVA-48 threads — unchanged folders are not scanned again (LIST-STATUS signature); a new reply in Sent is picked up', async () => {
+  _threadFixture()
+  imap.uidValidity = 4848
+  imap.uidNext = 100
+  const status = { INBOX: 3, Sent: 1, Archive: 1, Trash: 1 }
+  const syncStatus = () => imap.folders.forEach(f => { f.status = { messages: status[f.path], uidNext: 100, uidValidity: 4848 } })
+  syncStatus()
+  await request(app).get(`${API}/messages?folder=INBOX&threads=1`).set(AUTH)
+  const locks = () => calls('lock').map(c => c[1])
+  expect(locks()).toEqual(expect.arrayContaining(['Sent', 'Archive']))
+
+  imap.calls = []
+  const again = await request(app).get(`${API}/messages?folder=INBOX&threads=1`).set(AUTH)
+  expect(again.body.threads[0].messages).toHaveLength(4)
+  // Index from the cache: Archive / Sent only locked to fetch the summaries, INBOX for the list
+  expect(calls('fetch').filter(c => c[1] === '1:*')).toEqual([])
+
+  // A second own reply lands in Sent → Sent's signature changes → rescanned, the reply joins the conversation
+  imap.byFolder.Sent.push(_msg(6, { envelope: { messageId: '<b2>', inReplyTo: '<c>', subject: 'Re: Plan', date: new Date('2026-11-05T10:00:00Z') } }))
+  status.Sent = 2
+  syncStatus()
+  imap.calls = []
+  const fresh = await request(app).get(`${API}/messages?folder=INBOX&threads=1`).set(AUTH)
+  expect(fresh.body.threads[0].messages.map(x => `${x.folder}/${x.id}`)).toEqual(['INBOX/1', 'Sent/5', 'INBOX/2', 'Archive/9', 'Sent/6'])
+  expect(calls('fetch').filter(c => c[1] === '1:*')).toHaveLength(1)
 })
