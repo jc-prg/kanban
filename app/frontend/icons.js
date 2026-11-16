@@ -356,6 +356,10 @@ function _svgWxMoon(w = 24, h = 24) {
 function _svgWxPartly(w = 24, h = 24) {
   return _wxSvg(w, h, '<circle cx="8.5" cy="8.5" r="3.2"/><path d="M8.5 2v1.4M2 8.5h1.4M3.9 3.9l1 1M13.1 3.9l-1 1"/><path d="M9 19.5h8.5a3.2 3.2 0 0 0 .3-6.4 4.6 4.6 0 0 0-8.8-.4A3.4 3.4 0 0 0 9 19.5z" fill="var(--wx-fill, transparent)"/>');
 }
+// Mostly clear / partly cloudy at night: crescent moon behind a cloud (composition of _svgWxPartly)
+function _svgWxMoonCloud(w = 24, h = 24) {
+  return _wxSvg(w, h, '<path d="M13 9.3A5 5 0 0 1 6.7 3 5 5 0 1 0 13 9.3z"/><path d="M9 19.5h8.5a3.2 3.2 0 0 0 .3-6.4 4.6 4.6 0 0 0-8.8-.4A3.4 3.4 0 0 0 9 19.5z" fill="var(--wx-fill, transparent)"/>');
+}
 function _svgWxCloud(w = 24, h = 24) {
   return _wxSvg(w, h, `<path d="${_WX_CLOUD}"/>`);
 }
@@ -442,6 +446,7 @@ const SVGICONS = {
   wxSun:          _svgWxSun,
   wxMoon:         _svgWxMoon,
   wxPartly:       _svgWxPartly,
+  wxMoonCloud:    _svgWxMoonCloud,
   wxCloud:        _svgWxCloud,
   wxRain:         _svgWxRain,
   wxSnow:         _svgWxSnow,
@@ -510,7 +515,8 @@ const ICON_REGISTRY = [
   { type: 'svg', svg: _svgEyeOff(16, 16),       name: 'EyeOff',           usage: 'Hide a mail folder (mail view folder menu)' },
   { type: 'svg', svg: _svgWxSun(16, 16),        name: 'Weather: clear',   usage: 'Today page weather (clear sky, day)' },
   { type: 'svg', svg: _svgWxMoon(16, 16),       name: 'Weather: night',   usage: 'Today page weather (clear sky, night)' },
-  { type: 'svg', svg: _svgWxPartly(16, 16),     name: 'Weather: partly cloudy', usage: 'Today page weather' },
+  { type: 'svg', svg: _svgWxPartly(16, 16),     name: 'Weather: partly cloudy', usage: 'Today page weather (mostly clear / partly cloudy, day)' },
+  { type: 'svg', svg: _svgWxMoonCloud(16, 16),  name: 'Weather: partly cloudy (night)', usage: 'Today page weather (mostly clear / partly cloudy, between sunset and sunrise)' },
   { type: 'svg', svg: _svgWxCloud(16, 16),      name: 'Weather: cloudy',  usage: 'Today page weather' },
   { type: 'svg', svg: _svgWxRain(16, 16),       name: 'Weather: rain',    usage: 'Today page weather (drizzle, rain, showers)' },
   { type: 'svg', svg: _svgWxSnow(16, 16),       name: 'Weather: snow',    usage: 'Today page weather' },

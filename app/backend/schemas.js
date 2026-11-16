@@ -274,27 +274,42 @@ const validateRecurringTasks = ajv.compile({
 });
 
 const _mailAddrList = { type: 'string', maxLength: 4000 };
+const _MAIL_UID = { type: 'string', pattern: '^[0-9]{1,10}$' };
+const _MAIL_PARTS = { type: 'array', maxItems: 50, uniqueItems: true, items: { type: 'string', pattern: '^[0-9]+(\\.[0-9]+)*$' } };
+const _mailMessageProps = {
+  from:        { type: 'string', maxLength: 320 },
+  to:          { ..._mailAddrList, minLength: 3 },
+  cc:          _mailAddrList,
+  bcc:         _mailAddrList,
+  subject:     { type: 'string', maxLength: 998 },
+  html:        { type: 'string', maxLength: 5_000_000 },
+  text:        { type: 'string', maxLength: 5_000_000 },
+  inReplyTo:   { type: 'string', maxLength: 998 },
+  references:  { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 998 } },
+  replyUid:    _MAIL_UID,
+  replyFolder: { type: 'string', minLength: 1, maxLength: 255 },
+  forwardAccount: { type: 'string', minLength: 1, maxLength: 64 },
+  forwardUid:     _MAIL_UID,
+  forwardFolder:  { type: 'string', minLength: 1, maxLength: 255 },
+  forwardParts:   _MAIL_PARTS,
+  // The draft this message continues: its attachments (`draftParts`) are taken over server-side;
+  // sending deletes it (`draftAccount` = another account than the sending one)
+  draftAccount: { type: 'string', minLength: 1, maxLength: 64 },
+  draftUid:     _MAIL_UID,
+  draftFolder:  { type: 'string', minLength: 1, maxLength: 255 },
+  draftParts:   _MAIL_PARTS,
+};
 const validateMailSend = ajv.compile({
   type: 'object',
   required: ['to'],
   additionalProperties: false,
-  properties: {
-    from:        { type: 'string', maxLength: 320 },
-    to:          { ..._mailAddrList, minLength: 3 },
-    cc:          _mailAddrList,
-    bcc:         _mailAddrList,
-    subject:     { type: 'string', maxLength: 998 },
-    html:        { type: 'string', maxLength: 5_000_000 },
-    text:        { type: 'string', maxLength: 5_000_000 },
-    inReplyTo:   { type: 'string', maxLength: 998 },
-    references:  { type: 'array', maxItems: 100, items: { type: 'string', maxLength: 998 } },
-    replyUid:    { type: 'string', pattern: '^[0-9]{1,10}$' },
-    replyFolder: { type: 'string', minLength: 1, maxLength: 255 },
-    forwardAccount: { type: 'string', minLength: 1, maxLength: 64 },
-    forwardUid:     { type: 'string', pattern: '^[0-9]{1,10}$' },
-    forwardFolder:  { type: 'string', minLength: 1, maxLength: 255 },
-    forwardParts:   { type: 'array', maxItems: 50, uniqueItems: true, items: { type: 'string', pattern: '^[0-9]+(\\.[0-9]+)*$' } },
-  },
+  properties: _mailMessageProps,
+});
+// A draft: recipients may still be missing or incomplete
+const validateMailDraft = ajv.compile({
+  type: 'object',
+  additionalProperties: false,
+  properties: { ..._mailMessageProps, to: _mailAddrList },
 });
 
 /** IMAP folder path: 1–255 chars, no control characters. */
@@ -431,4 +446,4 @@ function schemaError(validate) {
   return validate.errors.map(e => `${e.instancePath || '(root)'} ${e.message}`).join('; ');
 }
 
-module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validMailFolderPath, validateTodayConfig, QA_ICON_FILE, validateStickyCreate, validateStickyUpdate, STICKY_CATEGORIES, STICKY_CATEGORY_ID, STICKY_RHYTHMS, STICKY_ID, schemaError };
+module.exports = { validateBoard, validateBoardPatch, validateNotes, validateNotesPatch, validateInboxCards, validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateRecurringTasks, validateTemplates, validateMailSend, validateMailDraft, validMailFolderPath, validateTodayConfig, QA_ICON_FILE, validateStickyCreate, validateStickyUpdate, STICKY_CATEGORIES, STICKY_CATEGORY_ID, STICKY_RHYTHMS, STICKY_ID, schemaError };

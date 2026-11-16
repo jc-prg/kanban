@@ -12,10 +12,10 @@ const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendar
         buildIcs, fetchRawIcs, patchMasterIcs, buildOccurrenceOverrideIcs, buildDeleteOccurrenceIcs,
         addCardRefIcs, resolveEventUrl, hrefToUrl, parseEvents } = require('../dashboard/calendar');
 const { decodeText } = require('../charset');
-const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validMailFolderPath, schemaError } = require('../schemas');
+const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validateMailDraft, validMailFolderPath, schemaError } = require('../schemas');
 const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, fetchThread, MAIL_SORTS, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
-        markMailMessage, flagMailMessage, MAIL_FLAG_COLORS, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail } = require('../dashboard/mail');
+        markMailMessage, flagMailMessage, MAIL_FLAG_COLORS, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail, saveDraft, deleteDraft, findDrafts } = require('../dashboard/mail');
 
 // ---- Password utilities (also exported for unit tests) ----
 
@@ -603,52 +603,114 @@ router.put('/dashboard/mail-trusted-senders', writeRateLimit, withHandler(async 
   res.json({ ok: true, senders: await setTrustedSender(address.trim().toLowerCase(), trusted) });
 }));
 
-// POST /api/dashboard/mail/:accountId/send — multipart: `payload` (JSON) + `files`
-router.post('/dashboard/mail/:accountId/send', uploadRateLimit, withHandler(async (req, res) => {
+/**
+ * Multipart body of /send and /draft: `payload` (JSON, checked by `validate`) + `files`; attachments of the
+ * forwarded original (`forwardParts`) and of the continued draft (`draftParts`) are fetched server-side.
+ * Sends the error response itself and returns null; else { account, payload, attachments }.
+ */
+async function _mailUpload(req, res, validate) {
   const account = await getMailAccount(req.params.accountId);
-  if (!account) return res.status(404).json({ error: 'Account not found' });
-
+  if (!account) { res.status(404).json({ error: 'Account not found' }); return null; }
   try {
     await new Promise((resolve, reject) => _sendUpload(req, res, err => err ? reject(err) : resolve()));
   } catch (err) {
-    return res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.message }); return null;
   }
-
   let payload;
   try { payload = JSON.parse(req.body?.payload || 'null'); } catch { payload = null; }
-  if (!payload || typeof payload !== 'object') return res.status(400).json({ error: 'payload is required' });
-  if (!validateMailSend(payload)) return res.status(400).json({ error: schemaError(validateMailSend) });
+  if (!payload || typeof payload !== 'object') { res.status(400).json({ error: 'payload is required' }); return null; }
+  if (!validate(payload)) { res.status(400).json({ error: schemaError(validate) }); return null; }
 
   const attachments = (req.files || []).map(f => ({
     filename:    Buffer.from(f.originalname, 'latin1').toString('utf8'),
     content:     f.buffer,
     contentType: f.mimetype || 'application/octet-stream',
   }));
-
-  // Forward: the original's attachments are fetched server-side (from the same or another account)
-  if (payload.forwardParts?.length) {
-    if (!payload.forwardUid || !validMailFolderPath(payload.forwardFolder)) {
-      return res.status(400).json({ error: 'forwardUid and forwardFolder are required with forwardParts' });
-    }
-    const source = payload.forwardAccount ? await getMailAccount(payload.forwardAccount) : account;
-    if (!source) return res.status(404).json({ error: 'Forward source account not found' });
-    let forwarded;
+  // The original's attachments (forward) and the draft's own (continued draft), from the same or another account
+  const sources = [
+    ['forward', payload.forwardParts, payload.forwardUid, payload.forwardFolder, payload.forwardAccount],
+    ['draft',   payload.draftParts,   payload.draftUid,   payload.draftFolder,   payload.draftAccount],
+  ];
+  for (const [kind, parts, uid, folder, accountId] of sources) {
+    if (!parts?.length) continue;
+    if (!uid || !validMailFolderPath(folder)) { res.status(400).json({ error: `${kind}Uid and ${kind}Folder are required with ${kind}Parts` }); return null; }
+    const source = accountId ? await getMailAccount(accountId) : account;
+    if (!source) { res.status(404).json({ error: `${kind === 'draft' ? 'Draft' : 'Forward'} source account not found` }); return null; }
+    let fetched;
     try {
-      forwarded = await fetchMailAttachments(source, payload.forwardUid, payload.forwardParts, payload.forwardFolder);
+      fetched = await fetchMailAttachments(source, uid, parts, folder);
     } catch (err) {
-      return res.status(502).json({ error: err.message });
+      res.status(502).json({ error: err.message }); return null;
     }
-    if (!forwarded) return res.status(404).json({ error: 'Forwarded attachment not found' });
-    attachments.push(...forwarded.map(a => ({ filename: a.name, content: a.data, contentType: a.type })));
+    if (!fetched) { res.status(404).json({ error: `${kind === 'draft' ? 'Draft' : 'Forwarded'} attachment not found` }); return null; }
+    attachments.push(...fetched.map(a => ({ filename: a.name, content: a.data, contentType: a.type })));
   }
   const totalSize = attachments.reduce((n, a) => n + a.content.length, 0);
-  if (totalSize > _SEND_MAX_BYTES) return res.status(413).json({ error: 'Attachments exceed 50 MB in total' });
+  if (totalSize > _SEND_MAX_BYTES) { res.status(413).json({ error: 'Attachments exceed 50 MB in total' }); return null; }
+  return { account, payload, attachments };
+}
 
+// POST /api/dashboard/mail/:accountId/send — multipart: `payload` (JSON) + `files`; a continued draft
+// (`draftUid`) is deleted once the message is sent
+router.post('/dashboard/mail/:accountId/send', uploadRateLimit, withHandler(async (req, res) => {
+  const up = await _mailUpload(req, res, validateMailSend);
+  if (!up) return;
+  const { account, payload, attachments } = up;
+  let result;
   try {
-    res.json(await sendMail(account, { ...payload, attachments }));
+    result = await sendMail(account, { ...payload, attachments });
   } catch (err) {
-    res.status(err.status || 502).json({ error: err.message });
+    return res.status(err.status || 502).json({ error: err.message });
   }
+  if (payload.draftUid) {
+    const owner = payload.draftAccount ? await getMailAccount(payload.draftAccount) : account;
+    try { if (owner) await deleteDraft(owner, payload.draftUid); }
+    catch (err) { result.warning = result.warning || `Sent, but deleting the draft failed: ${err.message}`; }
+  }
+  res.json(result);
+}));
+
+// POST /api/dashboard/mail/:accountId/draft — the message being written as a draft (multipart like /send;
+// recipients optional). `draftUid` = the previous version: its attachments listed in `draftParts` are taken
+// over, then it is replaced. Returns { ok, uid, folder, messageId, attachments } (the new draft's attachments).
+router.post('/dashboard/mail/:accountId/draft', uploadRateLimit, withHandler(async (req, res) => {
+  const up = await _mailUpload(req, res, validateMailDraft);
+  if (!up) return;
+  const { account, payload, attachments } = up;
+  const sameAccount = !payload.draftAccount || payload.draftAccount === req.params.accountId;
+  let result;
+  try {
+    result = await saveDraft(account, { ...payload, attachments, replaceUid: sameAccount ? payload.draftUid : undefined });
+  } catch (err) {
+    return res.status(err.status || 502).json({ error: err.message });
+  }
+  // Written under another account before (From changed): the old version goes from there
+  if (!sameAccount && payload.draftUid) {
+    const old = await getMailAccount(payload.draftAccount);
+    if (old) await deleteDraft(old, payload.draftUid).catch(() => {});
+  }
+  let saved = null;
+  if (result.uid) { try { saved = await fetchMailMessage(account, result.uid, result.folder); } catch { /* list stays empty */ } }
+  res.json({ ...result, attachments: saved?.attachments || [] });
+}));
+
+// DELETE /api/dashboard/mail/:accountId/draft/:uid — discard a draft (only messages flagged \Draft in the drafts folder)
+router.delete('/dashboard/mail/:accountId/draft/:uid', writeRateLimit, withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  if (!/^[0-9]{1,10}$/.test(req.params.uid)) return res.status(400).json({ error: 'Invalid uid' });
+  try { res.json(await deleteDraft(account, req.params.uid)); }
+  catch (err) { res.status(502).json({ error: err.message }); }
+}));
+
+// GET /api/dashboard/mail/:accountId/drafts?inReplyTo=<Message-ID> — draft replies to that message
+router.get('/dashboard/mail/:accountId/drafts', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  const id = String(req.query.inReplyTo || '');
+  if (!/^<[^<>\s]{1,995}>$/.test(id)) return res.status(400).json({ error: 'inReplyTo must be a Message-ID' });
+  try { res.json(await findDrafts(account, id)); }
+  catch (err) { res.status(502).json({ error: err.message }); }
 }));
 
 // PATCH /api/dashboard/mail/:accountId/message/:uid — mark read/unread and / or flag (:uid may be a set "3,7,9")

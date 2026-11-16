@@ -41,7 +41,7 @@ let _mvPushed      = false;       // true when open() pushed a history entry
 let _mvListSeq     = 0;           // discards responses of superseded list loads
 let _mvPlain       = false;       // open message shown as plain text (HTML is the default)
 let _mvMsgSeq      = 0;
-let _mvCompose     = null;        // { files: [File], reply: { uid, folder } | null, dirty }
+let _mvCompose     = null;        // { files: [File], reply: { uid, folder } | null, dirty, draft, rev / savedRev, … } — see _mvOpenCompose
 let _mvWidths      = _mvLoadWidths(); // requested column widths (px); applied clamped to the body width
 let _mvOpts        = _mvDefaultListOpts();   // list order + filters of the options popup (sort kept per browser)
 let _mvLight       = _mvLoadLight();   // reader on a white background in dark mode (sun / moon toolbar button)
@@ -567,7 +567,7 @@ function openMailView(accountId, folder) {
 
 async function closeMailView() {
   if (!_mvIsOpen()) return;
-  if (_mvCompose?.dirty && !(await showConfirm('Discard the message you are writing?', { okLabel: 'Discard', danger: true }))) return;
+  _mvLeaveCompose();   // the message being written is kept as a draft
   _mvHide();
   if (_mvPushed) { _mvPushed = false; history.back(); return; }
   const url = new URL(window.location.href);
@@ -634,11 +634,11 @@ function _mvShow() {
 function _mvHide() {
   const view = document.getElementById('mailView');
   if (!view) return;
+  _mvLeaveCompose();   // before hiding: the text part is read from the rendered editor
   view.style.display = 'none';
   _mvCancelRead();
   _syncOverlayHost();
   document.body.classList.remove('mailview-open', 'mail-over-dialog');
-  _mvCompose = null;
   _mvClosePicker(null);
 }
 
@@ -838,9 +838,8 @@ function _mvSetPane(pane) {
 
 /** Open a message in the reader; `folder` ≠ the list's folder = a message of another folder (from a conversation). */
 async function _mvOpenMessage(id, folder = _mvFolder) {
-  if (_mvCompose?.dirty && !(await showConfirm('Discard the message you are writing?', { okLabel: 'Discard', danger: true }))) return;
+  _mvLeaveCompose();   // the message being written is kept as a draft
   const foreign = folder !== _mvFolder;
-  _mvCompose = null;
   _mvSelId  = foreign ? null : id;
   _mvExtSel = foreign ? { id, folder } : null;
   _mvMsg    = null;
@@ -866,6 +865,7 @@ async function _mvOpenMessage(id, folder = _mvFolder) {
   _mvMsg = msg;
   _mvRenderReader();
   _mvLoadThread(msg);
+  _mvCheckDraftHint(msg);
 }
 
 // ---- Read after a while: navigating through the list leaves the messages passed unread ----
@@ -2046,8 +2046,11 @@ function _mvListItemHtml(m, dupes, { child = false, depth = 0, thread = null } =
   if (m.flagColor)      meta.push(_mailFlagHtml(m.flagColor, 11));
   // `duplicate` from the server covers the whole folder; the loaded-only check is the fallback (e.g. after a move)
   if (m.duplicate ?? dupes?.has(m.id)) meta.push('<span class="card-duplicate-badge" title="Same message (Message-ID, sender, recipients, subject, date) as a larger or older copy in this folder">duplicate</span>');
-  if (m.answered)       meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Answered">\u21a9</span>');
-  if (m.forwarded)      meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Forwarded">\u21aa</span>');
+  // Answered / forwarded: not in conversation mode — the reply tree shows that already
+  if (!_mvOpts.threads) {
+    if (m.answered)     meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Answered">\u21a9</span>');
+    if (m.forwarded)    meta.push('<span class="dashboard-mail-attach mv-msg-answered" title="Forwarded">\u21aa</span>');
+  }
   if (m.hasAttachments) meta.push(`<span class="dashboard-mail-attach" title="Has attachments">${SVGICONS.attachment(11, 11)}</span>`);
   if (m.cardRefs?.length) meta.push(`<span class="dashboard-mail-attach" title="Linked to a card">${SVGICONS.card(13, 9)}</span>`);
   if (who)              meta.push(`<span class="dashboard-mail-from">${escHtml(who)}</span>`);
@@ -2369,6 +2372,7 @@ function _mvRenderReader(mode, error) {
       <h2 class="mv-subject">${escHtml(msg.subject)}</h2>
     </div>
     <div class="mv-reader-actions" id="mailViewReaderActions"></div>
+    ${msg.draft ? _mvDraftHintHtml('This is a draft.', { accountId: _mvAccountId, id: msg.id, folder: msg.folder || _mvFolder }, false) : '<div class="mv-draft-hint" hidden></div>'}
     <div class="mv-thread-strip" id="mailViewThread" hidden></div>
     <table class="dashboard-detail-table mv-headers">${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table>
     ${atts ? `<div class="mv-atts">${atts}</div>` : ''}
@@ -2465,36 +2469,54 @@ function _mvToggleThreadStrip() {
 function _mvOpenCompose(mode, prefill = null) {
   const sendable = _mvAccounts.filter(a => a.canSend);
   if (!sendable.length) { _mvFlash('Configure an SMTP server in the mail settings first', true); return; }
+  _mvLeaveCompose();   // another message being written: kept as a draft
+  // mode 'draft': continue a saved draft — prefill { draft: message (+ accountId, folder), original?: the answered message }
+  const draft   = mode === 'draft' ? prefill?.draft : null;
   const reply   = (mode === 'reply' || mode === 'replyall') && _mvMsg ? _mvMsg : null;
   const forward = mode === 'forward' && _mvMsg ? _mvMsg : null;
   const fields  = reply ? _mvReplyFields(reply, mode === 'replyall', _mvAccounts.find(a => a.accountId === _mvAccountId)?.own)
     : forward ? { to: '', cc: '', subject: _mvForwardSubject(forward.subject) }
+    : draft ? { to: draft.to || '', cc: draft.cc || '', subject: draft.subject === '(no subject)' ? '' : draft.subject || '',
+                inReplyTo: draft.inReplyTo || '', references: draft.references || [] }
     : prefill ? { to: prefill.to || '', cc: prefill.cc || '', subject: prefill.subject || '' } : null;
-  const fromAcc  = sendable.find(a => a.accountId === _mvAccountId) || sendable[0];
-  const fromAddr = reply && fromAcc.accountId === _mvAccountId ? _mvReplySender(reply, fromAcc.senders) : fromAcc.senders[0];
+  const ownAcc   = draft ? draft.accountId : _mvAccountId;
+  const fromAcc  = sendable.find(a => a.accountId === ownAcc) || sendable[0];
+  const draftFrom = draft && _mvAddrOf(draft.from || '').toLowerCase();
+  const fromAddr = reply && fromAcc.accountId === _mvAccountId ? _mvReplySender(reply, fromAcc.senders)
+    : draftFrom ? fromAcc.senders.find(a => a.toLowerCase() === draftFrom) || fromAcc.senders[0]
+    : fromAcc.senders[0];
   // One option per (account, sender address): the address with the account's colour swatch
   const fromOpts = sendable.flatMap(a => (a.senders.length ? a.senders : ['']).map(addr => ({ acc: a, addr })));
   const fromSel  = fromOpts.find(o => o.acc === fromAcc && o.addr === (fromAddr || '')) || fromOpts[0];
+  const original = draft && prefill.original;
   _mvCompose = {
     files:  [],
     dirty:  false,
-    reply:  reply ? { uid: reply.id, folder: reply.folder || _mvFolder, accountId: _mvAccountId } : null,
+    rev: 0, savedRev: 0,   // changes made / saved as draft (_mvMarkDirty, _mvSaveDraft)
+    reply:  reply ? { uid: reply.id, folder: reply.folder || _mvFolder, accountId: _mvAccountId }
+      : original ? { uid: original.id, folder: original.folder || _mvFolder, accountId: _mvAccountId }
+      : draft?.draftReply ? { ...draft.draftReply, accountId: draft.accountId } : null,
     // Original attachments are attached server-side; removing a chip drops it from `atts`
-    forward: forward ? { uid: forward.id, folder: forward.folder || _mvFolder, accountId: _mvAccountId, atts: [...(forward.attachments || [])] } : null,
+    forward: forward ? { uid: forward.id, folder: forward.folder || _mvFolder, accountId: _mvAccountId, atts: [...(forward.attachments || [])] }
+      : draft?.draftForward ? { ...draft.draftForward, accountId: draft.accountId, atts: [] } : null,
+    // The saved draft (replaced by every save); its attachments are taken over server-side
+    draft: draft ? { accountId: draft.accountId, uid: draft.id, folder: draft.folder, atts: (draft.attachments || []).filter(a => !a.cid) } : null,
     inReplyTo:  fields?.inReplyTo || '',
     references: fields?.references || [],
-    onSent:     (!reply && !forward && prefill?.onSent) || null,
+    onSent:     (!reply && !forward && !draft && prefill?.onSent) || null,
   };
-  const bodyHtml = !reply && !forward && prefill?.body
+  const bodyHtml = draft ? _mvDraftBodyHtml(draft)
+    : !reply && !forward && prefill?.body
     ? prefill.body.split('\n').map(l => `<p>${l.trim() ? escHtml(l) : '<br>'}</p>`).join('')
     : '<p><br></p>';
+  const title = reply || _mvCompose.reply ? 'Reply' : forward || _mvCompose.forward ? 'Forward' : 'New message';
   _mvSetPane('reader');
   const el = document.getElementById('mailViewReader');
   el.innerHTML = `
     <form class="mv-compose" autocomplete="off">
       <div class="mv-reader-head">
         <button type="button" class="btn mv-back" data-mv-back="list" title="Back">‹</button>
-        <h2 class="mv-subject">${reply ? 'Reply' : forward ? 'Forward' : 'New message'}</h2>
+        <h2 class="mv-subject">${title}${draft ? ' <span class="mv-draft-tag">draft</span>' : ''}</h2>
       </div>
       <button type="button" class="mv-compose-summary" title="Show sender, recipients and subject">
         <span class="mv-compose-summary-text"></span><span class="mv-compose-summary-caret" aria-hidden="true">▾</span></button>
@@ -2540,7 +2562,8 @@ function _mvOpenCompose(mode, prefill = null) {
       </div>
     </form>`;
   const form = el.querySelector('.mv-compose');
-  form.addEventListener('input', () => { if (_mvCompose) _mvCompose.dirty = true; });
+  _mvCompose.form = form;   // drafts are taken from it, also after it was replaced in the reader
+  form.addEventListener('input', () => { _mvMarkDirty(); });
   form.addEventListener('submit', e => { e.preventDefault(); _mvSend(form); });
   _mvWireFromPicker(form.querySelector('.mv-from'));
   const editor = form.querySelector('.mv-editor');
@@ -2560,14 +2583,16 @@ function _mvOpenCompose(mode, prefill = null) {
   });
   form.querySelector('.mv-file-input').addEventListener('change', e => { _mvAddFiles([...e.target.files]); e.target.value = ''; });
   // Bcc from the prefill (mailto: links): shown at once
-  if (!reply && !forward && prefill?.bcc) {
+  const bcc = draft ? draft.bcc : !reply && !forward && prefill?.bcc;
+  if (bcc) {
     form.querySelectorAll('.mv-bcc').forEach(b => { b.hidden = false; });
-    form.querySelector('[name="bcc"]').value = prefill.bcc;
+    form.querySelector('[name="bcc"]').value = bcc;
     form.querySelector('[data-mv-bcc]').hidden = true;
   }
   _mvRenderComposeFiles();
   _mvWireComposeFit(form);
-  if (reply) { editor.focus(); const r = document.createRange(); r.setStart(editor, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }
+  if (draft) { editor.focus(); }
+  else if (reply) { editor.focus(); const r = document.createRange(); r.setStart(editor, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }
   else if (fields?.to && !fields.subject) form.querySelector('[name="subject"]').focus();
   else if (fields?.to) { editor.focus(); }
   else form.querySelector('[name="to"]').focus();
@@ -2667,7 +2692,7 @@ function _mvWireFromPicker(root) {
     items().forEach(x => x.setAttribute('aria-selected', String(x === li)));
     btn.innerHTML = li.innerHTML + '<span class="mv-from-caret" aria-hidden="true">▾</span>';
     btn.title = li.title;
-    if (_mvCompose) _mvCompose.dirty = true;
+    _mvMarkDirty();
     open(false);
     btn.focus();
   };
@@ -2703,7 +2728,7 @@ function _mvAddFiles(files) {
   if (total.length > 10) { _mvFlash('At most 10 attachments', true); return; }
   if (files.some(f => f.size > 25 * 1024 * 1024)) { _mvFlash('Attachments are limited to 25 MB each', true); return; }
   _mvCompose.files = total;
-  _mvCompose.dirty = true;
+  _mvMarkDirty();
   _mvRenderComposeFiles();
 }
 
@@ -2713,7 +2738,8 @@ function _mvRenderComposeFiles() {
   const chip = (name, size, attr) =>
     `<span class="mv-att"><span class="mv-att-name">${SVGICONS.attachment(11, 11)}<span>${escHtml(name)}</span><span class="mv-att-size">${_mvFmtSize(size)}</span></span>
       <button type="button" class="mv-att-dl" ${attr} title="Remove">${SVGICONS.close(10, 10)}</button></span>`;
-  el.innerHTML = (_mvCompose.forward?.atts || []).map((a, i) => chip(a.name, a.size, `data-mv-unforward="${i}"`)).join('')
+  el.innerHTML = (_mvCompose.draft?.atts || []).map((a, i) => chip(a.name, a.size, `data-mv-undraft="${i}"`)).join('')
+    + (_mvCompose.forward?.atts || []).map((a, i) => chip(a.name, a.size, `data-mv-unforward="${i}"`)).join('')
     + _mvCompose.files.map((f, i) => chip(f.name, f.size, `data-mv-unattach="${i}"`)).join('');
 }
 
@@ -2799,7 +2825,7 @@ function _mvInsertEmoji(ch) {
     sel.addRange(range);
   }
   _mvSaveEditorRange();
-  _mvCompose.dirty = true;
+  _mvMarkDirty();
   _mvEmojiRemember(ch);
 }
 
@@ -2954,7 +2980,7 @@ function _mvApplyFont(kind, value) {
   }
   if (kind === 'color') editor.closest('.mv-compose')?.querySelector('.mv-fmt-color-bar')?.style.setProperty('background', value || '');
   _mvSaveEditorRange();
-  if (_mvCompose) _mvCompose.dirty = true;
+  _mvMarkDirty();
 }
 
 function _mvExecCmd(cmd) {
@@ -2972,11 +2998,19 @@ function _mvExecCmd(cmd) {
   } else {
     document.execCommand(cmd, false, null);
   }
-  if (_mvCompose) _mvCompose.dirty = true;
+  _mvMarkDirty();
 }
 
 async function _mvDiscardCompose() {
-  if (_mvCompose?.dirty && !(await showConfirm('Discard the message you are writing?', { okLabel: 'Discard', danger: true }))) return;
+  const c = _mvCompose;
+  const saved = !!(c?.draft?.uid || c?.saving);
+  if ((c?.dirty || saved) && !(await showConfirm(saved ? 'Discard this message? Its saved draft is deleted too.' : 'Discard the message you are writing?', { okLabel: 'Discard', danger: true }))) return;
+  if (c) {
+    c.closed = true;   // no more draft saves
+    clearTimeout(c.draftT);
+    if (saved) _mvDeleteDraftOf(c);
+  }
+  if (_mvCompose !== c) return;
   _mvCompose = null;
   _mvRenderReader();
   _mvSetPane(_mvMsg ? 'reader' : 'list');
@@ -3013,23 +3047,13 @@ async function _mvSend(form) {
   const to = v('to');
   if (!to) { _mvFlash('Please enter a recipient', true); form._mvFieldsOpen = true; form.classList.remove('mv-compose--folded'); form.querySelector('[name="to"]').focus(); return; }
   if (!v('subject') && !(await showConfirm('Send this message without a subject?', { okLabel: 'Send' }))) return;
-  const editor = form.querySelector('.mv-editor');
   const c = _mvCompose;
-  const accountId = form.querySelector('[name="from"]').value;
-  const payload = { to, subject: v('subject'), html: _mvComposeHtml(editor), text: editor.innerText.replace(/\u200b/g, '') };
-  const fromAddr = form.querySelector('[name="fromAddr"]').value;
-  if (fromAddr) payload.from = fromAddr;
-  if (v('cc'))  payload.cc  = v('cc');
-  if (v('bcc')) payload.bcc = v('bcc');
-  if (c.inReplyTo) payload.inReplyTo = c.inReplyTo;
-  if (c.references.length) payload.references = c.references.slice(-50);
-  if (c.reply && c.reply.accountId === accountId) { payload.replyUid = c.reply.uid; payload.replyFolder = c.reply.folder; }
-  if (c.forward) {
-    payload.forwardUid    = c.forward.uid;
-    payload.forwardFolder = c.forward.folder;
-    if (c.forward.accountId !== accountId) payload.forwardAccount = c.forward.accountId;
-    if (c.forward.atts.length) payload.forwardParts = c.forward.atts.map(a => a.part);
-  }
+  // A draft save still running: wait for it — the message continues (and deletes) the draft it stored
+  c.sending = true;
+  clearTimeout(c.draftT);
+  await c.saving;
+  const { accountId, payload } = _mvComposePayload(form, c);
+  _mvAddDraftFields(payload, c, accountId);
 
   const fd = new FormData();
   fd.append('payload', JSON.stringify(payload));
@@ -3043,11 +3067,15 @@ async function _mvSend(form) {
   try {
     res = await _mvJson(_mvApi(accountId, '/send'), { method: 'POST', body: fd });
   } catch (err) {
+    c.sending = false;
+    if (c.rev !== c.savedRev) _mvMarkDirty();   // changes made meanwhile: save them again
     btn.disabled = false;
     status.textContent = '';
     _mvFlash(`Sending failed: ${err.message}`, true);
     return;
   }
+  c.closed = true;
+  if (c.inReplyTo) _mvDraftHints.delete(`${c.reply?.accountId || accountId}|${c.inReplyTo}`);
   if (_mvCompose !== c) return;
   _mvCompose = null;
   _mvFlash(res.warning || 'Message sent', !!res.warning);
@@ -3065,6 +3093,181 @@ async function _mvSend(form) {
   _mvSetPane(_mvMsg ? 'reader' : 'list');
   _mvRefreshFoldersSoon(accountId);
   c.onSent?.();
+}
+
+/** The message in the compose form (`to` only when filled — a draft may lack it). */
+function _mvComposePayload(form, c) {
+  const v = name => form.querySelector(`[name="${name}"]`).value.trim();
+  const editor = form.querySelector('.mv-editor');
+  const accountId = form.querySelector('[name="from"]').value;
+  const payload = { subject: v('subject'), html: _mvComposeHtml(editor), text: editor.innerText.replace(/\u200b/g, '') };
+  if (v('to')) payload.to = v('to');
+  const fromAddr = form.querySelector('[name="fromAddr"]').value;
+  if (fromAddr) payload.from = fromAddr;
+  if (v('cc'))  payload.cc  = v('cc');
+  if (v('bcc')) payload.bcc = v('bcc');
+  if (c.inReplyTo) payload.inReplyTo = c.inReplyTo;
+  if (c.references.length) payload.references = c.references.slice(-50);
+  if (c.reply && c.reply.accountId === accountId) { payload.replyUid = c.reply.uid; payload.replyFolder = c.reply.folder; }
+  if (c.forward) {
+    payload.forwardUid    = c.forward.uid;
+    payload.forwardFolder = c.forward.folder;
+    if (c.forward.accountId !== accountId) payload.forwardAccount = c.forward.accountId;
+    if (c.forward.atts.length) payload.forwardParts = c.forward.atts.map(a => a.part);
+  }
+  return { accountId, payload };
+}
+
+// ---- Drafts ----
+// The message being written is kept as a draft in the drafts folder of the From account: saved
+// _MV_DRAFT_IDLE_MS after the last change (at the latest _MV_DRAFT_MAX_MS after the first unsaved one), and
+// when the form is left — another message or compose form, the view closed, the tab hidden (no question
+// asked any more). Every save replaces the previous draft (its attachments are taken over server-side, so
+// files are uploaded once); Send and Discard delete it. Opening a message that has a draft reply shows a
+// hint to continue it (_mvCheckDraftHint); a message in the drafts folder can be continued as well.
+const _MV_DRAFT_IDLE_MS = 3000;
+const _MV_DRAFT_MAX_MS  = 30000;
+const _mvDraftHints = new Map();   // `${accountId}|${Message-ID}` → Promise<{ folder, drafts }> (per session)
+
+function _mvMarkDirty() {
+  const c = _mvCompose;
+  if (!c) return;
+  c.dirty = true;
+  c.rev++;
+  if (!c.firstUnsaved) c.firstUnsaved = Date.now();
+  clearTimeout(c.draftT);
+  const wait = Math.max(0, Math.min(_MV_DRAFT_IDLE_MS, c.firstUnsaved + _MV_DRAFT_MAX_MS - Date.now()));
+  c.draftT = setTimeout(() => _mvSaveDraft(c), wait);
+}
+
+/** The draft to continue / replace: its uid, folder, account and the attachments kept from it. */
+function _mvAddDraftFields(payload, c, accountId) {
+  if (!c.draft?.uid) return;
+  payload.draftUid    = c.draft.uid;
+  payload.draftFolder = c.draft.folder;
+  if (c.draft.accountId !== accountId) payload.draftAccount = c.draft.accountId;
+  if (c.draft.atts.length) payload.draftParts = c.draft.atts.map(a => a.part);
+}
+
+/**
+ * Save the compose form `c` as a draft if it has unsaved changes. The content is taken at once (the form may be
+ * replaced right after); saves run one after another. Resolves true when saved (or nothing to save).
+ */
+function _mvSaveDraft(c, { keepalive = false } = {}) {
+  if (!c?.form || c.closed || c.sending) return Promise.resolve(true);
+  clearTimeout(c.draftT);
+  if (c.rev === c.savedRev) return c.saving || Promise.resolve(true);
+  const rev = c.rev;
+  const { accountId, payload } = _mvComposePayload(c.form, c);
+  const files = [...c.files];
+  const fwdParts = payload.forwardParts || [];
+  const run = async () => {
+    if (c.closed || c.sending) return true;
+    _mvAddDraftFields(payload, c, accountId);
+    const fd = new FormData();
+    fd.append('payload', JSON.stringify(payload));
+    files.forEach(f => fd.append('files', f, f.name));
+    const status = () => (c === _mvCompose ? c.form.querySelector('.mv-compose-status') : null);
+    let res;
+    try {
+      res = await _mvJson(_mvApi(accountId, '/draft'), { method: 'POST', body: fd, keepalive: keepalive && !files.length });
+    } catch (err) {
+      const st = status();
+      if (st) { st.textContent = 'Draft not saved'; st.title = err.message; }
+      return false;
+    }
+    // Sent / discarded meanwhile: this copy must not stay behind
+    if (c.closed && res.uid) { _mvJson(_mvApi(accountId, `/draft/${encodeURIComponent(res.uid)}`), { method: 'DELETE' }).catch(() => {}); return true; }
+    c.draft = res.uid ? { accountId, uid: res.uid, folder: res.folder, atts: (res.attachments || []).filter(a => !a.cid) } : null;
+    // Uploaded files and forwarded attachments now live in the draft
+    c.files = c.files.filter(f => !files.includes(f));
+    if (c.forward) c.forward.atts = c.forward.atts.filter(a => !fwdParts.includes(a.part));
+    c.savedRev = Math.max(c.savedRev, rev);
+    if (c.savedRev === c.rev) c.firstUnsaved = 0;
+    if (c.inReplyTo) _mvDraftHints.delete(`${c.reply?.accountId || accountId}|${c.inReplyTo}`);
+    const st = status();
+    if (st) { st.textContent = `Draft saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`; st.title = ''; }
+    if (c === _mvCompose) _mvRenderComposeFiles();
+    _mvRefreshFoldersSoon(accountId);
+    return true;
+  };
+  c.saving = (c.saving || Promise.resolve(true)).then(run, run);
+  return c.saving;
+}
+
+/** Leave the compose form (another message, view closed): unsaved changes are saved as a draft. */
+function _mvLeaveCompose() {
+  const c = _mvCompose;
+  if (!c) return;
+  _mvCompose = null;
+  if (c.closed) return;
+  const unsaved = c.dirty && c.rev !== c.savedRev;
+  _mvSaveDraft(c).then(ok => {
+    c.closed = true;
+    if (!unsaved) return;
+    if (ok) _mvFlash('Saved as draft');
+    else showMessage('The message you were writing could not be saved as a draft.');
+  });
+}
+
+function _mvDeleteDraftOf(c) {
+  (c.saving || Promise.resolve()).then(() => {
+    const d = c.draft;
+    if (!d?.uid) return;
+    c.draft = null;
+    _mvJson(_mvApi(d.accountId, `/draft/${encodeURIComponent(d.uid)}`), { method: 'DELETE' })
+      .then(() => { if (c.inReplyTo) _mvDraftHints.clear(); _mvRefreshFoldersSoon(d.accountId); })
+      .catch(err => _mvFlash(`Deleting the draft failed: ${err.message}`, true));
+  });
+}
+
+/** Draft body for the editor: the saved HTML without the font wrapper _mvComposeHtml put around it. */
+function _mvDraftBodyHtml(d) {
+  if (!d.bodyHtml) return (d.body || '').split('\n').map(l => `<p>${l.trim() ? escHtml(l) : '<br>'}</p>`).join('') || '<p><br></p>';
+  const tpl = document.createElement('template');
+  tpl.innerHTML = DOMPurify.sanitize(d.bodyHtml);
+  const only = tpl.content.children.length === 1 ? tpl.content.firstElementChild : null;
+  return (only?.tagName === 'DIV' && /font-family/.test(only.getAttribute('style') || '') ? only.innerHTML : tpl.innerHTML) || '<p><br></p>';
+}
+
+function _mvDraftHintHtml(text, draft, isReply) {
+  const attrs = `data-account="${escHtml(draft.accountId)}" data-folder="${escHtml(draft.folder)}"`;
+  return `<div class="mv-draft-hint">${SVGICONS.edit(13, 13)}<span>${escHtml(text)}</span>
+    <button type="button" class="btn btn-accent" data-mv-draft-continue="${escHtml(draft.id)}" ${attrs}${isReply ? ' data-reply="1"' : ''}>Continue</button>
+    ${isReply ? `<button type="button" class="btn" data-mv-draft-delete="${escHtml(draft.id)}" ${attrs}>Delete draft</button>` : ''}</div>`;
+}
+
+/** Opened message with a saved draft reply (this account's drafts folder): hint above the headers. */
+async function _mvCheckDraftHint(msg) {
+  if (!msg?.messageId || msg.draft) return;
+  const accountId = _mvAccountId;
+  const key = `${accountId}|${msg.messageId}`;
+  if (!_mvDraftHints.has(key)) {
+    _mvDraftHints.set(key, _mvJson(_mvApi(accountId, `/drafts?inReplyTo=${encodeURIComponent(msg.messageId)}`)).catch(() => ({ drafts: [] })));
+  }
+  const data = await _mvDraftHints.get(key);
+  const slot = document.querySelector('#mailViewReader .mv-draft-hint');
+  if (_mvMsg !== msg || _mvCompose || !slot || !data.drafts?.length) return;
+  const d = data.drafts[0];
+  const when = d.date ? new Date(d.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';
+  slot.outerHTML = _mvDraftHintHtml(`You started a reply to this message${when ? ` (saved ${when})` : ''}.`, { accountId, id: d.id, folder: data.folder }, true);
+}
+
+/** Continue a saved draft; `original` = the message it answers (open in the reader). */
+async function _mvResumeDraft(accountId, uid, folder, original = null) {
+  let d;
+  try { d = await _mvJson(_mvApi(accountId, `/message/${encodeURIComponent(uid)}?${_mvFolderQs(folder)}`)); }
+  catch (err) { _mvFlash(`Could not open the draft: ${err.message}`, true); return; }
+  _mvOpenCompose('draft', { draft: { ...d, accountId, folder }, original });
+}
+
+async function _mvDeleteDraftFromHint(accountId, uid) {
+  if (!(await showConfirm('Delete the saved draft reply?', { okLabel: 'Delete', danger: true }))) return;
+  try { await _mvJson(_mvApi(accountId, `/draft/${encodeURIComponent(uid)}`), { method: 'DELETE' }); }
+  catch (err) { _mvFlash(`Deleting the draft failed: ${err.message}`, true); return; }
+  _mvDraftHints.clear();
+  document.querySelector('#mailViewReader .mv-draft-hint')?.replaceWith(Object.assign(document.createElement('div'), { className: 'mv-draft-hint', hidden: true }));
+  _mvRefreshFoldersSoon(accountId);
 }
 
 // ---- Status line ----
@@ -3151,7 +3354,32 @@ function _mvShowInFolder(id, folder) {
   _mvOpenMessage(id);
 }
 
+/**
+ * Drag start of message / folder rows: the source rows dim (`mv-dragging`, removed on dragend) and
+ * the drag image is a copy of the row at 60 % opacity — a multi-selection adds a count chip.
+ */
+function _mvDragStart(e, row, rows, count) {
+  rows.forEach(r => r.classList.add('mv-dragging'));
+  if (!e.dataTransfer?.setDragImage) return;
+  const host = row.closest('.mailview-list, .mailview-folders');
+  const img = document.createElement('div');
+  img.className = `${host?.className || ''} mv-drag-image`;
+  img.style.width = `${row.offsetWidth}px`;
+  const copy = row.cloneNode(true);
+  copy.classList.remove('mv-dragging');
+  img.appendChild(copy);
+  if (count > 1) img.insertAdjacentHTML('beforeend', `<span class="mv-drag-count">${count} messages</span>`);
+  document.body.appendChild(img);
+  const r = row.getBoundingClientRect();
+  e.dataTransfer.setDragImage(img, Math.max(0, Math.min(e.clientX - r.left, r.width)), Math.max(0, Math.min(e.clientY - r.top, r.height)));
+  setTimeout(() => img.remove(), 0);   // the browser has taken its snapshot
+}
+
 // ---- Wiring ----
+
+// Tab hidden (app switch on a phone) or page left: the message being written goes to the drafts folder
+document.addEventListener('visibilitychange', () => { if (document.hidden && _mvCompose) _mvSaveDraft(_mvCompose, { keepalive: true }); });
+globalThis.addEventListener?.('pagehide', () => { if (_mvCompose) _mvSaveDraft(_mvCompose, { keepalive: true }); });
 
 document.addEventListener('DOMContentLoaded', () => {
   const view = document.getElementById('mailView');
@@ -3284,6 +3512,7 @@ document.addEventListener('DOMContentLoaded', () => {
       dragData = { kind: 'ext', accountId: _mvAccountId, folder: ext.dataset.mvExtFolder, items: [{ id: ext.dataset.mvExtUid, folder: ext.dataset.mvExtFolder }] };
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', ext.querySelector('.card-text')?.textContent || '');
+      _mvDragStart(e, ext, [ext], 1);
       return;
     }
     const row = e.target.closest('[data-mv-msg]');
@@ -3294,6 +3523,9 @@ document.addEventListener('DOMContentLoaded', () => {
     dragData = { kind: 'msg', accountId: _mvAccountId, folder: _mvFolder, ids };
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', row.querySelector('.card-text')?.textContent || '');
+    const idSet = new Set(ids);
+    const rows = [...list.querySelectorAll('[data-mv-msg]')].filter(r => idSet.has(r.dataset.mvMsg));
+    _mvDragStart(e, row, rows.includes(row) ? rows : [row, ...rows], ids.length);
   });
   folders.addEventListener('dragstart', e => {
     const row = e.target.closest('.mv-folder[draggable="true"]');
@@ -3301,9 +3533,11 @@ document.addEventListener('DOMContentLoaded', () => {
     dragData = { kind: 'folder', accountId: row.dataset.mvAcc, path: row.dataset.mvFolder };
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', row.dataset.mvFolder);
+    _mvDragStart(e, row, [row], 1);
   });
   document.addEventListener('dragend', () => {
     dragData = null;
+    document.querySelectorAll('.mv-dragging').forEach(el => el.classList.remove('mv-dragging'));
     folders.querySelectorAll('.mv-drop-target').forEach(el => el.classList.remove('mv-drop-target'));
   });
   const dropTarget = e => {
@@ -3454,9 +3688,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (e.target.closest('[data-mv-attach]')) { reader.querySelector('.mv-file-input').click(); return; }
     const unf = e.target.closest('[data-mv-unforward]');
-    if (unf && _mvCompose?.forward) { _mvCompose.forward.atts.splice(+unf.dataset.mvUnforward, 1); _mvCompose.dirty = true; _mvRenderComposeFiles(); return; }
+    if (unf && _mvCompose?.forward) { _mvCompose.forward.atts.splice(+unf.dataset.mvUnforward, 1); _mvMarkDirty(); _mvRenderComposeFiles(); return; }
     const un = e.target.closest('[data-mv-unattach]');
-    if (un && _mvCompose) { _mvCompose.files.splice(+un.dataset.mvUnattach, 1); _mvRenderComposeFiles(); return; }
+    if (un && _mvCompose) { _mvCompose.files.splice(+un.dataset.mvUnattach, 1); _mvMarkDirty(); _mvRenderComposeFiles(); return; }
+    const und = e.target.closest('[data-mv-undraft]');
+    if (und && _mvCompose?.draft) { _mvCompose.draft.atts.splice(+und.dataset.mvUndraft, 1); _mvMarkDirty(); _mvRenderComposeFiles(); return; }
+    const dc = e.target.closest('[data-mv-draft-continue]');
+    if (dc) { e.preventDefault(); _mvResumeDraft(dc.dataset.account, dc.dataset.mvDraftContinue, dc.dataset.folder, dc.dataset.reply ? _mvMsg : null); return; }
+    const dd = e.target.closest('[data-mv-draft-delete]');
+    if (dd) { e.preventDefault(); _mvDeleteDraftFromHint(dd.dataset.account, dd.dataset.mvDraftDelete); return; }
     if (e.target.closest('[data-mv-discard]')) _mvDiscardCompose();
   });
   // Right-click on an address in the header: trust / untrust

@@ -1853,10 +1853,14 @@ async function createBoardAndOpen(rawName) {
       // All active boards; only on a board page the current one is left out (on Today BOARD_NAME is just the
       // context of the last in-place edit)
       const others = boards.filter(b => !b.archived && !(ROUTE === 'board' && b.name === BOARD_NAME));
+      // A calendar / mail view covering the board: the board itself comes first — a click closes the view
+      const covered = ROUTE === 'board' && document.body.classList.contains('view-open');
+      const current = covered
+        ? `<a class="board-switch-item board-switch-item--current" href="${BASE_PATH}/board/${encodeURIComponent(BOARD_NAME)}" data-board-current title="Close the view, back to this board">${escHtml(BOARD_NAME)}</a>` : '';
       // The dashboard has its own header icon (#todayBtn) — the menu lists boards only
-      menu.innerHTML = others
+      menu.innerHTML = current + (others
         .map(b => `<a class="board-switch-item" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">${escHtml(b.name)}</a>`)
-        .join('') || '<span class="board-switch-item board-switch-empty">No other boards</span>';
+        .join('') || (current ? '' : '<span class="board-switch-item board-switch-empty">No other boards</span>'));
     } catch { return; }
     menu.classList.add('open');
     btn.classList.add('open');
@@ -1865,6 +1869,13 @@ async function createBoardAndOpen(rawName) {
   function closeBoardMenu() { menu.classList.remove('open'); btn.classList.remove('open'); }
 
   btn.addEventListener('click', toggleBoardMenu);
+  menu.addEventListener('click', e => {
+    if (!e.target.closest('[data-board-current]') || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+    e.preventDefault();
+    closeBoardMenu();
+    if (_mvIsOpen()) closeMailView();
+    if (_cvIsOpen()) closeCalView();
+  });
 
   // Capture phase: other menu buttons stop propagation, but opening their menu must close this one
   document.addEventListener('click', e => { if (!wrap.contains(e.target)) closeBoardMenu(); }, true);

@@ -230,6 +230,8 @@ body.view-open #schedToggleBtn { display: none !important; }
   background: var(--accent-glow);
   color: var(--accent);
 }
+/* The board under an open calendar / mail view (a click closes the view) */
+.board-switch-item--current { font-weight: 600; color: var(--accent); border-bottom: 1px solid var(--border); }
 .board-switch-empty, .board-switch-empty:hover { color: var(--text-muted); background: none; cursor: default; font-style: italic; }
 
 .header-dd-logout:hover {

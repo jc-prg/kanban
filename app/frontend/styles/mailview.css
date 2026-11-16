@@ -357,6 +357,17 @@ body.mailview-open header { z-index: 96; }
 
 /* Swipe actions (phones): the row slides, each action layer fills the freed space */
 .mv-msg-wrap { position: relative; overflow: hidden; }
+/* Drag & drop (_mvDragStart): source rows dimmed, drag image = row copy at 60 % (off-screen until the snapshot) */
+.mv-dragging { opacity: 0.6; }
+.mailview-list.mv-drag-image, .mailview-folders.mv-drag-image, .mv-drag-image {
+  position: fixed; left: -10000px; top: 0; z-index: -1; flex: none; overflow: visible;
+  opacity: 0.6; background: var(--panel-bg); border-radius: 6px; pointer-events: none;
+}
+.mv-drag-image .mv-msg.active, .mv-drag-image .mv-msg.selected { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.mv-drag-count {
+  position: absolute; right: 8px; bottom: 6px; padding: 1px 8px; border-radius: 10px;
+  background: var(--accent); color: #fff; font-size: 0.72rem; font-weight: 600;
+}
 .mv-msg-wrap > .mv-msg { position: relative; }
 .mv-swipe-actions {
   position: absolute;
@@ -405,6 +416,20 @@ body.mailview-open header { z-index: 96; }
 .mv-back { display: none; padding: 4px 10px; font-size: 1rem; line-height: 1; }
 .mv-subject { margin: 0 0 10px; font-size: 1.05rem; font-weight: 600; line-height: 1.35; word-break: break-word; }
 .mv-reader-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+/* Saved draft: hint above the headers of a message that has a draft reply, or of a draft itself (Continue) */
+.mv-draft-hint {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 10px; padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: 0.8rem; color: var(--text);
+}
+.mv-draft-hint[hidden] { display: none; }
+.mv-draft-hint > svg { color: var(--accent); flex: none; }
+.mv-draft-hint > span { flex: 1 1 12em; min-width: 0; }
+.mv-draft-hint .btn { padding: 3px 10px; font-size: 0.75rem; }
+.mv-draft-tag {
+  margin-left: 6px; padding: 1px 7px; border-radius: 8px; vertical-align: 2px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); font-size: 0.7rem; font-weight: 600;
+}
 /* Conversation strip: "Conversation · n messages" (opens the tree), ‹ position › */
 .mv-thread-strip {
   margin-bottom: 10px;

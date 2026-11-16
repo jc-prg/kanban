@@ -217,7 +217,7 @@ test('TD-10 weather widget: normalises Open-Meteo and caches per location', asyn
     expect(String(url)).toContain('forecast_days=7')
     return { ok: true, json: async () => ({
       current: { time: '2026-11-10T10:45', temperature_2m: 8.4, weather_code: 3, is_day: 1 },
-      hourly:  { time: hours, temperature_2m: hours.map((_, i) => i), precipitation_probability: hours.map(() => 10), weather_code: hours.map(() => 61) },
+      hourly:  { time: hours, temperature_2m: hours.map((_, i) => i), precipitation_probability: hours.map(() => 10), weather_code: hours.map(() => 61), is_day: hours.map(h => +(h.slice(11, 13) >= '07' && h.slice(11, 13) < '17')) },
       daily:   { time: ['2026-11-10', '2026-11-11'], temperature_2m_min: [4, 2], temperature_2m_max: [11, 9], weather_code: [61, 3], precipitation_probability_max: [60, 10], sunrise: ['2026-11-10T07:20', ''], sunset: ['2026-11-10T16:20', ''] },
     }) }
   })
@@ -230,6 +230,8 @@ test('TD-10 weather widget: normalises Open-Meteo and caches per location', asyn
   expect(res.body.today).toMatchObject({ date: '2026-11-10', min: 4, max: 11, precipMax: 60 })
   expect(res.body.hours).toHaveLength(12)
   expect(res.body.hours[0].time).toBe('2026-11-10T10:00')   // from the current hour on
+  expect(res.body.hours.map(h => h.isDay)).toEqual([...Array(7).fill(true), ...Array(5).fill(false)])   // 10–16 day, 17–21 night
+  expect(String(fetchMock.mock.calls[0][0])).toMatch(/hourly=[^&]*is_day/)
   expect(res.body.days.map(d => d.date)).toEqual(['2026-11-10', '2026-11-11'])   // 7-day view: every forecast day
   expect(res.body.days[1]).toMatchObject({ min: 2, max: 9, code: 3, precipMax: 10 })
 

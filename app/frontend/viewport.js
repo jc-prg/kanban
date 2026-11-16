@@ -34,7 +34,13 @@ function _vpShrunk(tallest, now) {
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
-  const debug = /[?&]vpdebug=1\b/.test(location.search);
+  // ?vpdebug=1 turns the overlay on until ?vpdebug=0 — it also shows on an app launch (plain start URL)
+  let debug = false;
+  try {
+    const m = /[?&]vpdebug=([01])\b/.exec(location.search);
+    if (m) localStorage.setItem('vp-debug', m[1]);
+    debug = localStorage.getItem('vp-debug') === '1';
+  } catch { debug = /[?&]vpdebug=1\b/.test(location.search); }
   let box = null;
 
   /** Height of a hidden probe element (position + height given as CSS). */
@@ -102,6 +108,11 @@ function _vpShrunk(tallest, now) {
       `safe top ${cs.paddingTop} bottom ${cs.paddingBottom}`,
       `--vp-gap ${gap}px  --vp-dvh-gap ${dvhGap}px`,
       `tallest ${JSON.stringify(tallest.get(innerWidth) || {})}  scrollY ${scrollY}`,
+      ...(window._lastViewDebug ? (lv => [
+        `lastview ${lv.restore ? 'restored' : 'kept'}: ${lv.reason}`,
+        `  nav ${lv.navType}  fresh ${lv.fresh}  referrer ${lv.referrer || '-'}`,
+        `  path ${lv.path}  last ${lv.last || '-'}  saved ${lv.savedAt || '-'}`,
+      ])(window._lastViewDebug) : []),
     ].join('\n');
     safe.remove();
   }

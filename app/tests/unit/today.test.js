@@ -169,6 +169,9 @@ test('TU-10 _todayWeatherKind — WMO codes → icon, night variant; _todayNextR
   expect(plain(ctx._todayWeatherKind(0))).toEqual({ icon: 'wxSun', label: 'Clear' })
   expect(ctx._todayWeatherKind(0, false).icon).toBe('wxMoon')
   expect(ctx._todayWeatherKind(2).icon).toBe('wxPartly')
+  expect(ctx._todayWeatherKind(1, false).icon).toBe('wxMoonCloud')   // mostly clear at night
+  expect(ctx._todayWeatherKind(2, false).icon).toBe('wxMoonCloud')
+  expect(ctx._todayWeatherKind(3, false).icon).toBe('wxCloud')
   expect(ctx._todayWeatherKind(3).icon).toBe('wxCloud')
   expect(ctx._todayWeatherKind(45).icon).toBe('wxFog')
   expect(ctx._todayWeatherKind(53).label).toBe('Drizzle')
@@ -565,3 +568,17 @@ test('TU-34 Stickies: keyword match (all words, text + source, accent-insensitiv
   ctx._stkSetCats([{ id: 'note', label: 'Note' }, { id: 'quote', label: 'Quote' }, { id: 'intervention', label: 'Intervention' }, { id: 'other', label: 'Other' }])
 })
 
+
+test('TU-37 _todayMoreTiles: widgets other stored layouts place but this one leaves out, registry order', () => {
+  const known = ['agenda', 'attention', 'weather', 'boards', 'notes']
+  const layouts = {
+    xl: { columns: [{ width: 1 }], tiles: [{ id: 'notes', col: 0, order: 0 }, { id: 'weather', col: 0, order: 1 }, { id: 'agenda', col: 0, order: 2 }] },
+    lg: { columns: [{ width: 1 }], tiles: [{ id: 'boards', col: 0, order: 0 }, { id: 'gone', col: 0, order: 1 }] },
+    sm: { columns: [{ width: 1 }], tiles: [{ id: 'agenda', col: 0, order: 0 }] },
+  }
+  expect(plain(ctx._todayMoreTiles(layouts, 'sm', ['agenda'], known))).toEqual(['weather', 'boards', 'notes'])
+  // disabled / unknown widgets (not in `known`) never show; the size's own stored layout doesn't count
+  expect(plain(ctx._todayMoreTiles(layouts, 'sm', ['agenda'], ['agenda', 'boards']))).toEqual(['boards'])
+  expect(plain(ctx._todayMoreTiles({ sm: layouts.sm }, 'sm', ['agenda'], known))).toEqual([])
+  expect(plain(ctx._todayMoreTiles(undefined, 'sm', [], known))).toEqual([])
+})

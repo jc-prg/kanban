@@ -202,7 +202,7 @@ function _todayAgendaRange(cfg) {
 function _todayWeatherKind(code, isDay = true) {
   const c = Number(code);
   if (c === 0)                      return { icon: isDay ? 'wxSun' : 'wxMoon', label: 'Clear' };
-  if (c === 1 || c === 2)           return { icon: isDay ? 'wxPartly' : 'wxCloud', label: c === 1 ? 'Mostly clear' : 'Partly cloudy' };
+  if (c === 1 || c === 2)           return { icon: isDay ? 'wxPartly' : 'wxMoonCloud', label: c === 1 ? 'Mostly clear' : 'Partly cloudy' };
   if (c === 3)                      return { icon: 'wxCloud', label: 'Overcast' };
   if (c === 45 || c === 48)         return { icon: 'wxFog', label: 'Fog' };
   if (c >= 51 && c <= 57)           return { icon: 'wxRain', label: 'Drizzle' };
@@ -525,7 +525,9 @@ async function initToday() {
   // A hidden tab skips its refreshes; catch up as soon as it is visible again
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && _todayStale && !_todayEdit) loadToday({ quiet: true });
+    if (!document.hidden) { _todayTickNow(); _todayStartNowTicker(); }   // timers of hidden tabs are throttled
   });
+  _todayStartNowTicker();
 
   let resizeT = null;
   window.addEventListener('resize', () => {
@@ -629,7 +631,7 @@ function _todayRelayout({ load = true } = {}) {
     const before = new Set([...document.querySelectorAll('#todayGrid .today-tile')].map(el => el.dataset.tile));
     _todayApplyLayout(layout);
     // Tiles that just became visible need data
-    if (load) for (const t of layout.tiles) if (!before.has(t.id) && _todayTileEls.get(t.id)?.dataset.loaded !== '1') _todayLoadTile(t.id);
+    if (load) for (const id of _todayActiveTileIds()) if (!before.has(id) && _todayTileEls.get(id)?.dataset.loaded !== '1') _todayLoadTile(id);
   }
   _todayMeasure();
 }
@@ -703,7 +705,7 @@ function _todayTileStale(loadedAt, minutes, now) {
 
 function _todayReloadIfStale(id) {
   const el = _todayTileEls.get(id);
-  if (el?.dataset.loaded !== '1' || !_todayLayout?.tiles.some(t => t.id === id)) return;
+  if (el?.dataset.loaded !== '1' || !_todayActiveTileIds().includes(id)) return;
   if (_todayTileStale(_todayTileLoadedAt.get(id), _todayRefreshMinutes(_todayCfg), Date.now()))
     _todayLoadTile(id, { keepState: true });
 }
@@ -763,7 +765,7 @@ function _todaySmall() { return !!window.matchMedia?.(_TODAY_SMALL_MQ).matches; 
 
 /** Tile ids in the grid, in visual order (columns, then tiles). */
 function _todayShownTileIds() {
-  return [...document.querySelectorAll('#todayGrid .today-tile')].map(el => el.dataset.tile);
+  return [...document.querySelectorAll('#todayGrid .today-col > .today-tile, #todayGrid .today-more-tiles:not([hidden]) > .today-tile')].map(el => el.dataset.tile);
 }
 
 /** Widget mode of the Today bar's button (small screens), per browser:
@@ -849,6 +851,67 @@ function _todayApplyLayout(layout) {
     cols[t.col].appendChild(el);
   }
   grid.replaceChildren(...cols);
+  _todayRenderMore(layout);
+}
+
+// ---- More widgets (small screens) ----
+// Below the last widget: "More … (N)" expands the widgets that this size's layout leaves out but
+// another stored layout places — shown inline, the layout itself stays unchanged.
+
+let _todayMoreIds = [];   // widgets in the "More" section (open or not)
+
+/** Widgets placed in a stored layout of another size but not shown here, in registry order. Pure. */
+function _todayMoreTiles(layouts, bp, shownIds, known) {
+  const shown = new Set(shownIds), more = new Set();
+  for (const [k, l] of Object.entries(layouts || {})) {
+    if (k === bp || !Array.isArray(l?.tiles)) continue;
+    for (const t of l.tiles) if (known.includes(t.id) && !shown.has(t.id)) more.add(t.id);
+  }
+  return known.filter(id => more.has(id));
+}
+
+function _todayMoreOpen() {
+  try { return localStorage.getItem('today-more-open') === '1'; } catch { return false; }
+}
+
+/** Widgets of the open "More" section — loaded and refreshed like the layout's own. */
+function _todayMoreVisible() {
+  return _todayMoreOpen() ? _todayMoreIds : [];
+}
+
+/** Tile ids to load / refresh: the layout's (or the edit draft's) plus the open "More" widgets. */
+function _todayActiveTileIds() {
+  if (_todayEdit) return (_todayEdit.draft || _todayLayout)?.tiles.map(t => t.id) || [];
+  return [...(_todayLayout?.tiles.map(t => t.id) || []), ..._todayMoreVisible()];
+}
+
+function _todayRenderMore(layout) {
+  const grid = document.getElementById('todayGrid');
+  grid.querySelector('.today-more')?.remove();
+  _todayMoreIds = !_todayEdit && _todayBp === 'sm'
+    ? _todayMoreTiles(_todayCfg?.layouts, 'sm', layout.tiles.map(t => t.id), _todayKnownTiles()) : [];
+  const lastCol = grid.querySelector('.today-col:last-child');
+  if (!_todayMoreIds.length || !lastCol) return;
+  const open = _todayMoreOpen();
+  const wrap = document.createElement('div');
+  wrap.className = 'today-more';
+  wrap.innerHTML = `<button class="today-qa-toggle today-more-toggle" type="button" aria-expanded="${open}">${open ? 'Less' : `More … (${_todayMoreIds.length})`}</button>
+    <div class="today-more-tiles"${open ? '' : ' hidden'}></div>`;
+  const box = wrap.querySelector('.today-more-tiles');
+  for (const id of _todayMoreIds) {
+    const el = _todayTileEl(id);
+    for (const cls of Object.values(_TODAY_SIZE_CLS)) el.classList.remove(`today-tile--${cls}`);
+    el.classList.add(`today-tile--${_TODAY_SIZE_CLS.container}`);
+    el.dataset.size = 'container';
+    box.appendChild(el);
+  }
+  wrap.querySelector('.today-more-toggle').addEventListener('click', () => {
+    try { localStorage.setItem('today-more-open', open ? '0' : '1'); } catch { /* ignore */ }
+    _todayRenderMore(_todayLayout);
+    if (!open) for (const id of _todayMoreIds) if (_todayTileEls.get(id)?.dataset.loaded !== '1') _todayLoadTile(id);
+    _todayScheduleFit();
+  });
+  lastCol.appendChild(wrap);
 }
 
 /** Column height for the fractional tile sizes. */
@@ -970,7 +1033,7 @@ async function loadToday({ quiet = false } = {}) {
   fetchedAt.classList.add('show');
   fetchedAt.textContent = 'Loading…';
   _todayRenderBar();
-  let ids = (_todayEdit?.draft || _todayLayout)?.tiles.map(t => t.id) || [];
+  let ids = _todayActiveTileIds();
   if (_todayLoadedOnce) _todaySyncCollapsed();
   _todayLoadedOnce = true;
   // Automatic refresh: collapsed tiles (already loaded) wait until they are opened again
@@ -1243,7 +1306,7 @@ function _todayEventHtml(item, day) {
   }
   const end = ev.end && ev.end !== ev.start ? `–${_todayFmtTime(ev.end)}` : '';
   const endsLater = ev.end && _todayLocalDay(new Date(new Date(ev.end) - 1)) > day ? ' →' : '';
-  return `<div class="today-ev today-ev-row${item.past ? ' today-ev--past' : ''}" ${attrs}${color}>
+  return `<div class="today-ev today-ev-row${item.past ? ' today-ev--past' : ''}" ${attrs} data-start="${escHtml(ev.start)}" data-end="${escHtml(ev.end || '')}"${color}>
     <span class="today-ev-time">${escHtml(_todayFmtTime(ev.start))}${escHtml(end)}${endsLater}</span>
     <span class="today-ev-title">${(() => {
       const title = _todayDecodeEntities(ev.title);
@@ -1271,6 +1334,42 @@ function _todayDayHtml(model, { isToday }) {
   if (starts.length)     parts.push(cardList(isToday ? 'Starts today' : 'Starts', starts));
   if (model.due.length)  parts.push(cardList(isToday ? 'Due today' : 'Due', model.due));
   return parts.join('');
+}
+
+// ---- Now line ----
+// The agenda's now line shows the current time whatever the refresh interval: once a minute (on the
+// minute) its time is updated, it moves in front of the first event that hasn't started, and events
+// that are over are dimmed — same rules as _todayAgendaDay. A new day reloads the agenda.
+
+/** Now line position (pure): index of the first row starting after `now`, else the row count. */
+function _todayNowIndex(starts, now) {
+  const i = starts.findIndex(s => new Date(s) > now);
+  return i < 0 ? starts.length : i;
+}
+
+let _todayNowTimer = null, _todayNowDay = null;
+function _todayTickNow() {
+  const now = new Date();
+  const day = _todayToday();
+  if (_todayNowDay && day !== _todayNowDay && _todayActiveTileIds().includes('agenda')) _todayLoadTile('agenda', { keepState: true });
+  _todayNowDay = day;
+  for (const line of document.querySelectorAll('#todayGrid .today-now[data-now]')) {
+    line.querySelector('span').textContent = _todayFmtTime(now.toISOString());
+    const timeline = line.parentElement;
+    const rows = [...timeline.querySelectorAll(':scope > .today-ev-row[data-start]')];
+    for (const r of rows) {
+      const s = new Date(r.dataset.start), e = r.dataset.end && new Date(r.dataset.end) > s ? new Date(r.dataset.end) : s;
+      r.classList.toggle('today-ev--past', +e === +s ? s < now : e <= now);
+    }
+    const before = rows[_todayNowIndex(rows.map(r => r.dataset.start), now)] || null;
+    if (line.nextElementSibling !== before || (!before && timeline.lastElementChild !== line)) timeline.insertBefore(line, before);
+  }
+}
+
+function _todayStartNowTicker() {
+  clearTimeout(_todayNowTimer);
+  const next = () => { _todayTickNow(); _todayNowTimer = setTimeout(next, 60_000 - Date.now() % 60_000 + 50); };
+  _todayNowTimer = setTimeout(next, 60_000 - Date.now() % 60_000 + 50);
 }
 
 function _todayDayCount(m) { return m.allDay.length + m.timed.length + m.due.length; }
@@ -1748,7 +1847,7 @@ function _todayRenderWeather(body, data, el) {
   const tomorrow = data.tomorrow ? _todayWeatherKind(data.tomorrow.code) : null;
   body.innerHTML = `${top}
     <div class="today-wx-hours" data-hscroll>${(data.hours || []).map(h => {
-      const k = _todayWeatherKind(h.code);
+      const k = _todayWeatherKind(h.code, h.isDay !== false);
       return `<div class="today-wx-hour" title="${escHtml(k.label)}"><span class="today-muted">${escHtml(hm(h.time))}</span>${SVGICONS[k.icon](16, 16)}<span>${t(h.temp)}</span><span class="today-wx-precip" style="--p:${h.precip ?? 0}%">${h.precip ?? 0}%</span></div>`;
     }).join('')}</div>
     ${tomorrow ? `<div class="today-wx-tomorrow today-muted">Tomorrow: ${SVGICONS[tomorrow.icon](14, 14)} ${escHtml(tomorrow.label)} · ${t(data.tomorrow.min)} / ${t(data.tomorrow.max)}${data.tomorrow.precipMax != null ? ` · rain ${data.tomorrow.precipMax} %` : ''}</div>` : ''}`;
@@ -1971,8 +2070,8 @@ function _todayRenderBoards(body, [boards, recent], el) {
   _todaySetCount(el, active.length);
   const chip = b => {
     const badges = boardBadgesHtml(b.columnBadges, { numbersOnly: true });
-    return `<a class="today-board${b.archived ? ' today-board--archived' : ''}"${b.archived ? ' data-archived="1"' : ''} href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">
-      <span class="today-board-name board-card-name" title="${escHtml(b.description || b.name)}">${escHtml(b.name)}</span>
+    return `<a class="today-board${b.archived ? ' today-board--archived' : ''}"${b.archived ? ' data-archived="1"' : ''} data-board="${escHtml(b.name)}" href="${BASE_PATH}/board/${encodeURIComponent(b.name)}">
+      <span class="today-board-head"><span class="today-board-icon">${SVGICONS.kanban(14, 14)}</span><span class="today-board-name board-card-name" title="${escHtml(b.description || b.name)}">${escHtml(b.name)}</span></span>
       ${badges ? `<span class="today-board-counts">${badges}</span>` : ''}</a>`;
   };
   // Archived boards (folder action) follow the active ones in the same grid, dimmed
@@ -1991,7 +2090,10 @@ function _todayRenderBoards(body, [boards, recent], el) {
   measure.className = 'today-boards today-boards--measure';
   measure.innerHTML = [...active, ...archived].map(chip).join('');
   body.appendChild(measure);
-  body._todayBoardNeed = Math.max(0, ...[...measure.children].map(c => Math.ceil(c.getBoundingClientRect().width)));
+  const widest = () => Math.max(0, ...[...measure.children].map(c => c.getBoundingClientRect().width));
+  body._todayBoardNeed = Math.ceil(widest());
+  measure.classList.add('today-boards--measure-icons');   // again with the board icon before the names
+  body._todayBoardNeedIcon = widest();   // unrounded: compared with the actual card width
   body._todayBoardCount = shown.length;
   measure.remove();
   _todayFitBoards(body);
@@ -1999,6 +2101,29 @@ function _todayRenderBoards(body, [boards, recent], el) {
     body._todayBoardRO = new ResizeObserver(() => _todayFitBoards(body));
     body._todayBoardRO.observe(body);
   }
+}
+
+/**
+ * Context menu of a board card: Open, Add card › (one entry per column — columns fetched when the
+ * menu opens), Add note page (root), Settings (the board page with its board settings, #settings).
+ */
+async function _todayBoardMenu(e, board) {
+  const pos = { clientX: e.clientX, clientY: e.clientY, stopPropagation() {} };
+  const url = `${BASE_PATH}/board/${encodeURIComponent(board)}`;
+  let columns = [];
+  try {
+    const r = await fetch(`/api/${encodeURIComponent(board)}/board`);
+    if (r.ok) columns = ((await r.json()).columns || []).filter(col => col.title);
+  } catch { /* menu without columns */ }
+  openContextMenu(pos, [
+    { label: 'Open', action: () => { window.location.href = url; } },
+    columns.length
+      ? { label: 'Add card', children: columns.map(col => ({ label: col.title, action: () => openInboxModal(board, null, () => _todayRefresh('cards'), col.title) })) }
+      : { label: 'Add card', action: () => openInboxModal(board, null, () => _todayRefresh('cards')) },
+    { label: 'Add note page', action: () => _todayNewNote(board, null) },
+    { separator: true },
+    { label: 'Settings', action: () => { window.location.href = `${url}#settings`; } },
+  ]);
 }
 
 /** Board cards per row: as many as fit at `need` px each, at least 2, at most the number of boards. Pure. */
@@ -2016,6 +2141,8 @@ function _todayFitBoards(body) {
   // Two per row is the minimum: when even that is too narrow, tighten paddings so the counts still fit
   const cardW = (grid.clientWidth - gap * (n - 1)) / n;
   body.classList.toggle('today-boards-compact', cardW < body._todayBoardNeed);
+  // Board icon before the name only when the widest card still fits with it
+  body.classList.toggle('today-boards--icons', cardW >= body._todayBoardNeedIcon);
 }
 
 // ---- Quick access ----
@@ -2288,6 +2415,8 @@ function _todayWireDelegation() {
     const c = cardAt(e.target);
     const ev = !c && e.target.closest('.today-ev[data-uid]');
     const mail = !c && !ev && e.target.closest('.today-mail-row[data-msg-id]');
+    const board = !c && !ev && !mail && e.target.closest('.today-board[data-board]');
+    if (board) { e.preventDefault(); e.stopPropagation(); _todayBoardMenu(e, board.dataset.board); return; }
     if (!c?.entry && !ev && !mail) return;
     // Search hits from other folders: the mail context menu acts on the account folder only
     if (mail && mail.dataset.folder) return;
@@ -2340,7 +2469,7 @@ function _todayRefresh(kind) {
               : [/^\/api\/today\/widgets\/cards/, /^\/api\/achievements\//];
   const tiles = kind === 'mail' ? ['attention'] : kind === 'calendar' ? ['agenda'] : ['agenda', 'attention', 'progress'];
   for (const url of [..._todayFetchMemo.keys()]) if (urls.some(re => re.test(url))) _todayFetchMemo.delete(url);
-  for (const id of tiles) if ((_todayEdit?.draft || _todayLayout)?.tiles.some(t => t.id === id)) _todayLoadTile(id);
+  for (const id of tiles) if (_todayActiveTileIds().includes(id)) _todayLoadTile(id);
 }
 
 // ---- In-place editing (card / note dialogs without loading the board page) ----

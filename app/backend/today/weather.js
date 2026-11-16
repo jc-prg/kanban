@@ -40,6 +40,7 @@ function normaliseForecast(raw, label) {
       temp:   hourly.temperature_2m?.[i] ?? null,
       precip: hourly.precipitation_probability?.[i] ?? null,
       code:   hourly.weather_code?.[i] ?? null,
+      isDay:  hourly.is_day?.[i] !== 0,   // night hours get moon icons
     });
   }
   return {
@@ -64,7 +65,7 @@ async function fetchWeather(settings = {}) {
   const qs = new URLSearchParams({
     latitude: String(lat), longitude: String(lon), timezone: 'auto', forecast_days: '7',
     current: 'temperature_2m,weather_code,is_day',
-    hourly:  'temperature_2m,precipitation_probability,weather_code',
+    hourly:  'temperature_2m,precipitation_probability,weather_code,is_day',
     daily:   'temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset',
   });
   const data = normaliseForecast(await _getJson(`${FORECAST_URL}?${qs}`), settings.label);

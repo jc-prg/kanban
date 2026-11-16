@@ -276,6 +276,15 @@ function _parseReferences(headers) {
   return m ? (m[1].match(/<[^<>\s]+>/g) || []) : [];
 }
 
+/** `X-JC-Reply` / `X-JC-Forward` of a draft: "<uid> <folder, URI-encoded>" → { uid, folder } or null. */
+function _draftLink(headers, name) {
+  if (!headers) return null;
+  const raw = headers.toString('utf8').replace(/\r?\n[ \t]+/g, ' ');
+  const m = raw.match(new RegExp(`^${name}:\\s*([0-9]{1,10}) (\\S+)\\s*$`, 'im'));
+  if (!m) return null;
+  try { return { uid: m[1], folder: decodeURIComponent(m[2]) }; } catch { return null; }
+}
+
 /**
  * Fetch a single message's full fields by UID from `folder`
  * (default: the account's configured folder).
@@ -289,7 +298,7 @@ async function fetchMailMessage(account, uid, folder) {
       envelope:      true,
       bodyStructure: true,
       flags:         true,
-      headers:       ['references'],
+      headers:       ['references', 'x-jc-reply', 'x-jc-forward'],
     }, { uid: true });
 
     if (!meta) return null;
@@ -327,10 +336,15 @@ async function fetchMailMessage(account, uid, folder) {
       replyTo:     _fmtAddrList(env.replyTo),
       to:          _fmtAddrList(env.to),
       cc:          _fmtAddrList(env.cc),
+      bcc:         _fmtAddrList(env.bcc),
       date:        _fmtDate(env.date),
       messageId:   env.messageId || '',
       inReplyTo:   env.inReplyTo || '',
       references:  _parseReferences(meta.headers),
+      draft:       !!meta.flags?.has('\\Draft'),
+      // Drafts saved by the mail view: the message they answer / forward (to mark it once sent)
+      ...(_draftLink(meta.headers, 'x-jc-reply')   ? { draftReply:   _draftLink(meta.headers, 'x-jc-reply') } : {}),
+      ...(_draftLink(meta.headers, 'x-jc-forward') ? { draftForward: _draftLink(meta.headers, 'x-jc-forward') } : {}),
       unread:      meta.flags ? !meta.flags.has('\\Seen') : false,
       flagged:     !!meta.flags?.has('\\Flagged'),
       flagColor:   flagColor(meta.flags),
@@ -1163,6 +1177,19 @@ function senderAddresses(account) {
 async function sendMail(account, mail) {
   if (!account.smtp?.host) throw Object.assign(new Error('No SMTP server configured for this account'), { status: 400 });
   const smtp = _smtpSettings(account);
+  const { opts, fromAddress, date, messageId } = _mailOpts(account, mail);
+
+  const recipients = [..._addresses(mail.to), ..._addresses(mail.cc), ..._addresses(mail.bcc)];
+  if (!recipients.length) throw Object.assign(new Error('No valid recipient'), { status: 400 });
+
+  const raw = await new MailComposer(opts).compile().build();
+  const transporter = nodemailer.createTransport(smtp);
+  await transporter.sendMail({ envelope: { from: fromAddress, to: recipients }, raw });
+  return _storeSentCopy(account, mail, opts, date, messageId);
+}
+
+/** MailComposer options of a message to send or to keep as a draft (sender checked against the account). */
+function _mailOpts(account, mail) {
   const senders = senderAddresses(account);
   const sender  = mail.from ? senders.find(s => s.address.toLowerCase() === String(mail.from).trim().toLowerCase()) : senders[0];
   if (!sender) throw Object.assign(new Error('Sender address not configured for this account'), { status: 400 });
@@ -1174,7 +1201,7 @@ async function sendMail(account, mail) {
 
   const opts = {
     from,
-    to:        mail.to,
+    to:        mail.to || undefined,
     cc:        mail.cc || undefined,
     bcc:       mail.bcc || undefined,
     subject:   mail.subject || '',
@@ -1186,14 +1213,10 @@ async function sendMail(account, mail) {
     references: mail.references?.length ? mail.references : undefined,
     attachments: (mail.attachments || []).map(a => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
   };
+  return { opts, fromAddress, date, messageId };
+}
 
-  const recipients = [..._addresses(mail.to), ..._addresses(mail.cc), ..._addresses(mail.bcc)];
-  if (!recipients.length) throw Object.assign(new Error('No valid recipient'), { status: 400 });
-
-  const raw = await new MailComposer(opts).compile().build();
-  const transporter = nodemailer.createTransport(smtp);
-  await transporter.sendMail({ envelope: { from: fromAddress, to: recipients }, raw });
-
+async function _storeSentCopy(account, mail, opts, date, messageId) {
   const result = { ok: true, messageId };
   try {
     const copyNode = new MailComposer(opts).compile();
@@ -1218,8 +1241,87 @@ async function sendMail(account, mail) {
   return result;
 }
 
+// ---- Drafts ----
+// The mail view keeps the message being written as a draft (\Draft, unread — counted in the folder tree) in the account's drafts folder
+// (account.draftsFolder, else the server's \Drafts folder, else 'Drafts'); every save replaces the previous one.
+
+async function _draftsFolder(client, account) {
+  return account.draftsFolder || (await _specialFolder(client, '\\Drafts')) || 'Drafts';
+}
+
+/**
+ * Store `mail` (same fields as sendMail, recipients optional) as a draft; `replaceUid` = the previous version,
+ * deleted once the new one is stored. Returns { ok, uid, folder, messageId } (uid null when the server reports
+ * none and the search finds nothing).
+ */
+async function saveDraft(account, mail) {
+  const { opts, date } = _mailOpts(account, mail);
+  const link = (uid, folder) => `${uid} ${encodeURIComponent(folder)}`;
+  opts.headers = {};
+  if (mail.replyUid && mail.replyFolder) opts.headers['X-JC-Reply'] = link(mail.replyUid, mail.replyFolder);
+  if (mail.forwardUid && mail.forwardFolder && !mail.forwardAccount) opts.headers['X-JC-Forward'] = link(mail.forwardUid, mail.forwardFolder);
+  const node = new MailComposer(opts).compile();
+  node.keepBcc = true;
+  const raw = await node.build();
+  return _withClient(account, async client => {
+    const folder = await _draftsFolder(client, account);
+    const appended = await client.append(folder, raw, ['\\Draft'], date);   // unread: the drafts folder shows a count
+    let uid = appended?.uid ? String(appended.uid) : null;
+    const lock = await client.getMailboxLock(folder);
+    try {
+      if (!uid) {   // no UIDPLUS: find it by its Message-ID
+        const found = await client.search({ header: { 'message-id': opts.messageId } }, { uid: true });
+        uid = found?.length ? String(Math.max(...found)) : null;
+      }
+      if (mail.replaceUid && String(mail.replaceUid) !== uid) await _deleteDraftLocked(client, mail.replaceUid);
+    } finally { lock.release(); }
+    return { ok: true, uid, folder, messageId: opts.messageId };
+  });
+}
+
+/** Delete draft `uid` from the selected drafts folder — only a message flagged \Draft. True when deleted. */
+async function _deleteDraftLocked(client, uid) {
+  const msg = await client.fetchOne(String(uid), { uid: true, flags: true }, { uid: true });
+  if (!msg?.flags?.has('\\Draft')) return false;
+  await client.messageDelete(String(uid), { uid: true });
+  return true;
+}
+
+/** Delete a draft permanently (sent or discarded). Returns { ok, deleted }. */
+async function deleteDraft(account, uid) {
+  return _withClient(account, async client => {
+    const lock = await client.getMailboxLock(await _draftsFolder(client, account));
+    try { return { ok: true, deleted: await _deleteDraftLocked(client, uid) }; }
+    finally { lock.release(); }
+  });
+}
+
+/** Drafts answering the message `inReplyTo` (its Message-ID), newest first: { folder, drafts: [{ id, subject, date }] }. */
+async function findDrafts(account, inReplyTo) {
+  return _withClient(account, async client => {
+    const folder = await _draftsFolder(client, account);
+    let lock;
+    try { lock = await client.getMailboxLock(folder); } catch { return { folder, drafts: [] }; }   // no drafts folder yet
+    try {
+      const uids = await client.search({ header: { 'in-reply-to': inReplyTo } }, { uid: true });
+      const drafts = [];
+      if (uids?.length) {
+        for await (const m of client.fetch(uids.join(','), { uid: true, envelope: true, flags: true }, { uid: true })) {
+          if (m.envelope?.inReplyTo !== inReplyTo || !m.flags?.has('\\Draft')) continue;
+          drafts.push({ id: String(m.uid), subject: m.envelope.subject || '', date: _fmtDate(m.envelope.date) });
+        }
+      }
+      drafts.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      return { folder, drafts };
+    } finally { lock.release(); }
+  });
+}
+
 module.exports = {
   MAIL_FLAG_COLORS,
+  saveDraft,
+  deleteDraft,
+  findDrafts,
   flagColor,
   flagChanges,
   flagMailMessage,

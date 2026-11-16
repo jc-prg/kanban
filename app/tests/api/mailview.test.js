@@ -92,7 +92,7 @@ class MockImapFlow {
   async messageFlagsRemove(u, f) { imap.calls.push(['flagsRemove', u, f]) }
   async messageMove(u, target)   { imap.calls.push(['move', u, target]) }
   async messageDelete(u)         { imap.calls.push(['expunge', u]) }
-  async append(folder, raw, flags) { imap.calls.push(['append', folder, raw.toString('utf8'), flags]) }
+  async append(folder, raw, flags) { imap.calls.push(['append', folder, raw.toString('utf8'), flags]); return imap.appendUid ? { uid: imap.appendUid } : undefined }
 }
 const IMAPFLOW_MODULE = require.resolve('imapflow')
 require.cache[IMAPFLOW_MODULE] = {
@@ -1122,4 +1122,92 @@ test('MVA-48 threads — unchanged folders are not scanned again (LIST-STATUS si
   const fresh = await request(app).get(`${API}/messages?folder=INBOX&threads=1`).set(AUTH)
   expect(fresh.body.threads[0].messages.map(x => `${x.folder}/${x.id}`)).toEqual(['INBOX/1', 'Sent/5', 'INBOX/2', 'Archive/9', 'Sent/6'])
   expect(calls('fetch').filter(c => c[1] === '1:*')).toHaveLength(1)
+})
+
+// ---------------------------------------------------------------------------
+// Drafts
+// ---------------------------------------------------------------------------
+
+function _draft(payload, files = []) {
+  let req = request(app).post(`${API}/draft`).set(AUTH).field('payload', JSON.stringify(payload))
+  for (const f of files) req = req.attach('files', Buffer.from(f.content), f.name)
+  return req
+}
+
+test('MVA-49 POST draft — stored in the \\Drafts folder (\\Draft, unread, Bcc kept, original in X-JC-Reply), replaces the previous version, never sent', async () => {
+  _storedConfig.mailAccounts[0].smtp = { host: 'smtp.ex.com', fromName: 'Me' }
+  imap.folders = [{ path: 'Entwürfe', specialUse: '\\Drafts', flags: new Set() }]
+  imap.appendUid = 41
+  imap.messages = [_msg(40, { flags: ['\\Draft', '\\Seen'] }), _msg(41, { flags: ['\\Draft', '\\Seen'] })]
+
+  const res = await _draft({ to: 'bob@ex.com', bcc: 'dave@ex.com', subject: 'Re: Plan', html: '<p>Half</p>', text: 'Half',
+    inReplyTo: '<m1@ex.com>', replyUid: '77', replyFolder: 'INBOX/Projekte', draftUid: '40' }, [{ name: 'a.txt', content: 'x' }])
+  expect(res.status).toBe(200)
+  expect(res.body).toMatchObject({ ok: true, uid: '41', folder: 'Entwürfe', attachments: [] })
+  expect(smtp.sent).toHaveLength(0)
+  const [, folder, raw, flags] = calls('append')[0]
+  expect(folder).toBe('Entwürfe')
+  expect(flags).toEqual(['\\Draft'])   // unread: counted in the folder tree
+  expect(raw).toMatch(/^Bcc: dave@ex\.com/m)
+  expect(raw).toMatch(/^In-Reply-To: <m1@ex\.com>/m)
+  expect(raw).toMatch(/^X-JC-Reply: 77 INBOX%2FProjekte/im)   // header names are case-insensitive (MailComposer: X-Jc-Reply)
+  expect(raw).toContain('filename=a.txt')
+  expect(calls('expunge')).toEqual([['expunge', '40']])   // the previous version
+
+  // Recipients may be missing; no UIDPLUS → found by Message-ID
+  imap.appendUid = null
+  imap.search = [52, 50]
+  const blank = await _draft({ subject: '', text: '' })
+  expect(blank.status).toBe(200)
+  expect(blank.body.uid).toBe('52')
+  expect(calls('search').at(-1)[1]).toMatchObject({ header: { 'message-id': expect.stringMatching(/^<.+@ex\.com>$/) } })
+  expect((await _draft({ to: 'x', evil: 1 })).status).toBe(400)
+})
+
+test('MVA-50 drafts are only deleted when flagged \\Draft; DELETE draft/:uid', async () => {
+  imap.folders = [{ path: 'Drafts', specialUse: '\\Drafts', flags: new Set() }]
+  imap.messages = [_msg(7, { flags: ['\\Seen'] }), _msg(8, { flags: ['\\Draft'] })]
+  expect((await request(app).delete(`${API}/draft/7`).set(AUTH)).body).toEqual({ ok: true, deleted: false })
+  expect((await request(app).delete(`${API}/draft/8`).set(AUTH)).body).toEqual({ ok: true, deleted: true })
+  expect(calls('expunge')).toEqual([['expunge', '8']])
+  expect(calls('lock').every(c => c[1] === 'Drafts')).toBe(true)
+  expect((await request(app).delete(`${API}/draft/x1`).set(AUTH)).status).toBe(400)
+  expect((await request(app).delete('/api/dashboard/mail/nope/draft/8').set(AUTH)).status).toBe(404)
+})
+
+test('MVA-51 send a continued draft — its attachments taken over (draftParts), the draft deleted afterwards', async () => {
+  _storedConfig.mailAccounts[0].smtp = { host: 'smtp.ex.com' }
+  imap.folders = [{ path: 'Drafts', specialUse: '\\Drafts', flags: new Set() }]
+  const draft = _msg(9, { flags: ['\\Draft'] })
+  draft.bodyStructure = { type: 'multipart/mixed', childNodes: [
+    { part: '1', type: 'text/plain', encoding: '7bit' },
+    { part: '2', type: 'application/pdf', encoding: 'base64', disposition: 'attachment', dispositionParameters: { filename: 'offer.pdf' }, size: 4 },
+  ] }
+  draft.bodyParts = new Map([['1', Buffer.from('Body')], ['2', Buffer.from('UERGIQ==')]])
+  imap.messages = [draft]
+  const res = await _send({ to: 'bob@ex.com', subject: 'Offer', text: 'see attached', draftUid: '9', draftFolder: 'Drafts', draftParts: ['2'] })
+  expect(res.status).toBe(200)
+  expect(smtp.sent[0].raw).toContain('filename=offer.pdf')
+  expect(calls('expunge')).toEqual([['expunge', '9']])
+  expect((await _send({ to: 'bob@ex.com', text: 'x', draftParts: ['2'] })).status).toBe(400)   // parts without the draft
+})
+
+test('MVA-52 GET drafts?inReplyTo — draft replies to a message; message route reports bcc, draft flag and the original', async () => {
+  imap.folders = [{ path: 'Drafts', specialUse: '\\Drafts', flags: new Set() }]
+  imap.search = [3, 4, 5]
+  imap.messages = [
+    _msg(3, { flags: ['\\Draft'], envelope: { inReplyTo: '<m1@ex.com>', subject: 'Re: A', date: new Date('2026-11-02T10:00:00Z') } }),
+    _msg(4, { flags: ['\\Draft'], envelope: { inReplyTo: '<other@ex.com>' } }),   // header search is substring-based
+    _msg(5, { flags: ['\\Seen'],  envelope: { inReplyTo: '<m1@ex.com>' } }),       // not a draft
+  ]
+  const res = await request(app).get(`${API}/drafts?inReplyTo=${encodeURIComponent('<m1@ex.com>')}`).set(AUTH)
+  expect(res.status).toBe(200)
+  expect(res.body).toEqual({ folder: 'Drafts', drafts: [{ id: '3', subject: 'Re: A', date: '2026-11-02T10:00:00.000Z' }] })
+  expect(calls('search')[0][1]).toEqual({ header: { 'in-reply-to': '<m1@ex.com>' } })
+  expect((await request(app).get(`${API}/drafts?inReplyTo=nope`).set(AUTH)).status).toBe(400)
+
+  imap.messages = [_msg(3, { flags: ['\\Draft'], envelope: { bcc: [{ address: 'dave@ex.com' }] },
+    headers: Buffer.from('X-JC-Reply: 77 INBOX%2FProjekte\r\nX-JC-Forward: 12 Archive\r\n') })]
+  const msg = await request(app).get(`${API}/message/3?folder=Drafts`).set(AUTH)
+  expect(msg.body).toMatchObject({ draft: true, bcc: 'dave@ex.com', draftReply: { uid: '77', folder: 'INBOX/Projekte' }, draftForward: { uid: '12', folder: 'Archive' } })
 })

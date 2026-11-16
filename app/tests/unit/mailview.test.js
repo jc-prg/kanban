@@ -471,3 +471,17 @@ test('MV-24 _mvTreeMovePlan — a message moves with its replies (any folder); n
   expect([both.items.length, both.anchors, both.replies]).toEqual([5, 2, 3])
   expect(plan([{ id: '7', folder: 'INBOX' }]).replies).toBe(0)
 })
+
+test('MV-25 list rows — answered / forwarded icons only outside conversation mode (the reply tree shows that there)', () => {
+  const m = { id: '9', subject: 'Plan', from: 'Jane <jane@ex.com>', date: '2026-01-05T10:00:00Z', answered: true, forwarded: true }
+  ctx._mailTrustedBadgeHtml = () => ''   // dashboard.js global
+  ctx._mailFlagHtml = () => ''
+  vm.runInContext(`_mvFolder = 'INBOX'; _mvOpts = _mvDefaultListOpts()`, ctx)
+  const flat = ctx._mvListItemHtml(m, new Set())
+  expect(flat).toContain('title="Answered"')
+  expect(flat).toContain('title="Forwarded"')
+  vm.runInContext(`_mvOpts = { ..._mvDefaultListOpts(), threads: true }`, ctx)
+  const grouped = ctx._mvListItemHtml(m, new Set())
+  expect(grouped).not.toContain('mv-msg-answered')
+  vm.runInContext(`_mvOpts = _mvDefaultListOpts()`, ctx)
+})

@@ -7,7 +7,7 @@
  *
  * Scenarios: E-T-1 … E-T-18
  */
-const { test, expect } = require('@playwright/test');
+const { test, expect, chromium } = require('@playwright/test');
 const path = require('path');
 
 const AUTH_STATE = path.join(__dirname, '.auth-state.json');
@@ -40,7 +40,7 @@ async function mockApis(page, state) {
       if (state.put.widgets) state.widgets = state.put.widgets;
       return r.fulfill({ json: { ok: true, config: { showBar: true, widgets: state.widgets || {}, layouts: state.layouts } } });
     }
-    return r.fulfill({ json: { showBar: true, widgets: state.widgets || { cvapp: { apiUrl: 'http://cv', publicUrl: 'https://cv.example/', hasApiKey: true } }, layouts: state.layouts, collapsed: state.collapsed || {} } });
+    return r.fulfill({ json: { showBar: true, refreshMinutes: state.refreshMinutes, widgets: state.widgets || { cvapp: { apiUrl: 'http://cv', publicUrl: 'https://cv.example/', hasApiKey: true } }, layouts: state.layouts, collapsed: state.collapsed || {} } });
   });
   // Collapsed widgets per breakpoint: PUTs captured, never reach the real server
   await page.route('**/api/today/collapsed', r => {
@@ -323,6 +323,78 @@ test.describe('Today page', () => {
     await loggedOut.goto('/today');
     await expect(loggedOut).toHaveURL(/\/board\/e2e-today$/);
     await expect(loggedOut.locator('#loginBackdrop')).toBeVisible();
+  });
+
+  test('E-T-58b Home-Screen app: every launch reopens the last view, even when sessionStorage survived; a reload does not', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    // Standalone display mode + a session marker iOS kept across the relaunch
+    await page.addInitScript(() => {
+      const mm = window.matchMedia.bind(window);
+      window.matchMedia = q => (/display-mode:\s*standalone/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : mm(q));
+      sessionStorage.setItem('app-session', '1');
+      if (!sessionStorage.getItem('e2e-seeded')) { localStorage.setItem('last-view', '/board/e2e-today'); sessionStorage.setItem('e2e-seeded', '1'); }
+    });
+    await page.goto('/');   // start_url "./" → /today → last view
+    await expect(page).toHaveURL(/\/board\/e2e-today$/);
+    await expect(page.locator('.column')).toHaveCount(1);
+
+    // In-app link to Today (same-origin referrer) and a reload: Today stays
+    await page.evaluate(() => { location.href = '/today'; });
+    await expect(page).toHaveURL(/\/today$/);
+    expect(await page.evaluate(() => window._lastViewDebug.reason)).toBe('opened from inside the app');
+    await page.reload();   // (pagehide stores /today first — the reload rule itself: unit LV-2)
+    await expect(page).toHaveURL(/\/today$/);
+  });
+
+  test('E-T-74 agenda now line: the current time every minute, also without auto-refresh — moves past started events, dims ended ones', async ({ page }) => {
+    const state = { layouts: LAYOUTS, refreshMinutes: 0 };   // auto-refresh off
+    await mockApis(page, state);
+    const start = new Date(now); start.setHours(8, 58, 30, 0);
+    await page.clock.install({ time: start });
+    await page.goto('/today');
+    const timeline = page.locator('.today-tile[data-tile="agenda"] .today-timeline').first();
+    const nowLine = timeline.locator('.today-now');
+    await expect(nowLine).toHaveText(/^08:58/);   // (locale may add AM / PM)
+    const order = () => timeline.evaluate(t => [...t.children].map(c => c.classList.contains('today-now') ? 'now' : c.classList.contains('today-ev--past') ? 'past' : 'ev'));
+    expect(await order()).toEqual(['now', 'ev']);   // Planning meeting 09:00–10:00 still ahead
+    await page.clock.runFor(60_000);
+    await expect(nowLine).toHaveText(/^08:59/);
+    await page.clock.runFor(3 * 60_000);
+    await expect(nowLine).toHaveText(/^09:02/);
+    expect(await order()).toEqual(['ev', 'now']);   // started: the line moves below it
+    await page.clock.runFor(60 * 60_000);
+    await expect(nowLine).toHaveText(/^10:02/);
+    expect(await order()).toEqual(['past', 'now']);   // over: dimmed
+  });
+
+  test('E-T-75 board page with the mail / calendar view open: the board menu lists the board itself first — a click closes the view', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    await mockBoard(page, 'e2e-today', BOARD_TODAY, state);
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-b', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail/ma-b/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-b', '');
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 0, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [], total: 0, page: 0, pageSize: 50 } });
+      return r.fulfill({ json: { size: 0, messages: 0 } });
+    });
+    await page.goto('/board/e2e-today?mail=ma-b&folder=INBOX');
+    await expect(page.locator('#mailView')).toBeVisible();
+    await page.locator('#headerHomeBtn').click();
+    const current = page.locator('#boardSwitchMenu .board-switch-item--current');
+    await expect(current).toHaveText('e2e-today');
+    await expect(page.locator('#boardSwitchMenu .board-switch-item').first()).toHaveText('e2e-today');
+    await current.click();
+    await expect(page.locator('#mailView')).toBeHidden();
+    await expect(page).toHaveURL(/\/board\/e2e-today$/);
+    await expect(page.locator('#boardSwitchMenu')).not.toHaveClass(/open/);
+    await expect(page.locator('.column')).toHaveCount(1);
+    // Without a view: the board itself is not listed
+    await page.locator('#headerHomeBtn').click();
+    await expect(page.locator('#boardSwitchMenu')).toHaveClass(/open/);
+    await expect(current).toHaveCount(0);
   });
 
   test('E-T-2 edit mode: move a tile to another column, resize it, save and reload', async ({ page }) => {
@@ -1688,6 +1760,152 @@ test.describe('Today page', () => {
     await expect(page).toHaveTitle('[TEST] e2e-today - Send offer (card)');
   });
 
+  test('E-T-72 mail view drag & drop: dragged rows dimmed, drag image = row copy at 60 % (count for a selection), folders too', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const msgs = [1, 2, 3].map(i => ({ id: String(i), subject: `Mail ${i}`, messageId: `<${i}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: new Date(Date.UTC(2026, 0, i)).toISOString(), size: 500, unread: false, flagged: false, flagColor: null }));
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-d', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [] }));
+    await page.route('**/api/dashboard/mail/ma-d/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-d', '');
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 3, unseen: 0 },
+        { path: 'Archive', name: 'Archive', delimiter: '/', parent: '', specialUse: null, messages: 0, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [...msgs].reverse(), total: 3, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p.startsWith('/message/')) return r.fulfill({ json: { ...msgs.find(m => m.id === p.split('/')[2]), body: 'Hello', bodyHtml: '', attachments: [] } });
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.goto('/today?mail=ma-d&folder=INBOX');
+    await expect(page.locator('#mailViewList .mv-msg')).toHaveCount(3);
+    await page.locator('.mv-msg[data-mv-msg="3"]').click();
+    await page.locator('.mv-msg[data-mv-msg="2"]').click({ modifiers: ['Control'] });
+
+    const drag = sel => page.evaluate(sel => {
+      const dt = new DataTransfer();
+      let img = null;
+      dt.setDragImage = el => { img = { cls: el.className, opacity: getComputedStyle(el).opacity, rows: el.querySelectorAll('.mv-msg, .mv-folder').length,
+        count: el.querySelector('.mv-drag-count')?.textContent || null, inDom: el.isConnected }; };
+      document.querySelector(sel).dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return { img, dimmed: [...document.querySelectorAll('.mv-dragging')].map(el => el.dataset.mvMsg || el.dataset.mvFolder) };
+    }, sel);
+    // Selection of two: both rows dimmed, drag image = the grabbed row + "2 messages", 60 %
+    const sel = await drag('.mv-msg[data-mv-msg="2"]');
+    expect(sel.dimmed.sort()).toEqual(['2', '3']);
+    expect(sel.img).toMatchObject({ opacity: '0.6', rows: 1, count: '2 messages', inDom: true });
+    expect(sel.img.cls).toContain('mv-drag-image');
+    await page.evaluate(() => document.dispatchEvent(new DragEvent('dragend', { bubbles: true })));
+    await expect(page.locator('.mv-dragging')).toHaveCount(0);
+    await expect(page.locator('.mv-drag-image')).toHaveCount(0);   // removed after the snapshot
+
+    // A row outside the selection: only that one, no count
+    const one = await drag('.mv-msg[data-mv-msg="1"]');
+    expect(one.dimmed).toEqual(['1']);
+    expect(one.img).toMatchObject({ opacity: '0.6', count: null });
+    await page.evaluate(() => document.dispatchEvent(new DragEvent('dragend', { bubbles: true })));
+
+    // Folders
+    const folder = await drag('.mv-folder[draggable="true"][data-mv-folder="Archive"]');
+    expect(folder.dimmed).toEqual(['Archive']);
+    expect(folder.img).toMatchObject({ opacity: '0.6', rows: 1 });
+    await page.evaluate(() => document.dispatchEvent(new DragEvent('dragend', { bubbles: true })));
+    await expect(page.locator('.mv-dragging')).toHaveCount(0);
+  });
+
+  test('E-T-73 drafts: autosave while writing (replaces the previous one), saved when leaving without a question, reply hint → Continue → Send deletes it; Discard deletes', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const orig = { id: '5', subject: 'Plan', messageId: '<plan@ex.com>', from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: '2026-01-05T10:00:00.000Z', size: 500, unread: false, flagged: false, flagColor: null };
+    const other = { ...orig, id: '6', subject: 'Other', messageId: '<other@ex.com>' };
+    const drafts = [], deletes = [], sends = [];
+    let draftList = [];   // what GET …/drafts answers
+    const form = req => JSON.parse(req.postDataBuffer().toString('utf8').match(/name="payload"\r\n\r\n([\s\S]*?)\r\n--/)[1]);
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-r', label: 'Work', color: '#0a0', smtp: { host: 'smtp.example', fromAddress: 'me@ex.com' } }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [] }));
+    await page.route('**/api/dashboard/mail/ma-r/**', r => {
+      const req = r.request(), url = new URL(req.url());
+      const p = url.pathname.replace('/api/dashboard/mail/ma-r', '');
+      if (p === '/draft' && req.method() === 'POST') { drafts.push(form(req)); return r.fulfill({ json: { ok: true, uid: String(30 + drafts.length), folder: 'Drafts', attachments: [] } }); }
+      if (p.startsWith('/draft/') && req.method() === 'DELETE') { deletes.push(p.split('/')[2]); return r.fulfill({ json: { ok: true, deleted: true } }); }
+      if (p === '/send') { sends.push(form(req)); return r.fulfill({ json: { ok: true, messageId: '<sent@ex.com>' } }); }
+      if (p === '/drafts') return r.fulfill({ json: { folder: 'Drafts', drafts: url.searchParams.get('inReplyTo') === '<plan@ex.com>' ? draftList : [] } });
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 2, unseen: 0 },
+        { path: 'Drafts', name: 'Drafts', delimiter: '/', parent: '', specialUse: '\\Drafts', messages: 0, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [other, orig], total: 2, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p === '/message/31' || p === '/message/32') return r.fulfill({ json: { id: p.split('/')[2], subject: 'Re: Plan', from: 'me@ex.com', to: 'jane@ex.com', cc: '', bcc: 'boss@ex.com',
+        inReplyTo: '<plan@ex.com>', references: ['<plan@ex.com>'], draft: true, bodyHtml: '<div style="font-family:system-ui;font-size:14px"><p>Half written</p></div>', body: 'Half written', attachments: [] } });
+      if (p.startsWith('/message/')) { const m = [orig, other].find(x => x.id === p.split('/')[2]); return r.fulfill({ json: { ...m, body: 'Hello', bodyHtml: '', attachments: [] } }); }
+      return r.fulfill({ status: 404, json: { error: 'nf' } });
+    });
+    await page.clock.install();
+    await page.goto('/today?mail=ma-r&folder=INBOX');
+    await page.locator('.mv-msg[data-mv-msg="5"]').click();
+    await expect(page.locator('#mailViewReader')).toContainText('Hello');
+    await expect(page.locator('#mailViewReader .mv-draft-hint')).toBeHidden();   // no draft reply yet
+
+    // Reply: nothing saved until something is written, then 3 s after the last change
+    await page.locator('[data-mv-act="reply"]').click();
+    const editor = page.locator('#mailViewReader .mv-editor');
+    await page.clock.runFor(5000);
+    expect(drafts).toHaveLength(0);
+    await editor.pressSequentially('Half');
+    await page.clock.runFor(1000);
+    expect(drafts).toHaveLength(0);
+    await page.clock.runFor(3000);
+    await expect.poll(() => drafts.length).toBe(1);
+    expect(drafts[0]).toMatchObject({ to: 'Jane <jane@ex.com>', inReplyTo: '<plan@ex.com>', replyUid: '5', replyFolder: 'INBOX' });
+    expect(drafts[0].html).toContain('Half');
+    expect(drafts[0].draftUid).toBeUndefined();
+    await expect(page.locator('.mv-compose-status')).toContainText('Draft saved');
+    // Next save replaces it
+    await editor.pressSequentially(' written');
+    await page.clock.runFor(3500);
+    await expect.poll(() => drafts.length).toBe(2);
+    expect(drafts[1]).toMatchObject({ draftUid: '31', draftFolder: 'Drafts' });
+
+    // Leaving the form: unsaved changes are saved right away, no question
+    await editor.pressSequentially('!');
+    await page.locator('.mv-msg[data-mv-msg="6"]').click();
+    await expect.poll(() => drafts.length).toBe(3);
+    expect(drafts[2].draftUid).toBe('32');
+    await expect(page.locator('#dialogMsg')).toBeHidden();
+    await expect(page.locator('#mailViewReader .mv-subject')).toHaveText('Other');
+
+    // Back on the original: hint → Continue opens the draft (body, Bcc, reply); Send continues and deletes it
+    draftList = [{ id: '32', subject: 'Re: Plan', date: '2026-01-06T09:30:00.000Z' }];
+    await page.locator('.mv-msg[data-mv-msg="5"]').click();
+    const hint = page.locator('#mailViewReader .mv-draft-hint');
+    await expect(hint).toContainText('You started a reply to this message');
+    await hint.locator('[data-mv-draft-continue]').click();
+    await expect(page.locator('#mailViewReader .mv-subject')).toContainText('Reply');
+    await expect(editor).toHaveText('Half written');
+    await expect(page.locator('#mailViewReader [name="bcc"]')).toHaveValue('boss@ex.com');
+    await page.locator('#mailViewReader .mv-send').click();
+    await expect.poll(() => sends.length).toBe(1);
+    expect(sends[0]).toMatchObject({ to: 'jane@ex.com', bcc: 'boss@ex.com', replyUid: '5', draftUid: '32', draftFolder: 'Drafts', inReplyTo: '<plan@ex.com>' });
+
+    // Discard of a saved draft: asks, then deletes it
+    draftList = [{ id: '31', subject: 'Re: Plan', date: '' }];
+    await page.locator('.mv-msg[data-mv-msg="6"]').click();
+    await page.locator('.mv-msg[data-mv-msg="5"]').click();
+    await page.locator('#mailViewReader [data-mv-draft-continue]').click();
+    await expect(editor).toHaveText('Half written');
+    await page.locator('#mailViewReader [data-mv-discard]').click();
+    await expect(page.locator('#dialogMsg')).toContainText('saved draft is deleted');
+    await page.locator('#dialogOkBtn').click();
+    await expect.poll(() => deletes).toEqual(['31']);
+
+    // Closing the view while writing: saved as a draft, no question
+    await page.locator('[data-mv-act="reply"]').click();
+    await editor.pressSequentially('Later');
+    const before = drafts.length;
+    await page.evaluate(() => closeMailView());
+    await expect.poll(() => drafts.length).toBe(before + 1);
+    expect(drafts.at(-1).html).toContain('Later');
+  });
+
   test('E-T-65 mail list: Load all (kept across search / filters, reset by a folder switch), sort & filter popup, Ctrl+A, Home / End, read only after 5 s alone', async ({ page }) => {
     const state = { layouts: LAYOUTS };
     await mockApis(page, state);
@@ -2868,6 +3086,36 @@ async function swipe(page, locator, dx) {
 test.describe('Today page — phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
+  test('E-T-71 phone: "More …" below the last widget expands the widgets other sizes place, without changing the layout', async ({ page }) => {
+    const t = (id, col, order, size) => ({ id, col, order, size });
+    const state = { layouts: {
+      xl: { columns: [{ width: 2 }, { width: 1 }], tiles: [t('agenda', 0, 0, '1/1'), t('cvapp', 1, 0, 'container'), t('progress', 1, 1, 'container')] },
+      sm: { columns: [{ width: 1 }], tiles: [t('agenda', 0, 0, 'container')] },
+    } };
+    await mockApis(page, state);
+    await page.goto('/today');
+    const toggle = page.locator('#todayGrid .today-more-toggle');
+    await expect(toggle).toHaveText('More … (2)');
+    // Below the last widget, closed: its widgets not shown (nor loaded)
+    await expect(page.locator('#todayGrid .today-more-tiles')).toBeHidden();
+    expect(await page.evaluate(() => _todayShownTileIds())).toEqual(['agenda']);
+    await toggle.click();
+    await expect(toggle).toHaveText('Less');
+    const more = page.locator('#todayGrid .today-more-tiles');
+    await expect(more.locator('.today-tile[data-tile="cvapp"]')).toContainText('Engineering Manager');
+    await expect(more.locator('.today-tile[data-tile="progress"] .today-stat')).toHaveCount(4);
+    expect(await page.evaluate(() => _todayShownTileIds())).toEqual(['agenda', 'cvapp', 'progress']);   // registry order
+    // Open state kept per browser; the layout itself was never saved
+    await page.reload();
+    await expect(page.locator('#todayGrid .today-more-tiles .today-tile[data-tile="cvapp"]')).toContainText('Engineering Manager');
+    expect(state.put).toBeUndefined();
+    // Edit mode (edits the phone layout itself): no "More"
+    await page.evaluate(() => _todayToggleEdit());
+    await expect(page.locator('#todayGrid .today-more')).toHaveCount(0);
+    await page.evaluate(() => _todayToggleEdit());
+    await expect(page.locator('#todayGrid .today-more-toggle')).toHaveText('Less');
+  });
+
   test('E-T-41 Stickies on a phone: swipe flips the stack, a tap opens the sticky without the keyboard', async ({ page }) => {
     const state = { layouts: JSON.parse(JSON.stringify(STICKY_LAYOUTS)) };
     await mockApis(page, state);
@@ -3448,5 +3696,50 @@ test.describe('Today page — phone', () => {
     await page.setViewportSize({ width: 700, height: 844 });
     await expect(date).toHaveText(long);
     await sameLine();
+  });
+});
+
+// Real (space-taking) scrollbars: headless Chrome hides them by default, so a column scrollbar never
+// changes the column width there — the flicker loop of E-T-70 needs them
+test.describe('Today page — classic scrollbars', () => {
+  test('E-T-70 no flicker: a Stickies + Applications column at every height around its overflow limit stays still', async ({}, testInfo) => {
+    // Stickies sizes itself from the column width; a column scrollbar coming and going changed that width,
+    // the Stickies height and so the overflow again — an endless loop at heights close to the limit.
+    // Own browser: launch options can't be set per describe (forces a new worker)
+    test.setTimeout(120_000);
+    const browser = await chromium.launch({ ...testInfo.project.use.launchOptions, ignoreDefaultArgs: ['--hide-scrollbars'] });
+    const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, storageState: AUTH_STATE });
+    const page = await context.newPage();
+    try {
+    const t = (id, col, order, size) => ({ id, col, order, size });
+    const state = { layouts: { lg: { columns: [{ width: 2 }, { width: 1 }], tiles: [
+      t('agenda', 0, 0, '1/1'), t('stickies', 1, 0, 'container'), t('cvapp', 1, 1, 'available') ] } } };
+    await mockApis(page, state);
+    await mockStickies(page, state);
+    await page.setViewportSize({ width: 1270, height: 700 });
+    await page.goto('/today');
+    await expect(page.locator('.today-stk-paper--top')).toBeVisible();
+    await expect(page.locator('.today-tile[data-tile="cvapp"]')).toContainText('Engineering Manager');
+    await page.evaluate(() => document.fonts.ready);
+    // Mutations of the grid's classes / styles within 400 ms
+    const restlessFor = () => page.evaluate(() => new Promise(resolve => {
+      let n = 0;
+      const mo = new MutationObserver(list => { for (const m of list) if (m.oldValue !== m.target.getAttribute(m.attributeName)) n++; });
+      mo.observe(document.getElementById('todayGrid'), { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['class', 'style'] });
+      setTimeout(() => { mo.disconnect(); resolve(n); }, 400);
+    }));
+    // Heights from "fits" to "clearly over"; a loop keeps changing — a one-time re-fit (late font) does not,
+    // so only a height that is still restless in a second window counts
+    const restless = [];
+    for (let h = Number(process.env.FLICKER_FROM || 740); h <= Number(process.env.FLICKER_TO || 840); h += Number(process.env.FLICKER_STEP || 2)) {   // looped at 792 px before the fix
+      await page.setViewportSize({ width: 1270, height: h });
+      await page.waitForTimeout(250);
+      const n = (await restlessFor()) && await restlessFor();
+      if (n) restless.push(`${h}px: ${n}`);
+      if (process.env.FLICKER_LOG) console.log(h, n, await page.locator('.today-col').nth(1).evaluate(c => `${c.className} sh=${c.scrollHeight} ch=${c.clientHeight} w=${c.clientWidth}`));
+    }
+    if (process.env.FLICKER_LOG) console.log(restless.join('\n'));
+    expect(restless).toEqual([]);
+    } finally { await browser.close(); }
   });
 });

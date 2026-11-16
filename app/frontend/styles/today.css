@@ -83,6 +83,11 @@
 .today-edit-pending { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
 select.today-edit-badge { font: inherit; border: 1px solid transparent; cursor: pointer; }
 select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
+/* Dark mode: the accent glow is too light behind white text — a darker accent shade (also the list entries) */
+@media not (prefers-color-scheme: light) {
+  .today-edit-badge { background: color-mix(in srgb, var(--accent) 35%, #000); color: #fff; }
+  select.today-edit-badge option { background: color-mix(in srgb, var(--accent) 20%, #111); color: #fff; }
+}
 .today-edit-status { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
 /* Edit preview of a smaller screen size on an extra-large screen */
 #today.today--preview .today-grid {
@@ -113,6 +118,9 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   overflow-x: hidden;   /* never a horizontal scrollbar — wide content scrolls with arrows (_todayHScroll) */
   overflow-y: auto;
   scrollbar-width: thin;
+  /* Room for the scrollbar kept free: content that just fits must not change width when the scrollbar
+     comes and goes — Stickies sizes itself from the width, so that looped (flicker; E2E E-T-70) */
+  scrollbar-gutter: stable;
 }
 #today.today--scroll .today-grid { flex: none; }
 #today.today--scroll .today-col  { overflow-y: visible; }
@@ -448,6 +456,14 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
 .today-board--archived:hover { opacity: 1; }
 /* base.css colours visited links (a:visited) — board and note page links keep the text colour */
 .today-board:visited, .today-npage:visited { color: var(--text); }
+.today-board-head { display: flex; align-items: center; gap: 9px; min-width: 0; max-width: 100%; }
+/* Board icon before the name: only when the widest card fits with it (_todayFitBoards → .today-boards--icons;
+   the measuring copy is laid out once without, once with it — .today-boards--measure-icons) */
+.today-board-icon { display: none; flex: none; color: var(--text-muted); }
+.today-board-icon svg { display: block; }
+.today-boards--icons .today-boards:not(.today-boards--measure) .today-board-icon,
+.today-boards--measure-icons .today-board-icon { display: block; }
+.today-board:hover .today-board-icon { color: var(--accent); }
 .today-board-name { max-width: 100%; }   /* .board-card-name: Syne 0.9rem bold, ellipsis */
 .today-board-counts { display: flex; flex-wrap: nowrap; gap: 4px; max-width: 100%; overflow: hidden; }
 .today-boards-compact .today-boards:not(.today-boards--measure) .today-board { padding: 7px 8px; }
@@ -545,12 +561,20 @@ select.today-edit-badge:focus { outline: none; border-color: var(--accent); }
   font: inherit; font-size: 0.75rem; color: var(--text-muted); transition: color 0.15s;
 }
 .today-qa-toggle:hover { color: var(--text); }
+/* Small screens: "More … (N)" below the last widget — widgets of other sizes' layouts (_todayRenderMore) */
+.today-more { display: flex; flex-direction: column; gap: var(--today-gap); }
+.today-more-toggle { margin: 0 auto; font-size: 0.8rem; }
+.today-more-tiles { display: flex; flex-direction: column; gap: var(--today-gap); }
+.today-more-tiles[hidden] { display: none; }
 .today-qa-empty { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .today-qa-empty .dashboard-empty { margin: 0; }
 
 /* ---- Progress: four inline numbers ---- */
 
-.today-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 8px; margin-top: 8px; }
+/* Four numbers in a row, or two when that is too narrow — never three */
+.today-tile[data-tile="progress"] > .today-tile-body { container-type: inline-size; }
+.today-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+@container (min-width: 280px) { .today-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .today-stat { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; }
 .today-stat-value { font-size: 1.35rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--stat-color); }
 .today-stat-label { font-size: 0.7rem; color: var(--text-muted); }
