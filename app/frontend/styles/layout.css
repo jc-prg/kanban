@@ -307,8 +307,10 @@ body.view-open #schedToggleBtn { display: none !important; }
   75%  { content: '...'; }
 }
 @media (prefers-reduced-motion: reduce) { .loading-dots::after { animation: none; content: '...'; } }
-/* Upload buttons while uploading: accent like Save (+ .btn-accent), not clickable */
+/* Upload buttons while uploading: accent like Save (+ .btn-accent), not clickable. The button is a <label> inside
+   .modal-field, whose label colour (overlay.css) would win over .btn-accent — the text takes Save's colour here */
 .note-upload-label--busy { pointer-events: none; }
+.modal-field label.note-upload-label--busy { color: #fff; }
 
 .btn-accent:hover {
   background: #6b58e8;

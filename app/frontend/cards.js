@@ -160,21 +160,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // File drag-and-drop upload: drag files from OS file manager onto the card modal
   let _cardFileDragDepth = 0;
-  let _cardDragAtCursor = false;
   const _cardModalEl = document.getElementById('modal');
   _cardModalEl.addEventListener('dragenter', e => {
     if (!_activeCardId() || !_cardAttachBase()) return;
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
-    if (++_cardFileDragDepth === 1) {
-      _cardDragAtCursor = isEditorActive('cardDesc');
-      _cardModalEl.classList.add('modal--file-drag');
-    }
+    if (++_cardFileDragDepth === 1) _cardModalEl.classList.add('modal--file-drag');
   }, {capture: true});
   _cardModalEl.addEventListener('dragleave', () => {
     if (--_cardFileDragDepth <= 0) {
       _cardFileDragDepth = 0;
-      _cardDragAtCursor = false;
       _cardModalEl.classList.remove('modal--file-drag');
     }
   }, {capture: true});
@@ -193,8 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!files?.length) return;
     e.preventDefault();
     e.stopPropagation();
-    _handleCardAttachUpload(aid, files, _cardDragAtCursor);
-    _cardDragAtCursor = false;
+    _handleCardAttachUpload(aid, files);
   }, {capture: true});
   // Paste image upload: paste an image from clipboard into the card modal
   _cardModalEl.addEventListener('paste', e => {
@@ -443,14 +437,14 @@ function renderCardAttachments(cardId, files) {
   }
 }
 
-function _appendAttachMd(taId, name, prefix = 'attachment:', atCursor = false) {
+// Uploaded file → description: images at the last edit cursor, other files into the list at the end
+function _appendAttachMd(taId, name, prefix = 'attachment:') {
   const ft = _attachType(name);
-  const md = (ft === 'image' || ft === 'svg') ? `![${name}](${prefix}${name})` : `[${name}](${prefix}${name})`;
-  if (atCursor) insertAtCursor(taId, md);
-  else appendToEditor(taId, md);
+  const image = ft === 'image' || ft === 'svg';
+  addAttachmentLink(taId, image ? `![${name}](${prefix}${name})` : `[${name}](${prefix}${name})`, image);
 }
 
-async function _handleCardAttachUpload(cardId, fileList, atCursor = false) {
+async function _handleCardAttachUpload(cardId, fileList) {
   if (!_cardAttachBase() || !fileList.length) return;
   const label = document.querySelector('label[for="cardAttachInput"]');
   const input = document.getElementById('cardAttachInput');
@@ -467,7 +461,7 @@ async function _handleCardAttachUpload(cardId, fileList, atCursor = false) {
       if (r.ok) {
         const { name } = await r.json();
         window.attachImg?.forget(`${_cardAttachBase()}/${cardId}/${encodeURIComponent(name)}`);   // same name re-uploaded
-        _appendAttachMd('cardDesc', name, 'attachment:', atCursor);
+        _appendAttachMd('cardDesc', name, 'attachment:');
       } else {
         const data = await r.json().catch(() => ({}));
         await showMessage(data.error || 'Upload failed.');

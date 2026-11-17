@@ -1544,7 +1544,7 @@ function initNotes(cfg) {
     return (bytes / 1024 / 1024).toFixed(1) + ' MB';
   }
 
-  async function _handleAttachUpload(pageId, fileList, atCursor = false) {
+  async function _handleAttachUpload(pageId, fileList) {
     if (!NOTES_ATTACH_API || !fileList?.length) return;
     // WebDAV: a page not saved yet has no file on the server to keep its attachments next to
     if (_webdavActive() && _pendingNewPage?.page.id === pageId) {
@@ -1582,7 +1582,7 @@ function initNotes(cfg) {
                     : ext === 'pdf' ? 'pdf'
                     : ['html','htm'].includes(ext) ? 'html'
                     : 'other';
-          _insertAttachmentMd(data.name, ft, data.link);
+          _insertAttachmentMd(data.name, ft, data.link, true);
         } catch (e) { console.error('Upload error:', e.message); }
       }
     } finally {
@@ -1595,11 +1595,15 @@ function initNotes(cfg) {
     }
   }
 
-  function _insertAttachmentMd(name, type, link = null) {
+  // uploaded: images at the last edit cursor, other files into the list at the end (addAttachment)
+  function _insertAttachmentMd(name, type, link = null, uploaded = false) {
     // WebDAV boards: the server returns the link (file next to the note); local: "<pageId>_name"
     const rel = link || `_attachments/${noteModalPageId}_${name}`;
-    const md  = (type === 'image' || type === 'svg') ? `![${name}](${rel})` : `[${name}](${rel})`;
-    if (_editor.insertAtCursor) {
+    const image = type === 'image' || type === 'svg';
+    const md  = image ? `![${name}](${rel})` : `[${name}](${rel})`;
+    if (uploaded && _editor.addAttachment) {
+      _editor.addAttachment('notePageDesc', md, image);
+    } else if (_editor.insertAtCursor) {
       _editor.insertAtCursor('notePageDesc', md);
     } else {
       const ta = document.getElementById('notePageDesc');
@@ -2085,22 +2089,17 @@ function initNotes(cfg) {
 
     // File drag-and-drop onto note modal
     let _noteFileDragDepth = 0;
-    let _noteDragAtCursor = false;
     const _noteModalEl = document.getElementById('noteModal');
     if (_noteModalEl) {
       _noteModalEl.addEventListener('dragenter', e => {
         if (!noteModalPageId || !NOTES_ATTACH_API) return;
         if (!e.dataTransfer?.types.includes('Files')) return;
         e.preventDefault();
-        if (++_noteFileDragDepth === 1) {
-          _noteDragAtCursor = _editor.isActive ? _editor.isActive('notePageDesc') : false;
-          _noteModalEl.classList.add('modal--file-drag');
-        }
+        if (++_noteFileDragDepth === 1) _noteModalEl.classList.add('modal--file-drag');
       }, { capture: true });
       _noteModalEl.addEventListener('dragleave', () => {
         if (--_noteFileDragDepth <= 0) {
           _noteFileDragDepth = 0;
-          _noteDragAtCursor = false;
           _noteModalEl.classList.remove('modal--file-drag');
         }
       }, { capture: true });
@@ -2118,8 +2117,7 @@ function initNotes(cfg) {
         if (!files?.length) return;
         e.preventDefault();
         e.stopPropagation();
-        _handleAttachUpload(noteModalPageId, files, _noteDragAtCursor);
-        _noteDragAtCursor = false;
+        _handleAttachUpload(noteModalPageId, files);
       }, { capture: true });
       // Paste image upload
       _noteModalEl.addEventListener('paste', e => {

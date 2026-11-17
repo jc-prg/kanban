@@ -317,6 +317,7 @@ function _activateEditor(id, srcPos, viewFraction) {
 function _deactivateEditor(id) {
   const entry = _editors.get(id);
   if (!entry) return;
+  entry.lastCursor = entry.view.state.selection.main.head;   // images uploaded later go here
   _renderPreview(entry, entry.view.state.doc.toString());
   entry.editorWrap.style.display = 'none';
   entry.preview.style.display = '';
@@ -474,6 +475,7 @@ function getEditorValue(id) {
 function setEditorValue(id, text) {
   const entry = _editors.get(id);
   if (entry) {
+    entry.lastCursor = null;
     entry.view.dispatch({ changes: { from: 0, to: entry.view.state.doc.length, insert: text } });
     _renderPreview(entry, text);
     // Return to preview mode when value is set programmatically
@@ -495,6 +497,33 @@ function insertAtCursor(id, text) {
     selection: { anchor: from + text.length },
   });
   entry.view.focus();
+}
+
+// An uploaded file's Markdown: files into the attachment list at the end, images at the last cursor
+// position of the edit mode, else above that list (_attachmentEdit in attach-list.js). The mode stays.
+function addAttachmentLink(id, md, image = false) {
+  const entry = _editors.get(id);
+  const el = entry ? null : document.getElementById(id);
+  if (!entry && !el) return;
+  const active = entry ? entry.editorWrap.style.display !== 'none' : document.activeElement === el;
+  const text = entry ? entry.view.state.doc.toString() : el.value;
+  const cursor = entry ? (active ? entry.view.state.selection.main.head : entry.lastCursor ?? null)
+                       : (active ? el.selectionStart : null);
+  const edit = window._attachmentEdit(text, md, { image, cursor });
+  if (!edit) return;
+  if (!entry) {
+    el.value = text.slice(0, edit.from) + edit.insert + text.slice(edit.to);
+    if (active && edit.cursor !== null) el.selectionStart = el.selectionEnd = edit.cursor;
+    el.dispatchEvent(new Event('input'));
+    return;
+  }
+  const changes = { from: edit.from, to: edit.to, insert: edit.insert };
+  if (active && image && edit.cursor !== null) entry.view.dispatch({ changes, selection: { anchor: edit.cursor } });
+  else entry.view.dispatch({ changes });
+  if (!active) {
+    entry.lastCursor = edit.cursor;
+    _renderPreview(entry, entry.view.state.doc.toString());
+  }
 }
 
 function focusEditor(id) {
@@ -889,6 +918,7 @@ window.focusEditor          = focusEditor;
 window.applyEditorFormat    = applyEditorFormat;
 window.isEditorActive       = isEditorActive;
 window.appendToEditor       = appendToEditor;
+window.addAttachmentLink    = addAttachmentLink;
 window.scrollEditorToTop    = scrollEditorToTop;
 window.closeModalFind       = editorId => {
   const st = _findState.get(editorId);

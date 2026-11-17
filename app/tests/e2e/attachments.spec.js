@@ -154,6 +154,15 @@ test.describe('3.7 Attachment uploads', () => {
     const desc = await page.locator('#cardDesc').inputValue();
     expect(desc).toContain('report.txt');
     expect(desc).toContain('attachment:report.txt');
+    // files go into the "---" list at the end; an image (no edit cursor yet) above that list
+    expect(desc).toMatch(/(^|\n)---\n- \[report\.txt\]\(attachment:report\.txt\)$/);
+
+    await page.locator('#cardAttachInput').setInputFiles({ name: 'second.txt', mimeType: 'text/plain', buffer: Buffer.from('2') });
+    await expect(page.locator('#cardAttachList')).toContainText('second.txt', { timeout: 8000 });
+    await page.locator('#cardAttachInput').setInputFiles({ name: 'pic.png', mimeType: 'image/png', buffer: Buffer.from('PNG') });
+    await expect(page.locator('#cardAttachList')).toContainText('pic.png', { timeout: 8000 });
+    const desc2 = await page.locator('#cardDesc').inputValue();
+    expect(desc2).toMatch(/!\[pic\.png\]\(attachment:pic\.png\)\n\n---\n- \[report\.txt\]\(attachment:report\.txt\)\n- \[second\.txt\]\(attachment:second\.txt\)$/);
   });
 
   // E-AT-3 -----------------------------------------------------------------
@@ -392,6 +401,10 @@ test.describe('3.7 Attachment uploads', () => {
     const label = page.locator('label[for="noteAttachInput"]');
     await expect(label).toHaveText('Uploading');
     await expect(label).toHaveClass(/btn-accent/);
+    // Text and background like the Save button
+    const look = el => el.evaluate(e => { const s = getComputedStyle(e); return { color: s.color, bg: s.backgroundColor }; });
+    const save = await look(page.locator('#noteModalSaveBtn'));
+    await expect.poll(() => look(label)).toEqual(save);   // after .btn's colour transition
     await expect(label.locator('.loading-dots')).toHaveCount(1);
     const anim = await label.locator('.loading-dots').evaluate(el => getComputedStyle(el, '::after').animationName);
     expect(anim).toBe('loading-dots');

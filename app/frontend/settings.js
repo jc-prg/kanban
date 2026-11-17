@@ -1802,6 +1802,7 @@ function _createNotesModule(extra = {}) {
       focus:          id => focusEditor(id),
       applyFormat:    (id, fmt) => applyEditorFormat(id, fmt),
       insertAtCursor: (id, text) => insertAtCursor(id, text),
+      addAttachment:  (id, md, image) => addAttachmentLink(id, md, image),
     },
     print: {
       buildItem: _buildPrintItem,
