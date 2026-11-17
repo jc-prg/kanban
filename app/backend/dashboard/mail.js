@@ -691,6 +691,39 @@ async function fetchFolderSize(account, folder) {
   });
 }
 
+// Mailbox totals per account (the folder sum is a full pass over every folder): { at, value }
+const _mailboxSizeCache = new Map();
+const MAILBOX_SIZE_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Size of the whole mailbox: { folders, size (bytes), limit (bytes | null), source } — the server's storage quota
+ * when it reports one (QUOTA, source 'quota'), else the sum of all message sizes of every selectable folder
+ * (source 'sum'). Cached per account for 10 minutes (`fresh` skips the cache).
+ */
+async function fetchMailboxSize(account, { fresh = false } = {}) {
+  const hit = _mailboxSizeCache.get(account.id);
+  if (!fresh && hit && Date.now() - hit.at < MAILBOX_SIZE_TTL_MS) return hit.value;
+  const value = await _withClient(account, async client => {
+    const all = (await client.list()).map(_mapFolder);
+    const folders = all.length;
+    let quota = null;
+    try { quota = await client.getQuota('INBOX'); } catch { /* no QUOTA */ }
+    if (quota && Number.isFinite(quota.storage?.usage)) {
+      return { folders, size: quota.storage.usage, limit: Number.isFinite(quota.storage.limit) && quota.storage.limit > 0 ? quota.storage.limit : null, source: 'quota' };
+    }
+    let size = 0;
+    for (const f of all.filter(x => !x.noselect)) {
+      const lock = await client.getMailboxLock(f.path, { readOnly: true });
+      try {
+        if (client.mailbox?.exists) for await (const msg of client.fetch('1:*', { size: true })) size += msg.size || 0;
+      } finally { lock.release(); }
+    }
+    return { folders, size, limit: null, source: 'sum' };
+  });
+  _mailboxSizeCache.set(account.id, { at: Date.now(), value });
+  return value;
+}
+
 // ---- Duplicates ----
 
 /** Lower-case bare addresses of an envelope address list, sorted. */
@@ -1096,19 +1129,28 @@ async function markFolderRead(account, folder) {
   });
 }
 
+/** UIDs of moved messages in the target folder ({ old: new }, COPYUID / UIDPLUS); null when the server gives none. */
+function _uidMapOf(res) {
+  const map = res && res.uidMap;
+  if (!map || typeof map.entries !== 'function' || !map.size) return null;
+  return Object.fromEntries([...map.entries()].map(([a, b]) => [String(a), Number(b)]));
+}
+
 /**
- * Move a message by UID from `folder` to targetFolder.
+ * Move a message by UID from `folder` to targetFolder. Returns { folder: targetFolder, uids } — uids = the
+ * messages' UIDs in the target ({ old: new }, null without UIDPLUS); the mail view's undo moves them back.
  */
 async function moveMailMessage(account, uid, targetFolder, folder) {
   return _withMailbox(account, folder, async client => {
-    await client.messageMove(String(uid), targetFolder, { uid: true });
+    const res = await client.messageMove(String(uid), targetFolder, { uid: true });
+    return { folder: targetFolder, uids: _uidMapOf(res) };
   });
 }
 
 /**
  * Delete a message by UID — moves it to the trash folder (account.trashFolder,
  * else the server's \Trash folder, else 'Trash'). A message that already is in
- * the trash is deleted permanently. Returns { permanent }.
+ * the trash is deleted permanently. Returns { permanent, folder?, uids? } — folder / uids (as moveMailMessage) for a move to the trash.
  */
 async function deleteMailMessage(account, uid, folder) {
   const source = _folderOf(account, folder);
@@ -1118,8 +1160,8 @@ async function deleteMailMessage(account, uid, folder) {
       await client.messageDelete(String(uid), { uid: true });
       return { permanent: true };
     }
-    await client.messageMove(String(uid), trash, { uid: true });
-    return { permanent: false };
+    const res = await client.messageMove(String(uid), trash, { uid: true });
+    return { permanent: false, folder: trash, uids: _uidMapOf(res) };
   });
 }
 
@@ -1335,6 +1377,7 @@ module.exports = {
   fetchMailAttachments,
   fetchFolderMessages,
   fetchFolderSize,
+  fetchMailboxSize,
   searchMailAccount,
   testMailAccount,
   listMailFolders,

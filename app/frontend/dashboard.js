@@ -1780,7 +1780,11 @@ window.addEventListener('click', _mailtoClick, true);
 /** Wire mailto: links inside an iframe (mail bodies, event descriptions) once it has loaded. */
 function _mailtoWireFrame(iframe) {
   iframe.addEventListener('load', () => {
-    try { iframe.contentDocument?.addEventListener('click', _mailtoClick, true); } catch { /* cross-origin */ }
+    try {
+      iframe.contentDocument?.addEventListener('click', _mailtoClick, true);
+      // Keys pressed inside the mail text reach the mail view's shortcuts (Delete …) — mailview.js
+      iframe.contentDocument?.addEventListener('keydown', e => { if (typeof _mailFrameKeydown === 'function') _mailFrameKeydown(e, iframe); });
+    } catch { /* cross-origin */ }
   });
 }
 

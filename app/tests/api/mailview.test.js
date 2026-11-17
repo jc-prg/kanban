@@ -90,8 +90,9 @@ class MockImapFlow {
   async mailboxRename(a, b)    { imap.calls.push(['rename', a, b]) }
   async messageFlagsAdd(u, f)    { imap.calls.push(['flagsAdd', u, f]) }
   async messageFlagsRemove(u, f) { imap.calls.push(['flagsRemove', u, f]) }
-  async messageMove(u, target)   { imap.calls.push(['move', u, target]) }
+  async messageMove(u, target)   { imap.calls.push(['move', u, target]); return imap.moveResult }
   async messageDelete(u)         { imap.calls.push(['expunge', u]) }
+  async getQuota(path)           { imap.calls.push(['quota', path]); return imap.quota ?? false }
   async append(folder, raw, flags) { imap.calls.push(['append', folder, raw.toString('utf8'), flags]); return imap.appendUid ? { uid: imap.appendUid } : undefined }
 }
 const IMAPFLOW_MODULE = require.resolve('imapflow')
@@ -331,7 +332,7 @@ test('MVA-10 PATCH / move with ?folder= — operate in that folder; default stay
 test('MVA-11 DELETE — moves to the \\Trash folder; inside trash → permanent delete', async () => {
   imap.folders = [{ path: 'Deleted Items', specialUse: '\\Trash', flags: new Set() }]
   const moved = await request(app).delete(`${API}/message/3`).set(AUTH)
-  expect(moved.body).toEqual({ ok: true, permanent: false })
+  expect(moved.body).toEqual({ ok: true, permanent: false, folder: 'Deleted Items', uids: null })
   expect(calls('move')[0]).toEqual(['move', '3', 'Deleted Items'])
 
   const gone = await request(app).delete(`${API}/message/3?folder=${encodeURIComponent('Deleted Items')}`).set(AUTH)
@@ -565,7 +566,7 @@ test('MVA-19 bulk — UID sets accepted for PATCH / move / DELETE; single GET an
 
   imap.folders = [{ path: 'Trash', specialUse: '\\Trash', flags: new Set() }]
   const del = await request(app).delete(`${API}/message/4,5`).set(AUTH)
-  expect(del.body).toEqual({ ok: true, permanent: false })
+  expect(del.body).toEqual({ ok: true, permanent: false, folder: 'Trash', uids: null })
   expect(calls('move').at(-1)).toEqual(['move', '4,5', 'Trash'])
 
   expect((await request(app).get(`${API}/message/3,7`).set(AUTH)).status).toBe(400)
@@ -1210,4 +1211,40 @@ test('MVA-52 GET drafts?inReplyTo — draft replies to a message; message route 
     headers: Buffer.from('X-JC-Reply: 77 INBOX%2FProjekte\r\nX-JC-Forward: 12 Archive\r\n') })]
   const msg = await request(app).get(`${API}/message/3?folder=Drafts`).set(AUTH)
   expect(msg.body).toMatchObject({ draft: true, bcc: 'dave@ex.com', draftReply: { uid: '77', folder: 'INBOX/Projekte' }, draftForward: { uid: '12', folder: 'Archive' } })
+})
+
+test('MVA-53 move / DELETE report the target folder and the new UIDs (COPYUID) for the mail view\'s undo', async () => {
+  imap.moveResult = { path: 'INBOX', destination: 'Archive', uidMap: new Map([[3, 101], [7, 102]]) }
+  const mv = await request(app).post(`${API}/message/3,7/move`).set(AUTH).send({ folder: 'Archive' })
+  expect(mv.body).toEqual({ ok: true, folder: 'Archive', uids: { 3: 101, 7: 102 } })
+  imap.moveResult = { path: 'INBOX', destination: 'Trash', uidMap: new Map([[4, 55]]) }
+  const del = await request(app).delete(`${API}/message/4`).set(AUTH)
+  expect(del.body).toEqual({ ok: true, permanent: false, folder: 'Trash', uids: { 4: 55 } })
+  imap.moveResult = true   // server without UIDPLUS
+  expect((await request(app).post(`${API}/message/5/move`).set(AUTH).send({ folder: 'Archive' })).body)
+    .toEqual({ ok: true, folder: 'Archive', uids: null })
+  imap.moveResult = undefined
+})
+
+test('MVA-54 GET mailbox-size — storage quota when the server reports one, else the sum over all selectable folders (cached)', async () => {
+  imap.folders = [
+    { path: 'INBOX', name: 'INBOX', delimiter: '/', flags: new Set() },
+    { path: 'Archive', name: 'Archive', delimiter: '/', flags: new Set() },
+    { path: 'Parent', name: 'Parent', delimiter: '/', flags: new Set(['\\Noselect']) },
+  ]
+  imap.byFolder = { INBOX: [_msg(1), _msg(2)], Archive: [{ ..._msg(3), size: 1000 }] }
+  const sum = await request(app).get(`${API}/mailbox-size?fresh=1`).set(AUTH)
+  expect(sum.status).toBe(200)
+  expect(sum.body).toEqual({ folders: 3, size: 1234 * 2 + 1000, limit: null, source: 'sum' })
+  expect(calls('lock').map(c => c[1])).toEqual(['INBOX', 'Archive'])   // \Noselect skipped
+  // Cached: no IMAP pass for the next request
+  imap.calls = []
+  expect((await request(app).get(`${API}/mailbox-size`).set(AUTH)).body.size).toBe(3468)
+  expect(imap.calls).toEqual([])
+
+  imap.quota = { path: 'INBOX', storage: { usage: 5 * 1024 * 1024, limit: 1024 * 1024 * 1024 } }
+  const q = await request(app).get(`${API}/mailbox-size?fresh=1`).set(AUTH)
+  expect(q.body).toEqual({ folders: 3, size: 5 * 1024 * 1024, limit: 1024 * 1024 * 1024, source: 'quota' })
+  expect(calls('lock')).toEqual([])   // no folder pass with a quota
+  expect((await request(app).get('/api/dashboard/mail/ma-x/mailbox-size').set(AUTH)).status).toBe(404)
 })

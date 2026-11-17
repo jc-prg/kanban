@@ -357,12 +357,14 @@ body.mailview-open header { z-index: 96; }
 
 /* Swipe actions (phones): the row slides, each action layer fills the freed space */
 .mv-msg-wrap { position: relative; overflow: hidden; }
-/* Drag & drop (_mvDragStart): source rows dimmed, drag image = row copy at 60 % (off-screen until the snapshot) */
+/* Drag & drop (_mvDragStart): source rows dimmed, drag image = row copy at 50 % (off-screen until the snapshot), so folder
+   names stay readable beneath it — on the background and the copy, browsers may drop opacity on the drag image's root */
 .mv-dragging { opacity: 0.6; }
 .mailview-list.mv-drag-image, .mailview-folders.mv-drag-image, .mv-drag-image {
   position: fixed; left: -10000px; top: 0; z-index: -1; flex: none; overflow: visible;
-  opacity: 0.6; background: var(--panel-bg); border-radius: 6px; pointer-events: none;
+  background: color-mix(in srgb, var(--panel-bg) 50%, transparent); border-radius: 6px; pointer-events: none;
 }
+.mv-drag-image > .mv-msg, .mv-drag-image > .mv-folder { opacity: 0.5; }
 .mv-drag-image .mv-msg.active, .mv-drag-image .mv-msg.selected { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .mv-drag-count {
   position: absolute; right: 8px; bottom: 6px; padding: 1px 8px; border-radius: 10px;

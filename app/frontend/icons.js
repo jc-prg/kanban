@@ -232,6 +232,16 @@ function _svgDelete(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="1" y1="3.5" x2="11" y2="3.5"/><path d="M4.5 3.5V2.2h3V3.5"/><path d="M2.2 3.5L2.8 10.5H9.2L9.8 3.5"/><line x1="5" y1="5.5" x2="5" y2="9"/><line x1="7" y1="5.5" x2="7" y2="9"/></svg>`;
 }
 
+// Paper plane — sent mail folder
+function _svgPaperPlane(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 1L1 5.2l3.8 1.6L11 1L6.6 11L4.8 6.8"/></svg>`;
+}
+
+// Sheet with a pencil across its corner — mail drafts folder
+function _svgDraft(w = 12, h = 12) {
+  return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 1H2.3a.8.8 0 0 0-.8.8v8.4a.8.8 0 0 0 .8.8h6.4a.8.8 0 0 0 .8-.8V7.5"/><path d="M9.6 1.4l1 1L6.3 6.7l-1.6.6.6-1.6z"/></svg>`;
+}
+
 // Ring with inner dot (bullseye) — change card or column color
 function _svgColor(w = 12, h = 12) {
   return `<svg viewBox="0 0 12 12" width="${w}" height="${h}" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="6" cy="6" r="5.3"/><circle cx="6" cy="6" r="2" fill="currentColor" stroke="none"/></svg>`;
@@ -381,6 +391,8 @@ const SVGICONS = {
   shield:         _svgShield,
   shieldCheck:    _svgShieldCheck,
   delete:         _svgDelete,
+  paperPlane:     _svgPaperPlane,
+  draft:          _svgDraft,
   color:          _svgColor,
   fileImage:      _svgFileImage,
   filePdf:        _svgFilePdf,

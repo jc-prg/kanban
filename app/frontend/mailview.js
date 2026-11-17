@@ -19,6 +19,11 @@ const _MV_EMPTYABLE_NAMES = new Set([
   'trash', 'spam', 'junk', 'junk-e-mail', 'junk e-mail', 'junk-mail', 'gelöschte elemente',
   'gelöschte objekte', 'deleted items', 'deleted messages', 'papierkorb', 'bulk mail',
 ]);
+// Folder icons: trash can / paper plane / sheet with pencil for the trash, sent and drafts folders (account setting,
+// special use, else these names)
+const _MV_TRASH_NAMES = new Set(['trash', 'deleted items', 'deleted messages', 'gelöschte elemente', 'gelöschte objekte', 'papierkorb']);
+const _MV_SENT_NAMES  = new Set(['sent', 'sent items', 'sent messages', 'sent mail', 'gesendet', 'gesendete elemente', 'gesendete objekte']);
+const _MV_DRAFT_NAMES = new Set(['drafts', 'draft', 'entwürfe', 'entwurf']);
 const _MV_DEFAULT_W     = { folders: 210, list: 340 };
 const _MV_MIN_W         = { folders: 120, list: 180 };
 
@@ -697,6 +702,8 @@ async function _mvReload() {
       own:             [a.user, ..._mvParseSenders(a.smtp?.fromAddress)].filter(x => x && x.includes('@')),
       canSend:         !!a.smtp?.host,
       trashFolder:     a.trashFolder || null,
+      sentFolder:      a.sentFolder || null,
+      draftsFolder:    a.draftsFolder || null,
     }));
   } catch { _mvAccounts = []; }
   if (!_mvAccounts.some(a => a.accountId === _mvAccountId)) {
@@ -756,6 +763,35 @@ async function _mvLoadFolderSize() {
   const size = data.size ?? 0, messages = data.messages ?? 0;
   el.textContent = `${name}: ${_mvFmtSize(size) || '0 B'}`;
   el.title = `${name}: ${messages} message${messages === 1 ? '' : 's'}, ${size.toLocaleString()} bytes`;
+}
+
+// Whole-mailbox size per account for the account row's tooltip: accountId → { at, data | null, error, pending }
+const _mvBoxSize = new Map();
+const _MV_BOX_SIZE_TTL_MS = 5 * 60 * 1000;
+
+/** Tooltip of an account row: "N folders, X total" (quota: "of Y"); the total once loaded. */
+function _mvAccountTitle(accountId) {
+  const n = _mvFolders.get(accountId)?.list?.length;
+  const e = _mvBoxSize.get(accountId);
+  const folders = n == null ? '' : `${n} folder${n === 1 ? '' : 's'}, `;
+  if (e?.data) {
+    const { size, limit } = e.data;
+    return `${folders}${_mvFmtSize(size) || '0 B'} total${limit ? ` (of ${_mvFmtSize(limit)})` : ''}`;
+  }
+  return `${folders}${e?.error ? `total size unavailable: ${e.error}` : 'total size \u2026'}`;
+}
+
+/** Hover on an account row: fetch the mailbox size (cached 5 min here, 10 min on the server), then update the tooltip. */
+async function _mvLoadMailboxSize(accountId) {
+  const e = _mvBoxSize.get(accountId);
+  if (e?.pending || (e?.data && Date.now() - e.at < _MV_BOX_SIZE_TTL_MS)) return;
+  _mvBoxSize.set(accountId, { ...e, pending: true });
+  let next;
+  try { next = { at: Date.now(), data: await _mvJson(_mvApi(accountId, '/mailbox-size')), error: null }; }
+  catch (err) { next = { at: Date.now(), data: e?.data || null, error: e?.data ? null : err.message }; }
+  _mvBoxSize.set(accountId, next);
+  document.querySelectorAll(`#mailViewFolders .mv-account-head[data-mv-account="${CSS.escape(accountId)}"]`)
+    .forEach(el => { el.title = _mvAccountTitle(accountId); });
 }
 
 /** Load a page of the open folder (`all`: every message from `page` on — "Load all"). */
@@ -1183,11 +1219,13 @@ async function _mvDeleteMessages(ids, opts = {}) {
   // Conversation mode: one row can stand for several messages → say how many
   else if (ids.length > 1 && _mvOpts.threads && !opts.confirmed
       && !(await showConfirm(`Delete ${ids.length} messages?`, { okLabel: 'Delete', danger: true }))) return;
+  const mids = _mvMessageIdsOf(ids, folder);
   _mvDropFromList(ids, opts);
   const n = ids.length === 1 ? 'Message' : `${ids.length} messages`;
   try {
     const res = await _mvJson(_mvMessagesUrl(ids, '', folder), { method: 'DELETE' });
     _mvFlash(res.permanent ? `${n} deleted permanently` : `${n} moved to trash`);
+    _mvSetUndo(accountId, res.permanent ? [] : [_mvUndoGroup(folder, ids, mids, res)]);
   } catch (err) {
     _mvFlash(`Delete failed: ${err.message}`, true);
     _mvLoadList(0);
@@ -1199,11 +1237,13 @@ async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _
   if (!ids.length || target === folder) return;
   // Conversations: a message moves with its replies (any folder)
   if (_mvOpts.threads && accountId === _mvAccountId && folder === _mvFolder) return _mvMoveItems(_mvMoveAnchors(ids), target, opts);
+  const mids = _mvMessageIdsOf(ids, folder);
   if (accountId === _mvAccountId && folder === _mvFolder) _mvDropFromList(ids, opts);
   try {
-    await _mvJson(_mvApi(accountId, `/message/${ids.join(',')}/move?${_mvFolderQs(folder)}`), {
+    const res = await _mvJson(_mvApi(accountId, `/message/${ids.join(',')}/move?${_mvFolderQs(folder)}`), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: target }),
     });
+    _mvSetUndo(accountId, [_mvUndoGroup(folder, ids, mids, res)]);
     _addRecentFolder(accountId, target);
     const tf = _mvFolderInfo(accountId, target);
     _mvFlash(`${ids.length === 1 ? 'Moved' : `${ids.length} messages moved`} to ${tf ? _mvFolderLabel(tf) : target}`);
@@ -1212,6 +1252,87 @@ async function _mvMoveMessages(ids, target, accountId = _mvAccountId, folder = _
     _mvLoadList(0);
   }
   _mvRefreshFoldersSoon(accountId);
+}
+
+// ---- Keys ----
+
+let _mvKeydown = null;   // the view's key handler (wired with the view)
+
+/**
+ * Keydown inside a mail body iframe (dashboard.js `_mailtoWireFrame`): a click into the mail text moves the focus
+ * there, so the reader's iframe passes its keys on to the view (Delete, r, u, Escape …). Keys that act on the
+ * mail text itself stay there: select all / copy, arrows, Space, Page up / down.
+ */
+function _mailFrameKeydown(e, iframe) {
+  if (!_mvKeydown || !iframe.closest('#mailViewReader')) return;
+  if ((e.ctrlKey || e.metaKey) && !['z', 'Z'].includes(e.key)) return;
+  if (/^(Arrow|Page)/.test(e.key) || e.key === ' ' || e.key === 'Home' || e.key === 'End') return;
+  _mvKeydown(e);
+}
+
+// ---- Undo (Ctrl+Z): the last move / delete to the trash goes back ----
+
+let _mvUndo = null;   // { accountId, groups: [{ from, to, items: [{ uid?, messageId? }] }] } — only the last action
+
+/** Message-IDs of messages by UID (read before they leave the list) — the undo's fallback without new UIDs. */
+function _mvMessageIdsOf(ids, folder) {
+  const out = {};
+  for (const id of ids) {
+    const m = _mvFindListed(id, folder) || (_mvMsg?.id === id && (_mvMsg.folder || _mvFolder) === folder ? _mvMsg : null);
+    if (m?.messageId) out[id] = m.messageId;
+  }
+  return out;
+}
+
+/** Undo entry of one move request: the messages' UIDs in the target (server's COPYUID), else their Message-IDs. */
+function _mvUndoGroup(from, ids, mids, res) {
+  return {
+    from, to: res?.folder,
+    items: ids.map(id => ({ uid: res?.uids?.[id] || null, messageId: mids?.[id] || null })).filter(it => it.uid || it.messageId),
+  };
+}
+
+function _mvSetUndo(accountId, groups) {
+  groups = groups.filter(g => g.to && g.to !== g.from && g.items.length);
+  _mvUndo = groups.length ? { accountId, groups } : null;
+}
+
+/** Ctrl+Z: move the messages of the last move / delete back to where they came from. */
+async function _mvUndoLast() {
+  const u = _mvUndo;
+  if (!u) return;
+  _mvUndo = null;
+  let moved = 0, error = null;
+  for (const g of u.groups) {
+    const uids = [];
+    for (const it of g.items) {
+      if (it.uid) { uids.push(it.uid); continue; }
+      try {   // server without UIDPLUS: find it in the target by Message-ID
+        const qs = new URLSearchParams({ messageId: it.messageId, folder: g.to, scope: 'hint' });
+        const found = await _mvJson(_mvApi(u.accountId, `/locate?${qs}`));
+        if (found?.folder === g.to && found.uid) uids.push(found.uid);
+      } catch { /* gone meanwhile */ }
+    }
+    for (let i = 0; i < uids.length; i += 500) {
+      const chunk = uids.slice(i, i + 500);
+      try {
+        await _mvJson(_mvApi(u.accountId, `/message/${chunk.join(',')}/move?${_mvFolderQs(g.to)}`), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: g.from }),
+        });
+        moved += chunk.length;
+      } catch (err) { error = err.message; }
+    }
+  }
+  if (error) _mvFlash(`Undo failed${moved ? ` for some messages (${moved} moved back)` : ''}: ${error}`, true);
+  else if (!moved) _mvFlash('Nothing to undo — the messages were not found', true);
+  else {
+    const back = [...new Set(u.groups.map(g => g.from))];
+    const tf = back.length === 1 ? _mvFolderInfo(u.accountId, back[0]) : null;
+    const where = back.length === 1 ? ` to ${tf ? _mvFolderLabel(tf) : back[0]}` : '';
+    _mvFlash(`Undone: ${moved === 1 ? 'message' : `${moved} messages`} moved back${where}`);
+  }
+  if (u.accountId === _mvAccountId && u.groups.some(g => g.from === _mvFolder || g.to === _mvFolder)) _mvLoadList(0);
+  _mvRefreshFoldersSoon(u.accountId);
 }
 
 /**
@@ -1246,6 +1367,7 @@ async function _mvMoveItems(anchors, target, opts = {}) {
   }
   const byFolder = new Map();
   for (const m of plan.items) (byFolder.get(m.folder) || byFolder.set(m.folder, []).get(m.folder)).push(m.id);
+  const mids = new Map([...byFolder].map(([folder, ids]) => [folder, _mvMessageIdsOf(ids, folder)]));
   // Out of the list, the conversations and the reader at once
   const gone = new Set(plan.items.map(m => _mvKey(m.id, m.folder)));
   const keep = m => m.placeholder || !gone.has(_mvKey(m.id, m.folder || _mvFolder));
@@ -1262,17 +1384,20 @@ async function _mvMoveItems(anchors, target, opts = {}) {
   _mvRenderList();
   _mvRenderThreadStrip();
   let moved = 0, error = null;
+  const undo = [];
   for (const [folder, ids] of byFolder) {
     for (let i = 0; i < ids.length; i += 500) {
       const chunk = ids.slice(i, i + 500);
       try {
-        await _mvJson(_mvApi(accountId, `/message/${chunk.join(',')}/move?${_mvFolderQs(folder)}`), {
+        const res = await _mvJson(_mvApi(accountId, `/message/${chunk.join(',')}/move?${_mvFolderQs(folder)}`), {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder: target }),
         });
         moved += chunk.length;
+        undo.push(_mvUndoGroup(folder, chunk, mids.get(folder), res));
       } catch (err) { error = err.message; }
     }
   }
+  _mvSetUndo(accountId, undo);
   if (moved) _addRecentFolder(accountId, target);
   if (error) {
     _mvFlash(`Move failed${moved ? ` for some messages (${moved} moved)` : ''}: ${error}`, true);
@@ -1362,9 +1487,11 @@ async function _mvExtAction(act, btn) {
     return;
   }
   if (act === 'move') return _mvPickAndMoveItem(id, folder);   // with its replies
+  const mids = _mvMessageIdsOf([id], folder);
   try {
     const res = await _mvJson(_mvMessagesUrl([id], '', folder), { method: 'DELETE' });
     _mvFlash(res.permanent ? 'Message deleted permanently' : 'Message moved to trash');
+    _mvSetUndo(accountId, res.permanent ? [] : [_mvUndoGroup(folder, [id], mids, res)]);
   } catch (err) {
     _mvFlash(`Delete failed: ${err.message}`, true);
     return;
@@ -1817,9 +1944,6 @@ function _mvFolderMenu(e, accountId, path) {
   if (f && !f.noselect) {
     items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.duplicate()}</span>Delete duplicates`, action: () => _mvDeleteDuplicates(accountId, path) });
   }
-  if (f && !f.noselect && _mvIsEmptyable(f, _mvAccounts.find(a => a.accountId === accountId)?.trashFolder)) {
-    items.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.delete()}</span>Empty folder`, danger: true, action: () => _mvEmptyFolder(accountId, path) });
-  }
   if (!isInbox) {
     const hidden = _mvHidden.has(`${accountId}\n${path}`);
     items.push(hidden
@@ -1828,10 +1952,15 @@ function _mvFolderMenu(e, accountId, path) {
     items.push(
       { labelHtml: `<span class="ctx-icon">${SVGICONS.edit()}</span>Rename`,    action: () => _mvRenameFolder(accountId, path) },
       { labelHtml: `<span class="ctx-icon">${SVGICONS.moveTo()}</span>Move to…`, action: () => _mvMoveFolder(accountId, path, null) },
-      { separator: true },
-      { labelHtml: `<span class="ctx-icon">${SVGICONS.delete()}</span>Delete folder`, danger: true, action: () => _mvDeleteFolder(accountId, path) },
     );
   }
+  // Destructive entries below the line: Empty folder (trash / spam), Delete folder
+  const danger = [];
+  if (f && !f.noselect && _mvIsEmptyable(f, _mvAccounts.find(a => a.accountId === accountId)?.trashFolder)) {
+    danger.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.delete()}</span>Empty folder`, danger: true, action: () => _mvEmptyFolder(accountId, path) });
+  }
+  if (!isInbox) danger.push({ labelHtml: `<span class="ctx-icon">${SVGICONS.delete()}</span>Delete folder`, danger: true, action: () => _mvDeleteFolder(accountId, path) });
+  if (danger.length) items.push({ separator: true }, ...danger);
   openContextMenu(e, items);
 }
 
@@ -1929,6 +2058,31 @@ function _mvRenderToolbar() {
     ? 'New message (c)' : 'Configure an SMTP server in the mail settings to write messages';
 }
 
+/**
+ * Role of a folder for its icon: 'trash' / 'sent' / 'drafts' — the account's trashFolder / sentFolder / draftsFolder,
+ * else the server's \Trash / \Sent / \Drafts folder, else a well-known name (only when the account has no such folder already); null otherwise.
+ */
+function _mvFolderRole(accountId, f) {
+  const acc  = _mvAccounts.find(a => a.accountId === accountId);
+  const list = _mvFolders.get(accountId)?.list || [];
+  const name = String(f.name || f.path).trim().toLowerCase();
+  const role = (setting, use, names) => {
+    if (setting) return f.path === setting;
+    if (list.some(x => x.specialUse === use)) return f.specialUse === use;
+    return f.specialUse === use || names.has(name);
+  };
+  if (role(acc?.trashFolder, '\\Trash', _MV_TRASH_NAMES)) return 'trash';
+  if (role(acc?.sentFolder, '\\Sent', _MV_SENT_NAMES)) return 'sent';
+  if (role(acc?.draftsFolder, '\\Drafts', _MV_DRAFT_NAMES)) return 'drafts';
+  return null;
+}
+
+function _mvFolderIconHtml(accountId, f) {
+  const role = _mvFolderRole(accountId, f);
+  const icon = { trash: SVGICONS.delete, sent: SVGICONS.paperPlane, drafts: SVGICONS.draft }[role]?.(12, 12) || SVGICONS.folder(12, 12);
+  return `<span class="mv-folder-icon"${role ? ` data-mv-role="${role}"` : ''}>${icon}</span>`;
+}
+
 function _mvTreeNodeHtml(accountId, node, depth) {
   const f = node.folder;
   const key = `${accountId}\n${f.path}`;
@@ -1947,7 +2101,7 @@ function _mvTreeNodeHtml(accountId, node, depth) {
       data-mv-acc="${escHtml(accountId)}" data-mv-folder="${escHtml(f.path)}" style="--mv-depth:${depth}"
       ${f.path.toUpperCase() !== 'INBOX' && !editing ? 'draggable="true"' : ''} title="${escHtml(f.path)}${hidden ? ' (hidden)' : ''}">
       <button class="mv-twisty${hasKids ? '' : ' mv-twisty-none'}" data-mv-toggle="${escHtml(key)}" tabindex="-1" aria-label="${collapsed ? 'Expand' : 'Collapse'}">${hasKids ? (collapsed ? '▸' : '▾') : ''}</button>
-      <span class="mv-folder-icon">${SVGICONS.folder(12, 12)}</span>${label}
+      ${_mvFolderIconHtml(accountId, f)}${label}
       ${unseen ? `<span class="mv-badge${collapsed && !f.unseen ? ' mv-badge-rollup' : ''}">${unseen}</span>` : ''}
     </div>`;
   if (!collapsed) {
@@ -1994,7 +2148,7 @@ function _mvRenderTree() {
       }
     }
     return `<div class="mv-account" style="${acc.color ? `--card-color:${escHtml(acc.color)}` : ''}">
-      <div class="mv-account-head" data-mv-account="${escHtml(acc.accountId)}">
+      <div class="mv-account-head" data-mv-account="${escHtml(acc.accountId)}" title="${escHtml(_mvAccountTitle(acc.accountId))}">
         <button class="mv-twisty" data-mv-toggle="${escHtml(rootKey)}" tabindex="-1">${collapsed ? '▸' : '▾'}</button>
         <span class="mv-account-swatch"></span><span class="mv-account-label">${escHtml(acc.label)}</span>
         ${collapsed && inboxUnseen ? `<span class="mv-badge">${inboxUnseen}</span>` : ''}
@@ -3356,7 +3510,7 @@ function _mvShowInFolder(id, folder) {
 
 /**
  * Drag start of message / folder rows: the source rows dim (`mv-dragging`, removed on dragend) and
- * the drag image is a copy of the row at 60 % opacity — a multi-selection adds a count chip.
+ * the drag image is a copy of the row at 50 % opacity — a multi-selection adds a count chip.
  */
 function _mvDragStart(e, row, rows, count) {
   rows.forEach(r => r.classList.add('mv-dragging'));
@@ -3389,6 +3543,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const reader  = document.getElementById('mailViewReader');
   const search  = document.getElementById('mailViewSearch');
 
+  folders.addEventListener('mouseover', e => {
+    const head = e.target.closest('.mv-account-head');
+    if (head) _mvLoadMailboxSize(head.dataset.mvAccount);
+  });
   document.getElementById('mailViewClose').addEventListener('click', closeMailView);
   document.getElementById('mailViewCompose').addEventListener('click', () => _mvOpenCompose('new'));
   document.getElementById('mailViewSettings').addEventListener('click', () => openSettingsDialog('mail-accounts'));
@@ -3735,7 +3893,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Capture phase: runs before modal handlers, so a modal that closes itself on Escape
   // is still visible here and the view stays open
-  window.addEventListener('keydown', e => {
+  _mvKeydown = e => {
     if (!_mvIsOpen()) return;
     // Leave keys to dialogs / menus stacked above the view
     if (document.querySelector('dialog[open]')) return;
@@ -3761,6 +3919,11 @@ document.addEventListener('DOMContentLoaded', () => {
       _mvSelectAll();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z' && !_mvCompose && _mvUndo) {
+      e.preventDefault();
+      _mvUndoLast();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -3769,7 +3932,7 @@ document.addEventListener('DOMContentLoaded', () => {
       else closeMailView();
     } else if (_mvCompose) {
       return;
-    } else if ((e.key === 'Delete' || e.key === '#') && _mvSelectedIds().length) { e.preventDefault(); _mvDeleteMessages(_mvSelectedIds()); }
+    } else if ((e.key === 'Delete' || e.key === 'Backspace' || e.key === '#') && _mvSelectedIds().length) { e.preventDefault(); _mvDeleteMessages(_mvSelectedIds()); }
     else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); _mvMoveSelection(1); }
     else if (e.key === 'ArrowUp'   || e.key === 'k') { e.preventDefault(); _mvMoveSelection(-1); }
     else if (e.key === 'Home') { e.preventDefault(); _mvJumpSelection('first'); }
@@ -3788,7 +3951,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     else if (e.key === 's' && _mvSelectedIds().length) _mvToggleFlag(_mvSelectedIds());
     else if (e.key === '/') { e.preventDefault(); _mvSetPane('list'); search.focus(); }
-  }, true);
+  };
+  window.addEventListener('keydown', _mvKeydown, true);
 
   // System switches between light and dark: the open mail follows (and the background button comes / goes)
   try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (_mvIsOpen()) _mvRerenderBody(); }); } catch { /* ignore */ }

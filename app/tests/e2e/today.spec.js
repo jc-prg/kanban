@@ -397,6 +397,167 @@ test.describe('Today page', () => {
     await expect(current).toHaveCount(0);
   });
 
+  test('E-T-76 mail view Ctrl+Z: the last delete / move goes back (new UIDs from the server, else found by Message-ID); folder menu: Empty folder below the line', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const msgs = [1, 2, 3].map(i => ({ id: String(i), subject: `Mail ${i}`, messageId: `<${i}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: new Date(Date.UTC(2026, 0, i)).toISOString(), size: 500, unread: false, flagged: false, flagColor: null }));
+    const ops = [];   // [method, path, folder query, body folder]
+    let moveUids = null, listLoads = 0;
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-u', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [] }));
+    await page.route('**/api/dashboard/mail/ma-u/**', r => {
+      const u = new URL(r.request().url());
+      const p = u.pathname.replace('/api/dashboard/mail/ma-u', '');
+      const m = r.request().method();
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 3, unseen: 0 },
+        { path: 'Archive', name: 'Archive', delimiter: '/', parent: '', specialUse: null, messages: 0, unseen: 0 },
+        { path: 'Trash', name: 'Trash', delimiter: '/', parent: '', specialUse: '\\Trash', messages: 0, unseen: 0 }] } });
+      if (p === '/messages') { listLoads++; return r.fulfill({ json: { messages: [...msgs].reverse(), total: 3, page: 0, pageSize: 50 } }); }
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (p === '/locate') { ops.push(['LOCATE', u.searchParams.get('messageId'), u.searchParams.get('folder'), u.searchParams.get('scope')]); return r.fulfill({ json: { folder: 'Archive', uid: '77' } }); }
+      if (m === 'DELETE') { ops.push(['DELETE', p, u.searchParams.get('folder')]); return r.fulfill({ json: { ok: true, permanent: false, folder: 'Trash', uids: { 3: 55 } } }); }
+      if (m === 'POST' && p.endsWith('/move')) {
+        ops.push(['MOVE', p, u.searchParams.get('folder'), r.request().postDataJSON().folder]);
+        return r.fulfill({ json: { ok: true, folder: r.request().postDataJSON().folder, uids: moveUids } });
+      }
+      if (p.startsWith('/message/')) return r.fulfill({ json: { ...msgs.find(x => x.id === p.split('/')[2]), body: 'Hello', bodyHtml: '', attachments: [] } });
+      return r.fulfill({ json: { ok: true } });
+    });
+    await page.goto('/today?mail=ma-u&folder=INBOX');
+    await expect(page.locator('#mailViewList .mv-msg')).toHaveCount(3);
+    await page.locator('.mv-msg[data-mv-msg="3"]').click();
+
+    // Delete → Ctrl+Z moves the copy in the trash (UID 55) back to INBOX and reloads the list
+    await page.keyboard.press('Delete');
+    await expect.poll(() => ops.length).toBe(1);
+    expect(ops[0][0]).toBe('DELETE');
+    await expect(page.locator('#mailViewFlash')).toContainText('moved to trash');   // undoable once the server answered
+    const loads = listLoads;
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => ops.length).toBe(2);
+    expect(ops[1]).toEqual(['MOVE', '/message/55/move', 'Trash', 'INBOX']);
+    await expect.poll(() => listLoads).toBeGreaterThan(loads);
+    await expect(page.locator('#mailViewFlash')).toContainText(/moved back/);
+    // Only once
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(300);
+    expect(ops).toHaveLength(2);
+
+    // Move of two with the server's new UIDs
+    await expect(page.locator('#mailViewList .mv-msg')).toHaveCount(3);
+    moveUids = { 1: 10, 2: 11 };
+    await page.evaluate(() => _mvMoveMessages(['2', '1'], 'Archive'));
+    await expect.poll(() => ops.length).toBe(3);
+    moveUids = null;
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => ops.length).toBe(4);
+    expect(ops[3]).toEqual(['MOVE', '/message/11,10/move', 'Archive', 'INBOX']);
+
+    // Server without new UIDs: found in the target by Message-ID
+    await expect(page.locator('#mailViewList .mv-msg')).toHaveCount(3);
+    await page.evaluate(() => _mvMoveMessages(['1'], 'Archive'));
+    await expect.poll(() => ops.length).toBe(5);
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => ops.length).toBe(7);
+    expect(ops[5]).toEqual(['LOCATE', '<1@ex.com>', 'Archive', 'hint']);
+    expect(ops[6]).toEqual(['MOVE', '/message/77/move', 'Archive', 'INBOX']);
+
+    // Folder menu of the trash: Empty folder sits below the line, before Delete folder
+    await page.locator('.mv-folder[data-mv-folder="Trash"]').click({ button: 'right' });
+    const menu = page.locator('.context-menu').filter({ hasText: 'Empty folder' });
+    const entries = await menu.locator(':scope > *').evaluateAll(els => els.filter(el => getComputedStyle(el).display !== 'none')
+      .map(el => el.classList.contains('ctx-separator') ? '---' : el.textContent.trim()));
+    expect(entries.slice(-3)).toEqual(['---', 'Empty folder', 'Delete folder']);
+  });
+
+  test('E-T-77 mail view Delete key: also with the focus inside the mail text (iframe) and as Backspace (Mac "delete"); arrows there stay with the text', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const msgs = [1, 2, 3, 4].map(i => ({ id: String(i), subject: `Mail ${i}`, messageId: `<${i}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com',
+      date: new Date(Date.UTC(2026, 0, i)).toISOString(), size: 500, unread: false, flagged: false, flagColor: null }));
+    const dels = [];
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [{ id: 'ma-k', label: 'Work', color: '#0a0' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [] }));
+    await page.route('**/api/dashboard/mail/ma-k/**', r => {
+      const p = new URL(r.request().url()).pathname.replace('/api/dashboard/mail/ma-k', '');
+      if (p === '/folders') return r.fulfill({ json: { folders: [{ path: 'INBOX', name: 'INBOX', delimiter: '/', parent: '', specialUse: '\\Inbox', messages: 4, unseen: 0 }] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [...msgs].reverse(), total: 4, page: 0, pageSize: 50 } });
+      if (p === '/folder-size') return r.fulfill({ json: { size: 0, messages: 0 } });
+      if (r.request().method() === 'DELETE') { dels.push(p); return r.fulfill({ json: { ok: true, permanent: false, folder: 'Trash', uids: null } }); }
+      if (p.startsWith('/message/')) return r.fulfill({ json: { ...msgs.find(x => x.id === p.split('/')[2]), body: '', bodyHtml: '<p>Hello world text</p>', attachments: [] } });
+      return r.fulfill({ json: { ok: true } });
+    });
+    await page.goto('/today?mail=ma-k&folder=INBOX');
+    await expect(page.locator('#mailViewList .mv-msg')).toHaveCount(4);
+    await page.locator('.mv-msg[data-mv-msg="4"]').click();
+    // Focus in the mail text: arrows scroll the text (selection unchanged), Delete moves the mail to the trash
+    const body = page.frameLocator('#mailViewReader iframe').first().locator('body');
+    await expect(body).toContainText('Hello world');
+    await body.click();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('.mv-msg.active')).toHaveAttribute('data-mv-msg', '4');
+    await page.keyboard.press('Delete');
+    await expect.poll(() => dels).toEqual(['/message/4']);
+    // The neighbour opens; Backspace on the list deletes it too
+    await expect(page.locator('.mv-msg.active')).toHaveAttribute('data-mv-msg', '3');
+    await page.locator('.mv-msg[data-mv-msg="3"]').click();
+    await page.keyboard.press('Backspace');
+    await expect.poll(() => dels).toEqual(['/message/4', '/message/3']);
+  });
+
+  test('E-T-78 mail folder icons: trash can for the trash, paper plane for the sent folder, sheet with pencil for drafts (account setting > special use > name); account hover = folders + mailbox size', async ({ page }) => {
+    const state = { layouts: LAYOUTS };
+    await mockApis(page, state);
+    const F = (path, specialUse = null) => ({ path, name: path, delimiter: '/', parent: '', specialUse, messages: 0, unseen: 0 });
+    const sizeCalls = [];
+    const folders = {
+      'ma-a': [F('INBOX', '\\Inbox'), F('Deleted Items', '\\Trash'), F('Trash'), F('Gesendet'), F('Archive'), F('Entwürfe')],
+      'ma-b': [F('INBOX', '\\Inbox'), F('Sent', '\\Sent'), F('Outbox'), F('Papierkorb'), F('Notes', '\\Drafts'), F('Drafts')],
+    };
+    await page.route('**/api/dashboard/config', r => r.fulfill({ json: { calendarAccounts: [], mailAccounts: [
+      { id: 'ma-a', label: 'A', color: '#0a0' }, { id: 'ma-b', label: 'B', color: '#00a', sentFolder: 'Outbox' }] } }));
+    await page.route('**/api/dashboard/mail', r => r.fulfill({ json: [] }));
+    await page.route(/\/api\/dashboard\/mail\/ma-[ab]\//, r => {
+      const u = new URL(r.request().url());
+      const [, acc, p] = u.pathname.match(/\/mail\/(ma-[ab])(\/.*)$/);
+      if (p === '/folders') return r.fulfill({ json: { folders: folders[acc] } });
+      if (p === '/messages') return r.fulfill({ json: { messages: [], total: 0, page: 0, pageSize: 50 } });
+      if (p === '/mailbox-size') {
+        sizeCalls.push(acc);
+        return r.fulfill({ json: acc === 'ma-a' ? { folders: 6, size: 1536 * 1024 * 1024, limit: null, source: 'sum' }
+          : { folders: 6, size: 5 * 1024 * 1024, limit: 1024 * 1024 * 1024, source: 'quota' } });
+      }
+      return r.fulfill({ json: { size: 0, messages: 0 } });
+    });
+    await page.goto('/today?mail=ma-a&folder=INBOX');
+    const role = (acc, path) => page.locator(`.mv-folder[data-mv-acc="${acc}"][data-mv-folder="${path}"] .mv-folder-icon`);
+    await expect(role('ma-b', 'Outbox')).toHaveAttribute('data-mv-role', 'sent');
+    await expect(role('ma-a', 'Deleted Items')).toHaveAttribute('data-mv-role', 'trash');   // special use
+    await expect(role('ma-a', 'Trash')).not.toHaveAttribute('data-mv-role', /./);          // a \Trash folder exists
+    await expect(role('ma-a', 'Gesendet')).toHaveAttribute('data-mv-role', 'sent');        // by name
+    await expect(role('ma-a', 'Archive')).not.toHaveAttribute('data-mv-role', /./);
+    await expect(role('ma-b', 'Sent')).not.toHaveAttribute('data-mv-role', /./);           // account setting wins
+    await expect(role('ma-b', 'Papierkorb')).toHaveAttribute('data-mv-role', 'trash');
+    await expect(role('ma-a', 'Entwürfe')).toHaveAttribute('data-mv-role', 'drafts');      // by name
+    await expect(role('ma-b', 'Notes')).toHaveAttribute('data-mv-role', 'drafts');         // special use
+    await expect(role('ma-b', 'Drafts')).not.toHaveAttribute('data-mv-role', /./);         // a \Drafts folder exists
+    await expect(role('ma-a', 'Gesendet').locator('path')).toHaveAttribute('d', 'M11 1L1 5.2l3.8 1.6L11 1L6.6 11L4.8 6.8');   // paper plane
+    await expect(role('ma-a', 'Deleted Items').locator('path')).toHaveCount(2);   // trash can (lid + body)
+    await expect(role('ma-a', 'Archive').locator('path')).toHaveCount(2);
+
+    // Hover on an account: "N folders, X total" — the size fetched once, on the first hover
+    const head = acc => page.locator(`.mv-account-head[data-mv-account="${acc}"]`);
+    await expect(head('ma-a')).toHaveAttribute('title', /^6 folders, total size/);
+    expect(sizeCalls).toEqual([]);
+    await head('ma-a').locator('.mv-account-label').hover();
+    await expect(head('ma-a')).toHaveAttribute('title', /^6 folders, 1\.50? GB total$/);
+    await head('ma-b').locator('.mv-account-label').hover();
+    await expect(head('ma-b')).toHaveAttribute('title', /^6 folders, 5(\.0+)? MB total \(of 1(\.0+)? GB\)$/);
+    await head('ma-a').locator('.mv-account-label').hover();
+    expect(sizeCalls).toEqual(['ma-a', 'ma-b']);
+  });
+
   test('E-T-2 edit mode: move a tile to another column, resize it, save and reload', async ({ page }) => {
     const state = { layouts: JSON.parse(JSON.stringify(LAYOUTS)) };
     await mockApis(page, state);
@@ -1760,7 +1921,7 @@ test.describe('Today page', () => {
     await expect(page).toHaveTitle('[TEST] e2e-today - Send offer (card)');
   });
 
-  test('E-T-72 mail view drag & drop: dragged rows dimmed, drag image = row copy at 60 % (count for a selection), folders too', async ({ page }) => {
+  test('E-T-72 mail view drag & drop: dragged rows dimmed, drag image = row copy at 50 % (count for a selection), folders too', async ({ page }) => {
     const state = { layouts: LAYOUTS };
     await mockApis(page, state);
     const msgs = [1, 2, 3].map(i => ({ id: String(i), subject: `Mail ${i}`, messageId: `<${i}@ex.com>`, from: 'Jane <jane@ex.com>', to: 'me@ex.com',
@@ -1784,16 +1945,17 @@ test.describe('Today page', () => {
     const drag = sel => page.evaluate(sel => {
       const dt = new DataTransfer();
       let img = null;
-      dt.setDragImage = el => { img = { cls: el.className, opacity: getComputedStyle(el).opacity, rows: el.querySelectorAll('.mv-msg, .mv-folder').length,
+      dt.setDragImage = el => { img = { cls: el.className, opacity: getComputedStyle(el.querySelector('.mv-msg, .mv-folder')).opacity, bg: getComputedStyle(el).backgroundColor, rows: el.querySelectorAll('.mv-msg, .mv-folder').length,
         count: el.querySelector('.mv-drag-count')?.textContent || null, inDom: el.isConnected }; };
       document.querySelector(sel).dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
       return { img, dimmed: [...document.querySelectorAll('.mv-dragging')].map(el => el.dataset.mvMsg || el.dataset.mvFolder) };
     }, sel);
-    // Selection of two: both rows dimmed, drag image = the grabbed row + "2 messages", 60 %
+    // Selection of two: both rows dimmed, drag image = the grabbed row + "2 messages", 50 %
     const sel = await drag('.mv-msg[data-mv-msg="2"]');
     expect(sel.dimmed.sort()).toEqual(['2', '3']);
-    expect(sel.img).toMatchObject({ opacity: '0.6', rows: 1, count: '2 messages', inDom: true });
+    expect(sel.img).toMatchObject({ opacity: '0.5', rows: 1, count: '2 messages', inDom: true });
     expect(sel.img.cls).toContain('mv-drag-image');
+    expect(sel.img.bg).toMatch(/0\.5\)$/);   // half-transparent background
     await page.evaluate(() => document.dispatchEvent(new DragEvent('dragend', { bubbles: true })));
     await expect(page.locator('.mv-dragging')).toHaveCount(0);
     await expect(page.locator('.mv-drag-image')).toHaveCount(0);   // removed after the snapshot
@@ -1801,13 +1963,13 @@ test.describe('Today page', () => {
     // A row outside the selection: only that one, no count
     const one = await drag('.mv-msg[data-mv-msg="1"]');
     expect(one.dimmed).toEqual(['1']);
-    expect(one.img).toMatchObject({ opacity: '0.6', count: null });
+    expect(one.img).toMatchObject({ opacity: '0.5', count: null });
     await page.evaluate(() => document.dispatchEvent(new DragEvent('dragend', { bubbles: true })));
 
     // Folders
     const folder = await drag('.mv-folder[draggable="true"][data-mv-folder="Archive"]');
     expect(folder.dimmed).toEqual(['Archive']);
-    expect(folder.img).toMatchObject({ opacity: '0.6', rows: 1 });
+    expect(folder.img).toMatchObject({ opacity: '0.5', rows: 1 });
     await page.evaluate(() => document.dispatchEvent(new DragEvent('dragend', { bubbles: true })));
     await expect(page.locator('.mv-dragging')).toHaveCount(0);
   });

@@ -13,7 +13,7 @@ const { fetchCalendarAccount, fetchRawEvents, testCalendarAccount, clearCalendar
         addCardRefIcs, resolveEventUrl, hrefToUrl, parseEvents } = require('../dashboard/calendar');
 const { decodeText } = require('../charset');
 const { validateCalendarEvent, validateCalendarCardLink, validateMailCardLink, validateMailSend, validateMailDraft, validMailFolderPath, schemaError } = require('../schemas');
-const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, fetchThread, MAIL_SORTS, testMailAccount,
+const { fetchMailAccount, fetchMailMessage, fetchMessageId, findMailByMessageId, fetchMailSource, fetchMailAttachment, fetchMailAttachments, fetchFolderMessages, fetchFolderSize, fetchMailboxSize, fetchThread, MAIL_SORTS, testMailAccount,
         listMailFolders, createMailFolder, deleteMailFolder, renameMailFolder, emptyMailFolder,
         markMailMessage, flagMailMessage, MAIL_FLAG_COLORS, markFolderRead, findDuplicateMessages, moveMailMessage, deleteMailMessage, sendMail, saveDraft, deleteDraft, findDrafts } = require('../dashboard/mail');
 
@@ -573,6 +573,17 @@ router.get('/dashboard/mail/:accountId/folder-size', withHandler(async (req, res
   }
 }));
 
+// GET /api/dashboard/mail/:accountId/mailbox-size — whole mailbox: { folders, size (bytes), limit, source: 'quota' | 'sum' }
+router.get('/dashboard/mail/:accountId/mailbox-size', withHandler(async (req, res) => {
+  const account = await getMailAccount(req.params.accountId);
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  try {
+    res.json(await fetchMailboxSize(account, { fresh: req.query.fresh === '1' }));
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+}));
+
 // GET /api/dashboard/mail-hidden-folders — folders hidden in the mail view's tree: { folders: { [accountId]: [path] } }
 router.get('/dashboard/mail-hidden-folders', withHandler(async (req, res) => {
   res.json({ folders: await getHiddenFolders() });
@@ -745,8 +756,8 @@ router.post('/dashboard/mail/:accountId/message/:uid/move', writeRateLimit, with
   if (!folder || typeof folder !== 'string') return res.status(400).json({ error: 'folder is required' });
 
   try {
-    await moveMailMessage(ctx.account, req.params.uid, folder, ctx.folder);
-    res.json({ ok: true });
+    const moved = await moveMailMessage(ctx.account, req.params.uid, folder, ctx.folder);
+    res.json({ ok: true, folder, uids: moved?.uids || null });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -758,8 +769,8 @@ router.delete('/dashboard/mail/:accountId/message/:uid', writeRateLimit, withHan
   if (!ctx) return;
 
   try {
-    const { permanent } = await deleteMailMessage(ctx.account, req.params.uid, ctx.folder);
-    res.json({ ok: true, permanent });
+    const { permanent, folder, uids } = await deleteMailMessage(ctx.account, req.params.uid, ctx.folder);
+    res.json({ ok: true, permanent, ...(permanent ? {} : { folder, uids: uids || null }) });
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
