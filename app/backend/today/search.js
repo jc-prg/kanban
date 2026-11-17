@@ -9,6 +9,7 @@ const { cardItem }                        = require('./cards');
 const { fetchApplicationList, applicationItem, publicBase } = require('./cvapp');
 const { fetchRawEvents, filterRange }     = require('../dashboard/calendar');
 const { searchMailAccount }               = require('../dashboard/mail');
+const { freshenWebdavNotes }              = require('../../notes-webdav/backend/webdav-handlers');
 
 const LIMIT       = 50;
 const CAL_DAYS    = 365;              // events today − 1 year … today + 1 year
@@ -80,7 +81,11 @@ async function searchNotes(q, { full = false } = {}) {
   const words = queryWords(q);
   const couch = getCouch();
   const out = [];
-  await Promise.allSettled((await _boardNames()).map(async board => {
+  const boards = await _boardNames();
+  // WebDAV boards: their notes document is an index of the files — bring it up to date first (also the texts for
+  // full text), so notes added / changed in Nextcloud or Obsidian are found without opening the board
+  await freshenWebdavNotes(boards, { frontmatter: full });
+  await Promise.allSettled(boards.map(async board => {
     const db = couch.use(DB_PREFIX + board);
     const [boardRes, notesRes] = await Promise.allSettled([db.get(DOC_ID), db.get(NOTES_DOC_ID)]);
     if (boardRes.status !== 'fulfilled' || boardRes.value.settings?.archived) return;

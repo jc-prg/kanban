@@ -184,6 +184,90 @@ function _enhanceCheckboxes(entry) {
   });
 }
 
+// ---- Attachment images in rendered Markdown ----
+// Images pointing at an attachment (`_attachments/…` in notes, `attachment:…` in cards) are no URLs the browser can
+// load: put in with innerHTML they show the broken-image icon until a resolver swaps in a blob URL. They are inserted
+// with a loading placeholder instead (`data-att-src`, class att-img--loading); loadAttachmentImage fetches each file
+// once and keeps its blob URL, so switching between editing and preview shows them at once. Used by the card / note
+// editors (cards.js, notes-webdav/frontend/notes.js) and the detail panel (dashboard.js) via window.attachImg.
+const _ATT_SRC_RE    = /^(?:_attachments\/|attachment:)/;
+const _ATT_PIXEL     = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+const _ATT_CACHE_MAX = 200;
+const _attCache      = new Map();   // url → Promise<blob URL>
+
+function _deferAttachmentImages(root) {
+  for (const img of root.querySelectorAll('img[src]')) {
+    const src = img.getAttribute('src');
+    if (!_ATT_SRC_RE.test(src)) continue;
+    img.dataset.attSrc = src;
+    img.src = _ATT_PIXEL;
+    img.classList.add('att-img--loading');
+  }
+}
+
+/** Puts sanitized HTML into `el` without letting attachment images load (and show as broken) before they are resolved. */
+function setAttachmentHtml(el, html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  _deferAttachmentImages(tpl.content);   // template content loads nothing
+  el.replaceChildren(tpl.content);
+}
+
+/** Attachment reference of an image: the deferred one, else its src. */
+function attachmentSrc(img) {
+  return img.dataset.attSrc || img.getAttribute('src') || '';
+}
+
+/** Blob URL of an attachment, fetched once and cached; rejects when it cannot be loaded. */
+function attachmentBlobUrl(url) {
+  let p = _attCache.get(url);
+  if (!p) {
+    p = fetch(url).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); }).then(b => URL.createObjectURL(b));
+    _attCache.set(url, p);
+    p.catch(() => _attCache.delete(url));
+    if (_attCache.size > _ATT_CACHE_MAX) {
+      const [oldest, old] = _attCache.entries().next().value;
+      _attCache.delete(oldest);
+      old.then(u => URL.revokeObjectURL(u)).catch(() => {});
+    }
+  }
+  return p;
+}
+
+/**
+ * Shows an attachment in `img`: the first of `urls` that loads (cached blob URL). PDFs (`pdf: true`) replace the
+ * image with an embed. The placeholder stays until then; the broken-image icon only when nothing could be loaded.
+ */
+async function loadAttachmentImage(img, urls, { pdf = false } = {}) {
+  for (const url of [].concat(urls).filter(Boolean)) {
+    try {
+      const obj = await attachmentBlobUrl(url);
+      if (pdf) {
+        const embed = document.createElement('embed');
+        embed.src = obj; embed.type = 'application/pdf'; embed.className = 'md-pdf-embed';
+        img.replaceWith(embed);
+      } else {
+        img.src = obj;
+        img.classList.remove('att-img--loading');
+      }
+      return obj;
+    } catch { /* next source */ }
+  }
+  img.classList.remove('att-img--loading');
+  img.classList.add('att-img--broken');
+  img.src = 'data:,';   // not an image → the browser's broken-image icon
+  return null;
+}
+
+/** Drops cached copies (after an upload / delete of that file). `url` or a prefix ending in "/". */
+function forgetAttachment(url) {
+  for (const [k, p] of [..._attCache]) {
+    if (k === url || (url.endsWith('/') && k.startsWith(url))) { _attCache.delete(k); p.then(u => URL.revokeObjectURL(u)).catch(() => {}); }
+  }
+}
+
+window.attachImg = { setHtml: setAttachmentHtml, src: attachmentSrc, blobUrl: attachmentBlobUrl, load: loadAttachmentImage, forget: forgetAttachment };
+
 function _renderPreview(entry, text) {
   const el = entry.preview;
   if (!text || !text.trim()) {
@@ -194,7 +278,7 @@ function _renderPreview(entry, text) {
   el.classList.remove('cm-preview--empty');
   const raw = window.marked ? window.marked.parse(text) : text.replace(/\n/g, '<br>');
   const opts = Object.assign({ ADD_ATTR: ['target'] }, entry.sanitizeOpts);
-  el.innerHTML = window.DOMPurify ? window.DOMPurify.sanitize(raw, opts) : raw;
+  setAttachmentHtml(el, window.DOMPurify ? window.DOMPurify.sanitize(raw, opts) : raw);
   el.querySelectorAll('a[href^="http://"], a[href^="https://"]').forEach(a => {
     a.target = '_blank';
     a.rel = 'noopener noreferrer';

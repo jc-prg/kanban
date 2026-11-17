@@ -108,11 +108,15 @@ class WebdavStore {
     }
   }
 
-  _raise(r, what) {
+  _raise(r, what, p = null) {
     if (r.status === 404) throw new NotFound(`${what}: not found`);
     if (r.status === 412) throw new PreconditionFailed(`${what}: changed meanwhile or already exists`);
     if (r.status === 401 || r.status === 403) throw new StoreError(`${what}: access denied (HTTP ${r.status})`);
-    if (r.status === 423) throw new StoreError(`${what}: the file is locked on the server (in use by another program or sync client, e.g. Nextcloud desktop or Obsidian) — try again in a moment`, 423);
+    if (r.status === 423) {
+      // `path` / `store`: the handlers look up who holds the lock (lockInfo) for the message
+      throw Object.assign(new StoreError(`${what}: the file is locked on the server (in use by another program or sync client, e.g. Nextcloud desktop or Obsidian) — try again in a moment`, 423),
+        { path: p, store: this });
+    }
     throw new StoreError(`${what}: HTTP ${r.status}`);
   }
 
@@ -174,7 +178,7 @@ class WebdavStore {
     if (ifMatch) headers['If-Match'] = `"${ifMatch}"`;
     if (createOnly) headers['If-None-Match'] = '*';
     const r = await this._fetch('PUT', this._url(p), { headers, body: data });
-    if (!r.ok) this._raise(r, `PUT ${p}`);
+    if (!r.ok) this._raise(r, `PUT ${p}`, p);
     let etag = normEtag(r.headers.get('oc-etag') || r.headers.get('etag'));
     if (!etag) etag = (await this.stat(p))?.etag || '';
     return etag;
@@ -186,7 +190,7 @@ class WebdavStore {
     const r = await this._fetch('MOVE', this._url(src, st.isDir), {
       headers: { Destination: this._url(dst, st.isDir), Overwrite: overwrite ? 'T' : 'F' },
     });
-    if (!r.ok) this._raise(r, `MOVE ${src} → ${dst}`);
+    if (!r.ok) this._raise(r, `MOVE ${src} → ${dst}`, src);
   }
 
   async mkdirs(p) {
@@ -199,11 +203,38 @@ class WebdavStore {
     }
   }
 
+  /**
+   * Who holds a lock on `p` (Nextcloud files_lock: nc:lock-* properties, else DAV lockdiscovery):
+   * { owner, app, editor, since (ISO | null), token, timeout } or null when the file is not locked / unknown.
+   */
+  async lockInfo(p) {
+    const body = '<?xml version="1.0" encoding="utf-8"?>' +
+      '<d:propfind xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns"><d:prop><d:lockdiscovery/>' +
+      '<nc:lock/><nc:lock-owner/><nc:lock-owner-type/><nc:lock-owner-displayname/><nc:lock-owner-editor/>' +
+      '<nc:lock-time/><nc:lock-timeout/><nc:lock-token/></d:prop></d:propfind>';
+    const r = await this._fetch('PROPFIND', this._url(p), { headers: { Depth: '0', 'Content-Type': 'application/xml; charset=utf-8' }, body });
+    if (r.status !== 207) return null;
+    const xml = await r.text();
+    const val = tag => { const v = _first(xml, tag); return v === null ? '' : _decodeXml(v).trim(); };
+    const ncLocked = val('lock') === '1';
+    const active = _first(xml, 'activelock');
+    if (!ncLocked && !active) return null;
+    const time = parseInt(val('lock-time'), 10);
+    return {
+      owner:   val('lock-owner-displayname') || val('lock-owner') || (active ? _decodeXml((_first(active, 'owner') || '').replace(/<[^>]+>/g, '')).trim() : ''),
+      app:     val('lock-owner-type') === '1',          // locked by an app (e.g. Nextcloud Text), not a user
+      editor:  val('lock-owner-editor'),
+      since:   Number.isFinite(time) && time > 0 ? new Date(time * 1000).toISOString() : null,
+      timeout: parseInt(val('lock-timeout'), 10) || 0,  // seconds, 0 = none
+      token:   val('lock-token') || (active ? (_first(active, 'href') || '').trim() : ''),
+    };
+  }
+
   async delete(p) {
     const st = await this.stat(p);
     if (!st) return;
     const r = await this._fetch('DELETE', this._url(p, st.isDir));
-    if (!r.ok && r.status !== 404) this._raise(r, `DELETE ${p}`);
+    if (!r.ok && r.status !== 404) this._raise(r, `DELETE ${p}`, p);
   }
 }
 

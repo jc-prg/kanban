@@ -413,6 +413,17 @@ describe('DELETE /:board/notes/pages/:id', () => {
     expect(paths(res.body.notes.items)).toEqual(['F/', 'F/B'])
   })
 
+  it('NP-7b: delete page → attachments only its front matter lists are gone too', async () => {
+    await wdBoard({
+      'F/A.md': '---\nid: n-a\nattachments:\n  - "[only.pdf](_attachments/only.pdf)"\n  - "[shared.pdf](_attachments/shared.pdf)"\n---\nText',
+      'F/B.md': '---\nattachments:\n  - "[shared.pdf](_attachments/shared.pdf)"\n---\n',
+      'F/_attachments/only.pdf': 'O', 'F/_attachments/shared.pdf': 'S',
+    })
+    expect((await request(app).delete(`/api/${B}/notes/pages/n-a`).set(AUTH)).status).toBe(200)
+    expect(activeDav.read('F/_attachments/only.pdf')).toBeUndefined()
+    expect(activeDav.read('F/_attachments/shared.pdf')).toBe('S')
+  })
+
   it('NP-8b: 423 Locked on save → retried; still locked after the retries → readable error', async () => {
     const store = require('../../notes-webdav/backend/store')
     const pauses = store.LOCK_RETRY_MS
@@ -430,6 +441,29 @@ describe('DELETE /:board/notes/pages/:id', () => {
       expect(res.body.error).toMatch(/locked on the server/)
       expect(activeDav.requests.filter(r => r.method === 'PUT').length).toBeGreaterThanOrEqual(4 + 3)
     } finally { store.LOCK_RETRY_MS = pauses; activeDav.fail = null }
+  })
+
+  it('NP-8c: file locked by an app (stale Nextcloud Text lock) → 423 names the owner, the time and what to do', async () => {
+    const store = require('../../notes-webdav/backend/store')
+    const pauses = store.LOCK_RETRY_MS
+    store.LOCK_RETRY_MS = [1]
+    try {
+      await wdBoard({ 'Sub/Next test.md': NOTE_1 })
+      activeDav.locks.set('Sub/Next test.md', { owner: 'Text', app: true, editor: 'text', time: 1794911615 })
+      const res = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: 'x\n' })
+      expect(res.status).toBe(423)
+      expect(res.body.error).toMatch(/^"Next test" is locked on the server by Text \(Nextcloud app lock\), without expiry\. Nextcloud did not release it/)
+      expect(res.body.lock).toMatchObject({ owner: 'Text', app: true, since: new Date(1794911615 * 1000).toISOString() })
+      expect(activeDav.read('Sub/Next test.md')).toBe(NOTE_1)
+    } finally { store.LOCK_RETRY_MS = pauses }
+  })
+
+  it('NA-6: upload with an umlaut in the file name (multer: UTF-8 bytes as Latin-1) → stored and listed as typed', async () => {
+    await wdBoard({ 'One.md': NOTE_1 })
+    const up = await request(app).post(`/api/${B}/notes/attachments/n-one`).set(AUTH).attach('file', Buffer.from('PDF'), 'Vorbereitung Gespräch.pdf')
+    expect(up.status).toBe(200)
+    expect(up.body.name).toBe('Vorbereitung Gespräch.pdf')
+    expect(activeDav.read('_attachments/Vorbereitung Gespräch.pdf')).toBe('PDF')
   })
 
   it('NP-8: WebDAV DELETE fails → error; page still listed', async () => {
@@ -458,6 +492,24 @@ describe('POST /:board/notes/pages/:id/move', () => {
     expect(activeDav.read('Target/One.md')).toBe('---\nid: n-one\n---\n![x](_attachments/Bild%201%201.png)\n')
     expect(activeDav.read('Target/_attachments/Bild 1 1.png')).toBe('PNG')
     expect(activeDav.read('_attachments/Bild 1.png')).toBeUndefined()
+  })
+
+  it('NP-9b: move page into a subfolder → its attachments follow (front matter list and links), shared ones are copied, list and links updated', async () => {
+    const notes = await wdBoard({
+      'F/One.md': '---\nid: n-one\nattachments:\n  - "[listed.pdf](_attachments/listed.pdf)"\n  - "[pic.png](_attachments/pic.png)"\n---\n![p](_attachments/pic.png)\n',
+      'F/Other.md': '---\nattachments:\n  - "[pic.png](_attachments/pic.png)"\n---\n',
+      'F/_attachments/listed.pdf': 'L', 'F/_attachments/pic.png': 'P',
+      'F/Sub/Keep.md': 'k',
+    })
+    const res = await request(app).post(`/api/${B}/notes/pages/n-one/move`).set(AUTH).send({ folderId: find(notes.items, 'Sub').id })
+    expect(res.status).toBe(200)
+    expect(activeDav.read('F/Sub/One.md')).toBe('---\nid: n-one\nattachments:\n  - "[listed.pdf](_attachments/listed.pdf)"\n  - "[pic.png](_attachments/pic.png)"\n---\n![p](_attachments/pic.png)\n')
+    expect(activeDav.read('F/Sub/_attachments/listed.pdf')).toBe('L')
+    expect(activeDav.read('F/_attachments/listed.pdf')).toBeUndefined()   // only One had it → moved
+    expect(activeDav.read('F/Sub/_attachments/pic.png')).toBe('P')
+    expect(activeDav.read('F/_attachments/pic.png')).toBe('P')            // Other lists it too → copied
+    const list = (await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)).body
+    expect(list.map(f => `${f.scope}:${f.name}`)).toEqual(['page:listed.pdf', 'page:pic.png'])
   })
 
   it('NP-11: reorder within the same folder → no MOVE (order is alphabetical)', async () => {
@@ -598,6 +650,20 @@ describe('index follows the server', () => {
 // NA — Attachments next to the note
 // ===========================================================================
 
+describe('freshenWebdavNotes (Today widgets)', () => {
+  it('NS-9: a note added outside the app reaches the stored index (Notes / Find widgets) without opening the board', async () => {
+    const { freshenWebdavNotes } = require('../../notes-webdav/backend/webdav-handlers')
+    await wdBoard({ 'One.md': NOTE_1 })
+    activeDav.write('Folder/From Obsidian.md', 'Klient Auszug\n')
+    const now = Date.now()
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(now + 6000)   // past the 5 s between checks
+    try { await freshenWebdavNotes([B, 'other-board'], { frontmatter: true }) } finally { spy.mockRestore() }
+    const stored = mockDbCtx.db.doc('notes')
+    expect(paths(stored.items)).toContain('Folder/From Obsidian')
+    expect(find(stored.items, 'From Obsidian').description).toBe('Klient Auszug\n')   // full text searchable
+  })
+})
+
 describe('attachments (WebDAV board)', () => {
   it('NA-1: upload → file in <folder>/_attachments, link returned; list, download, delete', async () => {
     await wdBoard({ 'F/One.md': NOTE_1 })
@@ -607,7 +673,7 @@ describe('attachments (WebDAV board)', () => {
     expect(activeDav.read('F/_attachments/My Pic.png')).toBe('PNG')
     await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: `![](${up.body.link})` })
     const list = await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)
-    expect(list.body).toEqual([{ name: 'My Pic.png', size: 3, link: '_attachments/My%20Pic.png' }])
+    expect(list.body).toEqual([{ name: 'My Pic.png', size: 3, link: '_attachments/My%20Pic.png', scope: 'page' }])
     const dl = await request(app).get(`/api/${B}/notes/attachments/n-one/${encodeURIComponent('My Pic.png')}`).set(AUTH).buffer(true)
     expect(dl.status).toBe(200)
     expect(Buffer.from(dl.body).toString()).toBe('PNG')
@@ -619,27 +685,53 @@ describe('attachments (WebDAV board)', () => {
   it('NA-2: legacy "<id>_name" files are listed without the prefix and still download', async () => {
     await wdBoard({ 'One.md': NOTE_1, '_attachments/n-one_old.pdf': 'PDF' })
     const list = await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)
-    expect(list.body).toEqual([{ name: 'old.pdf', size: 3, link: '_attachments/n-one_old.pdf' }])
+    expect(list.body).toEqual([{ name: 'old.pdf', size: 3, link: '_attachments/n-one_old.pdf', scope: 'page' }])
     const dl = await request(app).get(`/api/${B}/notes/attachments/n-one/old.pdf`).set(AUTH).buffer(true)
     expect(Buffer.from(dl.body).toString()).toBe('PDF')
   })
 
-  it('NA-4: a file just uploaded (link only in the editor, note not saved) is listed at once; files only other notes link are not', async () => {
+  it('NA-4: the page\'s own files (front matter list, links) apart from the folder\'s other files', async () => {
     await wdBoard({
       'F/One.md': NOTE_1,
-      'F/Two.md': '---\nid: n-two\n---\n![x](_attachments/theirs.png)\n',
-      'F/_attachments/theirs.png': 'T',
+      'F/Two.md': '---\nid: n-two\nattachments:\n  - "[theirs.png](_attachments/theirs.png)"\n---\nText\n',
+      'F/_attachments/theirs.png': 'T', 'F/_attachments/loose.pdf': 'L',
     })
     const up = await request(app).post(`/api/${B}/notes/attachments/n-one`).set(AUTH).attach('file', Buffer.from('NEW'), 'new.png')
     expect(up.status).toBe(200)
-    const list = await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)
-    expect(list.body).toEqual([{ name: 'new.png', size: 3, link: '_attachments/new.png' }])
-    // While no note links it, every note of the folder lists it; once One's saved text links it, only One does
-    const two = await request(app).get(`/api/${B}/notes/attachments/n-two`).set(AUTH)
-    expect(two.body.map(f => f.name).sort()).toEqual(['new.png', 'theirs.png'])
-    await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: `![](${up.body.link})` })
-    const twoAfter = await request(app).get(`/api/${B}/notes/attachments/n-two`).set(AUTH)
-    expect(twoAfter.body.map(f => f.name)).toEqual(['theirs.png'])
+    const one = (await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)).body
+    expect(one.map(f => `${f.scope}:${f.name}`)).toEqual(['page:new.png', 'folder:loose.pdf', 'folder:theirs.png'])
+    const two = (await request(app).get(`/api/${B}/notes/attachments/n-two`).set(AUTH)).body
+    expect(two.map(f => `${f.scope}:${f.name}`)).toEqual(['page:theirs.png', 'folder:loose.pdf', 'folder:new.png'])
+  })
+
+  it('NA-5: front matter `attachments:` — upload adds (If-Match = editor version, new ETag back), saving adds linked files, delete removes; Obsidian keys kept', async () => {
+    await wdBoard({ 'F/One.md': NOTE_1, 'F/_attachments/linked.pdf': 'P' })
+    const c = await request(app).get(`/api/${B}/notes/pages/n-one/content`).set(AUTH)
+    const up = await request(app).post(`/api/${B}/notes/attachments/n-one`).set(AUTH).set('If-Match', `"${c.body.etag}"`)
+      .attach('file', Buffer.from('PNG'), 'My Pic.png')
+    expect(up.body.etag).toBeTruthy()
+    expect(up.body.etag).not.toBe(c.body.etag)
+    expect(activeDav.read('F/One.md')).toBe('---\nid: n-one\ntags: [keep]\nattachments:\n  - "[My Pic.png](_attachments/My%20Pic.png)"\n---\nOne\n')
+    expect((await request(app).get(`/api/${B}/notes/pages/n-one/content`).set(AUTH)).body.properties).toEqual({ tags: ['keep'] })
+    // The editor saves with the ETag from the upload: no conflict; a link in the text joins the list
+    const save = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).set('If-Match', `"${up.body.etag}"`)
+      .send({ description: 'One\n[doc](_attachments/linked.pdf)\n' })
+    expect(save.status).toBe(200)
+    expect(activeDav.read('F/One.md')).toContain('attachments:\n  - "[linked.pdf](_attachments/linked.pdf)"\n  - "[My Pic.png](_attachments/My%20Pic.png)"\n')
+    // Delete: file gone, entry gone
+    const del = await request(app).delete(`/api/${B}/notes/attachments/n-one/${encodeURIComponent('My Pic.png')}`).set(AUTH)
+      .set('If-Match', `"${save.body.page.etag}"`)
+    expect(del.body.etag).toBeTruthy()
+    expect(activeDav.read('F/_attachments/My Pic.png')).toBeUndefined()
+    expect(activeDav.read('F/One.md')).not.toContain('My%20Pic.png')
+    // Note changed elsewhere since the editor loaded it: the file is uploaded, the note left alone (the next save conflicts)
+    activeDav.write('F/One.md', activeDav.read('F/One.md') + 'changed in Obsidian\n')
+    const late = await request(app).post(`/api/${B}/notes/attachments/n-one`).set(AUTH).set('If-Match', `"${del.body.etag}"`)
+      .attach('file', Buffer.from('X'), 'late.png')
+    expect(late.status).toBe(200)
+    expect(late.body.etag).toBeNull()
+    expect(activeDav.read('F/_attachments/late.png')).toBe('X')
+    expect(activeDav.read('F/One.md')).not.toContain('late.png')
   })
 
   it('NA-3: blocked file type → 400', async () => {
@@ -670,13 +762,13 @@ describe('POST /:board/notes/migrate', () => {
     const dry = await request(app).post(`/api/${B}/notes/migrate`).set(AUTH)
     expect(dry.status).toBe(200)
     expect(dry.body).toMatchObject({ dry_run: true, restored: ['Lost.md'], moved_elsewhere: ['Moved.md → Archiv/Moved.md'] })
-    expect(dry.body.frontmatter_cleaned).toEqual(['One.md: attachments, title, lastModified, id'])
+    expect(dry.body.frontmatter_cleaned).toEqual(['One.md: title, lastModified, id'])
     expect(activeDav.read('Lost.md')).toBeUndefined()
 
     const run = await request(app).post(`/api/${B}/notes/migrate?dry_run=0`).set(AUTH)
     expect(run.status).toBe(200)
     expect(activeDav.read('Lost.md')).toBe('Only in the DB')
-    expect(activeDav.read('One.md')).toBe('---\nid: "n-one"\n---\nOne\n\n- ![a.png](_attachments/n-one_a.png)\n')
+    expect(activeDav.read('One.md')).toBe('---\nid: "n-one"\nattachments:\n  - "[a.png](_attachments/n-one_a.png)"\n---\nOne\n')   // the list stays
 
     const again = await request(app).post(`/api/${B}/notes/migrate?dry_run=0`).set(AUTH)
     expect(again.body).toMatchObject({ restored: [], uploaded: [], frontmatter_cleaned: [], attachments_uploaded: [] })

@@ -436,6 +436,7 @@ function renderCardAttachments(cardId, files) {
     item.querySelector('[data-act="delete"]').addEventListener('click', async () => {
       if (!await showConfirm(`Delete "${f.name}"?`, { okLabel: 'Delete', danger: true })) return;
       await fetch(`${_cardAttachBase()}/${cardId}/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
+      window.attachImg?.forget(`${_cardAttachBase()}/${cardId}/${encodeURIComponent(f.name)}`);
       loadCardAttachments(cardId);
     });
     list.appendChild(item);
@@ -453,7 +454,10 @@ async function _handleCardAttachUpload(cardId, fileList, atCursor = false) {
   if (!_cardAttachBase() || !fileList.length) return;
   const label = document.querySelector('label[for="cardAttachInput"]');
   const input = document.getElementById('cardAttachInput');
-  if (label) label.textContent = 'Uploading…';
+  if (label) {
+    label.innerHTML = 'Uploading<span class="loading-dots"></span>';
+    label.classList.add('btn-accent', 'note-upload-label--busy');   // like Save, while it runs
+  }
   if (input) input.disabled = true;
   try {
     for (const file of Array.from(fileList)) {
@@ -461,14 +465,19 @@ async function _handleCardAttachUpload(cardId, fileList, atCursor = false) {
       fd.append('file', file);
       const r = await fetch(`${_cardAttachBase()}/${cardId}`, { method: 'POST', body: fd });
       if (r.ok) {
-        _appendAttachMd('cardDesc', (await r.json()).name, 'attachment:', atCursor);
+        const { name } = await r.json();
+        window.attachImg?.forget(`${_cardAttachBase()}/${cardId}/${encodeURIComponent(name)}`);   // same name re-uploaded
+        _appendAttachMd('cardDesc', name, 'attachment:', atCursor);
       } else {
         const data = await r.json().catch(() => ({}));
-        await showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+        await showMessage(data.error || 'Upload failed.');
       }
     }
   } finally {
-    if (label) label.textContent = '+ Upload';
+    if (label) {
+      label.textContent = '+ Upload';
+      label.classList.remove('btn-accent', 'note-upload-label--busy');
+    }
     if (input) input.disabled = false;
     loadCardAttachments(cardId);
   }
@@ -488,8 +497,15 @@ async function resolveCardAttachments(container, cardId = null) {
   const sources = cardId == null && modalMode === 'inbox' ? _inboxAttachSources : null;
   const base = id && _cardAttachBase() ? `${_cardAttachBase()}/${id}` : null;
   if (!base && !sources) return;
-  for (const img of container.querySelectorAll('img[src^="attachment:"]')) {
-    const fn = img.getAttribute('src').slice('attachment:'.length);
+  for (const img of container.querySelectorAll('img')) {
+    // Deferred by the editor (window.attachImg: loading placeholder, cached blob URLs) or a plain src
+    const ref = window.attachImg ? window.attachImg.src(img) : img.getAttribute('src') || '';
+    if (!ref.startsWith('attachment:')) continue;
+    const fn = ref.slice('attachment:'.length);
+    if (window.attachImg) {
+      window.attachImg.load(img, [sources?.get(fn), base && `${base}/${encodeURIComponent(fn)}`], { pdf: _attachType(fn) === 'pdf' });
+      continue;
+    }
     try {
       let r = sources?.has(fn) ? await fetch(sources.get(fn)) : null;
       if (!r?.ok && base) r = await fetch(`${base}/${encodeURIComponent(fn)}`);

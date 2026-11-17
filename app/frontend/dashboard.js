@@ -970,24 +970,38 @@ function _mailFormatToggle(plain) {
 
 // ---- Detail panel ----
 
+/** Rendered Markdown into the detail panel — attachment images wait with a loading placeholder (editor.js). */
+function _dashSetMarkdown(el, html) {
+  if (window.attachImg) window.attachImg.setHtml(el, html);
+  else el.innerHTML = html;
+}
+
 async function _resolveDashCardAttachments(container, board, cardId) {
   return _resolveDashAttachments(container, `/api/${encodeURIComponent(board)}/cards/attachments/${encodeURIComponent(cardId)}`, 'attachment:');
 }
 
-/** Note pages reference their files as `_attachments/<pageId>_<name>` (notes.js#resolveAttachments). */
+/** Note pages reference their files as `_attachments/<name>` (WebDAV, URL-encoded) or `_attachments/<pageId>_<name>`
+ *  (local / legacy) — notes-webdav/frontend/notes.js#resolveAttachments. */
 async function _resolveDashNoteAttachments(container, board, pageId) {
-  return _resolveDashAttachments(container, `/api/${encodeURIComponent(board)}/notes/attachments/${encodeURIComponent(pageId)}`, `_attachments/${pageId}_`);
+  return _resolveDashAttachments(container, `/api/${encodeURIComponent(board)}/notes/attachments/${encodeURIComponent(pageId)}`, '_attachments/', `${pageId}_`);
 }
 
 /**
  * Attachment images / links in a rendered description: images and PDFs become blob URLs
  * (auth-safe), links open the viewer (image / PDF) or download the file.
  */
-async function _resolveDashAttachments(container, base, prefix) {
-  for (const img of container.querySelectorAll('img[src]')) {
-    const src = img.getAttribute('src');
+async function _resolveDashAttachments(container, base, prefix, strip = '') {
+  const fileOf = ref => {
+    let fn = ref.slice(prefix.length);
+    try { fn = decodeURIComponent(fn); } catch { /* keep */ }
+    return strip && fn.startsWith(strip) ? fn.slice(strip.length) : fn;
+  };
+  for (const img of container.querySelectorAll('img')) {
+    // Deferred by _dashSetMarkdown (window.attachImg: loading placeholder, cached blob URLs) or a plain src
+    const src = window.attachImg ? window.attachImg.src(img) : img.getAttribute('src') || '';
     if (!src.startsWith(prefix)) continue;
-    const fn = src.slice(prefix.length);
+    const fn = fileOf(src);
+    if (window.attachImg) { window.attachImg.load(img, `${base}/${encodeURIComponent(fn)}`, { pdf: _attachType(fn) === 'pdf' }); continue; }
     try {
       const r = await fetch(`${base}/${encodeURIComponent(fn)}`);
       if (!r.ok) continue;
@@ -1004,7 +1018,7 @@ async function _resolveDashAttachments(container, base, prefix) {
   for (const a of container.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href');
     if (!href.startsWith(prefix)) continue;
-    const fn = href.slice(prefix.length);
+    const fn = fileOf(href);
     const url = `${base}/${encodeURIComponent(fn)}`;
     a.removeAttribute('href');
     a.style.cursor = 'pointer';
@@ -1140,7 +1154,7 @@ async function _openCardDetail(board, card) {
   const div = document.createElement('div');
   div.className = 'cm-preview card-desc-preview dash-doc-preview';
   if (fullDescription) {
-    div.innerHTML = renderMarkdown(fullDescription);
+    _dashSetMarkdown(div, renderMarkdown(fullDescription));
     // buildToc is exposed by the notes module, which isn't initialised in focus mode
     if (window.buildToc) window.buildToc(div);
     _resolveDashCardAttachments(div, board, card.id);
@@ -1305,7 +1319,7 @@ async function _openNoteDetail(board, pageId) {
   const div = document.createElement('div');
   div.className = 'cm-preview card-desc-preview dash-doc-preview';
   if (page.description) {
-    div.innerHTML = renderMarkdown(page.description);
+    _dashSetMarkdown(div, renderMarkdown(page.description));
     if (window.buildToc) window.buildToc(div);
     _resolveDashNoteAttachments(div, board, pageId);
   } else {
@@ -1315,6 +1329,7 @@ async function _openNoteDetail(board, pageId) {
 
   const attachments = page.hasAttachments
     ? await fetch(`/api/${encodeURIComponent(board)}/notes/attachments/${encodeURIComponent(pageId)}`).then(r => r.ok ? r.json() : []).catch(() => [])
+        .then(list => list.filter(a => a.scope !== 'folder'))   // WebDAV: the page's own, not the folder's other files
     : [];
   if (attachments.length && current()) {
     const fmtSize = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`;

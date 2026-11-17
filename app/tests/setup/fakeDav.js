@@ -46,8 +46,13 @@ function createFakeDav({ base = 'http://dav.test/', propagate = false } = {}) {
       (isDir ? '' : `<d:getcontentlength>${e.data.length}</d:getcontentlength>`) +
       `<d:resourcetype>${isDir ? '<d:collection/>' : ''}</d:resourcetype>` +
       (propagate ? `<oc:fileid>${Math.abs(hashCode(p))}</oc:fileid>` : '') +
+      (!isDir && api.locks.has(p) ? lockProps(api.locks.get(p)) : '') +
       `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
   }
+  // Nextcloud files_lock properties of a locked file ({ owner, app, time (s), token })
+  const lockProps = l => `<nc:lock>1</nc:lock><nc:lock-owner-type>${l.app ? 1 : 0}</nc:lock-owner-type>` +
+    `<nc:lock-owner-displayname>${xmlEsc(l.owner || '')}</nc:lock-owner-displayname><nc:lock-owner-editor>${xmlEsc(l.editor || '')}</nc:lock-owner-editor>` +
+    `<nc:lock-time>${l.time || 0}</nc:lock-time><nc:lock-timeout>0</nc:lock-timeout><nc:lock-token>${xmlEsc(l.token || 'files_lock/x')}</nc:lock-token>`
   const hashCode = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)
 
   const res = (status, body = '', headers = {}) => new Response(status === 304 || status === 204 ? null : body, { status, headers })
@@ -61,12 +66,14 @@ function createFakeDav({ base = 'http://dav.test/', propagate = false } = {}) {
     requests.push({ method, path: p, headers: h })
     const failed = api.fail && api.fail(method, p)   // true → 500, a number → that status
     if (failed) return res(typeof failed === 'number' ? failed : 500)
+    // Locked files (api.locks, Nextcloud files_lock) refuse writes with 423
+    if (['PUT', 'DELETE', 'MOVE'].includes(method) && api.locks.has(p)) return res(423)
     const ifMatch = (h['if-match'] || '').replace(/"/g, '')
     const ifNone  = h['if-none-match'] || ''
 
     if (method === 'PROPFIND') {
       const depth = h.depth || 'infinity'
-      if (files.has(p)) return res(207, `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">${propEntry(p, false)}</d:multistatus>`)
+      if (files.has(p)) return res(207, `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">${propEntry(p, false)}</d:multistatus>`)
       if (!dirs.has(p)) return res(404)
       let body = propEntry(p, true)
       if (depth !== '0') {
@@ -128,6 +135,7 @@ function createFakeDav({ base = 'http://dav.test/', propagate = false } = {}) {
 
   const api = {
     fetch, requests, files, dirs, fail: null,
+    locks: new Map(),   // path → { owner, app, editor, time (s), token }: writes answer 423, PROPFIND reports nc:lock-*
     /** Change a file "from outside" (Obsidian, another app). */
     write(p, text) {
       for (let q = parentOf(p), chain = []; ; q = parentOf(q)) {
@@ -141,7 +149,7 @@ function createFakeDav({ base = 'http://dav.test/', propagate = false } = {}) {
     remove(p) { files.delete(p); touch(p) },
     rename(from, to) { return fetch(base + from, { method: 'MOVE', headers: { Destination: base + to, Overwrite: 'F' } }) },
     count(method) { return requests.filter(r => r.method === method).length },
-    reset() { files.clear(); dirs.clear(); dirs.set('', { etag: 'd0' }); requests.length = 0; api.fail = null },
+    reset() { files.clear(); dirs.clear(); dirs.set('', { etag: 'd0' }); requests.length = 0; api.fail = null; api.locks.clear() },
   }
   return api
 }

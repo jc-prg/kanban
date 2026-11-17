@@ -297,6 +297,19 @@ body.view-open #schedToggleBtn { display: none !important; }
   color: #fff;
 }
 
+/* "…" cycling "" → "." → ".." → "..." — work in progress (upload buttons while uploading) */
+.loading-dots { display: inline-block; width: 1.2em; text-align: left; }
+.loading-dots::after { content: ''; animation: loading-dots 1.2s linear infinite; }
+@keyframes loading-dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+}
+@media (prefers-reduced-motion: reduce) { .loading-dots::after { animation: none; content: '...'; } }
+/* Upload buttons while uploading: accent like Save (+ .btn-accent), not clickable */
+.note-upload-label--busy { pointer-events: none; }
+
 .btn-accent:hover {
   background: #6b58e8;
   border-color: #6b58e8;

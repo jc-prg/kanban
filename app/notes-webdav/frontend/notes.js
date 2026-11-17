@@ -65,6 +65,8 @@ function initNotes(cfg) {
 
   function _escHtml(s)               { return _hooks.escHtml ? _hooks.escHtml(s) : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function _showConfirm(msg, opts)   { return _hooks.showConfirm ? _hooks.showConfirm(msg, opts) : Promise.resolve(window.confirm(msg)); }
+  /** Info / error message with just OK (closing it leaves the note dialog as it is). */
+  function _showMessage(msg)         { return _hooks.showMessage ? _hooks.showMessage(msg) : Promise.resolve(window.alert(msg)); }
   function _scheduleSave()           { if (_hooks.scheduleSave) _hooks.scheduleSave(); }
   function _render()                 { if (_hooks.render) _hooks.render(); }
   function _openEditModal(colId, c)  { if (_hooks.openEditModal) _hooks.openEditModal(colId, c); }
@@ -513,7 +515,7 @@ function initNotes(cfg) {
         const el = document.querySelector(`[data-item-id="${id}"]`);
         if (el) _startFolderRename(el, findNoteItem(id, notesState.items) || folder);
       } catch (e) {
-        await _showConfirm(`Could not create folder: ${e.message}`, { okLabel: 'OK' });
+        await _showMessage(`Could not create folder: ${e.message}`);
       }
       return;
     }
@@ -545,7 +547,7 @@ function initNotes(cfg) {
         _applyNotesResult(data);
         renderNotesTree();
       } catch (e) {
-        await _showConfirm(`Could not delete: ${e.message}`, { okLabel: 'OK' });
+        await _showMessage(`Could not delete: ${e.message}`);
       }
       return;
     }
@@ -854,7 +856,7 @@ function initNotes(cfg) {
           _applyNotesResult(data);
         } catch (e) {
           folder.title = prev;
-          await _showConfirm(`Could not rename folder: ${e.message}`, { okLabel: 'OK' });
+          await _showMessage(`Could not rename folder: ${e.message}`);
         }
       } else {
         scheduleSaveNotes();
@@ -924,7 +926,7 @@ function initNotes(cfg) {
     if (noteModalHasChanges()) {
       const result = await _showConfirm('Save changes before navigating?', { okLabel: 'Save', altLabel: "Don't save", cancelLabel: 'Cancel' });
       if (result === false) return; // cancelled
-      if (result === true) await submitNote();
+      if (result === true && !(await submitNote())) return;   // save failed → stay with the changes
     }
     openNoteModal(pageId);
   }
@@ -1047,7 +1049,7 @@ function initNotes(cfg) {
     if (saveBtnLabel) saveBtnLabel.textContent = 'Saving\u2026';
     if (saveBtn) saveBtn.disabled = true;
     _noteSubmitSaving = true;
-    try { await _submitNote(newTitle, newDesc, newLink, page); }
+    try { return await _submitNote(newTitle, newDesc, newLink, page); }
     finally {
       _noteSubmitSaving = false;
       if (saveBtnLabel) saveBtnLabel.textContent = 'Save';
@@ -1055,6 +1057,15 @@ function initNotes(cfg) {
     }
   }
 
+  /** Error text of a failed save; a lock (423) gets its time in local time ("locked since"). */
+  function _saveErrorText(e) {
+    const since = e?.status === 423 && e.data?.lock?.since ? new Date(e.data.lock.since) : null;
+    const when = since && !isNaN(since)
+      ? `\n\nLocked since ${since.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}.` : '';
+    return `Could not save page: ${e.message}${when}\n\nYour changes are still in the editor.`;
+  }
+
+  /** Saves the open note; true when it was saved (the dialog may close), false when it stays open (error, conflict). */
   async function _submitNote(newTitle, newDesc, newLink, page, { force = false } = {}) {
     let _handledByPost = false;
 
@@ -1074,8 +1085,8 @@ function initNotes(cfg) {
           _handledByPost = true;
         } catch (e) {
           _pendingNewPage = { page, parentId, onCreated };
-          await _showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
-          return;
+          await _showMessage(_saveErrorText(e));
+          return false;
         }
       } else {
         if (!parentId) {
@@ -1108,8 +1119,8 @@ function initNotes(cfg) {
         } catch (e) {
           if (e.status === 412 && e.data?.server) return _handleConflict(e.data.server, { title: newTitle, desc: newDesc, link: newLink }, page);
           if (e.status === 409 && e.data?.notes) { _applyNotesResult(e.data); _pageEtag.set(noteModalPageId, e.data.etag || null); }
-          await _showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
-          return;
+          await _showMessage(_saveErrorText(e));
+          return false;
         }
       } else {
         page.lastModified = new Date().toISOString();
@@ -1132,6 +1143,7 @@ function initNotes(cfg) {
       setTimeout(() => msg.classList.remove('modal-saved-msg--visible'), 1500);
     }
     onCreated?.(page.id);
+    return true;
   }
 
   function _flashNoteMsg(text, ms = 1500) {
@@ -1196,6 +1208,7 @@ function initNotes(cfg) {
   }
 
   async function _handleConflict(server, mine, page) {
+    // true only when "Overwrite with mine" saved — every other choice keeps the dialog open
     const choice = await _conflictDialog(server, mine);
     if (choice === 'mine') return _submitNote(mine.title, mine.desc, mine.link, page, { force: true });
     if (choice === 'theirs') {
@@ -1204,7 +1217,7 @@ function initNotes(cfg) {
       noteModalOrig = { title: document.getElementById('notePageTitle').value, desc: server.content || '', link: server.link || '' };
       page.description = server.content || '';
       _pageEtag.set(noteModalPageId, server.etag);
-      return;
+      return false;
     }
     if (choice === 'copy') {
       try {
@@ -1213,8 +1226,9 @@ function initNotes(cfg) {
         _applyNotesResult(data);
         renderNotesTree();
         await openNoteModal(data.page?.id || copy.id);
-      } catch (e) { await _showConfirm(`Could not save the copy: ${e.message}`, { okLabel: 'OK' }); }
+      } catch (e) { await _showMessage(`Could not save the copy: ${e.message}`); }
     }
+    return false;
   }
 
   function noteModalHasChanges() {
@@ -1440,22 +1454,30 @@ function initNotes(cfg) {
     const list = document.getElementById('noteAttachList');
     if (!list) return;
     list.innerHTML = '';
+    // WebDAV boards: the page's own files (scope 'page' — front matter `attachments:` / linked) and, in a section
+    // of their own, the folder's other files (scope 'folder')
+    const folderList  = document.getElementById('noteAttachFolderList');
+    const folderField = document.getElementById('noteAttachFolderField');
+    if (folderList) folderList.innerHTML = '';
+    const own      = files.filter(f => f.scope !== 'folder');
+    const inFolder = folderList ? files.filter(f => f.scope === 'folder') : [];
+    if (folderField) folderField.hidden = !inFolder.length;
 
     const page = findNotePage(pageId, notesState.items);
     if (page) {
       const hadAttach = page.hasAttachments;
       const prevCount = page.attachmentCount;
-      page.hasAttachments = files.length > 0;
-      page.attachmentCount = files.length;
-      if (!!hadAttach !== page.hasAttachments || prevCount !== files.length) {
+      page.hasAttachments = own.length > 0;
+      page.attachmentCount = own.length;
+      if (!!hadAttach !== page.hasAttachments || prevCount !== own.length) {
         if (!!hadAttach !== page.hasAttachments) page.lastModified = new Date().toISOString();
         scheduleSaveNotes();
         renderNotesTree();
       }
     }
 
-    _updateNoteToggleCount('noteToggleAttachments', files.length);
-    if (!files.length) return;
+    _updateNoteToggleCount('noteToggleAttachments', own.length);
+    if (!own.length && !inFolder.length) return;
 
     const svgAttach   = _icons.svgAttachment   ? _icons.svgAttachment()   : '';
     const svgFileImg  = _icons.svgFileImage     ? _icons.svgFileImage()    : svgAttach;
@@ -1466,7 +1488,7 @@ function initNotes(cfg) {
     const svgFullscreen  = _icons.svgFullscreen ? _icons.svgFullscreen() : '\u26f6';
     const svgOpenLink    = _icons.svgOpenLink   ? _icons.svgOpenLink()   : '\u2197';
 
-    for (const f of files) {
+    for (const f of [...own, ...inFolder]) {
       const ext = f.name.split('.').pop()?.toLowerCase() || '';
       const ft  = ['jpg','jpeg','png','gif','webp','avif','bmp','ico','tiff','svg'].includes(ext) ? 'image'
                 : ext === 'svg' ? 'svg'
@@ -1503,11 +1525,16 @@ function initNotes(cfg) {
       item.querySelector('[data-act="delete"]').addEventListener('click', async () => {
         if (!await _showConfirm(`Delete "${f.name}"?`, { okLabel: 'Delete', danger: true })) return;
         try {
-          await fetch(url, { method: 'DELETE' });
+          // WebDAV: the page's list in the front matter changes too — If-Match keeps the editor's version current
+          const etag = noteModalPageId === pageId ? _pageEtag.get(pageId) : null;
+          const r = await fetch(url, { method: 'DELETE', headers: etag ? { 'If-Match': `"${etag}"` } : {} });
+          const d = await r.json().catch(() => ({}));
+          if (d.etag && noteModalPageId === pageId) _pageEtag.set(pageId, d.etag);
+          window.attachImg?.forget(url);
           loadAttachments(pageId);
         } catch (e) { console.error('Delete failed:', e.message); }
       });
-      list.appendChild(item);
+      (f.scope === 'folder' ? folderList : list).appendChild(item);
     }
   }
 
@@ -1519,21 +1546,36 @@ function initNotes(cfg) {
 
   async function _handleAttachUpload(pageId, fileList, atCursor = false) {
     if (!NOTES_ATTACH_API || !fileList?.length) return;
+    // WebDAV: a page not saved yet has no file on the server to keep its attachments next to
+    if (_webdavActive() && _pendingNewPage?.page.id === pageId) {
+      const files = Array.from(fileList);   // the input's FileList is cleared once the dialog closes
+      const save = await _showConfirm('Save the page first, then the files can be attached to it.', { okLabel: 'Save now', cancelLabel: 'Cancel' });
+      if (!save || !(await submitNote())) return;
+      fileList = files;
+      pageId = noteModalPageId;
+    }
     const label = document.querySelector('label[for="noteAttachInput"]');
     const input = document.getElementById('noteAttachInput');
-    if (label) label.textContent = 'Uploading…';
+    if (label) {
+      label.innerHTML = 'Uploading<span class="loading-dots"></span>';
+      label.classList.add('btn-accent', 'note-upload-label--busy');   // like Save, while it runs
+    }
     if (input) input.disabled = true;
     try {
       for (const file of Array.from(fileList)) {
         const fd = new FormData();
         fd.append('file', file);
         try {
-          const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd });
+          // WebDAV: the file joins the page's front matter list — If-Match keeps the editor's version current
+          const etag = noteModalPageId === pageId ? _pageEtag.get(pageId) : null;
+          const r = await fetch(`${NOTES_ATTACH_API}/${pageId}`, { method: 'POST', body: fd, headers: etag ? { 'If-Match': `"${etag}"` } : {} });
           const data = await r.json().catch(() => ({}));
           if (!r.ok) {
-            await _showConfirm(data.error || 'Upload failed.', { okLabel: 'OK' });
+            await _showMessage(data.error || 'Upload failed.');
             continue;
           }
+          if (data.etag && noteModalPageId === pageId) _pageEtag.set(pageId, data.etag);
+          window.attachImg?.forget(`${NOTES_ATTACH_API}/${pageId}/${encodeURIComponent(data.name)}`);   // same name re-uploaded
           const ext = data.name.split('.').pop()?.toLowerCase() || '';
           const ft  = ['jpg','jpeg','png','gif','webp','avif','bmp','ico','tiff','svg'].includes(ext) ? 'image'
                     : ext === 'svg' ? 'svg'
@@ -1544,7 +1586,10 @@ function initNotes(cfg) {
         } catch (e) { console.error('Upload error:', e.message); }
       }
     } finally {
-      if (label) label.textContent = '+ Upload';
+      if (label) {
+        label.textContent = '+ Upload';
+        label.classList.remove('btn-accent', 'note-upload-label--busy');
+      }
       if (input) input.disabled = false;
       loadAttachments(pageId);
     }
@@ -1589,14 +1634,16 @@ function initNotes(cfg) {
 
   async function resolveAttachments(container) {
     if (!noteModalPageId || !NOTES_ATTACH_API) return;
-    const imgs = [...container.querySelectorAll('img[src]')];
+    const imgs = [...container.querySelectorAll('img')];
     const links = [...container.querySelectorAll('a[href]')];
 
     for (const img of imgs) {
-      const src = _decodeUri(img.getAttribute('src'));
+      // Deferred by the host editor (window.attachImg: loading placeholder, cached blob URLs) or a plain src
+      const src = _decodeUri(window.attachImg ? window.attachImg.src(img) : img.getAttribute('src'));
       if (!src.startsWith('_attachments/')) continue;
       const fname = src.replace('_attachments/', '').replace(`${noteModalPageId}_`, '');
       const url = `${NOTES_ATTACH_API}/${noteModalPageId}/${encodeURIComponent(fname)}`;
+      if (window.attachImg) { window.attachImg.load(img, url); continue; }   // in parallel, not one after another
       try {
         const r = await fetch(url);
         if (!r.ok) continue;
@@ -1846,7 +1893,7 @@ function initNotes(cfg) {
         _notesOp('POST', moveApi, body)
           .then(data => { _applyNotesResult(data); renderNotesTree(); })
           .catch(async e => {
-            await _showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });
+            await _showMessage(`Could not move item: ${e.message}`);
             await loadNotes();
           })
           .finally(() => _setTreeMoveLock(false));
@@ -1939,7 +1986,7 @@ function initNotes(cfg) {
         _notesOp('POST', moveApi, body)
           .then(data => { _applyNotesResult(data); renderNotesTree(); })
           .catch(async e => {
-            await _showConfirm(`Could not move item: ${e.message}`, { okLabel: 'OK' });
+            await _showMessage(`Could not move item: ${e.message}`);
             await loadNotes();
           })
           .finally(() => _setTreeMoveLock(false));
@@ -2119,7 +2166,8 @@ function initNotes(cfg) {
     });
     document.getElementById('noteModalPrintBtn')?.addEventListener('click', () => printNote(noteModalPageId));
     document.getElementById('noteModalCancelBtn')?.addEventListener('click', () => tryCloseNoteModal());
-    document.getElementById('noteModalSaveBtn')?.addEventListener('click', async () => { await submitNote(); closeNoteModal(); });
+    // Closes only when the note was saved — after an error / conflict it stays open with the changes
+    document.getElementById('noteModalSaveBtn')?.addEventListener('click', async () => { if (await submitNote()) closeNoteModal(); });
     document.getElementById('noteModalDeleteBtn')?.addEventListener('click', async () => {
       if (!noteModalPageId) return;
       const page = findNotePage(noteModalPageId, notesState.items);
@@ -2152,7 +2200,7 @@ function initNotes(cfg) {
           cancelLabel: 'Cancel',
         });
         if (!ok) return;
-        await submitNote();
+        if (!(await submitNote())) return;   // save failed → stay with the changes
       }
       openNoteModal(page.id, false, { push: true });
     }, { capture: true });

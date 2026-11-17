@@ -20,7 +20,6 @@ const {
 
 const MD_TYPE = 'text/markdown; charset=utf-8';
 const SLOW_READ_MS = 2500;
-const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif']);
 // Same list as the host app's local attachment upload (routes/attachments.js)
 const BLOCKED_EXTS = new Set(['xhtml', 'xht', 'xml', 'exe', 'com', 'bat', 'cmd', 'vbs', 'wsf', 'hta', 'ps1',
   'app', 'dmg', 'pkg', 'deb', 'rpm', 'run', 'elf', 'jar', 'war', 'php', 'asp', 'aspx', 'jsp', 'cgi', 'rb', 'pl',
@@ -48,11 +47,65 @@ function attachmentRefs(body) {
 }
 const attachmentLink = rel => rel.split('/').map(encodeURIComponent).join('/');
 
+/**
+ * Front matter `attachments:` — the page's own files (uploaded for it or linked in it) as "[name](_attachments/name)"
+ * (also bare names and older "[name](_attachments/<pageId>_name)" entries). Returns relative paths "_attachments/…".
+ */
+function fmAttachments(note) {
+  const v = fm.get(note, 'attachments');
+  if (!v) return [];
+  const out = new Set();
+  for (const e of Array.isArray(v) ? v : [v]) {
+    const s = String(e ?? '').trim().replace(/^"|"$/g, '');
+    if (!s) continue;
+    const m = /^!?\[[^\]]*\]\(<?([^)>]+)>?\)$/.exec(s);
+    let rel = m ? m[1] : (s.includes('/') ? s : `${ATTACH_DIR}/${s}`);
+    try { rel = decodeURIComponent(rel); } catch { /* keep */ }
+    rel = rel.replace(/^\.\//, '');
+    if (rel.startsWith(`${ATTACH_DIR}/`) && !rel.slice(ATTACH_DIR.length + 1).includes('/')) out.add(rel);
+  }
+  return [...out];
+}
+
+/** Writes the list (sorted by name, "[name](link)"); an empty list removes the key. */
+function setFmAttachments(note, rels) {
+  const list = [...new Set(rels)].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'de'));
+  fm.set(note, 'attachments', list.map(rel => `[${nameOf(rel).replace(/[[\]]/g, '')}](${attachmentLink(rel)})`));
+}
+
+/** All attachments of a note: its front matter list and the files its text links. */
+function noteAttachments(note) {
+  return new Set([...fmAttachments(note), ...attachmentRefs(note.body)]);
+}
+
 function _err(res, status, error, extra = {}) { return res.status(status).json({ error, ...extra }); }
 
-function _storeError(res, err) {
+/** Text for a lock found by store.lockInfo: who holds it and what to do (the time goes along as `lock.since` — the
+ *  browser shows it in local time; the server may run in UTC). */
+function lockMessage(name, lock) {
+  const who = lock.app ? `by ${lock.owner || 'an app'} (Nextcloud app lock)` : `by ${lock.owner || 'another user'}${lock.editor ? ` in ${lock.editor}` : ''}`;
+  const hint = lock.app
+    ? 'Nextcloud did not release it when the file was closed there. Open the file in Nextcloud and close it again, or ask the Nextcloud admin to remove the lock (files_lock).'
+    : 'Close the file there, or remove the lock in Nextcloud (Files → file menu → Unlock).';
+  return `"${name}" is locked on the server ${who}${lock.timeout ? '' : ', without expiry'}. ${hint}`;
+}
+
+async function _storeError(res, err) {
+  if (err.status === 423 && err.store && err.path) {
+    // Who holds the lock — a stale Nextcloud Text lock never goes away on its own
+    const lock = await err.store.lockInfo(err.path).catch(() => null);
+    if (lock) return _err(res, 423, lockMessage(nameOf(err.path).replace(/\.md$/i, ''), lock), { lock: { owner: lock.owner, app: lock.app, since: lock.since } });
+  }
   if (err instanceof StoreError || err.status) return _err(res, err.status || 502, err.message);
   throw err;
+}
+
+/** multer hands over the file name's UTF-8 bytes as Latin-1 ("Ã¤" for "ä") — decode them; real Latin-1 stays. */
+function uploadName(name) {
+  const s = String(name || '');
+  if (!/[\u0080-\u00ff]/.test(s)) return s;
+  const utf8 = Buffer.from(s, 'latin1').toString('utf8');
+  return utf8.includes('\uFFFD') ? s : utf8;
 }
 
 // board → BoardNotesIndex (one per process; replaced when the board's WebDAV config changes)
@@ -61,7 +114,30 @@ const indexes = new Map();
 /** Tests only: forget all indexes. */
 function _resetIndexes() { indexes.clear(); }
 
+// The handlers of the mounted notes router — lets other readers of the notes documents (Today's Notes and Find
+// widgets) bring WebDAV boards up to date first
+let _freshen = null;
+
+/**
+ * Checks the WebDAV boards among `boards` against their servers (at most every 5 s each) and waits for that up to
+ * `waitMs` (`frontmatter`: also for the texts of changed files — full-text search). Boards without WebDAV are skipped.
+ */
+async function freshenWebdavNotes(boards, { waitMs = 3000, frontmatter = false } = {}) {
+  if (!_freshen) return;
+  await Promise.allSettled(boards.map(b => _freshen(b, waitMs, frontmatter)));
+}
+
 function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = null, baseUrl = null }) {
+  _freshen = async (board, waitMs, frontmatter) => {
+    const cfg = await adapter.resolveWebdavCfg(board);
+    if (!cfg.enabled || !cfg.url) return;
+    const idx = await getIndex(board, cfg);
+    idx.ensureFresh();
+    const until = Date.now() + waitMs;
+    await idx.wait(waitMs);
+    if (frontmatter) await idx.waitFrontmatter(Math.max(0, until - Date.now()));
+  };
+
   async function getIndex(board, cfg) {
     const secret = crypto.createHash('sha1').update(cfg.password || '').digest('hex').slice(0, 8);
     const key = crypto.createHash('sha1').update(`${cfg.url}|${cfg.user}|${secret}`).digest('hex').slice(0, 16);
@@ -114,21 +190,9 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
     };
   }
 
-  /** Removes keys earlier versions wrote; attachments listed only there become links in the text. */
+  /** Removes keys earlier versions wrote (`attachments:` stays — it lists the page's files). */
   function _cleanupLegacy(note, stem) {
-    const att = fm.get(note, 'attachments');
-    if (att) {
-      const refs = attachmentRefs(note.body);
-      const lines = [];
-      for (const e of Array.isArray(att) ? att : [att]) {
-        const m = /^\[(.+?)\]\((.+)\)$/.exec(String(e).trim().replace(/^"|"$/g, ''));
-        const [name, rel] = m ? [m[1], m[2]] : [nameOf(String(e)), `${ATTACH_DIR}/${e}`];
-        if (!refs.has(rel)) lines.push(`- ${IMG_EXT.has((name.split('.').pop() || '').toLowerCase()) ? '!' : ''}[${name}](${attachmentLink(rel)})`);
-      }
-      if (lines.length) note.body = note.body.replace(/\n+$/, '') + (note.body.trim() ? '\n\n' : '') + lines.join('\n') + '\n';
-    }
     const changed = [];
-    if (fm.remove(note, 'attachments')) changed.push('attachments');
     const title = fm.get(note, 'title');
     if (title !== undefined) {
       const t = String(title).trim();
@@ -147,7 +211,7 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
       if (p === exceptPath || !p.endsWith('.md')) continue;
       try {
         const { text } = await idx.read(p);
-        if (attachmentRefs(fm.parse(text).body).has(rel)) return true;
+        if (noteAttachments(fm.parse(text)).has(rel)) return true;
       } catch { return true; }   // unknown → keep the file
     }
     return false;
@@ -158,7 +222,7 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
     const { text, etag } = await idx.read(page);
     const note = fm.parse(text);
     const mapping = new Map();
-    for (const rel of attachmentRefs(note.body)) {
+    for (const rel of noteAttachments(note)) {
       const src = joinPath(oldFolder, rel);
       if (!idx.exists(src)) continue;
       const name = nameOf(rel);
@@ -179,7 +243,9 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
       let r = raw; try { r = decodeURIComponent(raw); } catch {}
       return mapping.has(r) ? `](${attachmentLink(mapping.get(r))})` : m;
     });
-    if (body !== note.body) {
+    const listed = fmAttachments(note);
+    if (listed.some(r => mapping.has(r))) setFmAttachments(note, listed.map(r => mapping.get(r) || r));
+    if (body !== note.body || note.dirty) {
       note.body = body;
       const out = fm.render(note);
       await idx.noteWritten(page, await idx.store.put(page, out, { contentType: MD_TYPE, ifMatch: etag }), out, Buffer.byteLength(out));
@@ -292,6 +358,10 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
       const stem = nameOf(p).replace(/\.md$/i, '');
       if (body.description !== undefined) note.body = String(body.description);
       _cleanupLegacy(note, stem);
+      // Files the text links (and that exist next to the note) join the page's attachments list
+      const listed = fmAttachments(note);
+      const linked = [...attachmentRefs(note.body)].filter(r => !listed.includes(r) && idx.exists(joinPath(parentOf(p), r)));
+      if (linked.length) setFmAttachments(note, [...listed, ...linked]);
       if (body.link !== undefined) fm.set(note, 'link', String(body.link || '').trim());
       if (body.linkedCards !== undefined) fm.set(note, 'linkedCards', await _linkedCardEntries(body.linkedCards, board, req));
       // Pin the id, so card links and deep links survive a rename in Obsidian
@@ -328,7 +398,7 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
     try {
       const folder = parentOf(p);
       let refs = new Set();
-      try { refs = attachmentRefs(fm.parse((await idx.read(p)).text).body); } catch (err) { if (!(err instanceof NotFound)) throw err; }
+      try { refs = noteAttachments(fm.parse((await idx.read(p)).text)); } catch (err) { if (!(err instanceof NotFound)) throw err; }
       for (const rel of refs) {
         const f = joinPath(folder, rel);
         if (idx.exists(f) && !await _referencedElsewhere(idx, folder, p, rel)) { await idx.store.delete(f); await idx.removed(f); }
@@ -407,16 +477,34 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
     return idx.findFile(filename, folder);
   }
 
-  /** Attachment links of a note's text — the cached copy when it is current, else read from the server. */
-  async function _refsOf(idx, p) {
-    const text = idx.cachedText(p, idx.entry(p)?.e) ?? (await idx.read(p)).text;
-    return attachmentRefs(fm.parse(text).body);
+  /**
+   * Changes the page's front matter `attachments:` list (fn: list → list) and writes the note when it changed.
+   * `etagIn` = ETag the editor loaded the note with: the note is only touched when it still is at that version
+   * (else PreconditionFailed — the editor's next save brings the list in line). Returns the note's ETag.
+   */
+  async function _editAttachmentList(idx, p, fn, etagIn = '') {
+    let text = etagIn ? idx.cachedText(p, etagIn) : null, etag = etagIn;
+    if (text === null) {
+      const cur = await idx.read(p);
+      if (etagIn && cur.etag !== etagIn) throw new PreconditionFailed('note changed since it was loaded');
+      ({ text, etag } = cur);
+    }
+    const note = fm.parse(text);
+    if (!note.valid) return etag;   // unparsable YAML: leave the note alone
+    const before = fmAttachments(note);
+    const after = fn(before);
+    if (after.length === before.length && after.every(r => before.includes(r))) return etag;
+    setFmAttachments(note, after);
+    const out = fm.render(note);
+    const nextEtag = await idx.store.put(p, out, { contentType: MD_TYPE, ifMatch: etag });
+    await idx.noteWritten(p, nextEtag, out, Buffer.byteLength(out));
+    return nextEtag;
   }
 
   /**
-   * Files of a page: in <folder>/_attachments/ the ones its text links, legacy "<id>_name" files, and files no note
-   * of the folder links yet (just uploaded — the link is in the editor until the note is saved — or added
-   * elsewhere, e.g. Obsidian). Files only other notes link are left out. Each with its `link` for the text.
+   * Files in the page's folder <folder>/_attachments/, each { name, size, link, scope }: scope 'page' = the page's
+   * own (front matter `attachments:`, links in its text, legacy "<id>_name" files — listed without the prefix),
+   * 'folder' = the folder's other files (other notes', Obsidian's, …).
    */
   async function listAttachments(req, res, cfg) {
     const { pageId } = req.params;
@@ -425,21 +513,16 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
     if (!p) return res.json([]);
     try {
       const folder = parentOf(p);
-      const refs = await _refsOf(idx, p);
-      const others = new Set();
-      for (const q of idx.filesIn(folder)) {
-        if (q === p || !q.endsWith('.md')) continue;
-        try { for (const r of await _refsOf(idx, q)) others.add(r); }
-        catch { /* unreadable → its links unknown */ }
-      }
-      const out = [];
+      const own = noteAttachments(fm.parse((await idx.read(p)).text));
+      const page = [], other = [];
       for (const f of idx.filesIn(joinPath(folder, ATTACH_DIR))) {
         const name = nameOf(f), rel = `${ATTACH_DIR}/${name}`;
         const legacy = name.startsWith(pageId + '_');
-        if (!refs.has(rel) && !legacy && others.has(rel)) continue;
-        out.push({ name: legacy ? name.slice(pageId.length + 1) : name, size: idx.entry(f)?.s || 0, link: attachmentLink(rel) });
+        const item = { name: legacy ? name.slice(pageId.length + 1) : name, size: idx.entry(f)?.s || 0, link: attachmentLink(rel) };
+        if (own.has(rel) || legacy) page.push({ ...item, scope: 'page' });
+        else other.push({ ...item, scope: 'folder' });
       }
-      res.json(out);
+      res.json([...page, ...other]);
     } catch (err) { return _storeError(res, err); }
   }
 
@@ -462,7 +545,7 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
       if (!p) return _err(res, 404, 'Page not found');
       try {
         const target = joinPath(parentOf(p), ATTACH_DIR);
-        const base = fileName(nameOf(req.file.originalname || 'file'));
+        const base = fileName(nameOf(uploadName(req.file.originalname) || 'file'));
         const dot = base.lastIndexOf('.');
         const [stem, ext] = dot > 0 ? [base.slice(0, dot), base.slice(dot)] : [base, ''];
         await idx.store.mkdirs(target);
@@ -475,7 +558,12 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
             throw err;
           }
           await idx.noteWritten(f, etag, null, req.file.size);
-          return res.json({ name: nameOf(f), size: req.file.size, link: attachmentLink(`${ATTACH_DIR}/${nameOf(f)}`) });
+          // The page lists the file in its front matter (If-Match: the editor's version of the note)
+          const rel = `${ATTACH_DIR}/${nameOf(f)}`;
+          let noteEtag = null;
+          try { noteEtag = await _editAttachmentList(idx, p, list => [...list, rel], normEtag(req.headers['if-match'] || '')); }
+          catch (err) { if (!(err instanceof PreconditionFailed)) console.warn(`notes: could not list ${f} in ${p}:`, err.message); }
+          return res.json({ name: nameOf(f), size: req.file.size, link: attachmentLink(rel), etag: noteEtag });
         }
         return _err(res, 409, 'No free file name found');
       } catch (err) { return _storeError(res, err); }
@@ -502,7 +590,15 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
     try {
       await idx.store.delete(f);
       await idx.removed(f);
-      res.json({ ok: true });
+      // Out of the page's front matter list too
+      const p = idx.pathOf(req.params.pageId);
+      const rel = `${ATTACH_DIR}/${nameOf(f)}`;
+      let etag = null;
+      if (p && joinPath(parentOf(p), rel) === f) {
+        try { etag = await _editAttachmentList(idx, p, list => list.filter(r => r !== rel), normEtag(req.headers['if-match'] || '')); }
+        catch (err) { if (!(err instanceof PreconditionFailed)) console.warn(`notes: could not unlist ${f} in ${p}:`, err.message); }
+      }
+      res.json({ ok: true, etag });
     } catch (err) { return _storeError(res, err); }
   }
 
@@ -535,4 +631,4 @@ function createWebdavHandlers({ adapter, attachmentsDir = null, resolveCards = n
   };
 }
 
-module.exports = { createWebdavHandlers, fileName, attachmentRefs, attachmentLink, _resetIndexes };
+module.exports = { createWebdavHandlers, freshenWebdavNotes, fileName, attachmentRefs, attachmentLink, fmAttachments, noteAttachments, uploadName, lockMessage, _resetIndexes };

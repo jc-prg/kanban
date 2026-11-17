@@ -349,3 +349,22 @@ a.note-page-link {
   margin-right: 0.2em;
   font-style: normal;
 }
+
+/* Attachment images while they load (editor.js setAttachmentHtml / loadAttachmentImage): a shimmering placeholder
+   instead of the broken-image icon, which only shows when loading failed (.att-img--broken) */
+img.att-img--loading {
+  display: inline-block;
+  width: 160px;
+  height: 100px;
+  max-width: 100%;
+  border-radius: 6px;
+  vertical-align: middle;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--text-muted) 12%, transparent) 25%,
+    color-mix(in srgb, var(--text-muted) 24%, transparent) 50%,
+    color-mix(in srgb, var(--text-muted) 12%, transparent) 75%);
+  background-size: 200% 100%;
+  animation: att-img-shimmer 1.2s linear infinite;
+}
+@keyframes att-img-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { img.att-img--loading { animation: none; } }

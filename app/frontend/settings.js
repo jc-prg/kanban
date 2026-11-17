@@ -1763,6 +1763,7 @@ function _createNotesModule(extra = {}) {
       scheduleSave:       () => schedulesSave(),
       render:             () => render(),
       showConfirm:        (msg, opts) => showConfirm(msg, opts),
+      showMessage:        msg => showMessage(msg),
       escHtml:            s => escHtml(s),
       openEditModal:      (colId, card) => openEditModal(colId, card),
       uid:                () => uid(),

@@ -1,9 +1,10 @@
 'use strict';
 // "Today" provider: note page trees (titles only) of all active (non-archived) boards, from the
-// CouchDB copy (WebDAV boards: as of the last sync), with a `webdav` flag per board.
+// CouchDB copy (WebDAV boards: the index of the files, checked against the server first), with a `webdav` flag per board.
 const { getCouch }                        = require('../db');
 const { getWebdavDb, getWebdavAccounts }  = require('../global-db');
 const { DB_PREFIX, DOC_ID, NOTES_DOC_ID } = require('../config');
+const { freshenWebdavNotes }              = require('../../notes-webdav/backend/webdav-handlers');
 
 const MAX_DEPTH = 8;
 
@@ -41,6 +42,7 @@ async function fetchNoteTrees() {
   const names  = dbs.filter(n => n.startsWith(DB_PREFIX)).map(n => n.slice(DB_PREFIX.length));
   const boards = [];
   const accounts = getWebdavAccounts().catch(() => []);   // loaded once, only awaited when needed
+  await freshenWebdavNotes(names);   // WebDAV boards: notes added / changed in Nextcloud or Obsidian show up here too
   await Promise.allSettled(names.map(async board => {
     const db = couch.use(DB_PREFIX + board);
     const [boardRes, notesRes] = await Promise.allSettled([db.get(DOC_ID), db.get(NOTES_DOC_ID)]);

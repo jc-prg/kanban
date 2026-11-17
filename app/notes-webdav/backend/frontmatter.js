@@ -8,9 +8,9 @@
 
 const YAML = require('yaml');
 
-const APP_KEYS    = ['id', 'link', 'linkedCards'];
+const APP_KEYS    = ['id', 'link', 'linkedCards', 'attachments'];
 // Written by earlier versions; removed when the app writes a note
-const LEGACY_KEYS = ['title', 'lastModified', 'attachments', 'source'];
+const LEGACY_KEYS = ['title', 'lastModified', 'source'];
 
 const FM_RE       = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 const EMPTY_FM_RE = /^---[ \t]*\r?\n---[ \t]*(?:\r?\n|$)/;
