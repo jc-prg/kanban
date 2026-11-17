@@ -199,9 +199,13 @@ All `/api/*` routes require authentication via one of:
 | `GET` | `/api/:board/card/:id` | Card history: `{ created, moves, column }` |
 | `POST` | `/api/:board/move-to/:name` | Move a card to the named column (see below) |
 | `POST` | `/api/:board/import` | Bulk-import cards (see below) |
-| `GET` | `/api/:board/notes` | Load notes document |
-| `PUT` | `/api/:board/notes` | Replace notes document; body: full notes object |
-| `GET` | `/api/:board/notes/export` | Download notes as a ZIP archive (Markdown + attachments) |
+| `GET` | `/api/:board/notes` | Load notes document. WebDAV boards: answered from the index at once (`revalidating: true` while the server is checked in the background, `error` if unreachable); `?wait=1` waits for the check |
+| `PUT` | `/api/:board/notes` | Replace notes document; body: full notes object (ignored on WebDAV boards — the tree is derived from the files) |
+| `GET` | `/api/:board/notes/export` | Download notes as a ZIP archive (Markdown + attachments; WebDAV boards: the files as they are on the server) |
+| `POST` | `/api/:board/notes/sync` | WebDAV boards: check the server now (`{ full: true }` lists everything again) |
+| `GET` | `/api/:board/notes/pages/:id/content` | WebDAV boards: `{ content, etag, link, linkedCards, properties, … }` (conditional GET; `stale: true` = cached copy, server slower than 2.5 s) |
+| `PATCH` | `/api/:board/notes/pages/:id` | Update `title` (renames the file), `description`, `link`, `linkedCards`; WebDAV boards: header `If-Match: <etag>` → 412 `{ server }` when changed elsewhere, `force: true` overwrites |
+| `POST` | `/api/:board/notes/migrate` | WebDAV boards: one-time migration from the old DB tree; reports only, `?dry_run=0` runs it |
 | `GET` | `/api/:board/attachment-stats` | Returns `{ count, size }` for all attachments on the board |
 | `GET` | `/api/:board/webdav-config` | Load WebDAV config: `{ enabled, url, user, hasPassword }` |
 | `PUT` | `/api/:board/webdav-config` | Save WebDAV config; body: `{ enabled, url, user, password? }` |
@@ -210,11 +214,13 @@ All `/api/*` routes require authentication via one of:
 | `PUT` | `/api/:board/webhook-config` | Save webhook config; body: `{ enabled, name, url, method }` |
 | `POST` | `/api/:board/webhook/trigger` | Fire the configured webhook server-side; returns `{ ok, status?, error? }` |
 
-WebDAV config is stored globally in `jc-config-webdav`, with each board's config as a separate document keyed by board name. When enabled, notes are synced with the configured WebDAV server (e.g. Nextcloud). Credentials are stored server-side and never sent to the browser.
+WebDAV config is stored globally in `jc-config-webdav`, with each board's config as a separate document keyed by board name. When enabled, the Markdown files on the WebDAV server (e.g. Nextcloud, also edited with Obsidian or the CV-App) are the only source of truth; see "Notes on WebDAV" below. Credentials are stored server-side and never sent to the browser.
 
 Webhook config is stored as a separate CouchDB document (`_id: "webhook-config"`) per board. The configured button name appears in the board menu; clicking it fires `POST /:board/webhook/trigger` which makes a server-side HTTP request (GET/POST/PUT/PATCH) to the URL and returns the result in a dialog.
 
 ### Notes attachments (`:pageId` format: `n-<alphanumeric>`)
+
+Boards without WebDAV: local files `<ATTACHMENTS_DIR>/<board>/<folder>/_attachments/<pageId>_<name>` (`routes/attachments.js`). WebDAV boards (notes router, before that): files in `<folder>/_attachments/` next to the note on the server; upload returns `{ name, size, link }` and the link goes into the text; the list shows files the note links, legacy `<pageId>_name` files (listed without the prefix) and files no note of the folder links yet (a fresh upload whose link is still unsaved in the editor, files added in Obsidian), each with its `link` (used by the list's insert button); files only other notes link are left out (API NA-4).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -387,7 +393,7 @@ Returns `{ relevant, relevant_items, excluded, excluded_items, skipped, skipped_
 
 ### Notes document (`_id: "notes"`)
 
-Stored as a separate CouchDB document per board. Schema version 2 — older v1 documents (with a `pages` array) are migrated automatically on read.
+Stored as a separate CouchDB document per board. Schema version 2 — older v1 documents (with a `pages` array) are migrated automatically on read. On WebDAV boards the document is the index of the files (`source: "webdav"`, see "Notes on WebDAV"); the Today page, search and backups read it the same way.
 
 ```jsonc
 {
@@ -429,39 +435,37 @@ Stored as a separate CouchDB document per board. Schema version 2 — older v1 d
 }
 ```
 
-### WebDAV file format (on the server)
+### Notes on WebDAV (`app/notes-webdav/backend/`)
 
-Each note page is stored as a Markdown file with a YAML front-matter block. Folders map to WebDAV collections (directories).
+**The files on the server are the only source of truth.** The board's notes document is a cache of them (`notes-index.js`), rebuilt from the file listing — nothing is matched by heuristics, so there are no orphans. Before the first index is written, an old DB tree is kept as `notes-legacy` for the migration.
 
-**Directory layout:**
+- `store.js` — WebDAV client (Node fetch, keep-alive): PROPFIND with `getetag` + `oc:fileid`, GET with `If-None-Match`, PUT with `If-Match` / `If-None-Match: *`, MOVE with `Overwrite: F`, MKCOL, DELETE. Writes answered with 423 Locked (Nextcloud: file in use by another request or a sync client) are retried after `LOCK_RETRY_MS` (0.3 / 1 / 2.5 s), then reported as "locked on the server" (API NP-8b).
+- `notes-index.js` — `BoardNotesIndex`: Nextcloud/ownCloud (detected by `oc:fileid`) propagate folder ETags, so an unchanged root ETag = one PROPFIND Depth:0; otherwise only changed folders are listed again. Other servers: one Depth:infinity. Checks run in the background at most every 5 s; front matter fields and bodies (`description`, for search) of files with a new ETag are read afterwards (3 at a time). Ids: a page keeps the `id` from its front matter, otherwise `n-<hash of path>`; folders `f-<hash of path>`; `pathOf()` resolves all of them, so an id handed out before the front matter was read keeps working. Order: folders first, then alphabetical; dot folders (`.obsidian`, `.trash`) and `_attachments/` are not in the tree.
+- `frontmatter.js` — round trip with the `yaml` package: Obsidian properties (`tags`, `aliases`, …), order and comments are kept; the app writes only `id`, `link`, `linkedCards`. Writing a note also removes the legacy keys `title`, `lastModified`, `source` and turns `attachments:` into links in the text.
+- `webdav-handlers.js` — the routes of WebDAV boards (`notes-router.js` dispatches by board mode). Writes go to the server first and are never swallowed into a DB-only state.
+- `migrate.js` — `POST /:board/notes/migrate`: writes pages whose text exists only in the old DB tree (unless the same text is in another file = moved outside the app), uploads local attachment copies, cleans the front matter; idempotent.
+
+**Directory layout / file format:**
 ```
 <webdav-root>/
-  page-title.md              # root-level page (slug = title with / \ : * ? " < > | replaced by _)
-  folder-name/               # folder (same slugging)
-    child-page.md
-    _attachments/            # attachments for pages inside this folder
-      <pageId>_filename.ext
-  _attachments/              # attachments for root-level pages
-    <pageId>_filename.ext
+  My Note.md                 # file name = title
+  Folder/
+    Child.md
+    _attachments/            # files linked from notes in this folder
+      picture.png
 ```
-
-**File format:**
 ```markdown
 ---
-id: "[n-abc123](https://host/board#note:n-abc123)"
-title: "My Note"
-link: "https://example.com" # optional
-attachments:                 # optional — Markdown links: "[filename](_attachments/pageId_filename)"
-  - "[document.pdf](_attachments/n-abc123_document.pdf)"
-linkedCards:                 # optional — Markdown links: "[title](url/board#card:id-xxx)"; any []() in the title are stripped
+id: n-abc123                 # stable id (card links, deep links)
+link: "https://example.com"  # optional
+linkedCards:                 # optional — "[title](url/board#card:id-xxx)"
   - "[Some card](https://host/board#card:id-abc123)"
-lastModified: 2024-01-15T10:30:00.000Z
+tags: [any, obsidian, property]   # kept as is
 ---
-
-Markdown body of the note…
+Markdown body … ![picture](_attachments/picture.png)
 ```
 
-The `id` front-matter field ties the file back to the CouchDB item. On first sync the app writes its internal ID; files created directly on the WebDAV server (without an `id` field) get a generated `n-wd-<hex>` ID when imported. The `wdPath` field stored on CouchDB items tracks the authoritative relative path after any renames or moves, so the file is found even if the title slug would differ.
+The frontend (`notes-webdav/frontend/notes.js`) sends the ETag a note was loaded with as `If-Match`; on 412 it shows a conflict dialog with a line diff (overwrite / load theirs / save mine as a copy). Tests: `tests/api/notes-ops.test.js` against an in-memory WebDAV server (`tests/setup/fakeDav.js`, optional Nextcloud-style ETag propagation).
 
 ### WebDAV config document
 

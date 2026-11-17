@@ -213,10 +213,53 @@
 .notes-item-title:hover { color: var(--accent); }
 .notes-item-title--root { }
 
-.notes-tree-item--orphaned .notes-item-title,
-.notes-tree-item--orphaned .notes-item-folder-title { color: #c9971a; }
-.notes-tree-item--orphaned .notes-item-title:hover,
-.notes-tree-item--orphaned .notes-item-folder-title:hover { color: var(--accent); }
+.notes-sync-btn--error { color: var(--danger); }
+
+/* Conflict dialog (WebDAV: note changed elsewhere since it was loaded) */
+.note-conflict-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.note-conflict-dialog {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  width: min(760px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+}
+.note-conflict-dialog h3 { margin: 0; font-size: 15px; }
+.note-conflict-dialog p  { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.note-diff-legend { display: inline-flex; gap: 8px; margin-left: 4px; }
+.note-diff-legend > span { padding: 0 4px; border-radius: 3px; color: var(--text); }
+.note-diff {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-diff-line { padding: 0 8px; }
+.note-diff-line--add { background: rgba(46, 160, 67, 0.18); }
+.note-diff-line--del { background: rgba(240, 79, 106, 0.18); }
+.note-diff-line--same { color: var(--text-muted); }
+.note-diff-sign { display: inline-block; width: 14px; opacity: 0.6; user-select: none; }
+.note-conflict-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .notes-item-indicators {
   display: flex;

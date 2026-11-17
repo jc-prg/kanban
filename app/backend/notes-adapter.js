@@ -2,7 +2,7 @@
 
 /**
  * Singleton CouchDB adapter for the notes-webdav module.
- * Imported by server.js (for router mounting) and routes/attachments.js
+ * Imported by server.js (for router mounting)
  * (for resolveWebdavCfg calls).
  */
 const { CouchDbAdapter } = require('../notes-webdav/backend');

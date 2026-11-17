@@ -117,6 +117,24 @@ class CouchDbAdapter {
     return { rev: result.rev };
   }
 
+  // ---- Old DB tree of a WebDAV board (kept for the one-time migration) ----
+
+  async loadLegacyNotes(boardName) {
+    const db = await this._getBoardDb(boardName);
+    try {
+      const { _id, _rev, ...data } = await db.get(this._notesDocId + '-legacy');
+      return data;
+    } catch (err) {
+      if (err.statusCode === 404) return null;
+      throw err;
+    }
+  }
+
+  async saveLegacyNotes(boardName, data) {
+    const db = await this._getBoardDb(boardName);
+    await _upsertDoc(db, this._notesDocId + '-legacy', data);
+  }
+
   // ---- Per-board WebDAV config ----
 
   async _loadBoardWebdavDoc(boardName) {

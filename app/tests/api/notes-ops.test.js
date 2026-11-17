@@ -2,9 +2,13 @@
 /**
  * Notes per-operation API tests — section 1.7
  * WC-1..5  WebDAV config
- * NP-1..14 Page operations
- * NF-1..7  Folder operations
- * NS-1..4  Sync
+ * NP-*     Page operations   (WebDAV boards: files on the server are the truth)
+ * NF-*     Folder operations
+ * NS-*     Index / sync      (changes made outside the app, ETag propagation)
+ * NA-*     Attachments next to the note
+ * NM-*     Migration from the old DB tree
+ *
+ * WebDAV is an in-memory fake server (tests/setup/fakeDav.js) behind fetch().
  */
 
 const os   = require('os')
@@ -91,22 +95,23 @@ function makeDb({ notes = null, webdav = null } = {}) {
     delete mockWdStore[B]
   }
 
-  let notesDoc = notes ? { _id: 'notes', _rev: '1-n', ...notes } : null
+  const docs = new Map()
+  if (notes) docs.set('notes', { _id: 'notes', _rev: '1-n', ...notes })
+  docs.set('board', { _id: 'board', _rev: '1-b', columns: [{ id: 'c1', title: 'Inbox', cards: [{ id: 'id-card1', text: 'Card one' }] }] })
+  let rev = 1
 
   return {
     get: vi.fn(async (id) => {
-      if (id === 'notes') {
-        if (!notesDoc) throw Object.assign(new Error('missing'), { statusCode: 404 })
-        return JSON.parse(JSON.stringify(notesDoc))
-      }
-      if (id === 'board') return { _id: 'board', _rev: '1-b', columns: [] }
-      throw Object.assign(new Error('missing'), { statusCode: 404 })
+      if (!docs.has(id)) throw Object.assign(new Error('missing'), { statusCode: 404 })
+      return JSON.parse(JSON.stringify(docs.get(id)))
     }),
     insert: vi.fn(async (data) => {
-      if (data._id === 'notes') notesDoc = { ...JSON.parse(JSON.stringify(data)), _rev: '2-n' }
-      return { ok: true, id: data._id, rev: '2-abc' }
+      const r = `${++rev}-x`
+      docs.set(data._id, { ...JSON.parse(JSON.stringify(data)), _rev: r })
+      return { ok: true, id: data._id, rev: r }
     }),
-    lastNotes: () => notesDoc,
+    lastNotes: () => docs.get('notes') || null,
+    doc: id => docs.get(id) || null,
   }
 }
 
@@ -116,55 +121,16 @@ const PAGE = { type: 'page', id: 'n-testpage', title: 'Test Page',
   description: 'Hello', link: '', linkedCards: [],
   lastModified: '2026-05-16T10:00:00.000Z' }
 
-const FOLDER = { type: 'folder', id: 'f-testfolder', title: 'Test Folder', children: [] }
-
 const NOTES_EMPTY   = { items: [], schemaVersion: 2 }
 const NOTES_PAGE    = { items: [{ ...PAGE }], schemaVersion: 2 }
-const NOTES_FOLDER  = { items: [{ ...FOLDER }], schemaVersion: 2 }
-const NOTES_FOLDER_WITH_PAGE = {
-  items: [{ ...FOLDER, children: [{ ...PAGE }] }],
-  schemaVersion: 2,
-}
 
-function fetchOk(status = 200, text = '') {
-  return { ok: true, status, text: async () => text }
-}
-function fetchFail(status = 500) {
-  return { ok: false, status, text: async () => '' }
-}
-
-/** Build a PROPFIND multi-status XML blob. entries = [{ href, collection?, lastModified?, size? }] */
-function propfindXml(entries, baseHref = WD_URL) {
-  const toResp = (e) => `
-  <D:response>
-    <D:href>${e.href}</D:href>
-    <D:propstat><D:prop>
-      <D:resourcetype>${e.collection ? '<D:collection/>' : ''}</D:resourcetype>
-      <D:getlastmodified>${e.lastModified || 'Fri, 16 May 2026 10:00:00 GMT'}</D:getlastmodified>
-      <D:getcontentlength>${e.size ?? 100}</D:getcontentlength>
-    </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
-  </D:response>`
-  return `<?xml version="1.0" encoding="utf-8"?>
-<D:multistatus xmlns:D="DAV:">
-  <D:response>
-    <D:href>${baseHref}</D:href>
-    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype>
-      <D:getlastmodified>Fri, 16 May 2026 10:00:00 GMT</D:getlastmodified>
-      <D:getcontentlength>0</D:getcontentlength>
-    </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
-  </D:response>
-  ${entries.map(toResp).join('')}
-</D:multistatus>`
-}
-
-function mdContent(id = 'n-wd-new', title = 'New', body = 'body') {
-  return `---\nid: ${id}\ntitle: "${title}"\nlastModified: 2026-05-16T10:00:00.000Z\n---\n\n${body}`
-}
 
 // ---------------------------------------------------------------------------
 // Global fetch mock (intercepts WebDAV HTTP calls)
 // ---------------------------------------------------------------------------
-const mockFetch = vi.fn()
+const { createFakeDav } = require('../setup/fakeDav')
+const dav = createFakeDav({ base: WD_URL })
+const mockFetch = vi.fn(dav.fetch)
 vi.stubGlobal('fetch', mockFetch)
 
 // ---------------------------------------------------------------------------
@@ -210,10 +176,17 @@ const AUTH = { 'x-api-key': 'test-api-key-that-is-32chars-long!' }
 const B    = 'test-board'
 
 afterAll(() => { try { fs.rmSync(TEST_DIR, { recursive: true, force: true }) } catch (_) {} })
+const { _resetIndexes } = require('../../notes-webdav/backend/webdav-handlers')
+
 beforeEach(() => {
   mockFetch.mockReset()
+  mockFetch.mockImplementation((...a) => activeDav.fetch(...a))
+  activeDav = dav
+  dav.reset()
+  _resetIndexes()
   Object.keys(mockWdStore).forEach(k => delete mockWdStore[k])
 })
+let activeDav = dav
 
 // ===========================================================================
 // WC — WebDAV Config
@@ -290,197 +263,231 @@ describe('POST /:board/webdav-config/test', () => {
 })
 
 // ===========================================================================
+// Helpers for WebDAV boards
+// ===========================================================================
+
+/** WebDAV board with the given files on the server; returns the loaded notes document. */
+async function wdBoard(files = {}, { notes = null } = {}) {
+  mockDbCtx.db = makeDb({ webdav: WD_CFG, notes })
+  for (const [p, text] of Object.entries(files)) activeDav.write(p, text)
+  const res = await request(app).get(`/api/${B}/notes?wait=1`).set(AUTH)
+  expect(res.status).toBe(200)
+  return res.body
+}
+
+/** Flat list "path" of the tree (folders end with "/"). */
+function paths(items, prefix = '') {
+  const out = []
+  for (const it of items) {
+    if (it.type === 'folder') { out.push(prefix + it.title + '/'); out.push(...paths(it.children, prefix + it.title + '/')) }
+    else out.push(prefix + it.title)
+  }
+  return out
+}
+
+function find(items, title) {
+  for (const it of items) {
+    if (it.title === title) return it
+    if (it.type === 'folder') { const f = find(it.children, title); if (f) return f }
+  }
+  return null
+}
+
+const NOTE_1 = '---\nid: n-one\ntags: [keep]\n---\nOne\n'
+
+// ===========================================================================
 // NP — Page operations
 // ===========================================================================
 
+describe('GET /:board/notes (WebDAV board)', () => {
+  it('NP-0b: a path-derived id handed out before the front matter was read keeps working', async () => {
+    mockDbCtx.db = makeDb({ webdav: WD_CFG })
+    activeDav.write('One.md', NOTE_1)
+    const first = (await request(app).get(`/api/${B}/notes`).set(AUTH)).body   // front matter still loading
+    const early = find(first.items, 'One').id
+    await request(app).get(`/api/${B}/notes?wait=1`).set(AUTH)
+    const res = await request(app).get(`/api/${B}/notes/pages/${early}/content`).set(AUTH)
+    expect(res.status).toBe(200)
+    expect(res.body.id).toBe('n-one')
+  })
+
+  it('NP-0: tree = files on the server; folders first, alphabetical; dot folders and _attachments hidden', async () => {
+    const notes = await wdBoard({
+      'b.md': 'b', 'Ä.md': 'a', 'Z/x.md': 'x', '.obsidian/app.json': '{}', '_attachments/p.png': 'P', 'One.md': NOTE_1,
+    })
+    expect(notes.source).toBe('webdav')
+    expect(paths(notes.items)).toEqual(['Z/', 'Z/x', 'Ä', 'b', 'One'])
+    expect(find(notes.items, 'One').id).toBe('n-one')
+    expect(find(notes.items, 'b').id).toMatch(/^n-[0-9a-f]{12}$/)
+    expect(find(notes.items, 'One').description).toBe('One\n')
+  })
+})
+
 describe('POST /:board/notes/pages', () => {
-  it('NP-1: create root-level page → page in returned notes; WebDAV PUT called', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_EMPTY })
-    mockFetch.mockResolvedValueOnce(fetchOk(201)) // PUT
-    const res = await request(app)
-      .post(`/api/${B}/notes/pages`).set(AUTH)
-      .send({ page: { id: 'n-new1', title: 'New Page', description: '', link: '', linkedCards: [] } })
+  it('NP-1: create root page → file with id, link and linked cards; page in returned notes', async () => {
+    await wdBoard()
+    const res = await request(app).post(`/api/${B}/notes/pages`).set(AUTH)
+      .send({ page: { id: 'n-new1', title: 'New: Page', description: 'Body', link: 'https://l', linkedCards: ['id-card1'] } })
     expect(res.status).toBe(200)
-    expect(res.body.notes.items.some(i => i.id === 'n-new1')).toBe(true)
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-    const [url, opts] = mockFetch.mock.calls[0]
-    expect(opts.method).toBe('PUT')
+    expect(res.body.page.id).toBe('n-new1')
+    expect(find(res.body.notes.items, 'New Page').id).toBe('n-new1')
+    const text = activeDav.read('New Page.md')
+    // linkedCards as "[Card text](…#card:id)" when the host resolves cards, else the bare id
+    expect(text).toMatch(/^---\nid: n-new1\nlink: https:\/\/l\nlinkedCards:\n  - .*id-card1.*\n---\nBody$/)
   })
 
-  it('NP-2: create page inside folder → page in folder children; MKCOL + PUT called', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_FOLDER })
-    mockFetch
-      .mockResolvedValueOnce(fetchOk(405)) // MKCOL (405 = already exists, tolerated)
-      .mockResolvedValueOnce(fetchOk(201)) // PUT
-    const res = await request(app)
-      .post(`/api/${B}/notes/pages`).set(AUTH)
-      .send({ page: { id: 'n-child', title: 'Child Page', description: '', link: '', linkedCards: [] }, parentId: 'f-testfolder' })
+  it('NP-2: create page inside a folder; a second page with the same title gets a free name', async () => {
+    const notes = await wdBoard({ 'F/Taken.md': 'x' })
+    const fid = find(notes.items, 'F').id
+    const res = await request(app).post(`/api/${B}/notes/pages`).set(AUTH)
+      .send({ page: { id: 'n-new2', title: 'Taken', description: '' }, parentId: fid })
     expect(res.status).toBe(200)
-    const folder = res.body.notes.items.find(i => i.id === 'f-testfolder')
-    expect(folder.children.some(c => c.id === 'n-child')).toBe(true)
-    expect(mockFetch).toHaveBeenCalledTimes(2)
-    expect(mockFetch.mock.calls[0][1].method).toBe('MKCOL')
-    expect(mockFetch.mock.calls[1][1].method).toBe('PUT')
-  })
-
-  it('NP-3: duplicate page id → 409, no WebDAV call', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    const res = await request(app)
-      .post(`/api/${B}/notes/pages`).set(AUTH)
-      .send({ page: { id: 'n-testpage', title: 'Dup' } })
-    expect(res.status).toBe(409)
-    expect(mockFetch).not.toHaveBeenCalled()
+    expect(activeDav.read('F/Taken 1.md')).toBe('---\nid: n-new2\n---\n')
   })
 })
 
 describe('PATCH /:board/notes/pages/:id', () => {
-  it('NP-4: title change → WebDAV MOVE + PUT; new title in returned notes', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    mockFetch
-      .mockResolvedValueOnce(fetchOk(201)) // MOVE
-      .mockResolvedValueOnce(fetchOk(200)) // PUT
-    const res = await request(app)
-      .patch(`/api/${B}/notes/pages/n-testpage`).set(AUTH)
-      .send({ title: 'Renamed Page', description: 'Hello' })
+  it('NP-4: title change → file renamed, id kept, Obsidian properties kept, legacy keys removed', async () => {
+    await wdBoard({ 'Old.md': '---\nid: "[n-one](http://x#note:n-one)"\ntitle: "Old"\nlastModified: 2026-01-01T00:00:00Z\ntags: [keep]\n---\nText\n' })
+    const c = await request(app).get(`/api/${B}/notes/pages/n-one/content`).set(AUTH)
+    expect(c.body).toMatchObject({ content: 'Text\n', properties: { tags: ['keep'] } })
+    const res = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).set('If-Match', `"${c.body.etag}"`)
+      .send({ title: 'New', description: 'Changed\n' })
     expect(res.status).toBe(200)
-    const page = res.body.notes.items.find(i => i.id === 'n-testpage')
-    expect(page.title).toBe('Renamed Page')
-    expect(mockFetch.mock.calls[0][1].method).toBe('MOVE')
-    expect(mockFetch.mock.calls[1][1].method).toBe('PUT')
+    expect(activeDav.read('Old.md')).toBeUndefined()
+    expect(activeDav.read('New.md')).toBe('---\nid: "n-one"\ntags: [keep]\n---\nChanged\n')
+    expect(find(res.body.notes.items, 'New').id).toBe('n-one')
   })
 
-  it('NP-5: content change only (same title) → only PUT, no MOVE', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    mockFetch.mockResolvedValueOnce(fetchOk(200)) // PUT
-    const res = await request(app)
-      .patch(`/api/${B}/notes/pages/n-testpage`).set(AUTH)
-      .send({ title: 'Test Page', description: 'Updated body' })
+  it('NP-5: stale If-Match → 412 with the server version, nothing written', async () => {
+    await wdBoard({ 'One.md': NOTE_1 })
+    const c = await request(app).get(`/api/${B}/notes/pages/n-one/content`).set(AUTH)
+    activeDav.write('One.md', '---\nid: n-one\n---\nFrom Obsidian\n')
+    const res = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).set('If-Match', `"${c.body.etag}"`)
+      .send({ description: 'Mine' })
+    expect(res.status).toBe(412)
+    expect(res.body.server.content).toBe('From Obsidian\n')
+    expect(activeDav.read('One.md')).toBe('---\nid: n-one\n---\nFrom Obsidian\n')
+    // force overwrites
+    const forced = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: 'Mine\n', force: true })
+    expect(forced.status).toBe(200)
+    expect(activeDav.read('One.md')).toBe('---\nid: n-one\n---\nMine\n')
+  })
+
+  it('NP-5b: only linkedCards → text stays as it is on the server (no stale body written back)', async () => {
+    await wdBoard({ 'One.md': NOTE_1 })
+    activeDav.write('One.md', '---\nid: n-one\n---\nNewer text\n')
+    const res = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ linkedCards: ['id-card1'] })
     expect(res.status).toBe(200)
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-    expect(mockFetch.mock.calls[0][1].method).toBe('PUT')
-    const page = res.body.notes.items.find(i => i.id === 'n-testpage')
-    expect(page.description).toBe('Updated body')
+    expect(activeDav.read('One.md')).toMatch(/Newer text\n$/)
+    expect(activeDav.read('One.md')).toMatch(/linkedCards:/)
   })
 
   it('NP-6: unknown page id → 404', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    const res = await request(app)
-      .patch(`/api/${B}/notes/pages/n-doesnotexist`).set(AUTH)
-      .send({ title: 'X' })
+    await wdBoard()
+    const res = await request(app).patch(`/api/${B}/notes/pages/n-nope`).set(AUTH).send({ title: 'x' })
     expect(res.status).toBe(404)
-    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('NP-6b: rename onto an existing name → 409, content saved, file not renamed', async () => {
+    await wdBoard({ 'One.md': NOTE_1, 'Two.md': 'two' })
+    const res = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ title: 'Two', description: 'X' })
+    expect(res.status).toBe(409)
+    expect(activeDav.read('One.md')).toMatch(/X$/)
+    expect(activeDav.read('Two.md')).toBe('two')
   })
 })
 
 describe('DELETE /:board/notes/pages/:id', () => {
-  it('NP-7: delete page → page removed from notes; WebDAV DELETE called', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    mockFetch.mockResolvedValueOnce(fetchOk(204)) // DELETE
-    const res = await request(app)
-      .delete(`/api/${B}/notes/pages/n-testpage`).set(AUTH)
+  it('NP-7: delete page → file and the attachments only it links are gone', async () => {
+    await wdBoard({
+      'F/A.md': '---\nid: n-a\n---\n![](_attachments/only.png) ![](_attachments/shared.png)',
+      'F/B.md': '![](_attachments/shared.png)',
+      'F/_attachments/only.png': 'O', 'F/_attachments/shared.png': 'S',
+    })
+    const res = await request(app).delete(`/api/${B}/notes/pages/n-a`).set(AUTH)
     expect(res.status).toBe(200)
-    expect(res.body.notes.items.find(i => i.id === 'n-testpage')).toBeUndefined()
-    expect(mockFetch.mock.calls[0][1].method).toBe('DELETE')
+    expect(activeDav.read('F/A.md')).toBeUndefined()
+    expect(activeDav.read('F/_attachments/only.png')).toBeUndefined()
+    expect(activeDav.read('F/_attachments/shared.png')).toBe('S')
+    expect(paths(res.body.notes.items)).toEqual(['F/', 'F/B'])
   })
 
-  it('NP-8: WebDAV DELETE fails → 500; page NOT removed from CouchDB', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    mockFetch.mockResolvedValueOnce(fetchFail(500)) // DELETE fails
-    const res = await request(app)
-      .delete(`/api/${B}/notes/pages/n-testpage`).set(AUTH)
-    expect(res.status).toBe(500)
-    // CouchDB insert (save) should NOT have been called
-    expect(mockDbCtx.db.insert).not.toHaveBeenCalled()
+  it('NP-8b: 423 Locked on save → retried; still locked after the retries → readable error', async () => {
+    const store = require('../../notes-webdav/backend/store')
+    const pauses = store.LOCK_RETRY_MS
+    store.LOCK_RETRY_MS = [1, 1, 1]
+    try {
+      await wdBoard({ 'One.md': NOTE_1 })
+      let locked = 2   // the first two PUTs hit a lock
+      activeDav.fail = (m) => m === 'PUT' && locked-- > 0 ? 423 : false
+      const ok = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: 'Saved\n' })
+      expect(ok.status).toBe(200)
+      expect(activeDav.read('One.md')).toMatch(/Saved\n$/)
+      activeDav.fail = (m) => m === 'PUT' ? 423 : false
+      const res = await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: 'Again\n' })
+      expect(res.status).toBe(423)
+      expect(res.body.error).toMatch(/locked on the server/)
+      expect(activeDav.requests.filter(r => r.method === 'PUT').length).toBeGreaterThanOrEqual(4 + 3)
+    } finally { store.LOCK_RETRY_MS = pauses; activeDav.fail = null }
+  })
+
+  it('NP-8: WebDAV DELETE fails → error; page still listed', async () => {
+    await wdBoard({ 'One.md': NOTE_1 })
+    activeDav.fail = (m) => m === 'DELETE'
+    const res = await request(app).delete(`/api/${B}/notes/pages/n-one`).set(AUTH)
+    expect(res.status).toBeGreaterThanOrEqual(500)
+    activeDav.fail = null
+    const notes = (await request(app).get(`/api/${B}/notes`).set(AUTH)).body
+    expect(find(notes.items, 'One')).not.toBeNull()
   })
 })
 
 describe('POST /:board/notes/pages/:id/move', () => {
-  it('NP-9: move page from root into folder → page in folder children; MKCOL + MOVE called', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: {
-      items: [{ ...PAGE }, { ...FOLDER }],
-      schemaVersion: 2,
-    }})
-    mockFetch
-      .mockResolvedValueOnce(fetchOk(405)) // MKCOL
-      .mockResolvedValueOnce(fetchOk(201)) // MOVE
-    const res = await request(app)
-      .post(`/api/${B}/notes/pages/n-testpage/move`).set(AUTH)
-      .send({ folderId: 'f-testfolder' })
+  it('NP-9: move page into a folder → file moved, linked attachments follow, links rewritten', async () => {
+    const notes = await wdBoard({
+      'One.md': '---\nid: n-one\n---\n![x](_attachments/Bild%201.png)\n',
+      '_attachments/Bild 1.png': 'PNG',
+      'Target/Exists.md': 'e',
+      'Target/_attachments/Bild 1.png': 'OTHER',
+    })
+    const res = await request(app).post(`/api/${B}/notes/pages/n-one/move`).set(AUTH)
+      .send({ folderId: find(notes.items, 'Target').id })
     expect(res.status).toBe(200)
-    const folder = res.body.notes.items.find(i => i.id === 'f-testfolder')
-    expect(folder.children.some(c => c.id === 'n-testpage')).toBe(true)
-    expect(res.body.notes.items.find(i => i.id === 'n-testpage' && i.type === 'page')).toBeUndefined()
-    expect(mockFetch.mock.calls[0][1].method).toBe('MKCOL')
-    expect(mockFetch.mock.calls[1][1].method).toBe('MOVE')
+    expect(activeDav.read('One.md')).toBeUndefined()
+    expect(activeDav.read('Target/One.md')).toBe('---\nid: n-one\n---\n![x](_attachments/Bild%201%201.png)\n')
+    expect(activeDav.read('Target/_attachments/Bild 1 1.png')).toBe('PNG')
+    expect(activeDav.read('_attachments/Bild 1.png')).toBeUndefined()
   })
 
-  it('NP-10: move page from folder to root → page at root; MOVE called', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_FOLDER_WITH_PAGE })
-    mockFetch.mockResolvedValueOnce(fetchOk(201)) // MOVE (no MKCOL — root has no dir prefix)
-    const res = await request(app)
-      .post(`/api/${B}/notes/pages/n-testpage/move`).set(AUTH)
-      .send({ folderId: null })
+  it('NP-11: reorder within the same folder → no MOVE (order is alphabetical)', async () => {
+    await wdBoard({ 'A.md': '---\nid: n-a\n---\n', 'B.md': 'b' })
+    const moves = activeDav.count('MOVE')
+    const res = await request(app).post(`/api/${B}/notes/pages/n-a/move`).set(AUTH)
+      .send({ folderId: null, targetId: 'x', position: 'after' })
     expect(res.status).toBe(200)
-    const rootPage = res.body.notes.items.find(i => i.id === 'n-testpage')
-    expect(rootPage).toBeDefined()
-    expect(mockFetch.mock.calls[0][1].method).toBe('MOVE')
-  })
-
-  it('NP-11: reorder two root pages (before/after) → order changed in CouchDB; no WebDAV MOVE', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: {
-      items: [
-        { type: 'page', id: 'n-p1', title: 'Alpha', linkedCards: [] },
-        { type: 'page', id: 'n-p2', title: 'Beta',  linkedCards: [] },
-      ],
-      schemaVersion: 2,
-    }})
-    // n-p2 moved before n-p1
-    const res = await request(app)
-      .post(`/api/${B}/notes/pages/n-p2/move`).set(AUTH)
-      .send({ folderId: null, targetId: 'n-p1', position: 'before' })
-    expect(res.status).toBe(200)
-    const ids = res.body.notes.items.map(i => i.id)
-    expect(ids).toEqual(['n-p2', 'n-p1'])
-    // WebDAV paths are identical (same root) → no MOVE should have been triggered
-    expect(mockFetch).not.toHaveBeenCalled()
+    expect(activeDav.count('MOVE')).toBe(moves)
   })
 })
 
 describe('GET /:board/notes/pages/:id/content', () => {
-  it('NP-12: WebDAV enabled → 200 { content, lastModified }', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    const md = mdContent('n-testpage', 'Test Page', 'Page body here')
-    mockFetch.mockResolvedValueOnce(fetchOk(200, md)) // GET
-    const res = await request(app)
-      .get(`/api/${B}/notes/pages/n-testpage/content`).set(AUTH)
+  it('NP-12: WebDAV enabled → content, etag, properties; second read is a 304 from the server', async () => {
+    await wdBoard({ 'One.md': NOTE_1 })
+    const res = await request(app).get(`/api/${B}/notes/pages/n-one/content`).set(AUTH)
     expect(res.status).toBe(200)
-    expect(res.body.content).toBe('Page body here')
-    expect(res.body.lastModified).toBeTruthy()
+    expect(res.body).toMatchObject({ content: 'One\n', properties: { tags: ['keep'] }, title: 'One' })
+    expect(res.body.etag).toBeTruthy()
+    const before = activeDav.requests.length
+    await request(app).get(`/api/${B}/notes/pages/n-one/content`).set(AUTH)
+    const gets = activeDav.requests.slice(before).filter(r => r.method === 'GET')
+    expect(gets).toHaveLength(1)
+    expect(gets[0].headers['if-none-match']).toBe(`"${res.body.etag}"`)
   })
 
   it('NP-13: WebDAV disabled → 400', async () => {
-    mockDbCtx.db = makeDb({ notes: NOTES_PAGE }) // no webdav
-    const res = await request(app)
-      .get(`/api/${B}/notes/pages/n-testpage/content`).set(AUTH)
+    mockDbCtx.db = makeDb({ notes: NOTES_PAGE })
+    const res = await request(app).get(`/api/${B}/notes/pages/n-testpage/content`).set(AUTH)
     expect(res.status).toBe(400)
-    expect(mockFetch).not.toHaveBeenCalled()
-  })
-})
-
-describe('GET /:board/notes/pages/:id/meta', () => {
-  it('NP-14: returns { lastModified, size } from WebDAV PROPFIND', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    const xml = propfindXml([{
-      href: `${WD_URL}Test%20Page.md`,
-      lastModified: 'Fri, 16 May 2026 10:00:00 GMT',
-      size: 512,
-    }])
-    mockFetch.mockResolvedValueOnce(fetchOk(207, xml)) // PROPFIND Depth:0
-    const res = await request(app)
-      .get(`/api/${B}/notes/pages/n-testpage/meta`).set(AUTH)
-    expect(res.status).toBe(200)
-    expect(res.body.lastModified).toBeTruthy()
-    expect(typeof res.body.size).toBe('number')
   })
 })
 
@@ -488,178 +495,190 @@ describe('GET /:board/notes/pages/:id/meta', () => {
 // NF — Folder operations
 // ===========================================================================
 
-describe('POST /:board/notes/folders', () => {
-  it('NF-1: create root folder → folder in items; WebDAV MKCOL called', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_EMPTY })
-    mockFetch.mockResolvedValueOnce(fetchOk(201)) // MKCOL
-    const res = await request(app)
-      .post(`/api/${B}/notes/folders`).set(AUTH)
-      .send({ folder: { id: 'f-new1', title: 'My Folder', children: [] } })
+describe('folders', () => {
+  it('NF-1: create folder → MKCOL; id of the new folder returned', async () => {
+    await wdBoard()
+    const res = await request(app).post(`/api/${B}/notes/folders`).set(AUTH).send({ folder: { id: 'f-x', title: 'New/Folder' } })
     expect(res.status).toBe(200)
-    expect(res.body.notes.items.some(i => i.id === 'f-new1' && i.type === 'folder')).toBe(true)
-    expect(mockFetch.mock.calls[0][1].method).toBe('MKCOL')
+    expect(activeDav.dirs.has('New Folder')).toBe(true)
+    expect(find(res.body.notes.items, 'New Folder').id).toBe(res.body.id)
   })
 
-  it('NF-2: create nested folder inside another folder → subfolder in parent children', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_FOLDER })
-    mockFetch.mockResolvedValueOnce(fetchOk(201)) // MKCOL
-    const res = await request(app)
-      .post(`/api/${B}/notes/folders`).set(AUTH)
-      .send({ folder: { id: 'f-sub', title: 'Sub', children: [] }, parentId: 'f-testfolder' })
+  it('NF-3: rename folder → MOVE; pages inside keep their ids', async () => {
+    const notes = await wdBoard({ 'F/One.md': NOTE_1 })
+    const res = await request(app).patch(`/api/${B}/notes/folders/${find(notes.items, 'F').id}`).set(AUTH).send({ title: 'G' })
     expect(res.status).toBe(200)
-    const parent = res.body.notes.items.find(i => i.id === 'f-testfolder')
-    expect(parent.children.some(c => c.id === 'f-sub')).toBe(true)
-  })
-})
-
-describe('PATCH /:board/notes/folders/:id', () => {
-  it('NF-3: rename folder → WebDAV MOVE called; title and wdPath updated', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_FOLDER })
-    mockFetch.mockResolvedValueOnce(fetchOk(201)) // MOVE
-    const res = await request(app)
-      .patch(`/api/${B}/notes/folders/f-testfolder`).set(AUTH)
-      .send({ title: 'Renamed Folder' })
-    expect(res.status).toBe(200)
-    const folder = res.body.notes.items.find(i => i.id === 'f-testfolder')
-    expect(folder.title).toBe('Renamed Folder')
-    expect(folder.wdPath).toBe('Renamed Folder/')
-    expect(mockFetch.mock.calls[0][1].method).toBe('MOVE')
+    expect(activeDav.read('G/One.md')).toBe(NOTE_1)
+    expect(paths(res.body.notes.items)).toEqual(['G/', 'G/One'])
+    expect(find(res.body.notes.items, 'One').id).toBe('n-one')
   })
 
-  it('NF-3b: wdPath on children updated after folder rename', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: {
-      items: [{ ...FOLDER, children: [{ ...PAGE, wdPath: 'Test Folder/Test Page.md' }] }],
-      schemaVersion: 2,
-    }})
-    mockFetch.mockResolvedValueOnce(fetchOk(201)) // MOVE
-    const res = await request(app)
-      .patch(`/api/${B}/notes/folders/f-testfolder`).set(AUTH)
-      .send({ title: 'Renamed' })
+  it('NF-4: delete folder → removed recursively', async () => {
+    const notes = await wdBoard({ 'F/One.md': NOTE_1, 'F/Sub/x.md': 'x' })
+    const res = await request(app).delete(`/api/${B}/notes/folders/${find(notes.items, 'F').id}`).set(AUTH)
     expect(res.status).toBe(200)
-    const folder = res.body.notes.items.find(i => i.id === 'f-testfolder')
-    expect(folder.children[0].wdPath).toBe('Renamed/Test Page.md')
-  })
-})
-
-describe('DELETE /:board/notes/folders/:id', () => {
-  it('NF-4: delete folder → removed from notes; WebDAV DELETE called', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_FOLDER })
-    mockFetch.mockResolvedValueOnce(fetchOk(204)) // DELETE
-    const res = await request(app)
-      .delete(`/api/${B}/notes/folders/f-testfolder`).set(AUTH)
-    expect(res.status).toBe(200)
-    expect(res.body.notes.items.find(i => i.id === 'f-testfolder')).toBeUndefined()
-    expect(mockFetch.mock.calls[0][1].method).toBe('DELETE')
+    expect(activeDav.files.size).toBe(0)
+    expect(res.body.notes.items).toEqual([])
   })
 
-  it('NF-5: WebDAV DELETE fails → 500; folder NOT removed from CouchDB', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_FOLDER })
-    mockFetch.mockResolvedValueOnce(fetchFail(500))
-    const res = await request(app)
-      .delete(`/api/${B}/notes/folders/f-testfolder`).set(AUTH)
-    expect(res.status).toBe(500)
-    expect(mockDbCtx.db.insert).not.toHaveBeenCalled()
-  })
-})
-
-describe('POST /:board/notes/folders/:id/move', () => {
-  it('NF-6: move folder into another folder → MOVE called; folder nested under new parent', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: {
-      items: [
-        { type: 'folder', id: 'f-src', title: 'Source', children: [] },
-        { type: 'folder', id: 'f-tgt', title: 'Target', children: [] },
-      ],
-      schemaVersion: 2,
-    }})
-    mockFetch.mockResolvedValueOnce(fetchOk(201)) // MOVE
-    const res = await request(app)
-      .post(`/api/${B}/notes/folders/f-src/move`).set(AUTH)
-      .send({ parentId: 'f-tgt' })
+  it('NF-6: move folder into another folder; into itself → 400', async () => {
+    const notes = await wdBoard({ 'A/x.md': 'x', 'B/y.md': 'y' })
+    const a = find(notes.items, 'A').id, b = find(notes.items, 'B').id
+    const res = await request(app).post(`/api/${B}/notes/folders/${a}/move`).set(AUTH).send({ parentId: b })
     expect(res.status).toBe(200)
-    const target = res.body.notes.items.find(i => i.id === 'f-tgt')
-    expect(target.children.some(c => c.id === 'f-src')).toBe(true)
-    expect(mockFetch.mock.calls[0][1].method).toBe('MOVE')
-  })
-})
-
-describe('POST /:board/notes/folders/:id/sync', () => {
-  it('NF-7: new file on WebDAV → page added to folder children', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_FOLDER })
-
-    // PROPFIND Depth:1 on the folder — returns the folder + one new .md file
-    const xml = propfindXml([
-      { href: `${WD_URL}Test%20Folder/`, collection: true },
-      { href: `${WD_URL}Test%20Folder/child.md`, size: 80 },
-    ], WD_URL)
-    mockFetch
-      .mockResolvedValueOnce(fetchOk(207, xml))                     // PROPFIND
-      .mockResolvedValueOnce(fetchOk(200, mdContent('n-c1', 'Child', 'hi'))) // GET child.md
-
-    const res = await request(app)
-      .post(`/api/${B}/notes/folders/f-testfolder/sync`).set(AUTH)
-    expect(res.status).toBe(200)
-    expect(res.body.changed).toBe(true)
-    const folder = res.body.notes.items.find(i => i.id === 'f-testfolder')
-    expect(folder.children.length).toBeGreaterThan(0)
-    expect(folder.children[0].title).toBe('Child')
+    expect(activeDav.read('B/A/x.md')).toBe('x')
+    const into = await request(app).post(`/api/${B}/notes/folders/${b}/move`).set(AUTH).send({ parentId: find(res.body.notes.items, 'A').id })
+    expect(into.status).toBe(400)
   })
 })
 
 // ===========================================================================
-// NS — Sync
+// NS — Index / sync
 // ===========================================================================
 
-describe('POST /:board/notes/sync', () => {
-  it('NS-1: no body → full scan; new WD file added to tree', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_EMPTY })
-    const xml = propfindXml([{ href: `${WD_URL}fresh.md`, size: 60 }])
-    mockFetch
-      .mockResolvedValueOnce(fetchOk(207, xml))                           // PROPFIND infinity
-      .mockResolvedValueOnce(fetchOk(200, mdContent('n-fresh', 'Fresh'))) // GET
-    const res = await request(app)
-      .post(`/api/${B}/notes/sync`).set(AUTH)
-      .send({})
+describe('index follows the server', () => {
+  it('NS-1: changes made outside the app (new, renamed, moved, deleted) → tree matches, no leftovers, ids kept', async () => {
+    await wdBoard({ 'One.md': NOTE_1, 'Gone.md': 'g', 'Deep/a/b/c.md': 'c' })
+    activeDav.write('Fresh.md', 'new')
+    await activeDav.rename('One.md', 'Deep/a/Renamed.md')
+    activeDav.remove('Gone.md')
+    const res = await request(app).post(`/api/${B}/notes/sync`).set(AUTH).send({})
     expect(res.status).toBe(200)
-    expect(res.body.changed).toBe(true)
-    expect(res.body.notes.items.some(i => i.title === 'Fresh')).toBe(true)
+    expect(paths(res.body.notes.items)).toEqual(['Deep/', 'Deep/a/', 'Deep/a/b/', 'Deep/a/b/c', 'Deep/a/Renamed', 'Fresh'])
+    const fresh = (await request(app).get(`/api/${B}/notes?wait=1`).set(AUTH)).body
+    expect(find(fresh.items, 'Renamed').id).toBe('n-one')
+    expect(JSON.stringify(fresh)).not.toMatch(/orphan/i)
   })
 
-  it('NS-2: { folderIds: [] } → lazy root-only sync; new root file discovered', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_EMPTY })
-    const xml = propfindXml([{ href: `${WD_URL}lazy.md`, size: 40 }])
-    mockFetch
-      .mockResolvedValueOnce(fetchOk(207, xml))                          // PROPFIND Depth:1
-      .mockResolvedValueOnce(fetchOk(200, mdContent('n-lazy', 'Lazy'))) // GET
-    const res = await request(app)
-      .post(`/api/${B}/notes/sync`).set(AUTH)
-      .send({ folderIds: [] })
-    expect(res.status).toBe(200)
-    expect(res.body.changed).toBe(true)
-    expect(res.body.notes.items.some(i => i.title === 'Lazy')).toBe(true)
+  it('NS-2: Nextcloud (ETag propagation) → unchanged root = one PROPFIND Depth:0; a change lists only changed folders', async () => {
+    activeDav = createFakeDav({ base: WD_URL, propagate: true })
+    await wdBoard({ 'A/x.md': 'x', 'B/y.md': 'y', 'C/z.md': 'z' })
+    let before = activeDav.requests.length
+    await request(app).post(`/api/${B}/notes/sync`).set(AUTH).send({})
+    expect(activeDav.requests.slice(before).map(r => `${r.method} ${r.headers.depth}`)).toEqual(['PROPFIND 0'])
+
+    activeDav.write('B/new.md', 'n')
+    before = activeDav.requests.length
+    const res = await request(app).post(`/api/${B}/notes/sync`).set(AUTH).send({})
+    const lists = activeDav.requests.slice(before).filter(r => r.method === 'PROPFIND').map(r => `${r.path}|${r.headers.depth}`)
+    expect(lists).toEqual(['|0', '|1', 'B|1'])
+    expect(paths(res.body.notes.items)).toContain('B/new')
   })
 
-  it('NS-3: page in CouchDB absent from WebDAV → marked orphaned', async () => {
-    mockDbCtx.db = makeDb({ webdav: WD_CFG, notes: NOTES_PAGE })
-    // PROPFIND returns only the root collection — no files
-    const xml = propfindXml([])
-    mockFetch.mockResolvedValueOnce(fetchOk(207, xml))
-    const res = await request(app)
-      .post(`/api/${B}/notes/sync`).set(AUTH)
-      .send({ folderIds: [] })
-    expect(res.status).toBe(200)
-    expect(res.body.changed).toBe(true)
-    const page = res.body.notes.items.find(i => i.id === 'n-testpage')
-    expect(page.orphaned).toBeTruthy()
-  })
+  it('NS-3: GET answers from the index at once and checks in the background (revalidating flag)', async () => {
+    await wdBoard({ 'A.md': 'a' })
+    await new Promise(r => setTimeout(r, 5100))   // older than the minimum check interval
+    activeDav.write('B.md', 'b')
+    const first = await request(app).get(`/api/${B}/notes`).set(AUTH)
+    expect(first.body.revalidating).toBe(true)
+    expect(paths(first.body.items)).toEqual(['A'])
+    const second = await request(app).get(`/api/${B}/notes?wait=1`).set(AUTH)
+    expect(paths(second.body.items)).toEqual(['A', 'B'])
+  }, 10000)
 
-  it('NS-4: WebDAV disabled → 200 { ok: true, changed: false }, no fetch', async () => {
-    mockDbCtx.db = makeDb({ notes: NOTES_PAGE }) // no webdav config
-    const res = await request(app)
-      .post(`/api/${B}/notes/sync`).set(AUTH)
-      .send({})
+  it('NS-4: WebDAV disabled → sync returns the CouchDB notes, no fetch', async () => {
+    mockDbCtx.db = makeDb({ notes: NOTES_PAGE })
+    const res = await request(app).post(`/api/${B}/notes/sync`).set(AUTH).send({})
     expect(res.status).toBe(200)
-    expect(res.body.ok).toBe(true)
     expect(res.body.changed).toBe(false)
     expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('NS-5: bulk PUT/PATCH of the tree is ignored on WebDAV boards (the tree is derived)', async () => {
+    await wdBoard({ 'One.md': NOTE_1 })
+    const before = activeDav.requests.length
+    const res = await request(app).put(`/api/${B}/notes`).set(AUTH).send({ items: [], schemaVersion: 2 })
+    expect(res.status).toBe(200)
+    expect(activeDav.requests.length).toBe(before)
+    expect(activeDav.read('One.md')).toBe(NOTE_1)
+  })
+})
+
+// ===========================================================================
+// NA — Attachments next to the note
+// ===========================================================================
+
+describe('attachments (WebDAV board)', () => {
+  it('NA-1: upload → file in <folder>/_attachments, link returned; list, download, delete', async () => {
+    await wdBoard({ 'F/One.md': NOTE_1 })
+    const up = await request(app).post(`/api/${B}/notes/attachments/n-one`).set(AUTH).attach('file', Buffer.from('PNG'), 'My Pic.png')
+    expect(up.status).toBe(200)
+    expect(up.body).toMatchObject({ name: 'My Pic.png', link: '_attachments/My%20Pic.png' })
+    expect(activeDav.read('F/_attachments/My Pic.png')).toBe('PNG')
+    await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: `![](${up.body.link})` })
+    const list = await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)
+    expect(list.body).toEqual([{ name: 'My Pic.png', size: 3, link: '_attachments/My%20Pic.png' }])
+    const dl = await request(app).get(`/api/${B}/notes/attachments/n-one/${encodeURIComponent('My Pic.png')}`).set(AUTH).buffer(true)
+    expect(dl.status).toBe(200)
+    expect(Buffer.from(dl.body).toString()).toBe('PNG')
+    const del = await request(app).delete(`/api/${B}/notes/attachments/n-one/${encodeURIComponent('My Pic.png')}`).set(AUTH)
+    expect(del.status).toBe(200)
+    expect(activeDav.read('F/_attachments/My Pic.png')).toBeUndefined()
+  })
+
+  it('NA-2: legacy "<id>_name" files are listed without the prefix and still download', async () => {
+    await wdBoard({ 'One.md': NOTE_1, '_attachments/n-one_old.pdf': 'PDF' })
+    const list = await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)
+    expect(list.body).toEqual([{ name: 'old.pdf', size: 3, link: '_attachments/n-one_old.pdf' }])
+    const dl = await request(app).get(`/api/${B}/notes/attachments/n-one/old.pdf`).set(AUTH).buffer(true)
+    expect(Buffer.from(dl.body).toString()).toBe('PDF')
+  })
+
+  it('NA-4: a file just uploaded (link only in the editor, note not saved) is listed at once; files only other notes link are not', async () => {
+    await wdBoard({
+      'F/One.md': NOTE_1,
+      'F/Two.md': '---\nid: n-two\n---\n![x](_attachments/theirs.png)\n',
+      'F/_attachments/theirs.png': 'T',
+    })
+    const up = await request(app).post(`/api/${B}/notes/attachments/n-one`).set(AUTH).attach('file', Buffer.from('NEW'), 'new.png')
+    expect(up.status).toBe(200)
+    const list = await request(app).get(`/api/${B}/notes/attachments/n-one`).set(AUTH)
+    expect(list.body).toEqual([{ name: 'new.png', size: 3, link: '_attachments/new.png' }])
+    // While no note links it, every note of the folder lists it; once One's saved text links it, only One does
+    const two = await request(app).get(`/api/${B}/notes/attachments/n-two`).set(AUTH)
+    expect(two.body.map(f => f.name).sort()).toEqual(['new.png', 'theirs.png'])
+    await request(app).patch(`/api/${B}/notes/pages/n-one`).set(AUTH).send({ description: `![](${up.body.link})` })
+    const twoAfter = await request(app).get(`/api/${B}/notes/attachments/n-two`).set(AUTH)
+    expect(twoAfter.body.map(f => f.name)).toEqual(['theirs.png'])
+  })
+
+  it('NA-3: blocked file type → 400', async () => {
+    await wdBoard({ 'One.md': NOTE_1 })
+    const up = await request(app).post(`/api/${B}/notes/attachments/n-one`).set(AUTH).attach('file', Buffer.from('x'), 'evil.js')
+    expect(up.status).toBe(400)
+  })
+})
+
+// ===========================================================================
+// NM — Migration from the old DB tree
+// ===========================================================================
+
+describe('POST /:board/notes/migrate', () => {
+  it('NM-1: old tree kept as notes-legacy; dry run reports; run restores DB-only text and cleans front matter; idempotent', async () => {
+    const legacy = { schemaVersion: 2, items: [
+      { type: 'page', id: 'n-one', title: 'One', wdPath: 'One.md', description: 'One\n' },
+      { type: 'page', id: 'n-lost', title: 'Lost', wdPath: 'Lost.md', description: 'Only in the DB' },
+      { type: 'page', id: 'n-moved', title: 'Moved', wdPath: 'Moved.md', description: 'Same text' },
+    ] }
+    await wdBoard({
+      'One.md': '---\nid: "[n-one](http://x#note:n-one)"\ntitle: "One"\nlastModified: 2026-01-01T00:00:00Z\nattachments:\n  - "[a.png](_attachments/n-one_a.png)"\n---\nOne\n',
+      'Archiv/Moved.md': 'Same text',
+    }, { notes: legacy })
+    expect(mockDbCtx.db.doc('notes-legacy').items).toHaveLength(3)
+    expect(mockDbCtx.db.doc('notes').source).toBe('webdav')
+
+    const dry = await request(app).post(`/api/${B}/notes/migrate`).set(AUTH)
+    expect(dry.status).toBe(200)
+    expect(dry.body).toMatchObject({ dry_run: true, restored: ['Lost.md'], moved_elsewhere: ['Moved.md → Archiv/Moved.md'] })
+    expect(dry.body.frontmatter_cleaned).toEqual(['One.md: attachments, title, lastModified, id'])
+    expect(activeDav.read('Lost.md')).toBeUndefined()
+
+    const run = await request(app).post(`/api/${B}/notes/migrate?dry_run=0`).set(AUTH)
+    expect(run.status).toBe(200)
+    expect(activeDav.read('Lost.md')).toBe('Only in the DB')
+    expect(activeDav.read('One.md')).toBe('---\nid: "n-one"\n---\nOne\n\n- ![a.png](_attachments/n-one_a.png)\n')
+
+    const again = await request(app).post(`/api/${B}/notes/migrate?dry_run=0`).set(AUTH)
+    expect(again.body).toMatchObject({ restored: [], uploaded: [], frontmatter_cleaned: [], attachments_uploaded: [] })
   })
 })

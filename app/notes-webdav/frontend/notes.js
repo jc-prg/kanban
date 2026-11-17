@@ -86,14 +86,13 @@ function initNotes(cfg) {
 
   // ---- API URLs ----
   // `let`: setBoard() switches them when the host edits notes of another board
-  let _base, NOTES_API, NOTES_ATTACH_API, NOTES_PAGES_API, NOTES_FOLD_API, NOTES_CHECK_API;
+  let _base, NOTES_API, NOTES_ATTACH_API, NOTES_PAGES_API, NOTES_FOLD_API;
   function _setApiBase(base) {
     _base            = base || null;
     NOTES_API        = _base ? `${_base}/notes`             : null;
     NOTES_ATTACH_API = _base ? `${_base}/notes/attachments` : null;
     NOTES_PAGES_API  = _base ? `${_base}/notes/pages`       : null;
     NOTES_FOLD_API   = _base ? `${_base}/notes/folders`     : null;
-    NOTES_CHECK_API  = _base ? `${_base}/notes/check-consistency` : null;
   }
   _setApiBase(cfg.apiBase);
   let _boardName = cfg.boardName || null;
@@ -125,8 +124,8 @@ function initNotes(cfg) {
   let _notesSaving      = false;
   let _notesSavePending = false;
 
-  // lastModified from frontmatter at the time each page was loaded — used for conflict detection
-  const _pageLoadedAt = new Map();
+  // WebDAV: ETag of each page as loaded — sent as If-Match on save (412 = changed elsewhere)
+  const _pageEtag = new Map();
 
   // Reference-counted sync-button spinner
   let _webdavPending = 0;
@@ -136,17 +135,17 @@ function initNotes(cfg) {
     if (btn) btn.classList.toggle('notes-sync-btn--spinning', _webdavPending > 0);
   }
 
-  // Call a per-operation notes endpoint; returns parsed JSON or throws
-  async function _notesOp(method, url, body) {
+  // Call a per-operation notes endpoint; returns parsed JSON or throws an Error with .status and .data
+  async function _notesOp(method, url, body, headers = {}) {
     _webdavBtnSpin(+1);
     try {
       const r = await fetch(url, {
         method,
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        headers: body ? { 'Content-Type': 'application/json', ...headers } : headers,
         body:    body ? JSON.stringify(body) : undefined,
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status, data });
       return data;
     } finally {
       _webdavBtnSpin(-1);
@@ -185,12 +184,16 @@ function initNotes(cfg) {
     const syncBtn = document.getElementById('notesSyncBtn');
     if (syncBtn) syncBtn.classList.add('notes-sync-btn--spinning');
 
+    let revalidating = false;
     try {
       const r = await fetch(NOTES_API);
       if (!r.ok) { notesState = { items: [], schemaVersion: 2 }; }
       else {
         notesEtag  = r.headers.get('ETag');
-        notesState = _normalizeNotes(await r.json());
+        const data = await r.json();
+        notesState = _normalizeNotes(data);
+        revalidating = !!data.revalidating;
+        _setWebdavError(data.error);
       }
     } catch (e) { notesState = { items: [], schemaVersion: 2 }; }
 
@@ -201,6 +204,31 @@ function initNotes(cfg) {
     renderNotesTree();
     if (!_headless) restoreNotesSidebar();
     _render();
+    // WebDAV: the tree came from the index at once, the server check runs in the background
+    if (revalidating) _awaitRevalidation();
+  }
+
+  /** Fetches the tree again once the server's background check is done (only if it changed). */
+  async function _awaitRevalidation() {
+    const api = NOTES_API;
+    try {
+      const r = await fetch(`${api}?wait=1`, { headers: notesEtag ? { 'If-None-Match': notesEtag } : {} });
+      if (r.status !== 200 || api !== NOTES_API) return;
+      notesEtag = r.headers.get('ETag');
+      const data = await r.json();
+      _setWebdavError(data.error);
+      notesState     = _normalizeNotes(data);
+      baseNotesState = JSON.parse(JSON.stringify(notesState));
+      renderNotesTree();
+      _render();
+    } catch { /* keep the shown tree */ }
+  }
+
+  function _setWebdavError(msg) {
+    const btn = document.getElementById('notesSyncBtn');
+    if (!btn) return;
+    btn.classList.toggle('notes-sync-btn--error', !!msg);
+    btn.title = msg ? `WebDAV not reachable: ${msg}` : 'Sync with WebDAV';
   }
 
   let _syncInProgress = false;
@@ -209,24 +237,18 @@ function initNotes(cfg) {
     if (_syncInProgress) return;
     _syncInProgress = true;
     try {
-      const data = await _notesOp('POST', `${NOTES_API}/sync`, { folderIds: [...notesExpanded] });
+      const data = await _notesOp('POST', `${NOTES_API}/sync`, {});
+      _setWebdavError(null);
       if (data.notes) {
         notesState     = _normalizeNotes(data.notes);
         baseNotesState = JSON.parse(JSON.stringify(notesState));
         renderNotesTree();
+        _render();
       }
-      // Run consistency check after sync to detect conflicts, duplicates, attachment orphans
-      if (NOTES_CHECK_API) {
-        try {
-          const checkData = await _notesOp('POST', NOTES_CHECK_API, {});
-          if (checkData.notes) {
-            notesState     = _normalizeNotes(checkData.notes);
-            baseNotesState = JSON.parse(JSON.stringify(notesState));
-            renderNotesTree();
-          }
-        } catch (e) { console.warn('Consistency check failed:', e.message); }
-      }
-    } catch (e) { console.error('WebDAV sync error:', e.message); }
+    } catch (e) {
+      _setWebdavError(e.message);
+      console.error('WebDAV sync error:', e.message);
+    }
     finally {
       _syncInProgress = false;
     }
@@ -353,7 +375,7 @@ function initNotes(cfg) {
     notesState     = { items: [], schemaVersion: 2 };
     baseNotesState = null;
     notesEtag      = null;
-    _pageLoadedAt.clear();
+    _pageEtag.clear();
     updateWebdavEnabled(webdavEnabled);
   }
 
@@ -483,11 +505,13 @@ function initNotes(cfg) {
       try {
         const data = await _notesOp('POST', NOTES_FOLD_API, { folder, parentId });
         _applyNotesResult(data);
-        notesExpanded.add(folder.id);
+        // The server names the folder after its path
+        const id = data.id || folder.id;
+        notesExpanded.add(id);
         _saveTreeOpenState();
         renderNotesTree();
-        const el = document.querySelector(`[data-item-id="${folder.id}"]`);
-        if (el) _startFolderRename(el, findNoteItem(folder.id, notesState.items) || folder);
+        const el = document.querySelector(`[data-item-id="${id}"]`);
+        if (el) _startFolderRename(el, findNoteItem(id, notesState.items) || folder);
       } catch (e) {
         await _showConfirm(`Could not create folder: ${e.message}`, { okLabel: 'OK' });
       }
@@ -692,341 +716,12 @@ function initNotes(cfg) {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Orphan repair context menu
-  // ---------------------------------------------------------------------------
-
-  let _orphanMenuEl   = null;
-  let _orphanTargetId = null;
-  let _orphanTargetType = null;
-
-  function _closeOrphanMenu() {
-    if (_orphanMenuEl) _orphanMenuEl.style.display = 'none';
-    _orphanTargetId = null;
-  }
-
-  function _ensureOrphanMenu() {
-    if (_orphanMenuEl) return;
-    _orphanMenuEl = document.createElement('div');
-    _orphanMenuEl.className = 'context-menu notes-orphan-ctx';
-    _orphanMenuEl.style.display = 'none';
-    _orphanMenuEl.innerHTML =
-      `<div class="notes-orphan-ctx__reason"></div>` +
-      `<div class="ctx-separator"></div>` +
-      `<button class="ctx-item notes-orphan-ctx__upload"><span class="ctx-icon">&#x2191;</span>Upload to WebDAV</button>` +
-      `<button class="ctx-item ctx-danger notes-orphan-ctx__delete"><span class="ctx-icon">&#xd7;</span>Delete from database</button>`;
-    document.body.appendChild(_orphanMenuEl);
-
-    _orphanMenuEl.querySelector('.notes-orphan-ctx__upload').addEventListener('click', async () => {
-      const id = _orphanTargetId;
-      _closeOrphanMenu();
-      if (!id || !NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-orphan`, { itemId: id, action: 'upload' });
-        _applyNotesResult(data);
-      } catch (e) {
-        await _showConfirm(`Upload failed: ${e.message}`, { okLabel: 'OK' });
-      }
-      renderNotesTree();
-    });
-
-    _orphanMenuEl.querySelector('.notes-orphan-ctx__delete').addEventListener('click', async () => {
-      const id   = _orphanTargetId;
-      const type = _orphanTargetType;
-      _closeOrphanMenu();
-      if (!id) return;
-      const it = findNoteItem(id, notesState.items);
-      if (!it) return;
-      const label = type === 'folder' ? `folder "${it.title}"` : `page "${it.title}"`;
-      if (!await _showConfirm(`Delete ${label} from database?`, { okLabel: 'Delete', danger: true })) return;
-      if (!NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-orphan`, { itemId: id, action: 'delete' });
-        if (noteModalPageId === id) closeNoteModal();
-        _applyNotesResult(data);
-      } catch (e) {
-        await _showConfirm(`Delete failed: ${e.message}`, { okLabel: 'OK' });
-      }
-      renderNotesTree();
-    });
-
-    document.addEventListener('mousedown', e => {
-      if (_orphanMenuEl?.style.display !== 'none' && !_orphanMenuEl.contains(e.target)) {
-        _closeOrphanMenu();
-      }
-    }, true);
-
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && _orphanMenuEl?.style.display !== 'none') _closeOrphanMenu();
-    });
-  }
-
-  function _showOrphanMenu(e, item) {
-    e.preventDefault();
-    e.stopPropagation();
-    _ensureOrphanMenu();
-    _orphanTargetId   = item.id;
-    _orphanTargetType = item.type;
-
-    const reason = (item.orphaned === true || !item.orphaned) ? 'Item not on WebDAV' : String(item.orphaned);
-    _orphanMenuEl.querySelector('.notes-orphan-ctx__reason').textContent = '\u26a0 ' + reason;
-
-    // Items orphaned because their parent folder is missing can't be individually re-uploaded.
-    const isChildOrphan = typeof item.orphaned === 'string' && item.orphaned.startsWith('Parent folder');
-    _orphanMenuEl.querySelector('.notes-orphan-ctx__upload').style.display = isChildOrphan ? 'none' : '';
-
-    _orphanMenuEl.style.display = 'block';
-    const x = e.clientX, y = e.clientY;
-    const w = _orphanMenuEl.offsetWidth  || 240;
-    const h = _orphanMenuEl.offsetHeight || 100;
-    _orphanMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
-    _orphanMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
-  }
-
-  // ---------------------------------------------------------------------------
-  // Conflict context menu
-  // ---------------------------------------------------------------------------
-
-  let _conflictMenuEl   = null;
-  let _conflictTargetId = null;
-
-  function _closeConflictMenu() {
-    if (_conflictMenuEl) _conflictMenuEl.style.display = 'none';
-    _conflictTargetId = null;
-  }
-
-  function _ensureConflictMenu() {
-    if (_conflictMenuEl) return;
-    _conflictMenuEl = document.createElement('div');
-    _conflictMenuEl.className = 'context-menu notes-conflict-ctx';
-    _conflictMenuEl.style.display = 'none';
-    _conflictMenuEl.innerHTML =
-      `<div class="notes-conflict-ctx__reason"></div>` +
-      `<div class="ctx-separator"></div>` +
-      `<button class="ctx-item notes-conflict-ctx__use-db"><span class="ctx-icon">&#x2191;</span>Use DB version (overwrite WebDAV)</button>` +
-      `<button class="ctx-item notes-conflict-ctx__use-wd"><span class="ctx-icon">&#x2193;</span>Use WebDAV version (overwrite DB)</button>`;
-    document.body.appendChild(_conflictMenuEl);
-
-    _conflictMenuEl.querySelector('.notes-conflict-ctx__use-db').addEventListener('click', async () => {
-      const id = _conflictTargetId;
-      _closeConflictMenu();
-      if (!id || !NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-conflict`, { itemId: id, action: 'use-db' });
-        _applyNotesResult(data);
-      } catch (e) { await _showConfirm(`Upload failed: ${e.message}`, { okLabel: 'OK' }); }
-      renderNotesTree();
-    });
-
-    _conflictMenuEl.querySelector('.notes-conflict-ctx__use-wd').addEventListener('click', async () => {
-      const id = _conflictTargetId;
-      _closeConflictMenu();
-      if (!id || !NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-conflict`, { itemId: id, action: 'use-webdav' });
-        _applyNotesResult(data);
-        // If the affected page is currently open in the modal, reload it
-        if (noteModalPageId === id) { closeNoteModal(); }
-      } catch (e) { await _showConfirm(`Download failed: ${e.message}`, { okLabel: 'OK' }); }
-      renderNotesTree();
-    });
-
-    document.addEventListener('mousedown', e => {
-      if (_conflictMenuEl?.style.display !== 'none' && !_conflictMenuEl.contains(e.target))
-        _closeConflictMenu();
-    }, true);
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && _conflictMenuEl?.style.display !== 'none') _closeConflictMenu();
-    });
-  }
-
-  function _showConflictMenu(e, item) {
-    e.preventDefault();
-    e.stopPropagation();
-    _ensureConflictMenu();
-    _conflictTargetId = item.id;
-
-    const diff = item.conflict || {};
-    const parts = [];
-    if (diff.title)       parts.push(`Title: DB="${diff.title.db}" / WebDAV="${diff.title.wd}"`);
-    if (diff.link)        parts.push(`Link: DB="${diff.link.db}" / WebDAV="${diff.link.wd}"`);
-    if (diff.description) parts.push('Description differs');
-    const reason = parts.length ? parts.join(' \u2022 ') : 'Content differs from WebDAV';
-    _conflictMenuEl.querySelector('.notes-conflict-ctx__reason').textContent = '\u26a0 ' + reason;
-
-    _conflictMenuEl.style.display = 'block';
-    const x = e.clientX, y = e.clientY;
-    const w = _conflictMenuEl.offsetWidth  || 280;
-    const h = _conflictMenuEl.offsetHeight || 100;
-    _conflictMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
-    _conflictMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
-  }
-
-  // ---------------------------------------------------------------------------
-  // Duplicate context menu
-  // ---------------------------------------------------------------------------
-
-  let _duplicateMenuEl   = null;
-  let _duplicateTargetId = null;
-
-  function _closeDuplicateMenu() {
-    if (_duplicateMenuEl) _duplicateMenuEl.style.display = 'none';
-    _duplicateTargetId = null;
-  }
-
-  function _ensureDuplicateMenu() {
-    if (_duplicateMenuEl) return;
-    _duplicateMenuEl = document.createElement('div');
-    _duplicateMenuEl.className = 'context-menu notes-duplicate-ctx';
-    _duplicateMenuEl.style.display = 'none';
-    _duplicateMenuEl.innerHTML =
-      `<div class="notes-duplicate-ctx__reason"></div>` +
-      `<div class="ctx-separator"></div>` +
-      `<button class="ctx-item ctx-danger notes-duplicate-ctx__remove"><span class="ctx-icon">&#xd7;</span>Remove this duplicate entry</button>`;
-    document.body.appendChild(_duplicateMenuEl);
-
-    _duplicateMenuEl.querySelector('.notes-duplicate-ctx__remove').addEventListener('click', async () => {
-      const id = _duplicateTargetId;
-      _closeDuplicateMenu();
-      if (!id || !NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-duplicate`, { itemId: id });
-        if (noteModalPageId === id) closeNoteModal();
-        _applyNotesResult(data);
-      } catch (e) { await _showConfirm(`Remove failed: ${e.message}`, { okLabel: 'OK' }); }
-      renderNotesTree();
-    });
-
-    document.addEventListener('mousedown', e => {
-      if (_duplicateMenuEl?.style.display !== 'none' && !_duplicateMenuEl.contains(e.target))
-        _closeDuplicateMenu();
-    }, true);
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && _duplicateMenuEl?.style.display !== 'none') _closeDuplicateMenu();
-    });
-  }
-
-  function _showDuplicateMenu(e, item) {
-    e.preventDefault();
-    e.stopPropagation();
-    _ensureDuplicateMenu();
-    _duplicateTargetId = item.id;
-
-    _duplicateMenuEl.querySelector('.notes-duplicate-ctx__reason').textContent =
-      '\u26a0 Duplicate ID in tree — this is the second occurrence';
-
-    _duplicateMenuEl.style.display = 'block';
-    const x = e.clientX, y = e.clientY;
-    const w = _duplicateMenuEl.offsetWidth  || 260;
-    const h = _duplicateMenuEl.offsetHeight || 80;
-    _duplicateMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
-    _duplicateMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
-  }
-
-  // ---------------------------------------------------------------------------
-  // Attachment-orphan context menu
-  // ---------------------------------------------------------------------------
-
-  let _attachMenuEl   = null;
-  let _attachTargetId = null;
-
-  function _closeAttachMenu() {
-    if (_attachMenuEl) _attachMenuEl.style.display = 'none';
-    _attachTargetId = null;
-  }
-
-  function _ensureAttachMenu() {
-    if (_attachMenuEl) return;
-    _attachMenuEl = document.createElement('div');
-    _attachMenuEl.className = 'context-menu notes-attach-ctx';
-    _attachMenuEl.style.display = 'none';
-    _attachMenuEl.innerHTML =
-      `<div class="notes-attach-ctx__reason"></div>` +
-      `<div class="ctx-separator"></div>` +
-      `<button class="ctx-item notes-attach-ctx__upload" style="display:none"><span class="ctx-icon">&#x2191;</span>Upload attachments to WebDAV</button>` +
-      `<button class="ctx-item notes-attach-ctx__download" style="display:none"><span class="ctx-icon">&#x2193;</span>Download attachments from WebDAV</button>` +
-      `<button class="ctx-item ctx-danger notes-attach-ctx__clear"><span class="ctx-icon">&#xd7;</span>Clear flag (false positive)</button>`;
-    document.body.appendChild(_attachMenuEl);
-
-    _attachMenuEl.querySelector('.notes-attach-ctx__upload').addEventListener('click', async () => {
-      const id = _attachTargetId;
-      _closeAttachMenu();
-      if (!id || !NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-attachments`, { itemId: id, action: 'upload' });
-        _applyNotesResult(data);
-      } catch (e) { await _showConfirm(`Upload failed: ${e.message}`, { okLabel: 'OK' }); }
-      renderNotesTree();
-    });
-
-    _attachMenuEl.querySelector('.notes-attach-ctx__download').addEventListener('click', async () => {
-      const id = _attachTargetId;
-      _closeAttachMenu();
-      if (!id || !NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-attachments`, { itemId: id, action: 'download' });
-        _applyNotesResult(data);
-      } catch (e) { await _showConfirm(`Download failed: ${e.message}`, { okLabel: 'OK' }); }
-      renderNotesTree();
-    });
-
-    _attachMenuEl.querySelector('.notes-attach-ctx__clear').addEventListener('click', async () => {
-      const id = _attachTargetId;
-      _closeAttachMenu();
-      if (!id || !NOTES_API) return;
-      try {
-        const data = await _notesOp('POST', `${NOTES_API}/repair-attachments`, { itemId: id, action: 'clear' });
-        _applyNotesResult(data);
-      } catch (e) { await _showConfirm(`Clear failed: ${e.message}`, { okLabel: 'OK' }); }
-      renderNotesTree();
-    });
-
-    document.addEventListener('mousedown', e => {
-      if (_attachMenuEl?.style.display !== 'none' && !_attachMenuEl.contains(e.target))
-        _closeAttachMenu();
-    }, true);
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && _attachMenuEl?.style.display !== 'none') _closeAttachMenu();
-    });
-  }
-
-  function _showAttachOrphanMenu(e, item) {
-    e.preventDefault();
-    e.stopPropagation();
-    _ensureAttachMenu();
-    _attachTargetId = item.id;
-
-    const status = item.attachmentsOrphaned;
-    const reasons = {
-      webdav: 'Attachments exist locally but are missing on WebDAV',
-      local:  'Attachments exist on WebDAV but are missing locally',
-      both:   'hasAttachments=true but no attachment files found anywhere',
-    };
-    _attachMenuEl.querySelector('.notes-attach-ctx__reason').textContent =
-      '\u26a0 ' + (reasons[status] || 'Attachment mismatch');
-
-    const showWd = _webdavActive();
-    _attachMenuEl.querySelector('.notes-attach-ctx__upload').style.display =
-      showWd && status === 'webdav' ? '' : 'none';
-    _attachMenuEl.querySelector('.notes-attach-ctx__download').style.display =
-      showWd && status === 'local' ? '' : 'none';
-
-    _attachMenuEl.style.display = 'block';
-    const x = e.clientX, y = e.clientY;
-    const w = _attachMenuEl.offsetWidth  || 280;
-    const h = _attachMenuEl.offsetHeight || 120;
-    _attachMenuEl.style.left = (x + w > window.innerWidth  ? x - w : x) + 'px';
-    _attachMenuEl.style.top  = (y + h > window.innerHeight ? y - h : y) + 'px';
-  }
-
   function _renderFolderItem(folder, container, depth) {
     const isExpanded  = notesExpanded.has(folder.id);
-    const hasChildren = (folder.children || []).length > 0 || _webdavActive();
+    const hasChildren = (folder.children || []).length > 0;
 
     const el = document.createElement('div');
     el.className = 'notes-tree-item notes-tree-item--folder';
-    if (_webdavActive() && folder.orphaned)  el.classList.add('notes-tree-item--orphaned');
-    else if (_webdavActive() && folder.duplicate) el.classList.add('notes-tree-item--duplicate');
     el.dataset.itemId   = folder.id;
     el.dataset.itemType = 'folder';
     el.dataset.depth    = depth;
@@ -1049,16 +744,8 @@ function initNotes(cfg) {
 
     el.querySelector('.notes-toggle-btn').addEventListener('click', async e => {
       e.stopPropagation();
-      const expanding = !notesExpanded.has(folder.id);
-      if (expanding) notesExpanded.add(folder.id); else notesExpanded.delete(folder.id);
+      if (notesExpanded.has(folder.id)) notesExpanded.delete(folder.id); else notesExpanded.add(folder.id);
       _saveTreeOpenState();
-      if (expanding && _webdavActive()) {
-        el.classList.add('notes-tree-item--loading');
-        try {
-          const data = await _notesOp('POST', `${NOTES_FOLD_API}/${folder.id}/sync`);
-          _applyNotesResult(data);
-        } catch { /* fall back to cached content */ }
-      }
       renderNotesTree();
     });
 
@@ -1092,12 +779,6 @@ function initNotes(cfg) {
       }
     });
 
-    if (_webdavActive() && folder.orphaned) {
-      el.addEventListener('contextmenu', e => _showOrphanMenu(e, folder));
-    } else if (_webdavActive() && folder.duplicate) {
-      el.addEventListener('contextmenu', e => _showDuplicateMenu(e, folder));
-    }
-
     container.appendChild(el);
 
     if (isExpanded) renderNotesList(folder.children || [], container, depth + 1);
@@ -1106,10 +787,6 @@ function initNotes(cfg) {
   function _renderPageItem(page, container, depth) {
     const el = document.createElement('div');
     el.className = 'notes-tree-item notes-tree-item--page';
-    if (_webdavActive() && page.orphaned)          el.classList.add('notes-tree-item--orphaned');
-    else if (_webdavActive() && page.conflict)     el.classList.add('notes-tree-item--conflict');
-    else if (_webdavActive() && page.duplicate)    el.classList.add('notes-tree-item--duplicate');
-    else if (page.attachmentsOrphaned)             el.classList.add('notes-tree-item--attach-orphaned');
     el.dataset.itemId   = page.id;
     el.dataset.pageId   = page.id;
     el.dataset.itemType = 'page';
@@ -1148,16 +825,6 @@ function initNotes(cfg) {
         deleteNoteItem(page.id);
       }
     });
-
-    if (_webdavActive() && page.orphaned) {
-      el.addEventListener('contextmenu', e => _showOrphanMenu(e, page));
-    } else if (_webdavActive() && page.conflict) {
-      el.addEventListener('contextmenu', e => _showConflictMenu(e, page));
-    } else if (_webdavActive() && page.duplicate) {
-      el.addEventListener('contextmenu', e => _showDuplicateMenu(e, page));
-    } else if (page.attachmentsOrphaned) {
-      el.addEventListener('contextmenu', e => _showAttachOrphanMenu(e, page));
-    }
 
     container.appendChild(el);
   }
@@ -1327,11 +994,18 @@ function initNotes(cfg) {
       if (loadingEl) loadingEl.style.display = 'flex';
       try {
         const data = await fetch(`${NOTES_PAGES_API}/${pageId}/content`).then(r => r.ok ? r.json() : null);
-        if (data) {
+        if (data && noteModalPageId === pageId) {
           if (_editor.setValue) _editor.setValue('notePageDesc', data.content || '');
           noteModalOrig.desc = data.content || '';
           page.description   = data.content || '';
-          _pageLoadedAt.set(pageId, data.lastModified || null);
+          page.link          = data.link || '';
+          page.linkedCards   = data.linkedCards || [];
+          document.getElementById('notePageLink').value = page.link;
+          noteModalOrig.link = page.link;
+          _updateNoteLinkBtn();
+          renderLinkedCards(page.linkedCards);
+          _pageEtag.set(pageId, data.etag || null);
+          if (data.stale) _flashNoteMsg('Server slow — showing the last loaded version', 4000);
         }
       } catch { /* fall back to cached */ }
       finally {
@@ -1381,7 +1055,7 @@ function initNotes(cfg) {
     }
   }
 
-  async function _submitNote(newTitle, newDesc, newLink, page) {
+  async function _submitNote(newTitle, newDesc, newLink, page, { force = false } = {}) {
     let _handledByPost = false;
 
     let onCreated = null;
@@ -1396,8 +1070,7 @@ function initNotes(cfg) {
         try {
           const data = await _notesOp('POST', NOTES_PAGES_API, { page, parentId });
           _applyNotesResult(data);
-          const savedPage = findNoteItem(noteModalPageId, notesState.items);
-          if (savedPage) _pageLoadedAt.set(noteModalPageId, savedPage.lastModified || null);
+          _pageEtag.set(noteModalPageId, data.page?.etag || null);
           _handledByPost = true;
         } catch (e) {
           _pendingNewPage = { page, parentId, onCreated };
@@ -1424,34 +1097,17 @@ function initNotes(cfg) {
 
     if (!_handledByPost) {
       if (_webdavActive()) {
-        const loadedAt = _pageLoadedAt.get(noteModalPageId);
-        if (loadedAt) {
-          try {
-            const r = await fetch(`${NOTES_PAGES_API}/${noteModalPageId}/content`);
-            if (r.ok) {
-              const { lastModified: serverLM } = await r.json();
-              const serverTime = serverLM ? new Date(serverLM).getTime() : 0;
-              const localTime  = new Date(loadedAt).getTime();
-              if (serverTime > localTime) {
-                const overwrite = await _showConfirm(
-                  'A newer version exists on the server. Overwrite it with your changes?',
-                  { okLabel: 'Overwrite', cancelLabel: 'Cancel' }
-                );
-                if (!overwrite) return;
-              }
-            }
-          } catch { /* network error — proceed */ }
-        }
-
+        // If-Match: the server answers 412 when the note changed since it was loaded
+        const etag = _pageEtag.get(noteModalPageId);
         try {
-          const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${noteModalPageId}`, {
-            title: newTitle, description: newDesc, link: newLink,
-            linkedCards: page.linkedCards || [],
-          });
+          const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${noteModalPageId}`,
+            { title: newTitle, description: newDesc, link: newLink, linkedCards: page.linkedCards || [], ...(force ? { force: true } : {}) },
+            etag && !force ? { 'If-Match': `"${etag}"` } : {});
           _applyNotesResult(data);
-          const savedPage = findNoteItem(noteModalPageId, notesState.items);
-          if (savedPage) _pageLoadedAt.set(noteModalPageId, savedPage.lastModified || null);
+          _pageEtag.set(noteModalPageId, data.page?.etag || null);
         } catch (e) {
+          if (e.status === 412 && e.data?.server) return _handleConflict(e.data.server, { title: newTitle, desc: newDesc, link: newLink }, page);
+          if (e.status === 409 && e.data?.notes) { _applyNotesResult(e.data); _pageEtag.set(noteModalPageId, e.data.etag || null); }
           await _showConfirm(`Could not save page: ${e.message}`, { okLabel: 'OK' });
           return;
         }
@@ -1476,6 +1132,89 @@ function initNotes(cfg) {
       setTimeout(() => msg.classList.remove('modal-saved-msg--visible'), 1500);
     }
     onCreated?.(page.id);
+  }
+
+  function _flashNoteMsg(text, ms = 1500) {
+    const msg = document.getElementById('noteModalSavedMsg');
+    if (!msg) return;
+    msg.textContent = text;
+    msg.classList.add('modal-saved-msg--visible');
+    setTimeout(() => msg.classList.remove('modal-saved-msg--visible'), ms);
+  }
+
+  // ---- Conflict dialog (WebDAV: the note was changed elsewhere since it was loaded) ----
+  function _lineDiff(a, b) {
+    const A = a.split('\n'), B = b.split('\n');
+    const n = A.length, m = B.length;
+    if (n * m > 400000) return [{ t: '-', s: a }, { t: '+', s: b }];
+    const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+      L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const out = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (A[i] === B[j]) { out.push({ t: ' ', s: A[i] }); i++; j++; }
+      else if (L[i + 1][j] >= L[i][j + 1]) out.push({ t: '-', s: A[i++] });
+      else out.push({ t: '+', s: B[j++] });
+    }
+    while (i < n) out.push({ t: '-', s: A[i++] });
+    while (j < m) out.push({ t: '+', s: B[j++] });
+    return out;
+  }
+
+  function _conflictDialog(server, mine) {
+    return new Promise(resolve => {
+      const ov = document.createElement('div');
+      ov.className = 'note-conflict-overlay';
+      const trimEnd = s => (s || '').replace(/\s+$/, '');
+      const rows = _lineDiff(trimEnd(server.content), trimEnd(mine.desc)).map(d =>
+        `<div class="note-diff-line note-diff-line--${d.t === '+' ? 'add' : d.t === '-' ? 'del' : 'same'}">` +
+        `<span class="note-diff-sign">${d.t}</span>${_escHtml(d.s) || '&nbsp;'}</div>`).join('');
+      ov.innerHTML =
+        `<div class="note-conflict-dialog" role="dialog" aria-modal="true">` +
+          `<h3>Note changed elsewhere</h3>` +
+          `<p>"${_escHtml(server.title)}" was changed somewhere else (Obsidian, another app or device) after you opened it. ` +
+          `<span class="note-diff-legend"><span class="note-diff-line--del">− there</span> <span class="note-diff-line--add">+ yours</span></span></p>` +
+          `<div class="note-diff">${rows}</div>` +
+          `<div class="note-conflict-actions">` +
+            `<button class="btn" data-r="cancel">Cancel</button>` +
+            `<button class="btn" data-r="copy">Save mine as a copy</button>` +
+            `<button class="btn" data-r="theirs">Load their version</button>` +
+            `<button class="btn btn-danger" data-r="mine">Overwrite with mine</button>` +
+          `</div>` +
+        `</div>`;
+      document.body.appendChild(ov);
+      const done = r => { ov.remove(); document.removeEventListener('keydown', onKey, true); resolve(r); };
+      const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); done('cancel'); } };
+      document.addEventListener('keydown', onKey, true);
+      ov.addEventListener('click', e => {
+        const b = e.target.closest('button[data-r]');
+        if (b) done(b.dataset.r);
+        else if (e.target === ov) done('cancel');
+      });
+    });
+  }
+
+  async function _handleConflict(server, mine, page) {
+    const choice = await _conflictDialog(server, mine);
+    if (choice === 'mine') return _submitNote(mine.title, mine.desc, mine.link, page, { force: true });
+    if (choice === 'theirs') {
+      if (_editor.setValue) _editor.setValue('notePageDesc', server.content || '');
+      document.getElementById('notePageLink').value = server.link || '';
+      noteModalOrig = { title: document.getElementById('notePageTitle').value, desc: server.content || '', link: server.link || '' };
+      page.description = server.content || '';
+      _pageEtag.set(noteModalPageId, server.etag);
+      return;
+    }
+    if (choice === 'copy') {
+      try {
+        const copy = { type: 'page', id: _noteUid('n-'), title: `${mine.title} (conflict)`, description: mine.desc, link: mine.link, linkedCards: [] };
+        const data = await _notesOp('POST', NOTES_PAGES_API, { page: copy, parentId: _getParentId(page.id, notesState.items) || null });
+        _applyNotesResult(data);
+        renderNotesTree();
+        await openNoteModal(data.page?.id || copy.id);
+      } catch (e) { await _showConfirm(`Could not save the copy: ${e.message}`, { okLabel: 'OK' }); }
+    }
   }
 
   function noteModalHasChanges() {
@@ -1539,11 +1278,10 @@ function initNotes(cfg) {
   // ---- Linked Cards ----
   async function _saveLinkedCards(page) {
     if (_webdavActive()) {
+      // Only the links: the server keeps the note's current text (the tree may hold an older copy)
       try {
-        await _notesOp('PATCH', `${NOTES_PAGES_API}/${page.id}`, {
-          title: page.title, description: page.description || '',
-          link: page.link || '', linkedCards: page.linkedCards || [],
-        });
+        const data = await _notesOp('PATCH', `${NOTES_PAGES_API}/${page.id}`, { linkedCards: page.linkedCards || [] });
+        if (noteModalPageId === page.id && data.page?.etag && !noteModalHasChanges()) _pageEtag.set(page.id, data.page.etag);
       } catch (e) { console.error('Failed to save linked cards:', e.message); }
     } else {
       page.lastModified = new Date().toISOString();
@@ -1753,7 +1491,7 @@ function initNotes(cfg) {
         `</div>`;
 
       item.querySelector('[data-act="insert"]').addEventListener('click', () => {
-        _insertAttachmentMd(f.name, ft);
+        _insertAttachmentMd(f.name, ft, f.link || null);   // WebDAV boards: the file's own link
       });
       if (ft === 'image' || ft === 'pdf' || ft === 'html')
         item.querySelector('[data-act="view"]').addEventListener('click', () => {
@@ -1802,7 +1540,7 @@ function initNotes(cfg) {
                     : ext === 'pdf' ? 'pdf'
                     : ['html','htm'].includes(ext) ? 'html'
                     : 'other';
-          _insertAttachmentMd(data.name, ft);
+          _insertAttachmentMd(data.name, ft, data.link);
         } catch (e) { console.error('Upload error:', e.message); }
       }
     } finally {
@@ -1812,8 +1550,9 @@ function initNotes(cfg) {
     }
   }
 
-  function _insertAttachmentMd(name, type) {
-    const rel = `_attachments/${noteModalPageId}_${name}`;
+  function _insertAttachmentMd(name, type, link = null) {
+    // WebDAV boards: the server returns the link (file next to the note); local: "<pageId>_name"
+    const rel = link || `_attachments/${noteModalPageId}_${name}`;
     const md  = (type === 'image' || type === 'svg') ? `![${name}](${rel})` : `[${name}](${rel})`;
     if (_editor.insertAtCursor) {
       _editor.insertAtCursor('notePageDesc', md);
@@ -1846,13 +1585,15 @@ function initNotes(cfg) {
     setTimeout(() => URL.revokeObjectURL(u), 5000);
   }
 
+  function _decodeUri(s) { try { return decodeURIComponent(s || ''); } catch { return s || ''; } }
+
   async function resolveAttachments(container) {
     if (!noteModalPageId || !NOTES_ATTACH_API) return;
     const imgs = [...container.querySelectorAll('img[src]')];
     const links = [...container.querySelectorAll('a[href]')];
 
     for (const img of imgs) {
-      const src = img.getAttribute('src');
+      const src = _decodeUri(img.getAttribute('src'));
       if (!src.startsWith('_attachments/')) continue;
       const fname = src.replace('_attachments/', '').replace(`${noteModalPageId}_`, '');
       const url = `${NOTES_ATTACH_API}/${noteModalPageId}/${encodeURIComponent(fname)}`;
@@ -1865,7 +1606,7 @@ function initNotes(cfg) {
     }
 
     for (const a of links) {
-      const href = a.getAttribute('href');
+      const href = _decodeUri(a.getAttribute('href'));
       if (!href.startsWith('_attachments/')) continue;
       const fname = href.replace('_attachments/', '').replace(`${noteModalPageId}_`, '');
       const url = `${NOTES_ATTACH_API}/${noteModalPageId}/${encodeURIComponent(fname)}`;

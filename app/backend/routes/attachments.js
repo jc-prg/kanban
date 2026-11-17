@@ -7,8 +7,7 @@ const { writeRateLimit, uploadRateLimit } = require('../auth');
 const { validBoardName, getBoardDb }      = require('../db');
 const { ATTACHMENTS_DIR, NOTES_DOC_ID }   = require('../config');
 const { getDbSizeBytes }                  = require('../backup');
-const notesAdapter                        = require('../notes-adapter');
-const { wdPutBinary, wdDelete, wdMkcol, _titleToSlug } = require('../../notes-webdav/backend/webdav-core');
+const { _titleToSlug } = require('../../notes-webdav/backend/webdav-core');
 
 function safePageId(id) {
   return typeof id === 'string' && /^n-(?:wd-)?[a-z0-9]{1,20}$/.test(id);
@@ -95,7 +94,7 @@ async function _getPageAttachmentPrefix(board, pageId) {
   } catch { return ''; }
 }
 
-// ---- Notes attachments ----
+// ---- Notes attachments (boards without WebDAV; WebDAV boards are served by the notes router) ----
 
 router.get('/:board/notes/attachments/:pageId', async (req, res) => {
   const { board, pageId } = req.params;
@@ -133,23 +132,6 @@ router.post('/:board/notes/attachments/:pageId', uploadRateLimit, async (req, re
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const originalName = req.file.filename.slice(pageId.length + 1);
     res.json({ name: originalName, size: req.file.size });
-    try {
-      const db  = await getBoardDb(board);
-      const cfg = await notesAdapter.resolveWebdavCfg(board);
-      if (cfg.enabled) {
-        // Ensure all ancestor folders and _attachments collection exist
-        if (prefix) {
-          const parts = prefix.replace(/\/$/, '').split('/');
-          let cumPath = '';
-          for (const part of parts) { cumPath += part + '/'; await wdMkcol(cfg, cumPath).catch(() => {}); }
-        }
-        await wdMkcol(cfg, `${prefix}_attachments/`).catch(() => {});
-        const buf = fs.readFileSync(req.file.path);
-        await wdPutBinary(cfg, `${prefix}_attachments/${req.file.filename}`, buf, req.file.mimetype || 'application/octet-stream');
-      }
-    } catch (wdErr) {
-      console.warn('WebDAV attachment upload failed:', wdErr.message);
-    }
   });
 });
 
@@ -173,13 +155,6 @@ router.delete('/:board/notes/attachments/:pageId/:filename', writeRateLimit, asy
   const dir    = path.join(ATTACHMENTS_DIR, board, prefix, '_attachments');
   try { fs.unlinkSync(path.join(dir, `${pageId}_${filename}`)); } catch {}
   res.json({ ok: true });
-  try {
-    const db  = await getBoardDb(board);
-    const cfg = await getWebdavConfig(board);
-    if (cfg.enabled) await wdDelete(cfg, `${prefix}_attachments/${pageId}_${filename}`);
-  } catch (wdErr) {
-    console.warn('WebDAV attachment delete failed:', wdErr.message);
-  }
 });
 
 // ---- Card attachments ----
